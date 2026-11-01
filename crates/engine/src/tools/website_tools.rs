@@ -590,7 +590,8 @@ const BLUEPRINT_JS: &str = r#"(() => {
     if (s.backgroundColor && s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') tally(backgrounds, hex(s.backgroundColor));
     for (const k of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'rowGap', 'columnGap', 'marginTop', 'marginBottom']) { const v = s[k]; if (v && v.endsWith('px') && v !== '0px') tally(spacing, v); }
     if (s.maxWidth.endsWith('px')) tally(maxWidths, s.maxWidth);
-    if (s.borderRadius && s.borderRadius !== '0px') tally(radii, s.borderRadius);
+    // A pill made with calc(infinity * 1px) comes back clamped as 3.35544e+07px: record it as 9999px (#155).
+    if (s.borderRadius && s.borderRadius !== '0px') tally(radii, s.borderRadius.replace(/[\d.]+(?:e\+?\d+)?px/g, n => parseFloat(n) > 9999 ? '9999px' : n));
     if (s.boxShadow && s.boxShadow !== 'none') tally(shadows, s.boxShadow);
     const bi = s.backgroundImage; if (bi && bi !== 'none') for (const m of bi.matchAll(/url\(["']?([^"')]+)["']?\)/g)) tally(bgImages, m[1]);
   }
@@ -1375,5 +1376,38 @@ mod tests {
         assert_eq!(err.code, ErrorCode::NotFound, "{}", err.message);
         assert!(err.message.contains("didn't open"), "{}", err.message);
         assert!(!out.exists(), "no folder is made for a capture that can't happen");
+    }
+
+    /// #155: a pill made with `calc(infinity * 1px)` (Tailwind's `rounded-full`) is recorded as
+    /// `9999px`, not the browser's clamped `3.35544e+07px`. Live: it needs a Chromium-based
+    /// browser (`--ignored`).
+    #[test]
+    #[ignore]
+    fn an_endless_corner_radius_is_recorded_as_a_pill() {
+        use std::io::{Read, Write};
+        let page = r#"<!doctype html><html><body>
+<a style="border-radius:calc(infinity * 1px);background:#1e66f5;padding:8px">One</a>
+<a style="border-radius:calc(infinity * 1px) calc(infinity * 1px) 4px 4px;background:#1e66f5;padding:8px">Two</a>
+<a style="border-radius:12px;background:#1e66f5;padding:8px">Three</a>
+</body></html>"#;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for mut s in listener.incoming().flatten() {
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len());
+            }
+        });
+        let e = crate::Engine::new(crate::testing::session());
+        let cli = || crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted);
+        e.call("web_site_open", json!({"url": url}), cli()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("capture");
+        e.call("web_site_capture", json!({"output_directory": out.display().to_string(), "widths": [1440]}), cli()).unwrap();
+        let capture: Value = serde_json::from_str(&std::fs::read_to_string(out.join("capture.json")).unwrap()).unwrap();
+        let mut radii: Vec<&str> = capture["design"]["radii"].as_array().unwrap().iter().filter_map(|r| r["value"].as_str()).collect();
+        radii.sort_unstable();
+        assert_eq!(radii, ["12px", "9999px", "9999px 9999px 4px 4px"]);
     }
 }
