@@ -120,6 +120,7 @@ impl Builder {
     pub fn needs(self) -> &'static str {
         match self {
             Builder::Unity => "About 10 GB. Free for personal use with a Unity account.",
+            Builder::Unreal if cfg!(target_os = "linux") => "An Unreal Engine Linux installation with its bundled Clang C++ toolchain.",
             Builder::Unreal => "About 60 GB, an Epic Games account, and Visual Studio's C++ tools.",
             Builder::Godot => "A small download (under 200 MB). Free, no account needed.",
             Builder::Rust => "The Rust toolchain (rustup.rs).",
@@ -518,7 +519,7 @@ pub struct Inventory {
     pub engines: Vec<Installed>,
     pub unity_hub: Option<PathBuf>,
     pub epic_launcher: Option<PathBuf>,
-    /// A C++ compiler Unreal can use (Visual Studio's C++ tools, or Xcode on a Mac).
+    /// A C++ compiler Unreal can use (Visual Studio, Xcode, or the selected Linux engine's bundled Clang).
     pub cpp_tools: bool,
 }
 
@@ -541,6 +542,8 @@ pub struct Places {
     pub program_data: Option<PathBuf>,
     pub app_data: Option<PathBuf>,
     pub home: Option<PathBuf>,
+    /// An explicit Unreal installation root, preferred over registered installations when valid.
+    pub unreal_root: Option<PathBuf>,
     pub applications: Option<PathBuf>,
     /// Craft Anything's own engine store (where it puts Godot).
     pub store: PathBuf,
@@ -556,6 +559,7 @@ impl Places {
             program_data: env("ProgramData"),
             app_data: env("APPDATA"),
             home: env("HOME").or_else(|| env("USERPROFILE")),
+            unreal_root: env("UE_ROOT"),
             applications: cfg!(target_os = "macos").then(|| PathBuf::from("/Applications")),
             store,
             use_path: true,
@@ -574,6 +578,7 @@ pub fn inventory(p: &Places) -> Inventory {
     }
     engines.sort_by(|a, b| (a.builder as u8).cmp(&(b.builder as u8)).then_with(|| version_key(&b.version).cmp(&version_key(&a.version))));
     engines.dedup_by(|a, b| a.program == b.program);
+    let cpp_tools = cpp_tools(p, engines.iter().find(|i| i.builder == Builder::Unreal));
     let first = |paths: Vec<PathBuf>| paths.into_iter().find(|x| x.exists());
     Inventory {
         engines,
@@ -587,7 +592,7 @@ pub fn inventory(p: &Places) -> Inventory {
                 .chain(p.applications.iter().map(|a| a.join("Epic Games Launcher.app")))
                 .collect(),
         ),
-        cpp_tools: cpp_tools(p),
+        cpp_tools,
     }
 }
 
@@ -624,7 +629,14 @@ fn unity_editors(p: &Places) -> Vec<Installed> {
 }
 
 fn unreal_installs(p: &Places) -> Vec<Installed> {
+    if let Some(install) = p.unreal_root.as_deref().filter(|root| root.is_absolute()).and_then(unreal_install) {
+        return vec![install];
+    }
     let mut roots: Vec<PathBuf> = Vec::new();
+    // Match UnrealVersionSelector's fixed per-user registry location.
+    if let Some(home) = &p.home {
+        roots.extend(unreal_registry_roots(&home.join(".config")));
+    }
     // The Epic Games Launcher lists its engine installs here.
     if let Some(dat) = p.program_data.as_ref().and_then(|d| std::fs::read_to_string(d.join("Epic/UnrealEngineLauncher/LauncherInstalled.dat")).ok())
         && let Ok(v) = serde_json::from_str::<serde_json::Value>(&dat)
@@ -637,20 +649,49 @@ fn unreal_installs(p: &Places) -> Vec<Installed> {
     }
     let shared = [p.program_files.iter().map(|pf| pf.join("Epic Games")).collect::<Vec<_>>(), vec![PathBuf::from("/Users/Shared/Epic Games")]].concat();
     roots.extend(shared.iter().flat_map(|d| subdirs(d)).filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("UE_"))));
+    roots.sort();
+    roots.dedup();
+    roots.iter().filter_map(|dir| unreal_install(dir)).collect()
+}
+
+/// UnrealVersionSelector's per-user Linux registry. Only the Installations section contains roots.
+fn unreal_registry_roots(config: &Path) -> Vec<PathBuf> {
+    let Some(bytes) = head(&config.join("Epic/UnrealEngine/Install.ini"), 1 << 20) else { return Vec::new() };
+    let Ok(text) = std::str::from_utf8(&bytes) else { return Vec::new() };
+    let mut installations = false;
+    let mut roots = Vec::new();
+    for line in text.trim_start_matches('\u{feff}').lines().map(str::trim) {
+        if line.starts_with('[') {
+            installations = line == "[Installations]";
+        } else if installations
+            && !line.starts_with([';', '#'])
+            && let Some((_, root)) = line.split_once('=')
+        {
+            let root = PathBuf::from(root.trim().trim_matches('"'));
+            if root.is_absolute() {
+                roots.push(root);
+            }
+        }
+    }
+    roots
+}
+
+fn unreal_install(dir: &Path) -> Option<Installed> {
     let exes = [
         "Engine/Binaries/Win64/UnrealEditor.exe",
         "Engine/Binaries/Win64/UE4Editor.exe",
         "Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor",
         "Engine/Binaries/Linux/UnrealEditor",
     ];
-    roots
-        .iter()
-        .filter_map(|dir| {
-            let program = exes.iter().map(|e| dir.join(e)).find(|e| e.is_file())?;
-            let version = dir.file_name()?.to_string_lossy().trim_start_matches("UE_").to_string();
-            Some(Installed { builder: Builder::Unreal, version, program })
-        })
-        .collect()
+    let program = exes.iter().map(|e| dir.join(e)).find(|e| e.is_file())?;
+    let version = program
+        .ends_with("Engine/Binaries/Linux/UnrealEditor")
+        .then(|| head(&dir.join("Engine/Build/Build.version"), 64 << 10))
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|v| Some(format!("{}.{}.{}", v.get("MajorVersion")?.as_u64()?, v.get("MinorVersion")?.as_u64()?, v.get("PatchVersion")?.as_u64()?)))
+        .or_else(|| dir.file_name().map(|n| n.to_string_lossy().trim_start_matches("UE_").to_string()))?;
+    Some(Installed { builder: Builder::Unreal, version, program })
 }
 
 fn godot_installs(p: &Places) -> Vec<Installed> {
@@ -683,12 +724,18 @@ fn godot_installs(p: &Places) -> Vec<Installed> {
     v
 }
 
-fn cpp_tools(p: &Places) -> bool {
+fn cpp_tools(p: &Places, unreal: Option<&Installed>) -> bool {
     if p.applications.as_ref().is_some_and(|a| a.join("Xcode.app").exists()) {
         return true;
     }
     // Visual Studio <year>/<edition>/VC/Tools/MSVC, in either Program Files.
-    p.program_files.iter().flat_map(|pf| subdirs(&pf.join("Microsoft Visual Studio"))).flat_map(|y| subdirs(&y)).any(|e| e.join("VC/Tools/MSVC").is_dir())
+    if p.program_files.iter().flat_map(|pf| subdirs(&pf.join("Microsoft Visual Studio"))).flat_map(|y| subdirs(&y)).any(|e| e.join("VC/Tools/MSVC").is_dir()) {
+        return true;
+    }
+    // A system clang can have the wrong version or sysroot. Look inside the selected Linux engine.
+    let Some(unreal) = unreal.filter(|i| i.program.ends_with("Engine/Binaries/Linux/UnrealEditor")) else { return false };
+    let Some(root) = unreal.program.ancestors().nth(4) else { return false };
+    subdirs(&root.join("Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64")).iter().any(|sdk| sdk.join("x86_64-unknown-linux-gnu/bin/clang++").is_file())
 }
 
 // ---- getting one ---------------------------------------------------------------------------------
@@ -1001,6 +1048,92 @@ mod tests {
         touch(&pf, "Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40/x", b"");
         assert!(inventory(&p).ready(Builder::Unreal));
         assert!(!inv.ready(Builder::Rust), "PATH isn't searched here");
+    }
+
+    #[test]
+    fn linux_unreal_registry_finds_an_install_outside_the_launcher_folders() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let root = d.path().join("custom engine = 5");
+        touch(&root, "Engine/Binaries/Linux/UnrealEditor", b"");
+        touch(&root, "Engine/Build/Build.version", br#"{"MajorVersion":5,"MinorVersion":8,"PatchVersion":4}"#);
+        let ignored = d.path().join("ignored-engine");
+        touch(&ignored, "Engine/Binaries/Linux/UnrealEditor", b"");
+        touch(
+            &home,
+            ".config/Epic/UnrealEngine/Install.ini",
+            format!(
+                "\u{feff}[Installations]\r\n; Registered by UnrealVersionSelector\r\nengine={}\r\nstale={}\r\nrelative=relative/engine\r\nempty=\r\n[Other]\r\nignored={}\r\n",
+                root.display(), d.path().join("missing-engine").display(), ignored.display()
+            )
+            .as_bytes(),
+        );
+
+        let inv = inventory(&Places { home: Some(home), ..Default::default() });
+        let installed = inv.best(Builder::Unreal).expect("the registered Linux editor must be found");
+        assert_eq!(installed.program, root.join("Engine/Binaries/Linux/UnrealEditor"));
+        assert_eq!(installed.version, "5.8.4", "the engine build file supplies the version, not its directory name");
+        assert_eq!(inv.engines.iter().filter(|i| i.builder == Builder::Unreal).count(), 1);
+        assert!(!inv.ready(Builder::Unreal), "an editor alone does not prove its C++ toolchain is installed");
+    }
+
+    #[test]
+    fn linux_unreal_is_ready_with_its_bundled_clang() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let root = d.path().join("UE_5.8");
+        touch(&root, "Engine/Binaries/Linux/UnrealEditor", b"");
+        touch(&home, ".config/Epic/UnrealEngine/Install.ini", format!("[Installations]\nengine={}\n", root.display()).as_bytes());
+        // An unrelated compiler is not evidence that Unreal's own toolchain is present.
+        touch(&home, "bin/clang++", b"");
+        let places = Places { home: Some(home), ..Default::default() };
+        assert!(!inventory(&places).ready(Builder::Unreal));
+
+        touch(&root, "Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64/v26_clang-20.1.8-rockylinux8/x86_64-unknown-linux-gnu/bin/clang++", b"");
+        let inv = inventory(&places);
+        assert!(inv.cpp_tools, "the compiler shipped with this Unreal install must be recognized");
+        assert!(inv.ready(Builder::Unreal));
+    }
+
+    #[test]
+    fn linux_unreal_explicit_root_selects_that_install() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let root = d.path().join("UE_5.8");
+        let other = d.path().join("UE_6.0");
+        touch(&root, "Engine/Binaries/Linux/UnrealEditor", b"");
+        touch(&other, "Engine/Binaries/Linux/UnrealEditor", b"");
+        touch(&home, ".config/Epic/UnrealEngine/Install.ini", format!("[Installations]\nengine={}\n", other.display()).as_bytes());
+        let mut places = Places { home: Some(home), unreal_root: Some(root.clone()), ..Default::default() };
+
+        let inv = inventory(&places);
+        assert_eq!(inv.best(Builder::Unreal).unwrap().program, root.join("Engine/Binaries/Linux/UnrealEditor"));
+        assert_eq!(inv.engines.iter().filter(|i| i.builder == Builder::Unreal).count(), 1);
+        places.unreal_root = Some(d.path().join("missing"));
+        assert_eq!(inventory(&places).best(Builder::Unreal).unwrap().program, other.join("Engine/Binaries/Linux/UnrealEditor"));
+    }
+
+    #[test]
+    fn linux_unreal_does_not_borrow_another_installs_compiler() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let older = d.path().join("UE_5.7");
+        let newer = d.path().join("UE_5.8");
+        for root in [&older, &newer] {
+            touch(root, "Engine/Binaries/Linux/UnrealEditor", b"");
+        }
+        touch(
+            &home,
+            ".config/Epic/UnrealEngine/Install.ini",
+            format!("[Installations]\nolder={}\nnewer={}\nduplicate={}\n", older.display(), newer.display(), older.display()).as_bytes(),
+        );
+        touch(&older, "Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64/v25_clang-18.1.0-rockylinux8/x86_64-unknown-linux-gnu/bin/clang++", b"");
+
+        let inv = inventory(&Places { home: Some(home), ..Default::default() });
+        assert_eq!(inv.best(Builder::Unreal).unwrap().program, newer.join("Engine/Binaries/Linux/UnrealEditor"));
+        assert_eq!(inv.engines.iter().filter(|i| i.builder == Builder::Unreal).count(), 2);
+        assert!(!inv.cpp_tools, "an older engine's compiler cannot establish readiness for the selected engine");
+        assert!(!inv.ready(Builder::Unreal));
     }
 
     #[test]
