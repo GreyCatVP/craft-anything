@@ -161,6 +161,38 @@ fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
     a
 }
 
+/// Turn common Claude Code result errors into a clear next step.
+fn result_error(why: &str) -> (String, Option<String>) {
+    let lower = why.to_ascii_lowercase();
+    if let Some(unsupported_at) = lower.find("does not support this model") {
+        let version = reported_claude_code_version(why, &lower, unsupported_at);
+        let message = match version {
+            Some(version) => format!("Claude Code CLI {version} is too old for the selected model."),
+            None => "The Claude Code command-line tool is too old for the selected model.".into(),
+        };
+        let remediation =
+            "Update the Claude Code command-line tool in a terminal: run `claude update`, then try again. This updates the CLI, not the Claude desktop app."
+                .into();
+        return (message, Some(remediation));
+    }
+
+    (format!("Claude Code stopped: {why}"), super::sign_in_hint(why))
+}
+
+/// Extract a version printed immediately after the Claude Code name, if it is numeric.
+fn reported_claude_code_version(message: &str, lower: &str, before_error: usize) -> Option<String> {
+    let prefix = lower.get(..before_error)?;
+    let name_at = prefix.rfind("claude code")?;
+    let version_at = name_at.checked_add("claude code".len())?;
+    let version_text = message.get(version_at..before_error)?.trim_start();
+    let token = version_text.split_whitespace().next()?;
+    let version = token.trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
+    if version.is_empty() || version.split('.').any(|part| part.is_empty() || !part.chars().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    Some(version.to_string())
+}
+
 /// Claude Code in headless mode (flags checked against `claude --help`).
 pub struct ClaudeCode;
 
@@ -254,7 +286,8 @@ impl AgentAdapter for ClaudeCode {
                 }
                 if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
-                    out.push(AgentEvent::Error { message: format!("Claude Code stopped: {why}"), remediation: sign_in_hint(&why), log: None });
+                    let (message, remediation) = result_error(&why);
+                    out.push(AgentEvent::Error { message, remediation, log: None });
                 }
             }
             _ => {}

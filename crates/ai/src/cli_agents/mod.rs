@@ -814,6 +814,52 @@ mod tests {
     }
 
     #[test]
+    fn an_unsupported_claude_model_error_explains_how_to_update_the_cli() {
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(
+            &json!({
+                "type": "result",
+                "is_error": true,
+                "result": r#"API Error: 400 {"type":"error","error":{"message":"CLAUDE CODE 2.1.81 DOES NOT SUPPORT THIS MODEL"}}"#
+            })
+            .to_string(),
+        );
+        match &ev[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert_eq!(message, "Claude Code CLI 2.1.81 is too old for the selected model.");
+                let remediation = remediation.as_deref().unwrap_or_default();
+                assert!(remediation.contains("`claude update`"), "{remediation}");
+                assert!(remediation.contains("command-line tool") && remediation.contains("not the Claude desktop app"), "{remediation}");
+                assert!(!message.contains("API Error") && !message.contains("invalid_request_error"));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":"Claude Code does not support this model"}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert_eq!(message, "The Claude Code command-line tool is too old for the selected model.");
+                assert!(remediation.as_deref().unwrap_or_default().contains("`claude update`"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn other_claude_result_errors_keep_the_existing_message() {
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":"rate limit exceeded"}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert_eq!(message, "Claude Code stopped: rate limit exceeded");
+                assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn sign_in_failures_get_a_plain_fix() {
         let mut p = StreamParser::new(adapter_for("claude-code"));
         let ev = p.line(&json!({"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired"}).to_string());
