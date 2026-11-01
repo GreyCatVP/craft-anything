@@ -182,6 +182,8 @@ fn standalone(program: &str) -> Process {
 /// Parses one CLI's output stream: the adapter reads each line, this keeps what it learned.
 pub struct StreamParser {
     adapter: Arc<dyn AgentAdapter>,
+    pub(super) cli_program: Option<String>,
+    pub(super) ssh_host: Option<String>,
     pub session_id: Option<String>,
     pub tool_names: HashMap<String, String>,
     pub input_tokens: u64,
@@ -221,7 +223,24 @@ fn summary_of(s: &str) -> String {
 
 impl StreamParser {
     pub fn new(adapter: Arc<dyn AgentAdapter>) -> Self {
-        StreamParser { adapter, session_id: None, tool_names: HashMap::new(), input_tokens: 0, output_tokens: 0, cost_usd: None, saw_result: false }
+        StreamParser {
+            adapter,
+            cli_program: None,
+            ssh_host: None,
+            session_id: None,
+            tool_names: HashMap::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: None,
+            saw_result: false,
+        }
+    }
+
+    /// Attach the selected executable and remote host so adapter errors can recommend the right fix.
+    pub(super) fn with_cli_context(mut self, program: &str, ssh_host: Option<&str>) -> Self {
+        self.cli_program = Some(program.to_string());
+        self.ssh_host = ssh_host.map(str::to_string);
+        self
     }
 
     /// Events for one output line.
@@ -434,7 +453,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, ses
     };
     let _ =
         tx.send(AgentEvent::Status { text: format!("Asking {}{}…", display_for(&agent), remote.as_ref().map(|h| format!(" on {h}")).unwrap_or_default()) });
-    let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
+    let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone()).with_cli_context(&program, remote.as_deref())));
     let (p2, tx2, tx_err) = (parser.clone(), tx.clone(), tx.clone());
     let stop2 = stop.clone();
     // A builder turn may take hours and sit silent for long stretches: Ghidra's first look at a big
@@ -829,7 +848,7 @@ mod tests {
                 assert_eq!(message, "Claude Code CLI 2.1.81 is too old for the selected model.");
                 let remediation = remediation.as_deref().unwrap_or_default();
                 assert!(remediation.contains("`claude update`"), "{remediation}");
-                assert!(remediation.contains("command-line tool") && remediation.contains("not the Claude desktop app"), "{remediation}");
+                assert!(remediation.contains("this machine") && remediation.contains("not the Claude desktop app"), "{remediation}");
                 assert!(!message.contains("API Error") && !message.contains("invalid_request_error"));
             }
             other => panic!("{other:?}"),
@@ -844,6 +863,20 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":"Claude Code CLI version 2.1.81 does not support this model"}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, .. } => assert_eq!(message, "Claude Code CLI 2.1.81 is too old for the selected model."),
+            other => panic!("{other:?}"),
+        }
+
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":"Claude Code: does not support this model"}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, .. } => assert_eq!(message, "The Claude Code command-line tool is too old for the selected model."),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -854,6 +887,52 @@ mod tests {
             AgentEvent::Error { message, remediation, .. } => {
                 assert_eq!(message, "Claude Code stopped: rate limit exceeded");
                 assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let gateway_error = "Group does not support this model";
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":gateway_error}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert_eq!(message, &format!("Claude Code stopped: {gateway_error}"));
+                assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":"Claude Code request failed: Group does not support this model"}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert!(message.contains("Group does not support this model"));
+                assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let model_name = "Claude Code claude-sonnet-4 does not support this model";
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":model_name}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert!(message.contains(model_name));
+                assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn unsupported_model_remediation_uses_the_configured_cli_and_machine() {
+        let mut p = StreamParser::new(adapter_for("claude-code")).with_cli_context("/opt/custom-claude", Some("build-host"));
+        let ev = p.line(&json!({"type":"result","is_error":true,"result":"Claude Code does not support this model"}).to_string());
+        match &ev[0] {
+            AgentEvent::Error { remediation, .. } => {
+                let remediation = remediation.as_deref().unwrap_or_default();
+                assert!(remediation.contains("remote machine `build-host`"), "{remediation}");
+                assert!(remediation.contains("`/opt/custom-claude`") && remediation.contains("`update` subcommand"), "{remediation}");
             }
             other => panic!("{other:?}"),
         }
