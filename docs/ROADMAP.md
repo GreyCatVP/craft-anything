@@ -771,6 +771,10 @@ Gaps found while using the app for real projects.
 - [x] Simplified and Traditional Chinese UI catalogs, system-locale selection and translated
       tool-title search; catalog integrity, coverage checks and isolated language-switch tests
       ([localisation](localization.md))
+- [ ] A Simplified Chinese README (`README.zh.md`) translated from `README.md`, linked from the
+      language switcher in `README.md` and `README.ja.md` — claimed: maple323, branch docs/readme-zh
+- [ ] `README.ja.md` is behind `README.md`: the whole Craft App Suite section is missing, so the
+      Japanese translation needs a catch-up pass
 - [x] First run sets up who builds, not only who answers, and no longer says the purpose is saved
       with projects (it stays on the computer); its Back has a name for screen readers
 - [x] An error whose fix quotes a command (`claude auth login`, `codex login`) offers to copy it,
