@@ -10,6 +10,7 @@ use craft_anything_engine::Mode;
 use egui::{RichText, Ui, Vec2};
 use std::path::PathBuf;
 
+/// Draws the Settings modal and the content for its selected tab.
 pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
     if !app.state.settings_open {
         return;
@@ -96,10 +97,10 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
                     // Not shrunk to the tab's content: that gave each tab its own width and put the
                     // scroll bar in a different place on every page.
                     let tab = app.state.settings_tab;
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(h).max_height(h).max_width(content_w).show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(h).max_height(h).max_width(w).show(ui, |ui| {
                         // The bar sits at the edge of the area, so the air between it and the
                         // settings is taken from the settings' side.
-                        ui.set_max_width(ui.available_width() - 14.0);
+                        ui.set_max_width(content_w - 14.0);
                         match tab {
                             SettingsTab::General => general(app, ui),
                             SettingsTab::Engines => engines(app, ui),

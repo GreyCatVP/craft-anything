@@ -1027,6 +1027,41 @@ fn settings_window_tabs_draw() {
     h.get_by_label("Studio Light").click();
     h.run_steps(3);
     assert_eq!(h.state().settings.theme, "studio-light");
+
+    // At the same window size, the same tab keeps its content bounds with and without scrolling.
+    let content_bounds = |overflow: bool| {
+        let mut h = harness_sized(egui::vec2(1000.0, 700.0), move || {
+            let mut a = demo::app(demo::engine(Mode::Beginner, true));
+            a.state.settings_open = true;
+            a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Safety;
+            a
+        });
+        h.run_steps(3);
+        if overflow {
+            h.state_mut().view.project = Some("Test project".into());
+            h.state_mut().view.project_allows = (0..20).map(|n| format!("extra tool {n}")).collect();
+            h.run_steps(2);
+        }
+        let content = h.get_by_label("Run to study").rect();
+        let close_right = edge(&h);
+        let scrollbars: Vec<_> = h.query_all_by_role(egui::accesskit::Role::ScrollBar).map(|node| node.rect()).collect();
+        (content, close_right, scrollbars)
+    };
+    let (short_content, short_window_right, short_scrollbars) = content_bounds(false);
+    let (long_content, long_window_right, long_scrollbars) = content_bounds(true);
+    let scrollbar = long_scrollbars
+        .iter()
+        .copied()
+        .filter(|r| r.left() < long_window_right)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("the overflowing Settings tab should show a scrollbar");
+    assert!((short_window_right - long_window_right).abs() < 0.1, "the windows have different widths");
+    assert!(short_scrollbars.iter().all(|r| r.left() > scrollbar.left()), "the short tab unexpectedly scrolls");
+    assert_eq!(short_content, long_content, "the Settings content bounds changed when scrolling");
+    assert!(
+        long_content.right() <= scrollbar.left() - 14.0,
+        "the content should stay at least 14 points before the scrollbar: content={long_content:?}, scrollbar={scrollbar:?}"
+    );
 }
 
 #[test]
