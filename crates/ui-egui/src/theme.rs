@@ -449,11 +449,13 @@ mod tests {
     #[test]
     fn fallback_fonts_are_sans_first() {
         let names = |list: &[&str]| list.iter().map(|f| format!("craft:{f}:Regular")).collect::<Vec<_>>();
-        let ordered = sans_first(names(&["Shippori Mincho", "Noto Sans CJK SC", "BIZ UDPGothic", "NanumGothic"]));
+        let ordered = sans_first(names(&["Shippori Mincho", "Noto Sans CJK SC", "BIZ UDPGothic", "NanumGothic", "Unknown Face"]));
         assert_eq!(ordered[0], "craft:BIZ UDPGothic:Regular");
         assert_eq!(ordered[1], "craft:Noto Sans CJK SC:Regular");
         assert_eq!(ordered[2], "craft:NanumGothic:Regular");
-        assert_eq!(ordered[3], "craft:Shippori Mincho:Regular");
+        assert_eq!(ordered[3], "craft:Unknown Face:Regular");
+        assert_eq!(ordered[4], "craft:Shippori Mincho:Regular");
+        assert_eq!(fallback_rank("craft:Unknown Face:Regular"), FallbackRank::Other);
         assert_eq!(fallback_rank("craft:BIZ UDMincho:Regular"), FallbackRank::Serif);
         assert_eq!(fallback_rank("craft:BIZ UDPGothic:Regular"), FallbackRank::Local);
     }
