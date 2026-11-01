@@ -390,6 +390,8 @@ Pending changes:
 - [x] Engines and settings as tools (`Setup` toolset): `engines_list` (external engines, Ghidra,
       game engines and readiness), `engines_install` (Ghidra, Godot, pinned engines, with
       progress; Unity/Unreal get their download page), `settings_show`, `settings_set`
+- [ ] Find registered Linux Unreal installations and their bundled Clang toolchain; support an
+      explicit `UE_ROOT` — claimed: one-bit, branch `bugfix/r1.6-linux-unreal-detection`
 - [x] The app's Godot, Unity/Unreal installer and Ghidra flows, and its play, preview and
       open-folder buttons, call the tools (`CraftApp::act`); inventory reads stay in the UI
 - [x] Launch, preview and open-folder as tools: `project_play` (needs consent: it runs the
