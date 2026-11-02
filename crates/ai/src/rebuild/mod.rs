@@ -238,7 +238,11 @@ impl RebuildRun {
             editor: None,
             notes: notes.clone(),
             feed: feed.clone(),
-            assets: hub.has_asset_keys(),
+            asset_keys_available: {
+                let keys = hub.keys.clone();
+                let providers = craft_anything_engines::assets::AssetProviders::built_in();
+                Box::new(move || providers.ids().into_iter().any(|id| providers.get(id).is_some_and(|p| crate::keys::asset_key(&keys, p.as_ref()).is_some())))
+            },
             decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
@@ -416,9 +420,9 @@ struct Worker {
     editor: Option<PathBuf>,
     notes: Arc<Mutex<Vec<Note>>>,
     feed: Arc<Mutex<feed::FeedLog>>,
-    /// An asset provider's key is set up, so the builder can generate pictures and 3D models if the
-    /// project allows it.
-    assets: bool,
+    /// Resolve current key availability on the worker, without retaining credentials or holding
+    /// the engine session lock during key-store I/O. Tests supply an isolated availability source.
+    asset_keys_available: Box<dyn Fn() -> bool + Send + Sync>,
     /// The builder has decompiled something this run (Deep mode requires it).
     decompiled: bool,
     /// Where this run adds its working time, tokens and cost (`None` in tests that don't build).
@@ -857,7 +861,7 @@ impl Worker {
             deep,
             ghidra,
             editor: self.editor.as_deref(),
-            assets: self.assets && spent.is_some(),
+            assets: (self.asset_keys_available)() && spent.is_some(),
             asset_spent: spent,
             image_model: image_model.as_deref(),
             model_3d: model_3d.as_deref(),

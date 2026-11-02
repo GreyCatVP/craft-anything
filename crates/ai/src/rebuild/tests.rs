@@ -306,7 +306,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         editor: None,
         notes: notes.clone(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -339,47 +339,55 @@ fn pictures_of_the_original_reach_the_builder() {
     assert!(pictures_reminder(&ws).contains("1 picture(s)"));
 }
 
+/// Record sent prompts, optionally changing project policy or key availability before one retry.
+#[derive(Default)]
+struct RecordedTurns(Vec<String>, Option<PathBuf>, Option<Arc<AtomicBool>>);
+impl Conversation for RecordedTurns {
+    /// Keep the complete prompt so the test can inspect the policy sent on each turn.
+    fn send(&mut self, text: &str) {
+        self.0.push(text.into());
+    }
+    /// Finish locally; retry fixtures change policy or key availability when the first turn fails.
+    fn poll(&mut self) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        if let Some(root) = &self.1
+            && self.0.len() == 1
+        {
+            Workspace::open(root)
+                .unwrap()
+                .set_person(|m| {
+                    m.generate_assets = false;
+                    m.asset_budget_usd = 0.75;
+                })
+                .unwrap();
+            events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
+        }
+        if let Some(available) = &self.2
+            && self.0.len() == 1
+        {
+            available.fetch_xor(true, Ordering::SeqCst);
+            events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
+        }
+        events.push(AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false });
+        events
+    }
+    /// Only the interruption fixture has a resumable session.
+    fn session_id(&self) -> Option<String> {
+        (self.1.is_some() || self.2.is_some()).then(|| "test-retry".into())
+    }
+    /// Ignore consent because this recorder never requests tool execution.
+    fn answer_consent(&mut self, _: &str, _: bool) {}
+    /// No background work exists to cancel in this synchronous recorder.
+    fn stop(&mut self) {}
+    /// Recorded turns have no pending background activity.
+    fn is_busy(&self) -> bool {
+        false
+    }
+}
+
 /// Each turn observes saved asset choices without replacing unsaved progress and refuses unreadable policy.
 #[test]
 fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progress() {
-    #[derive(Default)]
-    struct RecordedTurns(Vec<String>, Option<PathBuf>);
-    impl Conversation for RecordedTurns {
-        /// Keep the complete prompt so the test can inspect the policy sent on each turn.
-        fn send(&mut self, text: &str) {
-            self.0.push(text.into());
-        }
-        /// Finish locally; the optional retry fixture changes permission while its first turn fails.
-        fn poll(&mut self) -> Vec<AgentEvent> {
-            let mut events = Vec::new();
-            if let Some(root) = &self.1
-                && self.0.len() == 1
-            {
-                Workspace::open(root)
-                    .unwrap()
-                    .set_person(|m| {
-                        m.generate_assets = false;
-                        m.asset_budget_usd = 0.75;
-                    })
-                    .unwrap();
-                events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
-            }
-            events.push(AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false });
-            events
-        }
-        /// Only the interruption fixture has a resumable session.
-        fn session_id(&self) -> Option<String> {
-            self.1.as_ref().map(|_| "test-retry".into())
-        }
-        /// Ignore consent because this recorder never requests tool execution.
-        fn answer_consent(&mut self, _: &str, _: bool) {}
-        /// No background work exists to cancel in this synchronous recorder.
-        fn stop(&mut self) {}
-        /// Recorded turns have no pending background activity.
-        fn is_busy(&self) -> bool {
-            false
-        }
-    }
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "App", "Make an app", TargetRef::None).unwrap();
     let (tx, _rx) = std::sync::mpsc::channel();
@@ -394,7 +402,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: true,
+        asset_keys_available: Box::new(|| true),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -489,7 +497,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         // A local target also exercises game_steps' permission-sensitive instructions.
         ws.manifest.target = TargetRef::Local { path: d.path().join("fixture-game") };
         for prompt in [BuilderPrompt::Initial { extra: None, api: false, originals: false }, BuilderPrompt::Message("Keep going".into())] {
-            worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt).unwrap();
+            worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt, None).unwrap();
             let sent = agent.0.last().unwrap();
             assert_eq!(sent.contains("assets_model_generate"), visual, "{sent}");
             assert_eq!(sent.contains("assets_image_generate"), visual, "{sent}");
@@ -502,7 +510,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
             assert_eq!(sent.matches("Project asset providers:").count(), 1);
         }
     }
-    let mut interrupted = RecordedTurns(Vec::new(), Some(ws.root.clone()));
+    let mut interrupted = RecordedTurns(Vec::new(), Some(ws.root.clone()), None);
     worker.turn(&mut ws, &mut interrupted, kind("game").as_ref(), &BuilderPrompt::Initial { extra: None, api: false, originals: false }, None).unwrap();
     assert_eq!(interrupted.0.len(), 2);
     assert!(interrupted.0[0].contains("Realistic assets:") && interrupted.0[0].contains("$5.00"));
@@ -532,6 +540,55 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     assert!(note.contains("Do not generate assets or authorize new spending"));
     assert!(!note.contains("elevenlabs: enabled"), "unreadable choices never fall back to earlier permission");
     assert_eq!(ws.manifest, before_turn);
+}
+
+/// Adding or removing a key during a run updates the next sent prompt, including retry sends.
+#[test]
+fn every_builder_prompt_refreshes_live_asset_key_availability() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        m.asset_providers = Some(vec!["scenario".into()]);
+    })
+    .unwrap();
+    let mut worker = check_worker(&ws, false);
+    let available = Arc::new(AtomicBool::new(false));
+    let current = available.clone();
+    let engine = worker.engine.clone();
+    worker.asset_keys_available = Box::new(move || {
+        assert!(engine.try_session().is_some(), "key-store I/O must run without the session lock");
+        current.load(Ordering::SeqCst)
+    });
+    let game = kind("game");
+    let mut agent = RecordedTurns::default();
+    for prompt in [
+        BuilderPrompt::Initial { extra: None, api: false, originals: false },
+        BuilderPrompt::Message(follow_up("Make it brighter", "game")),
+        BuilderPrompt::Message(added_prompt(&["Add a score".into()])),
+        BuilderPrompt::Message(game.refine(&CheckResult::new(CheckResult::BUILD, 2, false, "Fix the build"))),
+    ] {
+        for has_key in [false, true, false] {
+            available.store(has_key, Ordering::SeqCst);
+            worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+            assert!(sent.contains("scenario: enabled"), "key availability must not change project permission: {sent}");
+        }
+    }
+    for initial in [false, true] {
+        available.store(initial, Ordering::SeqCst);
+        let mut interrupted = RecordedTurns(Vec::new(), None, Some(available.clone()));
+        worker.turn(&mut ws, &mut interrupted, game.as_ref(), &BuilderPrompt::Initial { extra: None, api: false, originals: false }, None).unwrap();
+        assert_eq!(interrupted.0.len(), 2);
+        for (sent, has_key) in interrupted.0.iter().zip([initial, !initial]) {
+            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+        }
+    }
 }
 
 #[test]
@@ -823,7 +880,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -940,7 +997,7 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1278,7 +1335,7 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1670,7 +1727,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1711,7 +1768,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
@@ -1904,7 +1961,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
             Note { id: 2, text: "add a footer".into(), shown: "add a footer".into() },
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -2051,7 +2108,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -2061,7 +2118,11 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
     assert_eq!(reply.trim(), "Carried on: yes");
     let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
     assert!(
-        sent.contains("A notes app") && sent.contains("Make it blue") && sent.contains("already under way") && sent.contains("app/") && sent.contains("notes app with a sidebar"),
+        sent.contains("A notes app")
+            && sent.contains("Make it blue")
+            && sent.contains("already under way")
+            && sent.contains("app/")
+            && sent.contains("notes app with a sidebar"),
         "{sent}"
     );
     assert_eq!(ws.manifest.agent_session.as_deref(), Some("new-1"), "the new session is the one kept");
@@ -2105,7 +2166,7 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -2168,7 +2229,7 @@ fn the_builders_conversation_travels_with_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|| false),
         decompiled: false,
         usage: None,
         self_check: None,
