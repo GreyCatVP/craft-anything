@@ -20,12 +20,24 @@ place to add yours. Follow `AGENTS.md` (never crash, layers, external programs t
 
 ## Built-in generated assets
 
-Settings → AI → Game assets stores each provider's credentials in the system keychain, separately
-from coding-agent credentials. Use **Scenario** for images and image-to-3D models, **ElevenLabs**
-for text-to-speech, sound effects and music, or the existing **fal.ai** models. Scenario's credential
-is its API key and secret joined with a colon (`API key:API secret`). ElevenLabs needs its API key.
-Credentials also come from `SCENARIO_API_KEY` (the same combined value), `ELEVENLABS_API_KEY`, or
+Settings → AI → Game assets manages each provider's credentials, separately from coding-agent
+credentials. The OS keychain is preferred; if unavailable, the app uses its private, owner-only
+`ai-keys.toml` fallback file. That fallback is not encrypted. Use **Scenario** for images and
+image-to-3D models, **ElevenLabs** for text-to-speech, sound effects and music, or the existing
+**fal.ai** models. Scenario has separate, masked **API key** and **API secret** inputs; Save combines
+them internally for authentication. Previously saved combined credentials keep working.
+ElevenLabs needs its API key. Credentials also come from `SCENARIO_API_KEY` (the combined
+`API key:API secret` value), `ELEVENLABS_API_KEY`, or
 `FAL_KEY` when no key is stored. Never include real credentials in a project, prompt or committed file.
+
+Scenario's [direct REST API](https://docs.scenario.com/get-started/documentation/quick-start-guide/step-2-authenticate-your-requests)
+documents HTTP Basic authentication, which this provider uses over HTTPS. Base64 encodes the
+credential pair; TLS provides transport encryption. Authenticated requests go to Scenario's API,
+redirects are refused, and downloads use a separate client with no authentication header.
+Scenario also offers [OAuth through its official MCP server](https://help.scenario.com/articles/2664328768-getting-started-with-the-scenario-mcp-server);
+that is a separate connection path, not an authentication mode of this built-in provider.
+Use a dedicated [project-scoped key with a usage limit](https://help.scenario.com/articles/2952168846-api-keys-and-scopes?lang=en)
+and grant only the permissions needed for generation and asset access.
 
 Choose the picture and 3D models in Settings → Builds. Headless settings use `[assets] image_model`
 and `model_3d`; individual image/model tool calls can override their model. Existing fal.ai defaults
