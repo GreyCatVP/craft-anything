@@ -306,6 +306,9 @@ fn engines(app: &mut CraftApp, ui: &mut Ui) {
 }
 
 fn ai(app: &mut CraftApp, ui: &mut Ui) {
+    if app.agent_model_picker.as_ref().is_some_and(|p| app.hub.model_context(&p.context.backend.config.name).ok().as_ref() != Some(&p.context)) {
+        app.agent_model_picker = None;
+    }
     let t = Tokens::get(ui.ctx());
     crate::engine_ui::assets_settings(app, ui);
     ui.add_space(16.0);
@@ -318,6 +321,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let (mut choose_program, mut usual_program) = (None, None);
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
     let mut chosen_effort = None;
+    let (mut pick_agent_model, mut chosen_agent_model, mut remote_program) = (None, None, None);
     // The AI whose Remove was pressed once: asked again before its key is deleted.
     let confirm_id = egui::Id::new("remove-ai");
     let confirming: Option<String> = ui.data(|d| d.get_temp(confirm_id));
@@ -331,6 +335,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.add(egui::Label::new(RichText::new(&b.name).font(theme::semibold(theme::SMALL))).truncate());
                     let model_in_use = craft_anything_ai::model_in_use(b, app.backend_options.get(&b.name));
+                    let live_catalog = b.kind == BackendKind::AgentCli && craft_anything_ai::cli_agents::adapter_for(&b.model).has_model_catalog();
                     // An API's model has its own line below; an agent app is named by its `model`.
                     let what = if model_in_use.is_some() && b.kind != BackendKind::AgentCli { String::new() } else { format!(" · {}", b.model) };
                     let ssh = b.ssh_host.as_ref().map(|h| format!(" · ssh {h}")).unwrap_or_default();
@@ -354,8 +359,43 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     }
                     // How hard it thinks: the Claude API and Claude Code take every Claude level.
                     let effort = craft_anything_ai::effort_in_use(b, app.backend_options.get(&b.name));
+                    if b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty()) {
+                        let id = egui::Id::new(("remote-agent-program", &b.name));
+                        let mut program = ui
+                            .data_mut(|d| d.get_temp::<String>(id))
+                            .unwrap_or_else(|| app.backend_options.get(&b.name).and_then(|o| o.command.clone()).unwrap_or_default());
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(tr("Remote program"));
+                            ui.add(egui::TextEdit::singleline(&mut program).hint_text(&b.model).desired_width(200.0));
+                            if widgets::link(ui, "Apply").clicked() {
+                                remote_program = Some((b.name.clone(), program.clone()));
+                            }
+                        });
+                        ui.data_mut(|d| d.insert_temp(id, program));
+                    }
                     // Which model it uses, and the ones it can be set to (#123).
-                    if let Some(current) = model_in_use {
+                    if live_catalog {
+                        let options = app.backend_options.get(&b.name);
+                        let current = options.and_then(|o| o.cli_model.as_deref()).map(str::to_string).unwrap_or_else(|| tr("OpenCode default"));
+                        ui.label(trf("Model: {model}", &[("model", &current)]));
+                        let thinking = options.and_then(|o| o.cli_thinking).map(|d| d.title().to_string()).unwrap_or_else(|| tr("Model default"));
+                        ui.label(format!("{}: {thinking}", tr("Thinking depth")));
+                        if let Some(picker) = app.agent_model_picker.as_mut().filter(|p| p.context.backend.config.name == b.name) {
+                            if crate::builders::agent_model_picker(ui, picker) {
+                                chosen_agent_model = Some((b.name.clone(), picker.model.clone(), picker.thinking));
+                            }
+                            ui.horizontal(|ui| {
+                                if widgets::link(ui, "Reload models").clicked() {
+                                    pick_agent_model = Some(b.name.clone());
+                                }
+                                if widgets::link(ui, "Cancel").clicked() {
+                                    close_picker = true;
+                                }
+                            });
+                        } else if widgets::link(ui, "Change…").clicked() {
+                            pick_agent_model = Some(b.name.clone());
+                        }
+                    } else if let Some(current) = model_in_use {
                         ui.horizontal_wrapped(|ui| {
                             ui.style_mut().override_font_id = Some(egui::FontId::proportional(theme::CAPTION));
                             ui.add(
@@ -468,6 +508,15 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if let Some(name) = pick_model {
         app.pick_model(&name);
     }
+    if let Some((name, program)) = remote_program {
+        app.set_agent_program(&name, Some(program));
+    }
+    if let Some(name) = pick_agent_model {
+        app.pick_agent_model(&name);
+    }
+    if let Some((name, model, thinking)) = chosen_agent_model {
+        app.set_agent_model(&name, model, thinking);
+    }
     if let Some((name, model)) = chosen_model {
         app.set_model(&name, &model);
     }
@@ -476,6 +525,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     if close_picker {
         app.model_picker = None;
+        app.agent_model_picker = None;
     }
     if let Some(name) = remove {
         ui.data_mut(|d| d.remove::<String>(confirm_id));

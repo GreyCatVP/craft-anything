@@ -110,6 +110,8 @@ const ACTIONS: &[Action] = &[
     a("pick_model",          "list the models an AI can use",                  Cli("ai model <name>")),
     a("set_model",           "change the model an AI uses",                    Cli("ai model <name> <model>")),
     a("set_effort",          "change how hard a Claude AI thinks",             Cli("ai effort <name> <level>")),
+    a("pick_agent_model",    "list an agent's visible models and thinking depths", Tool(&["ai_models_list"])),
+    a("set_agent_model",     "choose an agent's model and thinking depth",     Tool(&["ai_model_set"])),
     a("choose_backend",      "pick the AI brain",                              Cli("chat <question> --backend")),
     a("set_role",            "choose which AI builds or extracts",             Cli("ai extractor <name>")),
 

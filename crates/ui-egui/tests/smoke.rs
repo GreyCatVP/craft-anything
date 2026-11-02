@@ -1083,6 +1083,55 @@ fn a_claude_ais_effort_is_set_in_settings() {
 }
 
 #[test]
+fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
+    use craft_anything_ai::{AgentModel, BackendConfig, BackendKind, ThinkingDepth};
+    use craft_anything_ui_egui::builders::AgentModelPicker;
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.hub
+            .add_backend(
+                BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true },
+                None,
+            )
+            .unwrap();
+        a.backends = a.hub.backends();
+        a.backend_options = a.hub.options();
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a.agent_model_picker = Some(AgentModelPicker {
+            request: 1,
+            context: a.hub.model_context("OpenCode").unwrap(),
+            model: Some("test/deep".into()),
+            thinking: None,
+            result: Some(Ok(vec![
+                AgentModel { id: "test/deep".into(), name: "Deep".into(), thinking: ThinkingDepth::ALL.into() },
+                AgentModel { id: "test/small".into(), name: "Small".into(), thinking: vec![ThinkingDepth::Low] },
+            ])),
+        });
+        a
+    });
+    h.run_steps(3);
+    h.get_all_by_label("Thinking depth").last().unwrap().click();
+    h.run_steps(2);
+    for label in ["Low", "Medium", "High", "Xhigh", "Max"] {
+        h.get_by_label(label);
+    }
+    h.get_by_label("Max").click();
+    h.run_steps(2);
+    assert_eq!(h.state().agent_model_picker.as_ref().unwrap().thinking, Some(ThinkingDepth::Max));
+    h.get_by_label("OpenCode model").click();
+    h.run_steps(2);
+    h.get_by_label("Small · test/small").click();
+    h.run_steps(2);
+    assert!(h.state().agent_model_picker.as_ref().unwrap().thinking.is_none(), "a model change resets the draft depth");
+    h.get_all_by_label("Thinking depth").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("Low");
+    assert!(h.query_by_label("Max").is_none());
+    assert!(h.query_by_label("Xhigh").is_none());
+}
+
+#[test]
 fn settings_window_tabs_draw() {
     let mut h = harness(|| {
         let mut a = demo::app(demo::engine(Mode::Beginner, true));

@@ -10,6 +10,31 @@ impl AgentAdapter for OpenCode {
         &["opencode"]
     }
 
+    fn has_model_catalog(&self) -> bool {
+        true
+    }
+
+    fn model_catalog(
+        &self,
+        config: &BackendConfig,
+        options: &BackendOptions,
+        directory: Option<&Path>,
+        stop: &Stop,
+    ) -> Result<Vec<models::AgentModel>, ToolError> {
+        models::discover(config, options, directory, stop)
+    }
+
+    fn validate_model(&self, config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>, stop: &Stop) -> Result<(), ToolError> {
+        // Extra flags must not silently override the selected model or its thinking variant.
+        if options.args.iter().any(|a| a == "--model" || a.starts_with("--model=") || a.starts_with("-m")) {
+            return Err(ToolError::invalid("Choose OpenCode's model in its model setting, rather than in extra arguments."));
+        }
+        if options.cli_model.is_none() && options.cli_thinking.is_none() {
+            return Ok(());
+        }
+        models::validate(options, &self.model_catalog(config, options, directory, stop)?)
+    }
+
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = vec!["run".to_string()];
         // A builder works unattended: what OpenCode would stop to ask is allowed, unless its own
@@ -18,7 +43,8 @@ impl AgentAdapter for OpenCode {
             a.push("--auto".into());
         }
         if let Some(m) = &cx.options.cli_model {
-            a.extend(["--model".into(), m.clone()]);
+            let model = cx.options.cli_thinking.map_or_else(|| m.clone(), |d| format!("{m}#{}", d.id()));
+            a.extend(["--model".into(), model]);
         }
         a.extend(cx.options.args.iter().cloned());
         a.extend(["--format".into(), "json".into()]);
@@ -217,5 +243,20 @@ mod tests {
         zero.line(&step(json!(0)));
         zero.line(&step(json!(0)));
         assert_eq!(zero.cost_usd, Some(0.0), "an explicit zero is a known cost");
+    }
+
+    #[test]
+    fn thinking_depth_is_part_of_the_selected_model_reference() {
+        for depth in models::ThinkingDepth::ALL {
+            let options = BackendOptions { cli_model: Some("test/model".into()), cli_thinking: Some(depth), ..Default::default() };
+            for builder in [false, true] {
+                let argv = args(builder, &options);
+                let model = argv.iter().position(|a| a == "--model").unwrap();
+                assert_eq!(argv[model + 1], format!("test/model#{}", depth.id()));
+                assert_eq!(argv.last().unwrap(), "PRE make a game");
+            }
+        }
+        let argv = args(false, &BackendOptions::default());
+        assert!(!argv.iter().any(|a| a == "--model"));
     }
 }

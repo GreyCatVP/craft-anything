@@ -206,20 +206,28 @@ pub enum Delta {
 
 /// Cooperative cancellation for a conversation.
 #[derive(Debug, Clone, Default)]
-pub struct Stop(Arc<AtomicBool>);
+pub struct Stop {
+    stopped: Arc<AtomicBool>,
+    tool: Option<craft_anything_engine::CancelToken>,
+}
 
 impl Stop {
+    /// Link discovery to cancellation of the engine tool that owns it.
+    pub fn for_tool(cancel: craft_anything_engine::CancelToken) -> Self {
+        Self { tool: Some(cancel), ..Default::default() }
+    }
+
     pub fn stop(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.stopped.store(true, Ordering::SeqCst);
     }
 
     /// Clear a previous stop (at the start of the next message).
     pub fn reset(&self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.stopped.store(false, Ordering::SeqCst);
     }
 
     pub fn is_stopped(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.stopped.load(Ordering::SeqCst) || self.tool.as_ref().is_some_and(|c| c.is_cancelled())
     }
 
     pub fn check(&self) -> Result<(), ToolError> {

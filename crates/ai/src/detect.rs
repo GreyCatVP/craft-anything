@@ -214,22 +214,36 @@ pub fn detect_all() -> Vec<Detected> {
     }
     let mut hosts = crate::ssh::ssh_hosts();
     hosts.truncate(5);
-    let ssh: Vec<Detected> = hosts
-        .into_iter()
-        .map(|h| {
-            let mut c = cfg(&format!("Claude Code on {h}"), BackendKind::AgentCli, "claude-code");
-            c.ssh_host = Some(h.clone());
-            Detected { suggestion: c, reason: format!("SSH host {h} from ~/.ssh/config (runs an agent CLI there)"), needs_key: false }
-        })
-        .collect();
+    let ssh: Vec<Detected> = hosts.into_iter().flat_map(remote_agents).collect();
     parts.push((100, ssh));
     parts.sort_by_key(|(i, _)| *i);
     parts.into_iter().flat_map(|(_, v)| v).collect()
 }
 
+/// SSH aliases are suggestions, not proof that an agent is installed there.
+fn remote_agents(host: String) -> Vec<Detected> {
+    [("claude-code", "Claude Code"), ("opencode", "OpenCode")]
+        .into_iter()
+        .map(|(id, label)| {
+            let mut c = cfg(&format!("{label} on {host}"), BackendKind::AgentCli, id);
+            c.ssh_host = Some(host.clone());
+            Detected { suggestion: c, reason: format!("SSH host {host} from ~/.ssh/config (check that {label} is installed there)"), needs_key: false }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_hosts_offer_opencode_as_well_as_claude_code() {
+        let found = remote_agents("test-box".into());
+        assert_eq!(found.iter().map(|d| d.suggestion.model.as_str()).collect::<Vec<_>>(), ["claude-code", "opencode"]);
+        let oc = &found[1].suggestion;
+        assert_eq!(oc.name, "OpenCode on test-box");
+        assert_eq!(oc.ssh_host.as_deref(), Some("test-box"));
+    }
 
     #[test]
     fn env_detection() {

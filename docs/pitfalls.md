@@ -97,6 +97,11 @@ after and compare them byte for byte (done for every brief across 162 combinatio
 
 ## Building and running
 
+**A model catalogue queried in the wrong project.** OpenCode V2's raw `api get /api/model` does
+not reliably select the invoking CLI's directory. Use the `model.list` operation with an explicit
+`location[directory]` parameter, and test that the returned Location matches it. Over SSH,
+expand the remote shell's working directory, never send a local project path.
+
 **Rebuilding a binary that is running fails on Windows** ("Access is denied"), and the next command
 silently used the old binary. Long-running binaries (live rebuilds, servers) get their own
 `CARGO_TARGET_DIR`.

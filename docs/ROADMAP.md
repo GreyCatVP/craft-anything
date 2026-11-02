@@ -305,8 +305,12 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
-- [ ] Offer OpenCode locally and over SSH with its own visible chat models and supported thinking
-      depths (Low, Medium, High, Xhigh, Max) in settings and headless clients — claimed: OpenCode, branch feature/r2.2-opencode-models
+- [x] Offer OpenCode locally and over SSH with its own visible chat models and supported thinking
+      depths (Low, Medium, High, Xhigh, Max) in settings and headless clients. Choices are validated
+      before saving and native execution; explicit choices bypass ACP until it supports selection.
+      See [OpenCode](opencode.md).
+- [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
+      and complete a live generation with the selected model and variant (local catalogue verified).
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**

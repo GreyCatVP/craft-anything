@@ -1,5 +1,17 @@
 # zh-hans: original Chinese UI translations. Licensed MIT OR Apache-2.0.
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
+OpenCode default	OpenCode 默认设置
+Model default	模型默认设置
+Thinking depth	思考深度
+OpenCode model	OpenCode 模型
+Remote program	远程程序
+Reload models	重新加载模型
+Apply	应用
+OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode 中没有可见的聊天模型。请在 OpenCode 中连接服务提供商，然后重新加载。
+The saved model is no longer visible. Choose another model or the OpenCode default.	已保存的模型不再可见。请选择其他模型或使用 OpenCode 默认设置。
+The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	此模型不支持已保存的思考深度。请选择默认设置或可用的深度。
+List an agent's models	列出智能体的模型
+Choose an agent's model and thinking	选择智能体的模型和思考深度
  GB	 GB
  and {n} more	，另有 {n} 项
  {ascii}	 {ascii}

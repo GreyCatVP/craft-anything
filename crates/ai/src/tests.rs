@@ -137,6 +137,58 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
+#[cfg(unix)]
+#[test]
+fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
+    use std::os::unix::fs::PermissionsExt;
+    let (h, dir) = hub();
+    let program = dir.path().join("agent");
+    let catalogue = dir.path().join("models.json");
+    let seen = dir.path().join("arguments.txt");
+    let quote = |p: &std::path::Path| ssh::shell_quote(&p.display().to_string());
+    let script = format!(
+        "#!/bin/sh\ncase \"$1\" in\napi) cat {};;\nrun) printf '%s\\n' \"$@\" > {}; printf 'done';;\n*) exit 8;;\nesac\n",
+        quote(&catalogue),
+        quote(&seen)
+    );
+    std::fs::write(&program, script).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let model = json!({"id":"alias","providerID":"test","name":"Test","enabled":true,"type":"chat","variants":[{"id":"high"},{"id":"max"}]});
+    std::fs::write(&catalogue, json!({"data":[model]}).to_string()).unwrap();
+    let cfg = BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend_with(
+        BackendEntry { config: cfg, options: BackendOptions { command: Some(program.display().to_string()), acp: Some(true), ..Default::default() } },
+        None,
+    )
+    .unwrap();
+    assert_eq!(h.model_choices("OpenCode").unwrap(), ["test/alias"]);
+    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(ThinkingDepth::Max)).unwrap());
+    let saved = AiConfig::from_settings(&Settings::load_from(&dir.path().join("config.toml")));
+    assert_eq!(saved.get("OpenCode").unwrap().options.cli_thinking, Some(ThinkingDepth::Max));
+    assert_eq!(saved.get("OpenCode").unwrap().config.model, "opencode");
+    let mut conversation = h.start(Some("OpenCode"), false).unwrap();
+    conversation.send("test prompt");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut events = Vec::new();
+    while conversation.is_busy() && Instant::now() < deadline {
+        events.extend(conversation.poll());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    events.extend(conversation.poll());
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
+    assert!(std::fs::read_to_string(&seen).unwrap().contains("test/alias#max"), "ACP must not discard an explicit selection");
+    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(ThinkingDepth::Xhigh)).is_err());
+    assert_eq!(h.options()["OpenCode"].cli_thinking, Some(ThinkingDepth::Max), "a failed validation changes nothing");
+    let stale = h.model_context("OpenCode").unwrap();
+    h.set_enabled("OpenCode", false).unwrap();
+    assert!(h.set_agent_selection(&stale, None, None).is_err(), "a late picker cannot overwrite newer settings");
+    std::fs::write(&catalogue, r#"{"data":[]}"#).unwrap();
+    assert!(h.set_model("OpenCode", "test/alias").is_err(), "removed models are not offered as a fallback");
+    h.set_agent_model("OpenCode", None, None).unwrap();
+    assert!(h.options()["OpenCode"].cli_model.is_none());
+    assert!(h.options()["OpenCode"].cli_thinking.is_none());
+}
+
 #[test]
 fn a_failed_save_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();

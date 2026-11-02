@@ -1,0 +1,77 @@
+# OpenCode as an AI backend
+
+Craft Anything can run OpenCode V2 locally or on an SSH host. OpenCode owns its provider
+connections and sign-in. Set these up in OpenCode on the computer where it will run.
+
+## Desktop
+
+1. Open **Settings → AI → Detect**, then add **OpenCode**, or **OpenCode on <host>**.
+   Remote suggestions come from SSH aliases; they do not confirm that OpenCode is installed.
+2. If needed, choose the local program, or enter its full path in **Remote program**.
+3. Under the backend, click **Change…** to load the models from that OpenCode installation.
+4. Choose a model and a **Thinking depth**, then **Apply**.
+
+The model picker lists only enabled chat models returned by OpenCode. Provider/model ids
+distinguish similarly named models and preserve custom aliases. The five thinking depths are
+**Low**, **Medium**, **High**, **Xhigh** and **Max**; only those reported as variants of the
+selected model are offered. A model can offer fewer depths, or none.
+
+**OpenCode default** delegates model choice to OpenCode. **Model default** leaves thinking to
+the selected model. Changing the draft model resets its draft thinking depth. **Reload models**
+refreshes both lists after provider or configuration changes. A missing saved model or variant
+is marked unavailable; there is no fallback catalogue or silent downgrade.
+
+Discovery runs in the background with deadlines and output limits. Local queries explicitly
+use the current project directory; SSH queries use the remote shell's working directory, as
+the existing remote runner does. Local model lists are never substituted for a remote one.
+Changing the program, backend settings or project invalidates an open picker. A saved explicit
+choice is checked again in the actual execution directory before each native run.
+
+## CLI
+
+```sh
+craft-anything-cli ai add OpenCode --kind agent_cli --model opencode
+craft-anything-cli ai model OpenCode
+craft-anything-cli ai model OpenCode my-provider/my-model --thinking high
+craft-anything-cli ai model OpenCode --thinking max
+craft-anything-cli ai model OpenCode --default
+
+craft-anything-cli ai add "OpenCode on studio" --kind agent_cli --model opencode --ssh-host studio
+craft-anything-cli ai program "OpenCode on studio" /opt/opencode/bin/opencode
+craft-anything-cli ai model "OpenCode on studio"
+```
+
+Replace `my-provider/my-model` with an id from the listing. Listing an OpenCode backend also
+returns each model's supported `thinking` values. Naming a new model without `--thinking`
+uses that model's default depth. `--thinking` alone applies to the configured explicit model.
+
+The `ai_models_list` and `ai_model_set` tools expose the same discovery and validation to MCP
+and other headless clients. For example, `ai_model_set` accepts
+`{"name":"OpenCode","model":"my-provider/my-model","thinking":"high"}`. Omit both
+`model` and `thinking` to restore the OpenCode default.
+`ai_models_list` returns a total and a page controlled by `offset` and `limit` (200 by default,
+at most 1000); the desktop picker and `ai model` command load the whole bounded catalogue.
+
+## Configuration and execution
+
+The agent identity stays `model = "opencode"`. Its optional choices are saved separately:
+
+```toml
+[[ai.backends]]
+name = "OpenCode"
+kind = "agent_cli"
+model = "opencode"
+cli_model = "my-provider/my-model"
+cli_thinking = "high"
+```
+
+These fields extend the existing versioned settings file. Old settings without them retain
+OpenCode's defaults; a known variant embedded in an existing `cli_model` reference is read into
+`cli_thinking`. Explicit selections run as `opencode run --model provider/model#variant`.
+The current ACP transport cannot select models or variants, so an explicit choice uses the
+native adapter even if `acp = true` was previously set.
+
+Model discovery uses `opencode api model.list --param location[directory]=...` (the V2
+`GET /api/model` operation). This keeps credentials and configuration resolution inside OpenCode.
+Global `--server` and `--standalone` arguments are shared with discovery. Put model choices in
+the model settings rather than overriding them through extra `--model` arguments.

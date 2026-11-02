@@ -18,12 +18,14 @@ pub mod http;
 pub mod key_tools;
 pub mod keys;
 pub mod model;
+pub mod model_tools;
 pub mod openai;
 pub mod price;
 pub mod prompt;
 pub mod rebuild;
 pub mod ssh;
 
+pub use cli_agents::models::{AgentModel, ModelContext, ThinkingDepth};
 pub use config::{AiConfig, BackendEntry, BackendOptions, Price};
 pub use failure::{FailureKind, TurnFailure};
 pub use keys::KeyStore;
@@ -117,6 +119,9 @@ pub fn model_in_use(config: &BackendConfig, options: Option<&BackendOptions>) ->
     match config.kind {
         BackendKind::AgentCli if config.model == "claude-code" => {
             Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| anthropic::DEFAULT_MODEL.to_string()))
+        }
+        BackendKind::AgentCli if cli_agents::adapter_for(&config.model).has_model_catalog() => {
+            Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| "OpenCode default".into()))
         }
         BackendKind::AgentCli => None,
         _ => Some(config.model.clone()),
@@ -285,6 +290,7 @@ impl ChatModel for Tunneled {
 pub fn tools() -> Vec<craft_anything_engine::ToolSpec> {
     let mut v = rebuild::tools::specs();
     v.extend(key_tools::specs());
+    v.extend(model_tools::specs());
     v
 }
 
@@ -464,12 +470,15 @@ impl AiHub {
         self.config().backends.into_iter().map(|b| (b.config.name, b.options)).collect()
     }
 
-    /// The model a backend uses: an API's model, or the one Claude Code is asked for. Returns
+    /// The model a backend uses: an API's model, or the one its agent is asked for. Returns
     /// false when there was no such backend.
     pub fn set_model(&self, name: &str, model: &str) -> Result<bool, ToolError> {
         let model = model.trim();
         if model.is_empty() {
             return Err(ToolError::invalid("Name a model."));
+        }
+        if self.config().get(name).is_some_and(|e| e.config.kind == BackendKind::AgentCli && cli_agents::adapter_for(&e.config.model).has_model_catalog()) {
+            return self.set_agent_model(name, Some(model), None);
         }
         let mut cfg = self.config_to_change()?;
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
@@ -498,11 +507,51 @@ impl AiHub {
     /// Code. Empty for an agent app that picks its own. Blocking (bounded); run it off the UI thread.
     pub fn model_choices(&self, name: &str) -> Result<Vec<String>, ToolError> {
         let e = self.entry(name)?;
+        if e.config.kind == BackendKind::AgentCli && cli_agents::adapter_for(&e.config.model).has_model_catalog() {
+            return Ok(self.agent_models(&self.model_context(name)?)?.into_iter().map(|m| m.id).collect());
+        }
         match (e.config.kind, model_in_use(&e.config, Some(&e.options))) {
             (_, None) => Ok(Vec::new()),
             (BackendKind::AgentCli, Some(_)) => Ok(anthropic::MODELS.iter().map(|m| m.to_string()).collect()),
             _ => self.list_models(name),
         }
+    }
+
+    /// Capture the exact settings and working directory that model discovery will use.
+    pub fn model_context(&self, name: &str) -> Result<ModelContext, ToolError> {
+        Ok(ModelContext { backend: self.entry(name)?, directory: self.project_root() })
+    }
+
+    /// Model metadata from an agent's own instance; no API-provider catalogue is substituted.
+    pub fn agent_models(&self, context: &ModelContext) -> Result<Vec<AgentModel>, ToolError> {
+        let e = &context.backend;
+        cli_agents::adapter_for(&e.config.model).model_catalog(&e.config, &e.options, context.directory.as_deref(), &Stop::default())
+    }
+
+    /// Set an agent's model and thinking together. None uses OpenCode's default.
+    /// Discovery happens before taking the session lock, and stale settings aren't overwritten.
+    pub fn set_agent_model(&self, name: &str, model: Option<&str>, thinking: Option<ThinkingDepth>) -> Result<bool, ToolError> {
+        let context = self.model_context(name)?;
+        self.set_agent_selection(&context, model, thinking)
+    }
+
+    /// Commit a picker selection only if its captured settings and project are still current.
+    pub fn set_agent_selection(&self, context: &ModelContext, model: Option<&str>, thinking: Option<ThinkingDepth>) -> Result<bool, ToolError> {
+        let options = cli_agents::models::select(context, model, thinking)?;
+        // Re-read and compare under the same lock as the save. A long catalogue lookup must
+        // not overwrite another settings change that finished while it was running.
+        let mut session = self.engine.session();
+        let mut cfg = AiConfig::from_table(&session.settings.ai)?;
+        let Some(entry) = cfg.backends.iter_mut().find(|e| e.config.name == context.backend.config.name) else { return Ok(false) };
+        if *entry != context.backend || session.project.as_ref().map(|p| p.root.clone()) != context.directory {
+            return Err(ToolError::invalid("The AI settings changed while its models were loading. Reload the models and try again."));
+        }
+        entry.options = options;
+        let mut next = session.settings.clone();
+        next.ai = cfg.to_table()?;
+        next.save_to(&self.settings_path())?;
+        session.settings = next;
+        Ok(true)
     }
 
     /// Remove a backend and its stored key. Returns false when there was no such backend.
@@ -715,7 +764,7 @@ impl AiHub {
                 }
                 openai::OpenAi::compatible(&e.config.name, base.unwrap_or("http://127.0.0.1:11434/v1"), self.keys.get(&e.config.name), "").list_models(t)
             }
-            BackendKind::AgentCli => Ok(BackendKind::AgentCli.suggested_models().iter().map(|s| s.to_string()).collect()),
+            BackendKind::AgentCli => self.model_choices(name),
         }
     }
 

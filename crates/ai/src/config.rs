@@ -58,6 +58,9 @@ pub struct BackendOptions {
     /// Agent CLIs: the model to ask the CLI for (passed with its model flag when it has one).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_model: Option<String>,
+    /// OpenCode's model variant. Absent means the model's own default thinking depth.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_thinking: Option<crate::cli_agents::models::ThinkingDepth>,
     /// Wall-clock limit in seconds for one agent CLI turn (default: 24 hours for a builder, which may
     /// analyse and build a big game; 30 minutes for questions).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,6 +81,16 @@ pub struct BackendEntry {
 }
 
 impl BackendEntry {
+    /// Older configurations can put OpenCode's variant directly in its model reference.
+    fn thinking_from_model(&mut self) {
+        if self.config.kind != BackendKind::AgentCli || self.config.model != "opencode" {
+            return;
+        }
+        let Some((model, variant)) = self.options.cli_model.as_deref().and_then(|m| m.rsplit_once('#')) else { return };
+        let Some(depth) = crate::ThinkingDepth::ALL.into_iter().find(|d| d.id() == variant) else { return };
+        self.options.cli_thinking.get_or_insert(depth);
+        self.options.cli_model = Some(model.to_string());
+    }
     /// An agent CLI's `model` names the agent (`opencode`), and the model it should use goes in
     /// `cli_model`. People also write the agent's program in `command` and the model in `model`
     /// (`command = "opencode"`, `model = "deepseek/deepseek-flash"`); that ran the plain adapter
@@ -143,7 +156,10 @@ impl AiConfig {
             ToolError::new(ErrorCode::BadSettings, format!("The [ai] settings couldn't be read: {e}"))
                 .with_remediation("Fix or remove the [ai] section in config.toml.")
         })?;
-        c.backends.iter_mut().for_each(BackendEntry::model_from_command);
+        for backend in &mut c.backends {
+            backend.model_from_command();
+            backend.thinking_from_model();
+        }
         Ok(c)
     }
 
@@ -214,6 +230,20 @@ impl AiConfig {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opencode_embedded_variants_migrate_and_every_depth_round_trips() {
+        for depth in crate::ThinkingDepth::ALL {
+            let table: toml::Table =
+                toml::from_str(&format!("[[backends]]\nname = 'OpenCode'\nkind = 'agent_cli'\nmodel = 'opencode'\ncli_model = 'test/model#{}'\n", depth.id()))
+                    .unwrap();
+            let config = super::AiConfig::from_table(&table).unwrap();
+            let entry = config.get("OpenCode").unwrap();
+            assert_eq!(entry.options.cli_model.as_deref(), Some("test/model"));
+            assert_eq!(entry.options.cli_thinking, Some(depth));
+            assert_eq!(super::AiConfig::from_table(&config.to_table().unwrap()).unwrap(), config);
+        }
+    }
+
     #[test]
     fn the_default_builder_is_the_same_from_the_list_as_from_the_config() {
         use crate::{BackendConfig, BackendKind, Role, default_builder};

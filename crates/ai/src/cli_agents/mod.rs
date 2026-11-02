@@ -10,6 +10,7 @@
 
 pub mod acp;
 pub mod adapters;
+pub mod models;
 
 pub use acp::AcpConversation;
 pub use adapters::{AgentAdapter, AgentAdapters, ArgsCx};
@@ -434,6 +435,11 @@ pub fn builder_conversation(spec: CliSpec, approver: acp::Approver) -> Box<dyn C
 /// and its agent speaks ACP.
 fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     let agent = spec.config.model.clone();
+    // Our ACP transport has no model/variant selection yet. Use the native adapter whenever
+    // this agent has an explicit selection, rather than silently running its default model.
+    if spec.adapters.for_agent(&agent).has_model_catalog() && (spec.options.cli_model.is_some() || spec.options.cli_thinking.is_some()) {
+        return None;
+    }
     let local = spec.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let acp_args = acp::acp_args(&agent).filter(|_| spec.options.acp == Some(true) && local)?;
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
@@ -549,6 +555,10 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
     let mut adapter = spec.adapters.for_agent(&agent);
+    if let Err(e) = adapter.validate_model(&spec.config, &spec.options, spec.project.as_deref(), stop) {
+        let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
+        return;
+    }
     let (help, needed) = adapter.required_flags();
     if !needed.is_empty() {
         let ok = match remote {
