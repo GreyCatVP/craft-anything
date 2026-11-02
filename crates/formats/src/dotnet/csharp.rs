@@ -242,7 +242,7 @@ const MODIFIERS: &[&str] = &[
     "implicit",
     "explicit",
 ];
-const TYPE_KW: &[&str] = &["class", "struct", "interface", "enum", "record"];
+const TYPE_KW: &[&str] = &["class", "struct", "interface", "enum", "record", "delegate"];
 
 fn ident(t: &T) -> Option<&str> {
     match &t.tok {
@@ -418,8 +418,35 @@ impl Scanner {
     fn type_decl(&self, h: &[T]) -> Option<(String, String, usize, u32)> {
         let paren = h.iter().position(|t| is_p(t, '(')).unwrap_or(h.len());
         let kw = h.iter().take(paren).position(|t| ident(t).is_some_and(|w| TYPE_KW.contains(&w)))?;
+        let kind = ident(h.get(kw)?)?;
+        if kind == "delegate" {
+            let (name_idx, arity) = if paren > 0 && is_p(h.get(paren - 1)?, '>') {
+                let mut depth = 0i32;
+                let mut open_lt = None;
+                for i in (0..paren).rev() {
+                    let t = h.get(i)?;
+                    if is_p(t, '>') {
+                        depth += 1;
+                    } else if is_p(t, '<') {
+                        depth -= 1;
+                        if depth == 0 {
+                            open_lt = Some(i);
+                            break;
+                        }
+                    }
+                }
+                let lt = open_lt?;
+                let arity = split_commas(h.get(lt + 1..paren - 1)?).len();
+                (lt.checked_sub(1)?, arity)
+            } else {
+                (paren.checked_sub(1)?, 0)
+            };
+            let name_tok = h.get(name_idx)?;
+            let name = ident(name_tok)?.to_string();
+            return Some((name, "delegate".into(), arity, name_tok.line));
+        }
         let mut k = kw + 1;
-        let mut kind = ident(h.get(kw)?)?.to_string();
+        let mut kind = kind.to_string();
         if kind == "record" && h.get(k).and_then(ident).is_some_and(|w| w == "struct" || w == "class") {
             kind = format!("record {}", ident(h.get(k)?)?);
             k += 1;
@@ -640,7 +667,9 @@ impl Scanner {
                         }
                         // Positional records declare a constructor and properties.
                         let mut positional = Vec::new();
-                        if let Some(p) = h.iter().position(|x| is_p(x, '(')) {
+                        if kind != "delegate"
+                            && let Some(p) = h.iter().position(|x| is_p(x, '('))
+                        {
                             let close = matching(&h, p, '(', ')').unwrap_or(h.len());
                             let list = h.get(p + 1..close).unwrap_or(&[]);
                             let params: Vec<String> = split_commas(list).into_iter().map(param_type).collect();
@@ -691,7 +720,9 @@ impl Scanner {
                     } else if let Some((name, kind, arity, line)) = self.type_decl(&h) {
                         let prefix = self.prefix();
                         let full = if prefix.is_empty() { name } else { format!("{prefix}.{name}") };
-                        if let Some(p) = h.iter().position(|x| is_p(x, '(')) {
+                        if kind != "delegate"
+                            && let Some(p) = h.iter().position(|x| is_p(x, '('))
+                        {
                             let close = matching(&h, p, '(', ')').unwrap_or(h.len());
                             let list = h.get(p + 1..close).unwrap_or(&[]);
                             let params: Vec<String> = split_commas(list).into_iter().map(param_type).collect();
@@ -1068,6 +1099,39 @@ public sealed class Box<T> : IDisposable where T : class
         let implicit: Vec<&str> = r.implicit.iter().map(|m| m.name.as_str()).collect();
         assert!(implicit.contains(&"Interface.get_Property"), "{implicit:?}");
         assert!(implicit.contains(&"Interface.set_Property"), "{implicit:?}");
+    }
+
+    #[test]
+    fn scans_and_reconciles_delegate_declarations() {
+        let s = scan(
+            r#"
+namespace Newtonsoft.Json.Serialization;
+
+public delegate void ExtensionDataSetter(object o, string key, object value);
+public delegate TResult Func<out TResult>();
+
+public class Container {
+    public delegate bool Filter(int item);
+}
+"#,
+        );
+        let types: Vec<(&str, &str, usize)> = s.types.iter().map(|t| (t.full_name.as_str(), t.kind.as_str(), t.generic_arity)).collect();
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.ExtensionDataSetter", "delegate", 0)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.Func", "delegate", 1)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.Container.Filter", "delegate", 0)), "{types:?}");
+
+        let members = Members {
+            types: vec![ty("Newtonsoft.Json.Serialization.ExtensionDataSetter", "delegate", &[".ctor", "Invoke", "BeginInvoke", "EndInvoke"], &[])],
+            total_types: 1,
+            total_methods: 4,
+            total_fields: 0,
+            truncated: false,
+            warnings: vec![],
+        };
+        let r = reconcile(&members, &s);
+        assert_eq!(r.matched_types, 1);
+        assert!(r.missing_types.is_empty(), "delegate is not missing: {:?}", r.missing_types);
+        assert!(r.missing.is_empty(), "synthetic delegate methods are not missing: {:?}", r.missing);
     }
 
     #[test]
