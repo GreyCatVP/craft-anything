@@ -306,7 +306,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         editor: None,
         notes: notes.clone(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -402,7 +402,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| true),
+        asset_keys_available: Box::new(|_| true),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -556,9 +556,9 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
     let available = Arc::new(AtomicBool::new(false));
     let current = available.clone();
     let engine = worker.engine.clone();
-    worker.asset_keys_available = Box::new(move || {
+    worker.asset_keys_available = Box::new(move |provider| {
         assert!(engine.try_session().is_some(), "key-store I/O must run without the session lock");
-        current.load(Ordering::SeqCst)
+        provider == "scenario" && current.load(Ordering::SeqCst)
     });
     let game = kind("game");
     let mut agent = RecordedTurns::default();
@@ -567,6 +567,7 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
         BuilderPrompt::Message(follow_up("Make it brighter", "game")),
         BuilderPrompt::Message(added_prompt(&["Add a score".into()])),
         BuilderPrompt::Message(game.refine(&CheckResult::new(CheckResult::BUILD, 2, false, "Fix the build"))),
+        BuilderPrompt::ResumedElsewhere { extra: Some("Continue the game".into()), handoff: Some("The first level is built.".into()) },
     ] {
         for has_key in [false, true, false] {
             available.store(has_key, Ordering::SeqCst);
@@ -587,6 +588,39 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
             assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
             assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
             assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+        }
+    }
+}
+
+/// A saved key for a disabled provider cannot make an enabled, unkeyed provider usable.
+#[test]
+fn a_disabled_providers_key_does_not_enable_builder_asset_guidance() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
+    let mut worker = check_worker(&ws, false);
+    // The only saved key belongs to fal, whether or not that provider is enabled.
+    worker.asset_keys_available = Box::new(|provider| provider == "fal");
+    let game = kind("game");
+    let mut agent = RecordedTurns::default();
+    for (enabled, has_key) in [("scenario", false), ("fal", true)] {
+        ws.set_person(|m| {
+            m.generate_assets = true;
+            m.asset_providers = Some(vec![enabled.into()]);
+        })
+        .unwrap();
+        for prompt in [
+            BuilderPrompt::Initial { extra: None, api: false, originals: false },
+            BuilderPrompt::Message(follow_up("Make it brighter", "game")),
+            BuilderPrompt::ResumedElsewhere { extra: Some("Continue the game".into()), handoff: Some("The first level is built.".into()) },
+        ] {
+            worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_image_generate"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+            assert!(sent.contains(&format!("{enabled}: enabled")), "key availability must not change provider permission: {sent}");
+            assert_eq!(sent.matches("Project asset providers:").count(), 1, "{sent}");
         }
     }
 }
@@ -880,7 +914,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -997,7 +1031,7 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1335,7 +1369,7 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1727,7 +1761,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1768,7 +1802,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
@@ -1961,7 +1995,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
             Note { id: 2, text: "add a footer".into(), shown: "add a footer".into() },
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -2108,7 +2142,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -2166,7 +2200,7 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -2229,7 +2263,7 @@ fn the_builders_conversation_travels_with_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        asset_keys_available: Box::new(|| false),
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
