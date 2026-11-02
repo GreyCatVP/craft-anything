@@ -393,6 +393,8 @@ Pending changes:
 - [x] Find registered Linux Unreal installations and their bundled Clang toolchain; support an
       explicit `UE_ROOT` ([PR #191](https://github.com/storytold/craft-anything/pull/191))
       — claimed: one-bit, branch `bugfix/r1.6-linux-unreal-detection`
+- [ ] Give Linux-specific Clang guidance in Unreal's guided installer when the bundled compiler
+      is missing (the requirements summary is already platform-specific).
 - [x] The app's Godot, Unity/Unreal installer and Ghidra flows, and its play, preview and
       open-folder buttons, call the tools (`CraftApp::act`); inventory reads stay in the UI
 - [x] Launch, preview and open-folder as tools: `project_play` (needs consent: it runs the

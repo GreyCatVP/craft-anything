@@ -552,6 +552,7 @@ pub struct Places {
 }
 
 impl Places {
+    /// Capture environment-based search locations and the supplied engine store, with PATH lookup enabled.
     pub fn here(store: PathBuf) -> Places {
         let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
         Places {
@@ -628,6 +629,7 @@ fn unity_editors(p: &Places) -> Vec<Installed> {
         .collect()
 }
 
+/// Prefer a valid absolute `UE_ROOT`; otherwise discover installs in registries and standard folders.
 fn unreal_installs(p: &Places) -> Vec<Installed> {
     if let Some(install) = p.unreal_root.as_deref().filter(|root| root.is_absolute()).and_then(unreal_install) {
         return vec![install];
@@ -676,6 +678,7 @@ fn unreal_registry_roots(config: &Path) -> Vec<PathBuf> {
     roots
 }
 
+/// Find an editor in an install root, using Linux's `Build.version` when valid or the directory name otherwise.
 fn unreal_install(dir: &Path) -> Option<Installed> {
     let exes = [
         "Engine/Binaries/Win64/UnrealEditor.exe",
@@ -724,6 +727,8 @@ fn godot_installs(p: &Places) -> Vec<Installed> {
     v
 }
 
+/// Check filesystem presence of MSVC, Xcode, or the selected Linux engine's bundled Clang.
+/// This readiness heuristic does not execute or validate a compiler.
 fn cpp_tools(p: &Places, unreal: Option<&Installed>) -> bool {
     if p.applications.as_ref().is_some_and(|a| a.join("Xcode.app").exists()) {
         return true;

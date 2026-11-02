@@ -32,7 +32,9 @@ Unreal installations registered in `~/.config/Epic/UnrealEngine/Install.ini` are
 A valid absolute `UE_ROOT` selects an installation explicitly; an invalid override falls back to
 registered installations. The version comes from `Engine/Build/Build.version`, and C++ readiness
 checks for the selected engine's bundled Clang, not an unrelated system compiler or another
-installation's SDK. Linux setup text no longer asks for Visual Studio.
+installation's SDK. The Linux requirements summary (`Builder::needs` for Unreal) now describes
+the bundled Clang toolchain. The guided installer still shows Visual Studio instructions when
+Clang is missing; platform-specific guidance in that flow remains a follow-up.
 
 Checked with isolated registry and SDK fixtures and with a native Fedora install of Unreal
 5.8.4. Readiness is a tool-presence check; a complete Unreal game build and SDK compatibility
