@@ -874,7 +874,8 @@ to the project next. Pins are the engine's (tools), kept in the project's `pinne
       page with the frozen/light choice and each copy's size; the pin tools are in the command
       palette with every other tool
 - [ ] Opening a pin that's already running brings its window to the front, instead of a message
-- [ ] Show a pin's folder (the right-click menu), and how much space pins take in Settings
+- [ ] How much space pins take in Settings. Showing a pin's folder is done in the right-click menu,
+      through `project_open_folder` with `pin` — claimed: muraa-p, branch bugfix/r2.10-pin-folder
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't blocked
 
 ## M3 Engine depth
