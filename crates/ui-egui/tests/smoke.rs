@@ -1826,6 +1826,39 @@ fn make_says_who_builds_and_a_picked_builder_stays_with_the_project() {
 }
 
 #[test]
+fn a_projects_builder_can_be_changed_from_its_page() {
+    use craft_anything_ai::{BackendConfig, BackendKind};
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let root = ws.root.clone();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        let cfg = |name: &str, kind, model: &str| BackendConfig { name: name.into(), kind, model: model.into(), base_url: None, ssh_host: None, enabled: true };
+        a.backends = vec![cfg("Claude", BackendKind::Anthropic, "claude-opus-5-5"), cfg("Claude Code", BackendKind::AgentCli, "claude-code")];
+        a.workspace = Some(ws);
+        a.state.screen = Screen::Project;
+        a
+    });
+    h.run_steps(3);
+    assert!(Workspace::open(&root).unwrap().manifest.builder.is_none());
+    let combo = h.get_all_by_label("Built by").last().unwrap();
+    assert_eq!(combo.value().as_deref(), Some("Automatic (Claude Code)"));
+
+    h.state_mut().set_builder(&root, Some("Claude".into()));
+    assert!(wait(&mut h, |_| Workspace::open(&root).unwrap().manifest.builder.as_deref() == Some("Claude")), "saved in craft.json");
+    h.run_steps(2);
+    let combo = h.get_all_by_label("Built by").last().unwrap();
+    assert_eq!(combo.value().as_deref(), Some("Claude"));
+
+    h.state_mut().set_builder(&root, None);
+    assert!(wait(&mut h, |_| Workspace::open(&root).unwrap().manifest.builder.is_none()), "reset to default");
+    h.run_steps(2);
+    let combo = h.get_all_by_label("Built by").last().unwrap();
+    assert_eq!(combo.value().as_deref(), Some("Automatic (Claude Code)"));
+}
+
+#[test]
 fn with_nothing_to_build_with_start_offers_what_was_found_instead_of_a_dead_end() {
     use craft_anything_ui_egui::state::Modal;
     let mut h = harness(|| {

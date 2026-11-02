@@ -131,6 +131,17 @@ pub fn specs() -> Vec<ToolSpec> {
             run: project_questions_set,
         },
         ToolSpec {
+            id: "project_builder_set",
+            title: "Change a project's builder",
+            summary: "Change which AI builds a project (a backend or coding agent's name, or `default` / empty to follow the app's default builder). With no builder given, reports who builds the project now. The choice takes effect on the project's next build or prompt.",
+            beginner: "Chooses which AI builds this project.",
+            toolset: Toolset::Projects,
+            effects: Effects::WRITES_FILESYSTEM,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<ProjectBuilderParams>,
+            run: project_builder_set,
+        },
+        ToolSpec {
             id: "project_build_finish",
             title: "Call the build done",
             summary: "The person is happy with the build as it is (#210): its status becomes Ready and the conversation says they called it done, so a paused, stopped or failed build no longer offers to carry on. Everything so far is kept, and a new message carries on from here. It doesn't stop a build that is still running: pause it first.",
@@ -352,6 +363,37 @@ fn project_questions_set(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         "questions": settings.questions_in(Some(&ws.manifest)),
         "chosen": ws.manifest.questions,
         "app_default": settings.questions(),
+    })))
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectBuilderParams {
+    /// The project's folder.
+    pub project: PathBuf,
+    /// The AI backend or coding agent's name ("Claude Code", "gemini", etc.), or "default" / empty to follow the app's default builder. None just reports who builds the project now.
+    #[serde(default)]
+    pub builder: Option<String>,
+}
+
+fn project_builder_set(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let explicit_null = params.get("builder").is_some_and(Value::is_null);
+    let p: ProjectBuilderParams = parse_params(params)?;
+    let mut ws = open(&p.project)?;
+    if explicit_null {
+        ws.set_person(|m| m.builder = None)?;
+    } else if let Some(b) = p.builder {
+        let trimmed = b.trim();
+        let chosen = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") || trimmed.eq_ignore_ascii_case("auto") {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        ws.set_person(|m| m.builder = chosen)?;
+    }
+    Ok(ToolOutput::Value(json!({
+        "project": ws.root,
+        "builder": ws.manifest.builder,
     })))
 }
 
@@ -641,5 +683,33 @@ mod tests {
         assert!(err.remediation.unwrap_or_default().contains("project_preview"));
         // Playing runs the builder's code: refused without consent.
         assert!(e.call("project_play", json!({"project": ws.root}), CallOptions::new(Caller::Mcp)).is_err());
+    }
+
+    #[test]
+    fn a_projects_builder_is_read_and_set() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |p: Value| e.call("project_builder_set", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+
+        // Initially no builder set (None).
+        let r = call(json!({"project": ws.root})).unwrap();
+        assert!(r["builder"].is_null());
+
+        // Set to a specific builder ("Claude Code").
+        let r = call(json!({"project": ws.root, "builder": "Claude Code"})).unwrap();
+        assert_eq!(r["builder"], "Claude Code");
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.builder.as_deref(), Some("Claude Code"));
+
+        // Reset to default.
+        let r = call(json!({"project": ws.root, "builder": "default"})).unwrap();
+        assert!(r["builder"].is_null());
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.builder, None);
+
+        // Setting empty string also resets to default.
+        call(json!({"project": ws.root, "builder": "Gemini"})).unwrap();
+        let r = call(json!({"project": ws.root, "builder": ""})).unwrap();
+        assert!(r["builder"].is_null());
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.builder, None);
     }
 }

@@ -51,7 +51,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use theme::ThemeKind;
 
-pub use i18n::tr;
+pub use i18n::{tr, trf};
 
 /// Every icon name the UI uses (checked against the embedded set by a test).
 pub const USED_ICONS: &[&str] = &[
@@ -834,6 +834,16 @@ impl CraftApp {
                     tr(if decide { "The builder will decide its questions and tell you what it chose." } else { "The builder's questions will come to you." }),
                     false,
                 );
+            }
+            ("project_builder_set", Ok(v)) => {
+                if let Some(ws) = self.workspace.as_mut().filter(|w| v["project"].as_str().is_some_and(|p| w.root == std::path::Path::new(p))) {
+                    let _ = ws.reload();
+                }
+                let msg = match v["builder"].as_str() {
+                    Some(name) => trf("Later changes will be built by {name}.", &[("name", name)]),
+                    None => tr("Later changes will follow the default builder."),
+                };
+                self.toast(msg, false);
             }
             ("project_pins_list" | "project_pin_create" | "project_pin_open" | "project_pin_stop" | "project_pin_rename" | "project_pin_delete", r) => {
                 self.pin_done(tool, r)

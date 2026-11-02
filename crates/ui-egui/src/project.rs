@@ -367,6 +367,15 @@ impl CraftApp {
         self.act("project_questions_set", serde_json::json!({"project": root, "mode": mode}), tr("Choose what the builder's questions get"));
     }
 
+    /// Change which AI builds this project. Shown at once; saved by the tool.
+    pub fn set_builder(&mut self, root: &Path, builder: Option<String>) {
+        if let Some(ws) = self.workspace.as_mut().filter(|w| w.root == root) {
+            ws.manifest.builder = builder.clone();
+        }
+        let b = builder.as_deref().unwrap_or("default");
+        self.act("project_builder_set", serde_json::json!({"project": root, "builder": b}), tr("Change who builds this project"));
+    }
+
     /// Start the finished game or app (project_play: its own window, no console behind it).
     pub fn play(&mut self, ws: &Workspace) {
         self.act("project_play", serde_json::json!({"project": ws.root}), tr("Start it"));
@@ -686,7 +695,10 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         if !m.stack.is_empty() && !app.beginner() {
             widgets::caption(ui, "Built with");
             ui.label(RichText::new(&m.stack).color(t.text_dim));
+            ui.add_space(6.0);
         }
+        widgets::caption(ui, "Built by");
+        crate::builders::project_built_by(app, ui, ws);
     });
     ui.add_space(14.0);
     steps(app, ui, ws);

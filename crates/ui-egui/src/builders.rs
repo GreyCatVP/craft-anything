@@ -180,6 +180,39 @@ pub fn built_by(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
+/// "Built by" on a project's page: shows which AI builds later changes to this project, and lets
+/// the person pick another (or Automatic to follow Settings → AI).
+pub fn project_built_by(app: &mut CraftApp, ui: &mut Ui, ws: &craft_anything_engine::workspace::Workspace) {
+    let default = app.default_builder();
+    let choices = app.builder_choices();
+    let current = ws.manifest.builder.as_deref();
+    let automatic = match &default {
+        Some(name) => trf("Automatic ({name})", &[("name", name)]),
+        None => tr("Automatic"),
+    };
+    let shown = current.unwrap_or(&automatic);
+    let mut pick = None;
+    let r = egui::ComboBox::from_id_salt(("project-built-by", &ws.root))
+        .icon(widgets::combo_icon)
+        .selected_text(shown)
+        .width(ui.available_width().min(220.0))
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), &automatic).on_hover_text(tr("Whatever Settings → AI builds with.")).clicked() {
+                pick = Some(None);
+            }
+            for c in &choices {
+                let note = if c.found { format!("{} · {}", c.detail, tr("found on this computer; set up when you start")) } else { c.detail.clone() };
+                if ui.selectable_label(current == Some(&c.name), &c.name).on_hover_text(note).clicked() {
+                    pick = Some(Some(c.name.clone()));
+                }
+            }
+        });
+    widgets::named(r.response, "Built by");
+    if let Some(p) = pick {
+        app.set_builder(&ws.root, p);
+    }
+}
+
 /// Nothing can build yet: what was found on this computer (one click to use it), a way to look
 /// again, and Settings for API keys. Never a dead end.
 pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &mut bool) {

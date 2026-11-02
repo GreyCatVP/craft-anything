@@ -741,7 +741,7 @@ Gaps found while using the app for real projects.
 - [x] "Built by" on Make: every AI that can build, by name, even when one is set up and builds
       by default; a pick stays with the project (`craft.json` `builder`, also from `rebuild
       --backend` and `rebuild_start`), and its later changes are built by it while it's on
-- [ ] Change a project's builder from its page (a tool, so the CLI and MCP can too) — claimed: WadahBadawi, branch feature/r2.9-project-builder
+- [x] Change a project's builder from its page (a tool, so the CLI and MCP can too)
 - [x] Settings are saved after typing stops (one save at a time), and path fields keep spaces
 - [x] No file reads while drawing: the project's outcome, reference pictures, screenshots and
       side panel come from a worker when something changes (at most once a second)
