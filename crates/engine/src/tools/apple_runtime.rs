@@ -234,6 +234,31 @@ fn apple_calls_observe(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, T
     }
 }
 
+/// Build an lldb Python command that sets breakpoints, runs, and prints each hit as JSON.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn lldb_script(p: &ObserveCallsParams) -> String {
+    let mut setup = String::new();
+    setup.push_str("settings set auto-confirm true\n");
+    setup.push_str(&format!("target create \"{}\"\n", p.executable.replace('"', "\\\"")));
+    for bp in &p.breakpoints {
+        match bp {
+            Breakpoint::Function { name, module } => match module {
+                Some(m) => setup.push_str(&format!("breakpoint set --name \"{name}\" --shlib \"{m}\"\n")),
+                None => setup.push_str(&format!("breakpoint set --name \"{name}\"\n")),
+            },
+            Breakpoint::ObjcMethod { class_name, selector } => {
+                setup.push_str(&format!("breakpoint set --name \"-[{class_name} {selector}]\"\n"));
+                setup.push_str(&format!("breakpoint set --name \"+[{class_name} {selector}]\"\n"));
+            }
+        }
+    }
+    // A breakpoint command that records the argument registers and continues.
+    setup.push_str("breakpoint command add --script-type python -o 'frame = bp_loc.GetThread().GetSelectedFrame() if bp_loc else None\\nprint(\"CRAFT_HIT\", frame.GetFunctionName() if frame else \"?\")\\nreturn False' 1\n");
+    let args = p.arguments.iter().map(|a| a.replace('"', "\\\"")).map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(" ");
+    setup.push_str(&format!("process launch -- {args}\n"));
+    setup
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
@@ -263,26 +288,7 @@ mod macos {
                 .with_remediation("Install the macOS command-line developer tools (xcode-select --install).")
         })?;
 
-        // Build an lldb Python command that sets breakpoints, runs, and prints each hit as JSON.
-        let mut setup = String::new();
-        setup.push_str("settings set auto-confirm true\n");
-        setup.push_str(&format!("target create \"{}\"\n", p.executable.replace('"', "\\\"")));
-        for (i, bp) in p.breakpoints.iter().enumerate() {
-            match bp {
-                Breakpoint::Function { name, module } => match module {
-                    Some(m) => setup.push_str(&format!("breakpoint set --name \"{name}\" --shlib \"{m}\" --name-mask {i}\n")),
-                    None => setup.push_str(&format!("breakpoint set --name \"{name}\"\n")),
-                },
-                Breakpoint::ObjcMethod { class_name, selector } => {
-                    setup.push_str(&format!("breakpoint set --name \"-[{class_name} {selector}]\"\n"));
-                    setup.push_str(&format!("breakpoint set --name \"+[{class_name} {selector}]\"\n"));
-                }
-            }
-        }
-        // A breakpoint command that records the argument registers and continues.
-        setup.push_str("breakpoint command add --script-type python -o 'frame = bp_loc.GetThread().GetSelectedFrame() if bp_loc else None\\nprint(\"CRAFT_HIT\", frame.GetFunctionName() if frame else \"?\")\\nreturn False' 1\n");
-        let args = p.arguments.iter().map(|a| a.replace('"', "\\\"")).map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(" ");
-        setup.push_str(&format!("process launch -- {args}\n"));
+        let setup = lldb_script(&p);
 
         let root = private_root()?;
         let script_path = root.join("trace.lldb");
@@ -647,5 +653,26 @@ mod tests {
         let e = Engine::new(crate::testing::session());
         let err = e.call("runtime_ui_read", json!({"pid": 1}), CallOptions::new(Caller::Mcp)).unwrap_err();
         assert_eq!(err.code, craft_anything_evidence::ErrorCode::ConsentRequired);
+    }
+
+    #[test]
+    fn module_filtered_function_breakpoints_omit_unsupported_name_mask() {
+        use super::{Breakpoint, ObserveCallsParams, lldb_script};
+        let p = ObserveCallsParams {
+            executable: "/tmp/probe".into(),
+            arguments: vec!["--flag".into()],
+            working_directory: None,
+            breakpoints: vec![
+                Breakpoint::Function { name: "alpha".into(), module: Some("probe".into()) },
+                Breakpoint::Function { name: "beta".into(), module: None },
+                Breakpoint::ObjcMethod { class_name: "NSApplication".into(), selector: "run".into() },
+            ],
+            duration_ms: 10_000,
+            max_events: 100,
+        };
+        let script = lldb_script(&p);
+        assert!(script.contains("breakpoint set --name \"alpha\" --shlib \"probe\"\n"), "{script}");
+        assert!(!script.contains("--name-mask"), "{script}");
+        assert!(script.contains("breakpoint set --name \"beta\"\n"), "{script}");
     }
 }
