@@ -281,6 +281,7 @@ impl PackedFormat for PyInstaller {
         find_cookie(data).is_some()
     }
 
+    /// List CArchive members and nested PYZ module entries with archive metadata.
     fn list(&self, data: &[u8]) -> Result<PackedListing, FormatError> {
         let cookie = find_cookie(data)
             .ok_or_else(|| FormatError::Malformed("no sound PyInstaller cookie (its magic, sizes and Python version must all agree)".into()))?;
@@ -348,9 +349,15 @@ impl PackedFormat for PyInstaller {
         Ok(PackedListing { facts, entries, notes, truncated })
     }
 
+    /// Extract a CArchive member or PYZ module within `max_bytes`, including any `.pyc` header.
     fn read(&self, data: &[u8], entry: &PackedEntry, max_bytes: u64) -> Result<Vec<u8>, FormatError> {
+        const PYC_HEADER_BYTES: u64 = 16;
         let magic = entry.kind.as_deref().and_then(|k| k.strip_prefix(PYZ_KIND)).and_then(|m| u16::from_str_radix(m, 16).ok());
-        let body = read_stored(data, entry, max_bytes)?;
+        let body_limit = match magic {
+            Some(_) => max_bytes.checked_sub(PYC_HEADER_BYTES).ok_or_else(|| FormatError::TooLarge(format!("{} needs a .pyc header", entry.path)))?,
+            None => max_bytes,
+        };
+        let body = read_stored(data, entry, body_limit)?;
         match magic {
             Some(magic) => Ok(pyc::wrap_marshal(magic, &body)),
             None => Ok(body),
@@ -429,6 +436,7 @@ mod tests {
         assert_eq!(PyInstaller.read(&data, find(&l, "libz.so.1"), 100).unwrap(), b"native");
     }
 
+    /// Verify that code/module crypto_key markers flag encryption while data members do not.
     #[test]
     fn encrypted_modules_are_flagged_and_listed_but_not_read() {
         // A key module in the archive.
@@ -571,11 +579,17 @@ mod tests {
         assert_eq!((kept.len(), total), (2, 3));
     }
 
+    /// Verify that `read` enforces `max_bytes` including the 16-byte `.pyc` header for PYZ modules.
     #[test]
     fn reads_stop_at_their_limit() {
         let data = pyinstaller_sample();
         let l = PyInstaller.list(&data).unwrap();
         assert!(matches!(PyInstaller.read(&data, find(&l, "struct"), 10), Err(FormatError::TooLarge(_))));
+        let util = find(&l, "PYZ-00.pyz.modules/pkg/util.pyc");
+        let full = PyInstaller.read(&data, util, 10_000).unwrap();
+        assert!(matches!(PyInstaller.read(&data, util, 15), Err(FormatError::TooLarge(_))));
+        assert!(matches!(PyInstaller.read(&data, util, (full.len() - 1) as u64), Err(FormatError::TooLarge(_))));
+        assert_eq!(PyInstaller.read(&data, util, full.len() as u64).unwrap(), full);
     }
 
     #[test]
