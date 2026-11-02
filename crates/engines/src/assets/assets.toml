@@ -52,7 +52,7 @@ textured_usd = 0.50
 faces = [48, 20000]
 
 # Scenario prices below are conservative per-request SPENDING CEILINGS, not quoted prices.
-# Every generation first uses dryRun=true and refuses quotes above the ceiling.
+# Every generation first uses dryRun=api and refuses quotes above the ceiling.
 # Quoted CU are converted at Starter's $15/1500CU ($0.01/CU); actual invoices vary by plan.
 # https://www.scenario.com/pricing (checked 2026-11-02)
 # https://docs.scenario.com/api/resources/generate/methods/run_model

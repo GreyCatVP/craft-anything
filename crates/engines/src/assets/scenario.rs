@@ -73,6 +73,9 @@ impl Scenario {
         }
         .map_err(|_| http::network())?;
         http::status(response.status().as_u16())?;
+        if path.ends_with("?dryRun=api") && response.status().as_u16() != 269 {
+            return Err(http::garbled("Scenario did not confirm an API-tier price check; check your account before trying again."));
+        }
         http::json(response.into_body())
     }
 }
@@ -92,21 +95,26 @@ impl AssetProvider for Scenario {
     fn key_hint(&self) -> &'static str {
         "API key:API secret"
     }
+    fn validate_key(&self, key: &str) -> Result<(), ToolError> {
+        let key = http::key(key)?;
+        if !key.split_once(':').is_some_and(|(k, s)| !k.is_empty() && !s.is_empty()) {
+            return Err(http::bad("Enter the Scenario credential as API key:API secret."));
+        }
+        Ok(())
+    }
     fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
         request(req)?;
         Ok(req.listed_cost())
     }
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
         let (model, body) = request(req)?;
+        self.validate_key(key)?;
         let key = http::key(key)?;
-        if !key.split_once(':').is_some_and(|(k, s)| !k.is_empty() && !s.is_empty()) {
-            return Err(http::bad("Enter the Scenario credential as API key:API secret."));
-        }
         use base64::Engine as _;
         let auth = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(key));
         let start = Instant::now();
         let path = format!("generate/custom/{model}");
-        let quote = self.call(&auth, &format!("{path}?dryRun=true"), Some(&body), remaining(start, self.timeout)?)?;
+        let quote = self.call(&auth, &format!("{path}?dryRun=api"), Some(&body), remaining(start, self.timeout)?)?;
         // Fail closed if a server ignores dryRun: never follow it with another paid request.
         if quote.get("job").is_some() || quote.get("jobId").is_some() {
             return Err(http::garbled("Scenario returned a job during the price check; check your account before trying again."));
@@ -185,7 +193,7 @@ mod tests {
         assert_eq!(result.bytes, b"PNG fake");
         assert_eq!(result.cost_usd, 0.19);
         let seen = seen.lock().unwrap();
-        assert!(seen[0].starts_with("POST /generate/custom/model_google-gemini-3-1-flash?dryRun=true "));
+        assert!(seen[0].starts_with("POST /generate/custom/model_google-gemini-3-1-flash?dryRun=api "));
         assert!(seen[1].starts_with("POST /generate/custom/model_google-gemini-3-1-flash "));
         assert!(seen[1].contains("\"aspectRatio\":\"16:9\"") && seen[1].contains("\"numOutputs\":1"));
         assert!(seen[2].starts_with("GET /jobs/job_test "));
@@ -229,6 +237,9 @@ mod tests {
             assert!(image(&Scenario { base, ..Scenario::default() }).is_err());
             assert_eq!(seen.lock().unwrap().len(), 1);
         }
+        let (base, seen) = http::tests::serve(|_| vec![(200, json!({"creativeUnitsCost":19}).to_string())]);
+        assert!(image(&Scenario { base, ..Scenario::default() }).is_err());
+        assert_eq!(seen.lock().unwrap().len(), 1, "an ordinary success is not a confirmed dry run");
     }
     #[test]
     fn failed_jobs_invalid_ids_and_deadlines_fail_without_leaking_body() {
@@ -244,5 +255,13 @@ mod tests {
             assert!(!format!("{error:?}").contains("test-secret"));
         }
         assert!(image(&Scenario { timeout: Duration::ZERO, ..Scenario::default() }).is_err());
+    }
+    #[test]
+    fn credentials_are_validated_before_a_precursor_can_be_paid_for() {
+        let provider = Scenario::default();
+        for key in ["", "test-key", ":secret", "key:", "key:secret\r\ninjected"] {
+            assert!(provider.validate_key(key).is_err());
+        }
+        assert!(provider.validate_key("test-key:test-secret").is_ok());
     }
 }

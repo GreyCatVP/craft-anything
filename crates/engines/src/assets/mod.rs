@@ -373,6 +373,10 @@ pub trait AssetProvider: Send + Sync {
     fn key_hint(&self) -> &'static str {
         "API key"
     }
+    /// Validate the credential locally before a workflow spends on any precursor assets.
+    fn validate_key(&self, key: &str) -> Result<(), ToolError> {
+        http::key(key).map(|_| ())
+    }
     /// What `req` will cost, before anything is spent (the budget is checked against it).
     fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
         Ok(req.listed_cost())

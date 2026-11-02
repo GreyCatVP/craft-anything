@@ -34,7 +34,7 @@ pub(super) fn id(value: &str) -> Result<(), ToolError> {
 }
 pub(super) fn key(value: &str) -> Result<&str, ToolError> {
     let value = value.trim();
-    if value.is_empty() || value.len() > 4096 || value.chars().any(char::is_control) {
+    if value.is_empty() || value.len() > 4096 || !value.is_ascii() || value.chars().any(char::is_control) {
         return Err(bad("Enter a valid asset provider credential in Settings."));
     }
     Ok(value)

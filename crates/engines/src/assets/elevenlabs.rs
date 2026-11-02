@@ -58,6 +58,7 @@ impl AssetProvider for ElevenLabs {
     }
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
         validate(req)?;
+        self.validate_key(key)?;
         let key = http::key(key)?;
         let (path, content_type, body): (String, String, Vec<u8>) = match *req {
             AssetRequest::Speech { model, text, voice_id } => (

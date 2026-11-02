@@ -56,6 +56,7 @@ impl AssetProvider for Fal {
     }
 
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+        self.validate_key(key)?;
         let key = key.trim();
         match *req {
             AssetRequest::Image { model, prompt, shape } => {
