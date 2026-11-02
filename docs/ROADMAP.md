@@ -316,6 +316,8 @@ Owner: open · Status: in progress
       document functions touched by the OpenCode model-selection changes.
 - [x] Integrate the five-level `Effort` type from #395 for agent variants, and share a strict
       disk-based selection save between the hub and headless tools, preserving unrelated edits.
+- [x] Rebase onto main after #395's squash merge, preserve extra model arguments without a saved
+      selection, and render the remote-host placeholder visibly in the setup instructions.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 

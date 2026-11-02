@@ -26,15 +26,15 @@ impl AgentAdapter for OpenCode {
         models::discover(config, options, directory, stop)
     }
 
-    /// Refuse model overrides in extra arguments and validate explicit choices against the live catalogue.
-    /// Default selections require no catalogue query.
+    /// Validate explicit choices against the live catalogue and refuse conflicting extra model arguments.
+    /// With no selection, leave extra arguments to OpenCode and skip the catalogue query.
     fn validate_model(&self, config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>, stop: &Stop) -> Result<(), ToolError> {
+        if options.cli_model.is_none() && options.cli_thinking.is_none() {
+            return Ok(());
+        }
         // Extra flags must not silently override the selected model or its thinking variant.
         if options.args.iter().any(|a| a == "--model" || a.starts_with("--model=") || a.starts_with("-m")) {
             return Err(ToolError::invalid("Choose OpenCode's model in its model setting, rather than in extra arguments."));
-        }
-        if options.cli_model.is_none() && options.cli_thinking.is_none() {
-            return Ok(());
         }
         models::validate(options, &self.model_catalog(config, options, directory, stop)?)
     }
@@ -264,5 +264,30 @@ mod tests {
         }
         let argv = args(false, &BackendOptions::default());
         assert!(!argv.iter().any(|a| a == "--model"));
+    }
+
+    /// Extra model arguments work without a saved selection, but cannot override an explicit model or depth.
+    #[test]
+    fn extra_model_arguments_are_checked_only_for_explicit_selections() {
+        let config = BackendConfig {
+            name: "OpenCode".into(),
+            kind: crate::BackendKind::AgentCli,
+            model: "opencode".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        for extra in [vec!["--model", "test/legacy"], vec!["--model=test/legacy"], vec!["-m", "test/legacy"], vec!["-mtest/legacy"]] {
+            let options =
+                BackendOptions { command: Some("missing-test-opencode".into()), args: extra.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+            assert!(OpenCode.validate_model(&config, &options, None, &Stop::default()).is_ok());
+            let argv = args(false, &options);
+            assert_eq!(argv.get(1..1 + extra.len()).unwrap(), extra.as_slice());
+            for (model, thinking) in [(Some("test/selected"), None), (None, Some(crate::Effort::High)), (Some("test/selected"), Some(crate::Effort::High))] {
+                let selected = BackendOptions { cli_model: model.map(str::to_string), cli_thinking: thinking, ..options.clone() };
+                let error = OpenCode.validate_model(&config, &selected, None, &Stop::default()).unwrap_err();
+                assert_eq!(error.code, craft_anything_evidence::ErrorCode::BadInput);
+            }
+        }
     }
 }

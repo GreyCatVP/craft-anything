@@ -5,7 +5,7 @@ connections and sign-in. Set these up in OpenCode on the computer where it will 
 
 ## Desktop
 
-1. Open **Settings → AI → Detect**, then add **OpenCode**, or **OpenCode on <host>**.
+1. Open **Settings → AI → Detect**, then add **OpenCode**, or **OpenCode on `<host>`**.
    Remote suggestions come from SSH aliases; they do not confirm that OpenCode is installed.
 2. If needed, choose the local program, or enter its full path in **Remote program**.
 3. Under the backend, click **Change…** to load the models from that OpenCode installation.
@@ -83,5 +83,6 @@ native adapter even if `acp = true` was previously set.
 
 Model discovery uses `opencode api model.list --param location[directory]=...` (the V2
 `GET /api/model` operation). This keeps credentials and configuration resolution inside OpenCode.
-Global `--server` and `--standalone` arguments are shared with discovery. Put model choices in
-the model settings rather than overriding them through extra `--model` arguments.
+Global `--server` and `--standalone` arguments are shared with discovery. Extra model arguments
+remain available when no model or thinking selection is saved. With an explicit selection,
+conflicting extra model arguments are refused; choose the model through its settings instead.
