@@ -1303,7 +1303,16 @@ fn apple_dylibs_resolve(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         if !ok || !(macho_deps::is_thin(&head) || macho_deps::is_fat(&head)) {
             continue;
         }
-        let ft = if macho_deps::is_thin(&head) { macho_deps::header(&head).ok().map(|h| h.filetype) } else { None };
+        let ft = if macho_deps::is_thin(&head) {
+            macho_deps::header(&head).ok().map(|h| h.filetype)
+        } else {
+            std::fs::read(&f.abs).ok().and_then(|data| {
+                let slices = macho_deps::slices(&data).ok()?;
+                let pick = macho_deps::pick_slice(&slices, res.arch)?;
+                let bytes = macho_deps::slice_bytes(&data, &pick)?;
+                macho_deps::header(bytes).ok().map(|h| h.filetype)
+            })
+        };
         machos.push((normalize(&f.abs), ft));
     }
     let entries: Vec<(PathBuf, Option<u32>)> = machos.iter().filter(|(p, ft)| !t.loaded.contains(p) && matches!(ft, Some(2) | Some(8))).cloned().collect();
@@ -1550,5 +1559,35 @@ mod tests {
         // The bundle tools also accept the bundle folder.
         let m = call(&e, "apple_macho_show", json!({"path": app}));
         assert_eq!(m["result"]["selected"]["arch"], "arm64");
+    }
+
+    #[test]
+    fn dylib_resolution_discovers_universal_helper() {
+        let e = Engine::new(crate::testing::session());
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("UniversalHelper.app");
+        let contents = app.join("Contents");
+        std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+        std::fs::create_dir_all(contents.join("Helpers")).unwrap();
+        std::fs::create_dir_all(contents.join("Frameworks")).unwrap();
+        std::fs::write(contents.join("Info.plist"), fx::to_xml(&fx::dict(vec![("CFBundleExecutable", fx::s("Main"))]))).unwrap();
+
+        let main = fx::macho_min(fx::CPU_ARM64, 2, &[], &[]);
+        let helper = |cpu| fx::macho_min(cpu, 2, &[fx::lc_rpath("@executable_path/../Frameworks"), fx::lc_dylib(0xc, "@rpath/OnlyHelper.dylib")], &[]);
+        let universal = craft_anything_testkit::macho_fat(&[helper(fx::CPU_ARM64), helper(fx::CPU_X86_64)]);
+        let library = craft_anything_testkit::macho_fat(&[
+            fx::macho_min(fx::CPU_ARM64, 6, &[fx::lc_dylib(0xd, "@rpath/OnlyHelper.dylib")], &[]),
+            fx::macho_min(fx::CPU_X86_64, 6, &[fx::lc_dylib(0xd, "@rpath/OnlyHelper.dylib")], &[]),
+        ]);
+        std::fs::write(contents.join("MacOS/Main"), main).unwrap();
+        std::fs::write(contents.join("Helpers/Worker"), universal).unwrap();
+        std::fs::write(contents.join("Frameworks/OnlyHelper.dylib"), library).unwrap();
+
+        let result = call(&e, "apple_dylibs_resolve", json!({"path": app, "architecture": "arm64"}));
+        let images = result["result"]["images"].as_array().unwrap();
+        let worker = images.iter().find(|image| image["path"] == "Contents/Helpers/Worker").unwrap();
+        assert_eq!(worker["executable_path"], "Contents/Helpers/Worker");
+        assert_eq!(worker["dependencies"][0]["outcome"], "resolved");
+        assert_eq!(worker["dependencies"][0]["resolved_path"], "Contents/Frameworks/OnlyHelper.dylib");
     }
 }
