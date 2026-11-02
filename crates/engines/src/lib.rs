@@ -148,6 +148,12 @@ mod tests {
             assert!(paths.iter().any(|p| p.to_string_lossy().contains("Chrome")));
             assert!(paths.iter().any(|p| p.to_string_lossy().contains("Edge")));
         }
+        if cfg!(target_os = "linux") {
+            // Arch and Google's package install `google-chrome-stable`, which execs this binary.
+            let chromium = engine("chromium").unwrap();
+            assert!(chromium.host_exes().contains(&"google-chrome-stable"));
+            assert!(paths.contains(&PathBuf::from("/opt/google/chrome/google-chrome")));
+        }
         // #85: Linux packages put Ghidra in its own folder with only a start script on PATH.
         let ghidra = well_known("ghidra");
         if cfg!(target_os = "linux") {

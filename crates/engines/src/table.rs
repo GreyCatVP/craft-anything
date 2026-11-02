@@ -176,6 +176,12 @@ const CHROMIUM_PATHS: &[KnownPath] = &[
     mac(Base::Env("HOME"), "Applications/Chromium.app/Contents/MacOS/Chromium"),
     mac(Base::Dir("/Applications"), "Brave Browser.app/Contents/MacOS/Brave Browser"),
     mac(Base::Env("HOME"), "Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+    // Linux packages usually leave a wrapper on PATH, but not always (`google-chrome-stable`
+    // execs the real binary here; a PATH without the wrapper still finds it).
+    linux("/opt/google/chrome", "google-chrome"),
+    linux("/opt/microsoft/msedge", "msedge"),
+    linux("/opt/brave.com/brave", "brave"),
+    linux("/usr/lib/chromium", "chromium"),
 ];
 
 /// Android platform-tools r37.0.1. SHA-256 computed from Google's files, whose size and SHA-1
@@ -368,7 +374,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         id: "chromium",
         name: "a Chromium-based browser",
         needed_for: "Studying websites in a live browser",
-        exes: &["chromium", "chromium-browser", "google-chrome", "chrome", "msedge", "brave"],
+        exes: &["chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome", "msedge", "microsoft-edge-stable", "brave", "brave-browser"],
         exes_windows: &["chrome.exe", "msedge.exe", "brave.exe"],
         known_paths: CHROMIUM_PATHS,
         path_setting: true,
