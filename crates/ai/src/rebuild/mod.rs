@@ -694,7 +694,8 @@ impl Worker {
             for c in &checks {
                 self.emit(RunEvent::Checked(c.clone()));
             }
-            let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
+            let kind_checks = kind.checks(ws);
+            let not_good = checks.iter().find(|c| !c.good(opts.good_enough) && kinds::can_refine(&kind_checks, c));
             if let Some(p) = self.added(ws) {
                 prompt = p;
                 continue;
@@ -898,7 +899,7 @@ impl Worker {
 const API_BUILDER: &str = "Your tools: build_files_list, build_file_read, build_file_write and build_file_edit for the project's files (paths relative to the project folder, e.g. app/src/main.rs), and build_command_run for commands, which run in app/ (never start dev servers or watchers). Where the steps below mention Read, Write, Edit or Bash, use these. For the checklist step use build_checklist (the same shape as TodoWrite: todos with content, activeForm and status) and call it again as you go. You can't look at pictures: use capture/README.md, capture/capture.json and the evidence instead. Ask the person with core_person_ask only when a choice really changes the result. Other Craft Anything tools are available too; enable a toolset with enable_toolset when you need it. rebuild_check isn't available in this loop: Craft Anything checks your build after each turn instead.";
 
 /// Added to a refinement for a builder that can check its own work.
-const CHECK_BEFORE_REPLYING: &str = " Before you reply, check your build again with rebuild_check and fix what it still lists.";
+const CHECK_BEFORE_REPLYING: &str = " Before you reply, check your build again with rebuild_check. Fix the results it says another builder turn can resolve, and state any remaining unverified comparisons.";
 
 /// The backend the person chose for this project, while it's still set up and on (else the
 /// default builds it).
