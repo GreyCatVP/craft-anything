@@ -12,8 +12,18 @@ fn choose(request: &str, target: &TargetRef) -> (&'static str, &'static str) {
 fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
+/// Quote model guidance with one checked ledger snapshot, as a builder prompt does.
+fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>) -> String {
+    super::assets_note(&BriefCx { ws, deep: false, ghidra: false, editor: None, assets: true, asset_spent: ws.try_assets_spent().ok(), image_model, model_3d })
+}
+
+/// Build a test brief for a built-in kind using the catalogue's default asset models.
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
-    super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None }, extra)
+    super::brief(
+        kind(k).as_ref(),
+        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep, ghidra, editor, assets, image_model: None, model_3d: None },
+        extra,
+    )
 }
 fn refine(k: &str, check: &CheckResult) -> String {
     kind(k).refine(check)
@@ -237,6 +247,7 @@ fn engine_stacks_get_their_own_steps_checks_and_play() {
     assert_eq!(launch(d.path(), None).map(|l| l.0), Some(build.join(exe("Game"))), "crash reporters aren't the game");
 }
 
+/// Game art instructions require both permission and credentials; shared asset policy also reaches apps.
 #[test]
 fn games_hear_about_generated_assets_only_when_allowed_and_with_a_key() {
     let d = tempfile::tempdir().unwrap();
@@ -248,7 +259,9 @@ fn games_hear_about_generated_assets_only_when_allowed_and_with_a_key() {
     assert!(with.contains("assets_model_generate") && with.contains("$5.00") && with.contains("Assets/Generated/"), "{with}");
     assert!(with.contains("never a recognisable character, logo or brand artwork"));
     assert!(!brief(&ws, "game", false, false, None, false, None).contains("assets_model_generate"), "no key, no asset tools");
-    assert!(!brief(&ws, "app", false, false, None, true, None).contains("assets_model_generate"), "games only");
+    let app = brief(&ws, "app", false, false, None, true, None);
+    assert!(app.contains("Project asset providers:") && app.contains("share one budget"));
+    assert!(!app.contains("assets_model_generate"), "long game art guidance stays game-specific");
 }
 
 #[test]
@@ -261,16 +274,19 @@ fn a_new_project_keeps_the_persons_asset_choice() {
     }
 }
 
+/// Art estimates follow configured image and 3D prices, with catalogue defaults for unknown models.
 #[test]
 fn the_assets_note_reads_prices_from_the_asset_table() {
     let d = tempfile::tempdir().unwrap();
-    let ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
-    // The default picture model is Nano Banana Pro ($0.15 a picture).
-    let before = "Realistic assets: you can make them with fal.ai. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description (about $0.65 each); set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture (about $0.15) for textures, skies, backgrounds and menu art. This project's asset budget is $5.00 ($0.00 used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it (e.g. assets/generated/). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. List each generated file in app/CREDITS.md as made with fal.ai.";
-    assert_eq!(assets_note(&ws, None), before);
-    assert_eq!(assets_note(&ws, Some("no-such-model")), before, "an unknown model quotes the default's prices");
-    let schnell = assets_note(&ws, Some("flux-schnell"));
-    assert!(schnell.contains("(about $0.50 each)") && schnell.contains("a picture (under $0.01)"), "{schnell}");
+    let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
+    ws.manifest.generate_assets = true;
+    let before = assets_note(&ws, None, None);
+    assert!(before.contains("a picture (about $0.15)") && before.contains("(about $0.65 each)"), "{before}");
+    assert_eq!(assets_note(&ws, Some("no-such-model"), None), before, "an unknown model quotes the default's prices");
+    let schnell = assets_note(&ws, Some("flux-schnell"), None);
+    assert!(schnell.contains("(about $0.51 each)") && schnell.contains("a picture (about $0.01)"), "{schnell}");
+    let scenario = assets_note(&ws, Some("scenario-gemini-3-1"), Some("scenario-meshy"));
+    assert!(scenario.contains("(about $11.00 each)"), "configured 3D and image prices: {scenario}");
 }
 
 #[test]
@@ -290,7 +306,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         editor: None,
         notes: notes.clone(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -321,6 +337,292 @@ fn pictures_of_the_original_reach_the_builder() {
     assert!(b.contains("reference/picture-1.webp") && b.contains("--screenshot"), "{b}");
     assert!(!brief(&ws, "website", false, false, None, false, None).contains("--screenshot"), "websites are photographed for it");
     assert!(pictures_reminder(&ws).contains("1 picture(s)"));
+}
+
+/// Record sent prompts, optionally changing project policy or key availability before one retry.
+#[derive(Default)]
+struct RecordedTurns(Vec<String>, Option<PathBuf>, Option<Arc<AtomicBool>>);
+impl Conversation for RecordedTurns {
+    /// Keep the complete prompt so the test can inspect the policy sent on each turn.
+    fn send(&mut self, text: &str) {
+        self.0.push(text.into());
+    }
+    /// Finish locally; retry fixtures change policy or key availability when the first turn fails.
+    fn poll(&mut self) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        if let Some(root) = &self.1
+            && self.0.len() == 1
+        {
+            Workspace::open(root)
+                .unwrap()
+                .set_person(|m| {
+                    m.generate_assets = false;
+                    m.asset_budget_usd = 0.75;
+                })
+                .unwrap();
+            events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
+        }
+        if let Some(available) = &self.2
+            && self.0.len() == 1
+        {
+            available.fetch_xor(true, Ordering::SeqCst);
+            events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
+        }
+        events.push(AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false });
+        events
+    }
+    /// Only the interruption fixture has a resumable session.
+    fn session_id(&self) -> Option<String> {
+        (self.1.is_some() || self.2.is_some()).then(|| "test-retry".into())
+    }
+    /// Ignore consent because this recorder never requests tool execution.
+    fn answer_consent(&mut self, _: &str, _: bool) {}
+    /// No background work exists to cancel in this synchronous recorder.
+    fn stop(&mut self) {}
+    /// Recorded turns have no pending background activity.
+    fn is_busy(&self) -> bool {
+        false
+    }
+}
+
+/// Each turn observes saved asset choices without replacing unsaved progress and refuses unreadable policy.
+#[test]
+fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progress() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "App", "Make an app", TargetRef::None).unwrap();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut worker = Worker {
+        wake: Default::default(),
+        engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        tx,
+        stop: CancelToken::default(),
+        preview: Arc::default(),
+        seen: HashSet::new(),
+        inbox: Inbox::new(ws.inbox_dir()),
+        editor: None,
+        notes: Arc::default(),
+        feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        asset_keys_available: Box::new(|_| true),
+        decompiled: false,
+        usage: None,
+        self_check: None,
+    };
+    let mut agent = RecordedTurns::default();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Build the app").into()), None).unwrap();
+    assert!(agent.0.last().unwrap().contains("Generated assets are now off"));
+    let mut sidebar = Workspace::open(&ws.root).unwrap();
+    sidebar
+        .set_person(|m| {
+            m.generate_assets = true;
+            m.asset_providers = Some(vec!["scenario".into()]);
+            m.asset_budget_usd = 7.25;
+        })
+        .unwrap();
+    worker.notes.lock().unwrap().push(Note { id: 1, text: "Use generated textures".into(), shown: "Use generated textures".into() });
+    let added = worker.added(&mut ws).unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message((&added).into()), None).unwrap();
+    let note = agent.0.last().unwrap();
+    assert!(note.contains("Use generated textures") && note.contains("Current asset policy for this turn (replaces earlier asset instructions)"));
+    assert!(note.contains("scenario: enabled") && note.contains("fal: disabled") && note.contains("$7.25"));
+
+    sidebar
+        .set_person(|m| {
+            m.asset_providers = Some(vec!["elevenlabs".into()]);
+            m.asset_budget_usd = 0.75;
+        })
+        .unwrap();
+    sidebar
+        .record_asset(craft_anything_engine::workspace::AssetRecord {
+            file: "chime.mp3".into(),
+            kind: "sound".into(),
+            prompt: "a chime".into(),
+            cost_usd: 0.25,
+            at_ms: 1,
+        })
+        .unwrap();
+    ws.manifest.note = "Unsaved progress in this worker".into();
+    ws.manifest.status = Status::Checking;
+    let before_turn = ws.manifest.clone();
+    let refinement = refine("app", &CheckResult::new(CheckResult::BUILD, 1, false, "Fix the build"));
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message((&refinement).into()), None).unwrap();
+    let note = agent.0.last().unwrap();
+    assert!(note.contains("Current asset policy for this turn") && note.contains("scenario: disabled") && note.contains("elevenlabs: enabled"));
+    assert!(note.contains("$0.75") && note.contains("estimated spent $0.25, remaining $0.50"));
+    assert_eq!(ws.manifest, before_turn, "policy reads never replace run-owned state");
+
+    // Real game guidance must use current policy on both the initial brief and every follow-up.
+    std::fs::create_dir_all(ws.root.join("reference")).unwrap();
+    std::fs::write(ws.root.join("reference/picture.png"), b"fixture").unwrap();
+    for (stale_enabled, current_enabled, current_budget, stale_budget) in [(true, false, 0.75, 5.0), (false, true, 5.0, 0.75)] {
+        ws.manifest.generate_assets = stale_enabled;
+        ws.manifest.asset_budget_usd = stale_budget;
+        sidebar
+            .set_person(|m| {
+                m.generate_assets = current_enabled;
+                m.asset_providers = Some(vec!["scenario".into()]);
+                m.asset_budget_usd = current_budget;
+            })
+            .unwrap();
+        let game = kind("game");
+        let initial = BuilderPrompt::Initial { extra: Some("Keep the score".into()), api: true, originals: false };
+        let followup = BuilderPrompt::Message(follow_up("Make it brighter", "game"));
+        let added = BuilderPrompt::Message(added_prompt(&["Add a score".into()]));
+        let refinement = BuilderPrompt::Message(game.refine(&CheckResult::new(CheckResult::BUILD, 2, false, "Fix the build")));
+        let before = ws.manifest.clone();
+        for prompt in [initial, followup, added, refinement] {
+            worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.matches("Project asset providers:").count(), 1, "{sent}");
+            assert!(sent.contains(&format!("${current_budget:.2}")), "{sent}");
+            assert!(!sent.contains(&format!("${stale_budget:.2}")), "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), current_enabled, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), current_enabled, "{sent}");
+            assert_eq!(sent.contains("Generated assets are now off"), !current_enabled, "{sent}");
+            assert!(sent.contains("picture(s) of the original"), "{sent}");
+            assert_eq!(ws.manifest, before, "prompt rendering preserves run-owned state");
+        }
+    }
+    worker.turn(&mut ws, &mut agent, &SlidesKind, &BuilderPrompt::Message("Keep going".into()), None).unwrap();
+    let sent = agent.0.last().unwrap();
+    assert!(sent.contains("Custom follow-up sentinel: Unsaved progress in this worker"), "{sent}");
+    assert!(sent.contains("picture(s) of the original"));
+    // A master switch alone cannot enable any modality; audio permission cannot enable visual tools.
+    for (providers, visual, audio) in [(vec![], false, false), (vec!["elevenlabs"], false, true), (vec!["scenario"], true, false)] {
+        sidebar
+            .set_person(|m| {
+                m.generate_assets = true;
+                m.asset_providers = Some(providers.iter().map(|id| (*id).into()).collect());
+            })
+            .unwrap();
+        // A local target also exercises game_steps' permission-sensitive instructions.
+        ws.manifest.target = TargetRef::Local { path: d.path().join("fixture-game") };
+        for prompt in [BuilderPrompt::Initial { extra: None, api: false, originals: false }, BuilderPrompt::Message("Keep going".into())] {
+            worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.contains("assets_model_generate"), visual, "{sent}");
+            assert_eq!(sent.contains("assets_image_generate"), visual, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), visual, "{sent}");
+            for tool in ["assets_speech_generate", "assets_sound_generate", "assets_music_generate"] {
+                assert_eq!(sent.contains(tool), audio, "{sent}");
+            }
+            assert_eq!(sent.contains("Generated assets are now off"), !visual && !audio, "{sent}");
+            assert!(sent.contains("picture(s) of the original"), "{sent}");
+            assert_eq!(sent.matches("Project asset providers:").count(), 1);
+        }
+    }
+    let mut interrupted = RecordedTurns(Vec::new(), Some(ws.root.clone()), None);
+    worker.turn(&mut ws, &mut interrupted, kind("game").as_ref(), &BuilderPrompt::Initial { extra: None, api: false, originals: false }, None).unwrap();
+    assert_eq!(interrupted.0.len(), 2);
+    assert!(interrupted.0[0].contains("Realistic assets:") && interrupted.0[0].contains("$5.00"));
+    assert!(interrupted.0[1].contains("Generated assets are now off") && interrupted.0[1].contains("$0.75"));
+    assert!(!interrupted.0[1].contains("assets_model_generate") && !interrupted.0[1].contains("$5.00"));
+    assert_eq!(interrupted.0[1].matches("Project asset providers:").count(), 1);
+    sidebar.set_person(|m| m.generate_assets = true).unwrap();
+    // Invalid spending refuses generation in initial and follow-up game guidance, never assuming zero.
+    std::fs::write(ws.root.join("assets.json"), "not JSON").unwrap();
+    for prompt in [BuilderPrompt::Initial { extra: None, api: false, originals: false }, BuilderPrompt::Message("Continue".into())] {
+        worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt, None).unwrap();
+        let sent = agent.0.last().unwrap();
+        assert!(sent.contains("Do not generate assets or authorize new spending"), "{sent}");
+        assert!(!sent.contains("Realistic assets:") && !sent.contains("assets_model_generate") && !sent.contains("estimated spent $0.00"), "{sent}");
+    }
+    ws.manifest = before_turn.clone();
+
+    let mut future = sidebar.manifest.clone();
+    future.version = craft_anything_engine::workspace::MANIFEST_VERSION + 1;
+    std::fs::write(ws.root.join("craft.json"), serde_json::to_vec(&future).unwrap()).unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Continue with the future settings").into()), None).unwrap();
+    assert!(agent.0.last().unwrap().contains("Do not generate assets or authorize new spending"));
+
+    std::fs::write(ws.root.join("craft.json"), "not valid JSON").unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Try the fix again").into()), None).unwrap();
+    let note = agent.0.last().unwrap();
+    assert!(note.contains("Do not generate assets or authorize new spending"));
+    assert!(!note.contains("elevenlabs: enabled"), "unreadable choices never fall back to earlier permission");
+    assert_eq!(ws.manifest, before_turn);
+}
+
+/// Adding or removing a key during a run updates the next sent prompt, including retry sends.
+#[test]
+fn every_builder_prompt_refreshes_live_asset_key_availability() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        m.asset_providers = Some(vec!["scenario".into()]);
+    })
+    .unwrap();
+    let mut worker = check_worker(&ws, false);
+    let available = Arc::new(AtomicBool::new(false));
+    let current = available.clone();
+    let engine = worker.engine.clone();
+    worker.asset_keys_available = Box::new(move |provider| {
+        assert!(engine.try_session().is_some(), "key-store I/O must run without the session lock");
+        provider == "scenario" && current.load(Ordering::SeqCst)
+    });
+    let game = kind("game");
+    let mut agent = RecordedTurns::default();
+    for prompt in [
+        BuilderPrompt::Initial { extra: None, api: false, originals: false },
+        BuilderPrompt::Message(follow_up("Make it brighter", "game")),
+        BuilderPrompt::Message(added_prompt(&["Add a score".into()])),
+        BuilderPrompt::Message(game.refine(&CheckResult::new(CheckResult::BUILD, 2, false, "Fix the build"))),
+        BuilderPrompt::ResumedElsewhere { extra: Some("Continue the game".into()), handoff: Some("The first level is built.".into()) },
+    ] {
+        for has_key in [false, true, false] {
+            available.store(has_key, Ordering::SeqCst);
+            worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+            assert!(sent.contains("scenario: enabled"), "key availability must not change project permission: {sent}");
+        }
+    }
+    for initial in [false, true] {
+        available.store(initial, Ordering::SeqCst);
+        let mut interrupted = RecordedTurns(Vec::new(), None, Some(available.clone()));
+        worker.turn(&mut ws, &mut interrupted, game.as_ref(), &BuilderPrompt::Initial { extra: None, api: false, originals: false }, None).unwrap();
+        assert_eq!(interrupted.0.len(), 2);
+        for (sent, has_key) in interrupted.0.iter().zip([initial, !initial]) {
+            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+        }
+    }
+}
+
+/// A saved key for a disabled provider cannot make an enabled, unkeyed provider usable.
+#[test]
+fn a_disabled_providers_key_does_not_enable_builder_asset_guidance() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
+    let mut worker = check_worker(&ws, false);
+    // The only saved key belongs to fal, whether or not that provider is enabled.
+    worker.asset_keys_available = Box::new(|provider| provider == "fal");
+    let game = kind("game");
+    let mut agent = RecordedTurns::default();
+    for (enabled, has_key) in [("scenario", false), ("fal", true)] {
+        ws.set_person(|m| {
+            m.generate_assets = true;
+            m.asset_providers = Some(vec![enabled.into()]);
+        })
+        .unwrap();
+        for prompt in [
+            BuilderPrompt::Initial { extra: None, api: false, originals: false },
+            BuilderPrompt::Message(follow_up("Make it brighter", "game")),
+            BuilderPrompt::ResumedElsewhere { extra: Some("Continue the game".into()), handoff: Some("The first level is built.".into()) },
+        ] {
+            worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_image_generate"), has_key, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
+            assert!(sent.contains(&format!("{enabled}: enabled")), "key availability must not change provider permission: {sent}");
+            assert_eq!(sent.matches("Project asset providers:").count(), 1, "{sent}");
+        }
+    }
 }
 
 #[test]
@@ -485,11 +787,16 @@ impl TargetKind for SlidesKind {
     fn goal(&self) -> &'static str {
         "a slide deck"
     }
+    /// A non-asset extension sees run-owned progress alongside the current policy.
+    fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
+        vec![format!("Custom follow-up sentinel: {}", cx.ws.manifest.note)]
+    }
     fn checks(&self, _ws: &Workspace) -> Vec<Box<dyn Check>> {
         vec![Box::new(OutlineCheck)]
     }
 }
 
+/// A registered kind supplies its own stack, checks and brief while preserving built-in detection.
 #[test]
 fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let mut kinds = KindRegistry::built_in();
@@ -507,7 +814,20 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let ws = Workspace::create(d.path(), "Deck", "Make slides", TargetRef::None).unwrap();
     let checks = kinds.get("slides").unwrap().checks(&ws);
     assert_eq!(checks.iter().map(|c| c.id()).collect::<Vec<_>>(), ["outline"]);
-    let b = super::brief(&SlidesKind, &BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None }, None);
+    let b = super::brief(
+        &SlidesKind,
+        &BriefCx {
+            asset_spent: ws.try_assets_spent().ok(),
+            ws: &ws,
+            deep: false,
+            ghidra: false,
+            editor: None,
+            assets: false,
+            image_model: None,
+            model_3d: None,
+        },
+        None,
+    );
     assert!(b.contains("What to build: a slide deck."), "{b}");
 }
 
@@ -594,7 +914,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -612,7 +932,7 @@ fn an_api_backend_builds_with_the_build_tools() {
     let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10 };
     let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
     let mut api = ApiConversation::start_with(Arc::new(EngineHost(engine)), vec![slot], LoopConfig::default(), enabled).unwrap();
-    let reply = w.turn(&mut ws, &mut api, "Build it.", None).unwrap();
+    let reply = w.turn(&mut ws, &mut api, kind("app").as_ref(), &BuilderPrompt::Message(("Build it.").into()), None).unwrap();
     assert_eq!(reply.trim(), "Built the notes app.");
     assert_eq!(std::fs::read_to_string(ws.app_dir().join("README.md")).unwrap(), "# Notes\n");
     assert!(ws.manifest.agent_session.is_none(), "an API loop has no session to resume");
@@ -624,6 +944,7 @@ fn the_builder_is_an_agent_app_first_then_any_ai_backend() {
     assert!(builder_backend(&none, None).unwrap_err().message.contains("API key"));
 }
 
+/// Site routes are deduplicated and bounded, and captured pages and interaction states reach the brief.
 #[test]
 fn other_pages_of_the_same_site_are_picked_from_its_links() {
     use kinds::website::{ROUTES_FILE, pick_routes, routes};
@@ -649,7 +970,7 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx { ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None };
+    let cx = |ws| BriefCx { asset_spent: Some(0.0), ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None };
     assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
@@ -710,7 +1031,7 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1048,7 +1369,7 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1283,26 +1604,32 @@ fn website_check_compares_the_text_and_names_what_is_missing() {
     assert!(text_likeness(&json!({"text": ""}), &built).is_none(), "nothing to compare");
 }
 
+/// Every project kind receives current provider permissions, including revocation after assets exist.
 #[test]
-fn a_resumed_game_builder_hears_the_asset_choice_as_it_is_now() {
+fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
-    let game = kind("game");
+    /// Isolate workspace policy and key availability from unrelated brief settings.
     fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
-        BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None }
+        BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None }
     }
-    assert!(game.follow_up_sections(&cx(&ws, true)).is_empty(), "off and never used: nothing to say");
+    assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
     // Turned on after the first build, with a key: the follow-up carries the asset note and budget.
     ws.set_person(|m| m.generate_assets = true).unwrap();
-    let on = game.follow_up_sections(&cx(&ws, true));
-    assert!(on[0].contains("assets_model_generate") && on[0].contains("$5.00"), "{on:?}");
-    assert!(game.follow_up_sections(&cx(&ws, false)).is_empty(), "no key: not offered");
+    let on = project_assets_note(&cx(&ws, true));
+    assert!(on.contains("scenario: enabled") && on.contains("$5.00"), "{on:?}");
+    assert!(project_assets_note(&cx(&ws, false)).contains("No asset provider key"));
+    ws.set_person(|m| m.asset_providers = Some(vec!["scenario".into()])).unwrap();
+    let explicit = project_assets_note(&cx(&ws, true));
+    assert!(explicit.contains("scenario: enabled") && explicit.contains("fal: disabled") && explicit.contains("elevenlabs: disabled"));
+    for kind in ["game", "app", "website"] {
+        assert!(brief(&ws, kind, false, false, None, true, None).contains("scenario: enabled"));
+    }
     // Turned off after some were made: say so.
     let rec = craft_anything_engine::workspace::AssetRecord { file: "a.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.5, at_ms: 1 };
     ws.record_asset(rec).unwrap();
     ws.set_person(|m| m.generate_assets = false).unwrap();
-    assert!(game.follow_up_sections(&cx(&ws, true))[0].contains("now off"));
-    assert!(kind("website").follow_up_sections(&cx(&ws, true)).is_empty());
+    assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
 }
 
 #[test]
@@ -1434,7 +1761,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1475,13 +1802,13 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
-    let reply = w.turn(&mut ws, &mut builder, "Build it.", None).unwrap();
+    let reply = w.turn(&mut ws, &mut builder, kind("app").as_ref(), &BuilderPrompt::Message(("Build it.").into()), None).unwrap();
     // The same check the run makes after a turn, as round 0, with what to do next.
     assert!(reply.starts_with("mechanics: failed") && reply.contains("no app/mechanics.json") && reply.contains("check again with rebuild_check"), "{reply}");
     assert!(ws.manifest.checks.is_empty(), "the builder's own check isn't a round");
@@ -1668,7 +1995,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
             Note { id: 2, text: "add a footer".into(), shown: "add a footer".into() },
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
@@ -1815,17 +2142,21 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
     };
-    let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply, None);
-    let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
+    let first = BuilderPrompt::ResumedElsewhere { extra: Some("Make it blue".into()), handoff: None };
+    let reply = w.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("The person asks: make it blue".into()), Some(first)).unwrap();
     assert_eq!(reply.trim(), "Carried on: yes");
     let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
     assert!(
-        sent.starts_with("THE BRIEF") && sent.contains("already under way") && sent.contains("app/") && sent.contains("notes app with a sidebar"),
+        sent.contains("A notes app")
+            && sent.contains("Make it blue")
+            && sent.contains("already under way")
+            && sent.contains("app/")
+            && sent.contains("notes app with a sidebar"),
         "{sent}"
     );
     assert_eq!(ws.manifest.agent_session.as_deref(), Some("new-1"), "the new session is the one kept");
@@ -1869,12 +2200,12 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,
     };
-    let e = w.turn(&mut ws, &mut agent, "Carry on.", None).unwrap_err();
+    let e = w.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("Carry on.".into()), None).unwrap_err();
     assert!(e.message.contains("isn't on this computer"), "{e:?}");
     assert!(ws.manifest.agent_session.is_none());
 }
@@ -1932,7 +2263,7 @@ fn the_builders_conversation_travels_with_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-        assets: false,
+        asset_keys_available: Box::new(|_| false),
         decompiled: false,
         usage: None,
         self_check: None,

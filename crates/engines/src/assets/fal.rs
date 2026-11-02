@@ -55,7 +55,9 @@ impl AssetProvider for Fal {
         Some("FAL_KEY")
     }
 
+    /// Validate credentials, generate a supported image or mesh, and download it with its catalogue cost.
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+        self.validate_key(key)?;
         let key = key.trim();
         match *req {
             AssetRequest::Image { model, prompt, shape } => {
@@ -77,6 +79,7 @@ impl AssetProvider for Fal {
                 let url = model_url(&v).ok_or_else(|| unexpected("3D model", &v))?;
                 Ok(Generated { bytes: download(&url)?, url, cost_usd: req.listed_cost() })
             }
+            _ => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai does not support this asset request.")),
         }
     }
 }
@@ -239,7 +242,7 @@ mod tests {
         let fal = Fal { base };
         let pic = image(&fal, " k-123 ", "a wooden crate, game asset", Shape::Square).unwrap();
         assert_eq!(pic.bytes, b"\x89PNG fake");
-        assert!((pic.cost_usd - 0.0262144).abs() < 1e-9, "1024×1024 at $0.025 per megapixel");
+        assert!((pic.cost_usd - 0.05).abs() < 1e-9, "a conservative two decimal megapixels, not a verified invoice charge");
         let model = model_3d(&fal, "k-123", "https://v3.fal.media/files/crate.png", true, 2000).unwrap();
         assert_eq!(model.bytes, b"glTF fake", "the GLB, not the FBX");
         assert!((model.cost_usd - 0.50).abs() < 1e-9, "a textured Tripo P1 model");

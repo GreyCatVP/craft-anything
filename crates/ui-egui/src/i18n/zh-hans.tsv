@@ -806,6 +806,7 @@ Pick the folder for this project	选择此项目的文件夹
 Pick the game's folder	选择游戏文件夹
 Picture a program's window	截取程序窗口图片
 Picture model	图片模型
+Unavailable model: {id}	模型不可用：{id}
 Pictures	图片
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	暂不支持从 IoStore 容器保存图片，但可以查看其中的内容。
 Pictures of the original	原作图片
@@ -1365,3 +1366,32 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 … {} older	… 还有 {} 条较早内容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 选择 · Enter 运行 · Esc 关闭
+# Asset providers
+Generate speech	生成语音
+Generate a sound effect	生成音效
+Generate music	生成音乐
+Generate pictures, models and audio	生成图片、模型和音频
+Needs an asset provider key. Until then the game is built without generated assets.	需要素材服务密钥。在添加密钥之前，游戏构建不会使用生成素材。
+Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	费用从你的服务账户扣除：估算每个 3D 模型 {model}，每张图片 {picture}。音频费用取决于长度。关闭后，游戏构建不使用生成素材。
+Add a provider key	添加服务密钥
+Your asset provider keys	你的素材服务密钥
+Use fal.ai, Scenario or ElevenLabs for generated assets.	使用 fal.ai、Scenario 或 ElevenLabs 生成素材。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	使用你自己的服务账户生成原创图片、模型、语音、音效和音乐。视觉素材估算费用：每个模型 {model}，每张图片 {picture}。每个项目预算为 {budget}。密钥在系统钥匙串可用时存储于其中，否则保存在私有本地密钥文件中。在设置 → 构建中选择图片和 3D 服务。
+Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	通过 fal.ai 或 Scenario 生成图片和 3D 模型；通过 ElevenLabs 生成语音、音效和音乐。每个模型估算 {model}，每个项目预算为 {budget}。在设置 → 构建中选择视觉模型。
+3D model generator	3D 模型生成器
+What pictures are turned into 3D models with.	用于将图片转换为 3D 模型的服务。
+What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	新游戏在请求你批准之前可用于生成图片、3D 模型和音频的金额。每个项目保留自己的预算。
+API secret	API 密钥机密
+{name} API secret	{name} API 密钥机密
+Paste your {name} API secret	粘贴你的 {name} API 密钥机密
+Save asset settings	保存素材设置
+Key needed	需要密钥
+Manage provider keys	管理服务商密钥
+Assets: {n} · estimated spent ${spent}	素材：{n} · 预计已花费 ${spent}
+Budget ${budget} · remaining ${remaining}	预算 ${budget} · 剩余 ${remaining}
+Shared asset budget (USD)	共享素材预算（美元）
+Asset budget in USD	素材预算（美元）
+Save budget	保存预算
+Saving asset settings…	正在保存素材设置…
+Enter an amount from 0 to 10000 USD.	请输入 0 到 10000 美元之间的金额。
+Asset spending is unavailable. Repair assets.json before generating.	无法读取素材支出。请先修复 assets.json，再生成素材。

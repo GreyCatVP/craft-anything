@@ -18,6 +18,112 @@ place to add yours. Follow `AGENTS.md` (never crash, layers, external programs t
 | A persisted file | its owner module | A version field and a migration step; see [file-formats.md](file-formats.md). |
 | A UI language | `crates/ui-egui/src/i18n/` and `i18n.rs` | Add a TSV catalog and a language registry entry; preserve placeholders and run the catalog tests and `cargo xtask i18n-coverage`. See [localisation](localization.md) for scope and font setup. |
 
+## Built-in generated assets
+
+Settings → AI → Game assets manages each provider's credentials, separately from coding-agent
+credentials. The OS keychain is preferred; if unavailable, the app uses its private, owner-only
+`ai-keys.toml` fallback file. That fallback is not encrypted. Use **Scenario** for images and
+image-to-3D models, **ElevenLabs** for text-to-speech, sound effects and music, or the existing
+**fal.ai** models. Scenario has separate, masked **API key** and **API secret** inputs; Save combines
+them internally for authentication. Previously saved combined credentials keep working.
+ElevenLabs needs its API key. Credentials also come from `SCENARIO_API_KEY` (the combined
+`API key:API secret` value), `ELEVENLABS_API_KEY`, or
+`FAL_KEY` when no key is stored. Never include real credentials in a project, prompt or committed file.
+
+Scenario's [direct REST API](https://docs.scenario.com/get-started/documentation/quick-start-guide/step-2-authenticate-your-requests)
+documents HTTP Basic authentication, which this provider uses over HTTPS. Base64 encodes the
+credential pair; TLS provides transport encryption. Authenticated requests go to Scenario's API,
+redirects are refused, and downloads use a separate client with no authentication header.
+Scenario also offers [OAuth through its official MCP server](https://help.scenario.com/articles/2664328768-getting-started-with-the-scenario-mcp-server);
+that is a separate connection path, not an authentication mode of this built-in provider.
+Use a dedicated [project-scoped key with a usage limit](https://help.scenario.com/articles/2952168846-api-keys-and-scopes?lang=en)
+and grant only the permissions needed for generation and asset access.
+
+Choose the picture and 3D models in Settings → Builds. Headless settings use `[assets] image_model`
+and `model_3d`; individual image/model tool calls can override their model. Existing fal.ai defaults
+are preserved. Every project's sidebar has **Generated assets** controls, including app projects
+whose recorded stack is not a game engine. Turn providers on or off individually there. A key
+alone does not enable spending, and a disabled provider is refused by the generation tools even
+when a model override selects it. Turning a provider off affects new operations; an already-running
+generation operation can finish.
+
+The same sidebar shows the shared asset budget, estimated spending and remaining amount. Edit
+the budget and press **Save budget** to change this project's budget, including lowering it. The
+spending tally comes from generated asset records and is separate from the coding agent's AI cost.
+Provider switches and budget edits are saved with the project; disabling a provider keeps its
+previous asset records and spending. Provider switches do not change the selected image/3D models.
+
+Headless clients use `project_assets_allow` with `project`, `provider` and `allow` to control a
+single provider; omit `allow` to read its status. Omitting `provider` retains the existing master
+asset switch. `project_assets_budget` reads or sets the shared budget and reports spending.
+While the master switch is paused, disabling a provider preserves the other remembered choices
+without resuming generation. Enabling one provider from the paused state activates only that
+provider; it does not silently enable other unchecked providers.
+
+For example, these settings select Scenario for both stages and give a new project enough budget
+for a model and its source picture:
+
+```toml
+[assets]
+image_model = "scenario-gemini-3-1"
+model_3d = "scenario-meshy"
+budget_usd = 20.0
+```
+
+Existing projects keep their own budget; change one through `project_assets_budget` or its project
+screen. To request speech, pass a tool call such as the following (the voice id is an example;
+choose one available to your ElevenLabs account):
+
+```json
+{"text":"Welcome to the game.","voice_id":"JBFqnCBsd6RMkjVDRZzb","save_as":"Audio/welcome.mp3"}
+```
+
+The shared tool path saves assets inside the project's `app/` folder and records each asset's
+estimated cost against the project budget. `assets_speech_generate` accepts text and a voice id;
+`assets_sound_generate` and `assets_music_generate` accept a prompt and duration. These tools save
+MP3 audio, work with ElevenLabs alone, and are available in the CLI, MCP and builder for generating
+original assets.
+
+The spending ledger is checked before authorizing generation or changing a budget. Only a missing
+`assets.json` means no history; an unreadable, invalid, oversized or non-regular ledger blocks
+generation and is left untouched. Ledger symlinks are rejected rather than followed or replaced.
+The sidebar shows spending as unavailable until that history is repaired.
+
+Once generation has returned a valid reported cost, its spending record is saved before the output
+file is published. A failed ledger write leaves the destination untouched. A later file-save
+failure keeps the spending record and any previous destination file, so a record's `file` is the
+intended output location rather than proof that the new bytes were saved. A cost above the approved
+estimate is recorded and reported as an overrun; a precursor overrun stops the 3D stage. Do not
+blindly regenerate after these errors: check the recorded history and provider account first.
+
+This is not a reservation journal or a guarantee against process crashes or ambiguous provider
+timeouts. A provider may charge a request whose result never reaches the app, or a ledger write
+itself can fail. Use provider-side spending limits when a hard account-level cap is needed.
+
+Scenario bills Compute Units, which depend on model settings and account discounts. Its table
+amounts are conservative spending ceilings, not published per-generation prices: $1 per image
+and $10 per 3D model. Before submitting a paid job, the provider checks Scenario's authenticated
+`dryRun=api` quote and refuses missing, invalid or over-ceiling quotes. The dollar tally values a
+CU at $0.01, an estimate based on the Starter plan; it is not an invoice. A Scenario 3D call therefore
+needs a project budget covering the $10 ceiling (plus its source picture when generated first),
+even if the eventual quote is smaller. ElevenLabs estimates use the model rates in `assets.toml`
+and the requested character count or duration. Speech rates assume standard-priced voices;
+Voice Library credit multipliers can increase the actual charge. The project budget tracks these
+estimates, and actual provider billing can depend on your plan and selected voice.
+fal FLUX estimates round up to whole decimal megapixels conservatively. Its model pages specify
+rounding up, while its publishing guide uses a 1024×1024-pixel unit; the effective invoice unit
+still needs a real invoice check. The app therefore uses the larger estimate rather than claiming
+a measured per-image charge.
+
+Protocol and budget behavior is tested with local stand-in providers. Scenario and ElevenLabs
+generation have not been tested with live account credentials. Current API sources:
+[Scenario generation](https://docs.scenario.com/api/resources/generate/methods/run_model),
+[Scenario Compute Units](https://help.scenario.com/articles/7934059476-api-usage-and-credits-compute-units),
+[Scenario pricing](https://www.scenario.com/pricing),
+[ElevenLabs speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
+[sound effects](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert), and
+[music](https://elevenlabs.io/docs/api-reference/music/compose).
+
 ## Plugins: external MCP servers
 
 Any MCP server, local (stdio) or remote (Streamable HTTP), can add tools without changing code.

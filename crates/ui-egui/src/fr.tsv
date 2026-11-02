@@ -140,6 +140,20 @@ Allow generated assets	Autoriser les ressources générées
 Stop generated assets	Arrêter les ressources générées
 Paste your {name} key	Collez votre clé {name}
 Generate custom pictures and models	Générer des images et des modèles sur mesure
+Generate pictures, models and audio	Générer des images, des modèles et du son
+Generate speech	Générer une voix
+Generate a sound effect	Générer un effet sonore
+Generate music	Générer de la musique
+Needs an asset provider key. Until then the game is built without generated assets.	Une clé de fournisseur est nécessaire. En attendant, le jeu est créé sans ressources générées.
+Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	Facturé sur vos comptes fournisseurs : environ {model} par modèle 3D et {picture} par image. Le coût audio dépend de la durée. Désactivé, le jeu est créé sans ressources générées.
+Add a provider key	Ajouter une clé de fournisseur
+Your asset provider keys	Vos clés de fournisseurs de ressources
+Use fal.ai, Scenario or ElevenLabs for generated assets.	Utilisez fal.ai, Scenario ou ElevenLabs pour générer des ressources.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Générez des images et modèles originaux, des voix, des effets sonores et de la musique avec vos comptes fournisseurs. Coûts visuels estimés : {model} par modèle et {picture} par image. Chaque projet dispose d'un budget de {budget}. Les clés utilisent le trousseau du système s'il est disponible, sinon un fichier local privé. Choisissez les fournisseurs d'images et de 3D dans Réglages → Créations.
+Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Images et modèles 3D via fal.ai ou Scenario ; voix, effets sonores et musique via ElevenLabs. Environ {model} par modèle, avec un budget de {budget} par projet. Choisissez les modèles visuels dans Réglages → Créations.
+3D model generator	Générateur de modèles 3D
+What pictures are turned into 3D models with.	Le service qui transforme les images en modèles 3D.
+What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Ce qu'un nouveau jeu peut dépenser en images, modèles 3D et sons générés avant de vous demander. Chaque projet conserve son propre budget.
 Needs a fal.ai key. Until then the game is built without them.	Nécessite une clé fal.ai. En attendant, le jeu est construit sans.
 Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Faits avec fal.ai et payés depuis votre compte : {model} par modèle 3D, {picture} par image. Désactivé, le jeu est construit sans.
 Add a fal.ai key	Ajouter une clé fal.ai
@@ -681,6 +695,7 @@ Generated art (games)	Graphismes générés (jeux)
 Budget for a new project	Budget d'un nouveau projet
 What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Ce qu'un nouveau jeu peut dépenser en images et modèles 3D générés avant qu'on vous demande. Chaque projet garde le sien.
 Picture model	Modèle d'images
+Unavailable model: {id}	Modèle indisponible : {id}
 What pictures and textures are made with.	Ce qui sert à créer les images et les textures.
 a picture	une image
 Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	Les plugins ajoutent des outils que Craft Anything propose comme les siens : serveurs MCP (une commande ou une adresse ; lisez leurs outils après l'ajout) ou composants WebAssembly (un fichier .wasm, qui ne peut toucher ni à vos fichiers ni au réseau).
@@ -830,3 +845,18 @@ Log	Journal
 Hide the console	Masquer la console
 No jobs yet. Long tasks show their progress here, and you can cancel them.	Aucune tâche pour l'instant. Les longues tâches affichent ici leur progression, et vous pouvez les annuler.
 Clear finished	Effacer les terminées
+API key	Clé API
+API secret	Secret API
+{name} API secret	Secret API {name}
+Paste your {name} API secret	Collez votre secret API {name}
+Save asset settings	Enregistrer les réglages des ressources
+Key needed	Clé requise
+Manage provider keys	Gérer les clés des fournisseurs
+Assets: {n} · estimated spent ${spent}	Ressources : {n} · dépense estimée ${spent}
+Budget ${budget} · remaining ${remaining}	Budget ${budget} · reste ${remaining}
+Shared asset budget (USD)	Budget partagé des ressources (USD)
+Asset budget in USD	Budget des ressources en USD
+Save budget	Enregistrer le budget
+Saving asset settings…	Enregistrement des réglages des ressources…
+Enter an amount from 0 to 10000 USD.	Saisissez un montant entre 0 et 10000 USD.
+Asset spending is unavailable. Repair assets.json before generating.	Dépenses indisponibles. Réparez assets.json avant de générer des ressources.

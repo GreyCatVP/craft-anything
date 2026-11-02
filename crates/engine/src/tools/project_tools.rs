@@ -6,6 +6,7 @@ use crate::feed;
 use crate::inbox::{Answer, Inbox};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use crate::workspace::Workspace;
+use craft_anything_engines::assets::AssetProviders;
 use craft_anything_evidence::{ErrorCode, ToolError};
 use craft_anything_platform::sync::Mutex;
 use schemars::JsonSchema;
@@ -18,6 +19,7 @@ use std::sync::{Arc, PoisonError};
 /// Most feed items one call returns.
 const MAX_ITEMS: usize = 200;
 
+/// Expose project management tools with their parameter schemas and declared side effects.
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
@@ -144,7 +146,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_assets_budget",
             title: "Set a project's asset budget",
-            summary: "Set what a project may spend on generated pictures and 3D models (US dollars), or read it with no amount. Shows what's been spent so far.",
+            summary: "Set the shared budget for a project's generated images, 3D models and audio (US dollars), or read it with no amount. Shows estimated spending and the remaining budget.",
             beginner: "Changes how much a project may spend on generated art.",
             toolset: Toolset::Projects,
             effects: Effects::WRITES_FILESYSTEM,
@@ -155,8 +157,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_assets_allow",
             title: "Let a project generate assets",
-            summary: "Turn on or off whether the builder may generate pictures and 3D models for a project (paid per asset from its asset budget, and only with an asset provider's key), or read it with no value. Off until the person turns it on.",
-            beginner: "Chooses whether your game may get generated pictures and 3D models.",
+            summary: "Turn asset generation on or off for a project, or for one registered provider using provider. Omit allow to read the master switch and each provider's enabled state. Omitting provider preserves individual choices while setting the master switch. Images, 3D models and audio share the project's budget and require their provider's key. Off until the person turns it on.",
+            beginner: "Chooses which services may generate pictures, 3D models and audio for your project.",
             toolset: Toolset::Projects,
             effects: Effects::WRITES_FILESYSTEM,
             requires: Requires::Nothing,
@@ -231,16 +233,19 @@ pub struct BudgetParams {
     pub budget_usd: Option<f64>,
 }
 
+/// Read or persist a bounded asset budget and report spending with a nonnegative remaining balance.
 fn project_assets_budget(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: BudgetParams = parse_params(params)?;
     let mut ws = open(&p.project)?;
+    let spent = ws.try_assets_spent()?;
     if let Some(b) = p.budget_usd {
         if !b.is_finite() || !(0.0..=10_000.0).contains(&b) {
             return Err(ToolError::invalid("budget_usd must be between 0 and 10000."));
         }
         ws.set_person(|m| m.asset_budget_usd = b)?;
     }
-    Ok(ToolOutput::Value(json!({"budget_usd": ws.manifest.asset_budget_usd, "spent_usd": ws.assets_spent()})))
+    Ok(ToolOutput::Value(json!({"budget_usd": ws.manifest.asset_budget_usd, "spent_usd": spent,
+        "remaining_usd": (ws.manifest.asset_budget_usd - spent).max(0.0)})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -251,15 +256,47 @@ pub struct AllowAssetsParams {
     /// true lets the builder generate assets, false stops it; leave out to only read it.
     #[serde(default)]
     pub allow: Option<bool>,
+    /// One registered asset provider id (for example scenario or elevenlabs). Omit to read or
+    /// set the master switch, preserving individual provider choices.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
-fn project_assets_allow(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+/// Read or update asset permissions using the latest manifest and registered provider ids.
+/// Individual changes preserve other enabled providers; the master switch retains stored choices.
+fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: AllowAssetsParams = parse_params(params)?;
+    let providers = ctx.session.ext.get::<AssetProviders>().unwrap_or_default();
+    if let Some(id) = &p.provider
+        && providers.get(id).is_none()
+    {
+        return Err(ToolError::invalid(format!("No asset provider called \"{id}\" is available.")));
+    }
     let mut ws = open(&p.project)?;
     if let Some(allow) = p.allow {
-        ws.set_person(|m| m.generate_assets = allow)?;
+        ws.set_person(|m| {
+            if let Some(id) = &p.provider {
+                // Work from the freshly merged manifest, including changes made during a build.
+                let was_enabled = m.generate_assets;
+                let mut enabled = if was_enabled || !allow {
+                    m.asset_providers.clone().unwrap_or_else(|| providers.ids().into_iter().map(str::to_owned).collect())
+                } else {
+                    Vec::new()
+                };
+                enabled.retain(|other| other != id);
+                if allow {
+                    enabled.push(id.clone());
+                }
+                m.generate_assets = (was_enabled || allow) && !enabled.is_empty();
+                m.asset_providers = Some(enabled);
+            } else {
+                m.generate_assets = allow;
+            }
+        })?;
     }
-    Ok(ToolOutput::Value(json!({"generate_assets": ws.manifest.generate_assets})))
+    let statuses: Vec<_> = providers.ids().into_iter().map(|id| json!({"id": id, "enabled": ws.manifest.asset_provider_allowed(id)})).collect();
+    Ok(ToolOutput::Value(json!({"generate_assets": ws.manifest.generate_assets,
+        "asset_providers": ws.manifest.asset_providers, "providers": statuses})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -612,6 +649,7 @@ mod tests {
         assert!(call("project_show", json!({"project": d.path().join("nope")})).is_err());
     }
 
+    /// Budget updates persist within the allowed range, and past spending never produces a negative balance.
     #[test]
     fn a_projects_asset_budget_is_read_and_set() {
         let d = tempfile::tempdir().unwrap();
@@ -622,6 +660,15 @@ mod tests {
         assert_eq!(call(json!({"project": ws.root, "budget_usd": 12.5})).unwrap()["budget_usd"], 12.5);
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 12.5);
         assert!(call(json!({"project": ws.root, "budget_usd": -1})).is_err());
+        assert!(call(json!({"project": ws.root, "budget_usd": 10001})).is_err());
+        ws.record_asset(crate::workspace::AssetRecord { file: "sound.mp3".into(), kind: "sound".into(), prompt: "chime".into(), cost_usd: 2.25, at_ms: 1 })
+            .unwrap();
+        let out = call(json!({"project": ws.root, "budget_usd": 1.75})).unwrap();
+        assert_eq!(out["budget_usd"], 1.75);
+        assert_eq!(out["spent_usd"], 2.25);
+        assert_eq!(out["remaining_usd"], 0.0);
+        assert_eq!(call(json!({"project": ws.root, "budget_usd": 0.0})).unwrap()["budget_usd"], 0.0);
+        assert_eq!(call(json!({"project": ws.root, "budget_usd": 10000.0})).unwrap()["remaining_usd"], 9997.75);
     }
 
     #[test]
@@ -635,6 +682,117 @@ mod tests {
         assert!(Workspace::open(&ws.root).unwrap().manifest.generate_assets, "saved with the project");
         assert_eq!(call(json!({"project": ws.root, "allow": false})).unwrap()["generate_assets"], false);
         assert!(call(json!({"project": ws.root, "allow": "yes"})).is_err());
+    }
+
+    /// Provider toggles persist independently, while a master off/on cycle restores the selected providers.
+    #[test]
+    fn provider_switches_are_independent_persisted_and_preserved_by_the_master_switch() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |p: Value| e.call("project_assets_allow", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+        assert!(call(json!({"project": ws.root, "provider": "missing", "allow": true})).is_err());
+        assert!(!Workspace::open(&ws.root).unwrap().manifest.generate_assets);
+        let on = call(json!({"project": ws.root, "provider": "scenario", "allow": true})).unwrap();
+        assert_eq!(on["asset_providers"], json!(["scenario"]));
+        assert_eq!(on["providers"].as_array().unwrap().iter().filter(|p| p["enabled"] == true).count(), 1);
+        call(json!({"project": ws.root, "provider": "elevenlabs", "allow": true})).unwrap();
+        call(json!({"project": ws.root, "allow": false})).unwrap();
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_providers, Some(vec!["scenario".into(), "elevenlabs".into()]));
+        call(json!({"project": ws.root, "allow": true})).unwrap();
+        let manifest = Workspace::open(&ws.root).unwrap().manifest;
+        assert!(manifest.asset_provider_allowed("scenario") && manifest.asset_provider_allowed("elevenlabs"));
+        assert!(!manifest.asset_provider_allowed("fal"));
+        call(json!({"project": ws.root, "provider": "scenario", "allow": false})).unwrap();
+        assert_eq!(call(json!({"project": ws.root, "provider": "elevenlabs", "allow": false})).unwrap()["generate_assets"], false);
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_providers, Some(Vec::new()));
+        assert_eq!(call(json!({"project": ws.root, "provider": "fal"})).unwrap()["generate_assets"], false, "query does not mutate");
+    }
+
+    /// Editing a paused provider list never resumes its other providers; an explicit enable starts alone.
+    #[test]
+    fn paused_provider_changes_preserve_choices_without_resuming_them() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |p: Value| e.call("project_assets_allow", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+        for (disabled, remaining) in [("scenario", vec!["elevenlabs"]), ("fal", vec!["scenario", "elevenlabs"])] {
+            ws.set_person(|m| {
+                m.generate_assets = false;
+                m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+            })
+            .unwrap();
+            let paused = call(json!({"project": ws.root, "provider": disabled, "allow": false})).unwrap();
+            assert_eq!(paused["generate_assets"], false);
+            assert_eq!(paused["asset_providers"], json!(remaining));
+            assert!(paused["providers"].as_array().unwrap().iter().all(|p| p["enabled"] == false));
+            let resumed = call(json!({"project": ws.root, "allow": true})).unwrap();
+            assert_eq!(resumed["generate_assets"], true);
+            assert_eq!(resumed["asset_providers"], json!(remaining));
+        }
+        call(json!({"project": ws.root, "allow": false})).unwrap();
+        let enabled = call(json!({"project": ws.root, "provider": "fal", "allow": true})).unwrap();
+        assert_eq!(enabled["generate_assets"], true);
+        assert_eq!(enabled["asset_providers"], json!(["fal"]));
+    }
+
+    /// A missing ledger means no spending; an unreadable ledger refuses reads and leaves budget writes untouched.
+    #[test]
+    fn budget_ledger_errors_do_not_partially_change_the_budget() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |p: Value| e.call("project_assets_budget", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+        assert_eq!(call(json!({"project": ws.root})).unwrap()["spent_usd"], 0.0);
+        let ledger = ws.root.join("assets.json");
+        for contents in ["not JSON", "{\"version\":999,\"assets\":[]}"] {
+            std::fs::write(&ledger, contents).unwrap();
+            assert!(call(json!({"project": ws.root})).is_err());
+            assert!(call(json!({"project": ws.root, "budget_usd": 1.0})).is_err());
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 5.0);
+            assert_eq!(std::fs::read_to_string(&ledger).unwrap(), contents);
+        }
+        std::fs::remove_file(&ledger).unwrap();
+        std::fs::create_dir(&ledger).unwrap();
+        assert!(call(json!({"project": ws.root, "budget_usd": 1.0})).is_err());
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 5.0);
+    }
+
+    /// Restricting legacy all-provider permission must retain every other provider, including extensions.
+    #[test]
+    fn disabling_a_legacy_provider_keeps_other_registered_providers_enabled() {
+        use craft_anything_engines::assets::{AssetProvider, AssetRequest, Generated};
+        struct Custom;
+        impl AssetProvider for Custom {
+            /// Register a provider outside the built-in catalogue to exercise permission preservation.
+            fn id(&self) -> &'static str {
+                "custom"
+            }
+            /// Supply a display label for the custom permission-test provider.
+            fn name(&self) -> &'static str {
+                "Custom"
+            }
+            /// Fail any generation attempt because this fixture only tests permission changes.
+            fn generate(&self, _: &str, _: &AssetRequest) -> Result<Generated, ToolError> {
+                Err(ToolError::invalid("test provider must not generate"))
+            }
+        }
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        ws.set_person(|m| m.generate_assets = true).unwrap();
+        let mut providers = AssetProviders::built_in();
+        providers.register(Arc::new(Custom));
+        let mut session = crate::testing::session();
+        session.ext.insert(Arc::new(providers));
+        let e = Engine::new(session);
+        e.call("project_assets_allow", json!({"project": ws.root, "provider": "scenario", "allow": false}), CallOptions::new(Caller::Cli)).unwrap();
+        let manifest = Workspace::open(&ws.root).unwrap().manifest;
+        assert!(!manifest.asset_provider_allowed("scenario"));
+        for id in ["fal", "elevenlabs", "custom"] {
+            assert!(manifest.asset_provider_allowed(id));
+        }
+        e.call("project_assets_allow", json!({"project": ws.root, "provider": "custom", "allow": false}), CallOptions::new(Caller::Cli)).unwrap();
+        assert!(!Workspace::open(&ws.root).unwrap().manifest.asset_provider_allowed("custom"));
     }
 
     #[test]

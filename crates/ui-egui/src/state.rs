@@ -357,7 +357,7 @@ pub enum Modal {
     About,
     /// Getting a game engine (Unity, Unreal, Godot, Rust), step by step.
     Engine(craft_anything_engines::game::Builder),
-    /// Asking for a fal.ai key when generated assets are turned on without one.
+    /// Asking for an asset provider key when generated assets are turned on without one.
     Assets,
     /// Getting Ghidra for Deep mode.
     Ghidra,

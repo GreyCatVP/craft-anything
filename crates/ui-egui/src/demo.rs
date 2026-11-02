@@ -213,6 +213,7 @@ pub fn detected() -> Vec<Detected> {
     ]
 }
 
+/// Construct an in-memory demo project with the requested age and generated assets disabled.
 fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: Status, age_min: u64) -> Workspace {
     let at = craft_anything_engine::inbox::now_ms().saturating_sub(age_min * 60_000);
     Workspace {
@@ -234,6 +235,7 @@ fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: S
             last_reply: String::new(),
             asset_budget_usd: craft_anything_engine::workspace::ASSET_BUDGET_USD,
             generate_assets: false,
+            asset_providers: None,
             app_in_root: false,
             start_files: Vec::new(),
             builder: None,

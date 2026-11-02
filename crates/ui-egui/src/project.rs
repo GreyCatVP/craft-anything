@@ -481,21 +481,28 @@ pub struct Facts {
     pub references: usize,
     /// Generated assets: how many, what they cost.
     pub assets: (usize, f64),
+    /// Why spending could not be read; an unreadable ledger must not appear as zero spending.
+    pub assets_error: Option<String>,
     /// The builder's open questions, most important first.
     pub open_questions: Vec<String>,
 }
 
 impl Facts {
+    /// Read project facts on a worker, keeping ledger failures distinct from an empty history.
     pub fn read(ws: &Workspace, godot: Option<&Path>) -> Facts {
         let dir = ws.app_dir();
-        let a = ws.assets();
+        let (assets, assets_error) = match ws.try_assets() {
+            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
+            Ok(records) => ((records.len(), records.iter().fold(0.0, |sum, record| sum + record.cost_usd)), None),
+            Err(error) => ((0, 0.0), Some(error.for_people())),
+        };
         Facts {
             root: ws.root.clone(),
             site: rebuild::site_dir(&dir).is_some(),
             program: rebuild::launch(&dir, godot).is_some(),
             references: ws.references().len(),
-            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
-            assets: (a.len(), a.iter().fold(0.0, |s, x| s + x.cost_usd)),
+            assets,
+            assets_error,
             open_questions: craft_anything_ai::rebuild::self_check::open_questions(ws).into_iter().map(|u| u.question).collect(),
         }
     }
@@ -549,43 +556,127 @@ impl CraftApp {
     /// the project_assets_budget tool.
     fn raise_asset_budget(&mut self) {
         let step = self.asset_budget_step();
-        let Some(ws) = self.workspace.as_mut() else { return };
-        // The builder's tools may have changed the manifest; start from what's on disk.
-        let _ = ws.reload();
-        let params = serde_json::json!({"project": ws.root, "budget_usd": (ws.manifest.asset_budget_usd + step).min(10_000.0)});
-        self.act("project_assets_budget", params, tr("Raise the asset budget"));
+        let Some(ws) = self.workspace.as_ref() else { return };
+        let params = serde_json::json!({"project": ws.root});
+        self.change_assets("project_assets_budget", params, tr("Raise the asset budget"), Some(step));
     }
 
-    /// After project_assets_budget or project_assets_allow: show the project's new settings.
-    pub(crate) fn assets_changed(&mut self) {
-        if let Some(ws) = self.workspace.as_mut() {
-            let _ = ws.reload();
+    /// Save through the engine, then reload on the same worker. Disable further asset edits
+    /// until the saved settings arrive, so a second click never starts from an old value.
+    pub(crate) fn change_assets(&mut self, tool: &'static str, mut params: serde_json::Value, title: String, budget_step: Option<f64>) {
+        if self.asset_change_job.is_some() {
+            return;
         }
-        self.refresh_side_panel();
+        let engine = self.engine.clone();
+        let root = params.get("project").and_then(serde_json::Value::as_str).map(PathBuf::from);
+        self.asset_change_job = Some(self.jobs.spawn(title, false, move |_| {
+            let result = (|| {
+                let root = root.as_deref().unwrap_or(Path::new(""));
+                if let Some(step) = budget_step {
+                    // A CLI or another app can change this budget while the sidebar is open.
+                    // Raising starts from disk; an explicit Save still sets the typed amount.
+                    let ws = Workspace::open(root)?;
+                    params["budget_usd"] = serde_json::json!((ws.manifest.asset_budget_usd + step).min(10_000.0));
+                }
+                engine.call(
+                    tool,
+                    params,
+                    craft_anything_engine::CallOptions::new(craft_anything_engine::Caller::Ui).with_consent(craft_anything_engine::Consent::Granted),
+                )?;
+                Workspace::open(root).map(Box::new)
+            })();
+            Ok(Done::AssetSettings(result))
+        }));
+    }
+
+    /// Finish an asset settings save, updating the open project only if its root still matches.
+    pub(crate) fn assets_changed(&mut self, result: Result<Box<Workspace>, craft_anything_engine::evidence::ToolError>) {
+        self.asset_change_job = None;
+        match result {
+            Ok(saved) => {
+                if let Some(ws) = self.workspace.as_mut().filter(|ws| ws.root == saved.root) {
+                    ws.manifest = saved.manifest;
+                    self.refresh_side_panel();
+                }
+                self.refresh_projects();
+            }
+            Err(error) => self.toast(error.for_people(), true),
+        }
     }
 }
 
-/// A game project's generated-assets switch, and "7 · $2.10 of $5.00" once it's on or assets were made.
+/// Every project's provider permissions and shared asset budget, separate from coding-agent cost.
 fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     let t = Tokens::get(ui.ctx());
-    if craft_anything_engines::game::Builder::from_stack(&ws.manifest.stack).is_none() {
-        return;
-    }
     widgets::caption(ui, "Generated assets");
     ui.add_space(4.0);
-    crate::engine_ui::assets_toggle(app, ui, ws.manifest.generate_assets);
-    let (n, spent) = app.facts.assets;
-    if !ws.manifest.generate_assets && n == 0 {
-        ui.add_space(12.0);
-        return;
+    let providers = craft_anything_engines::assets::AssetProviders::built_in();
+    let saving = app.asset_change_job.is_some();
+    ui.add_enabled_ui(!saving, |ui| {
+        for provider in providers.ids().into_iter().filter_map(|id| providers.get(id)) {
+            let mut on = ws.manifest.asset_provider_allowed(provider.id());
+            ui.horizontal(|ui| {
+                if widgets::toggle(ui, &mut on, provider.name()).changed() {
+                    app.act("project_assets_allow", serde_json::json!({"project": ws.root, "provider": provider.id(), "allow": on}), tr("Save asset settings"));
+                }
+                if app.asset_keys.as_ref().and_then(|keys| keys.get(provider.id())) == Some(&false) {
+                    ui.label(RichText::new(tr("Key needed")).color(t.text_dim).size(theme::SMALL));
+                }
+            });
+        }
+    });
+    if widgets::link(ui, "Manage provider keys").clicked() {
+        app.state.modal = Some(Modal::Assets);
+    }
+    let facts_match = app.facts.root == ws.root;
+    let assets = (facts_match && app.facts.assets_error.is_none()).then_some(app.facts.assets);
+    if let Some(error) = app.facts.assets_error.as_deref().filter(|_| facts_match) {
+        ui.label(RichText::new(tr("Asset spending is unavailable. Repair assets.json before generating.")).color(t.warning).size(theme::SMALL))
+            .on_hover_text(error);
     }
     ui.add_space(6.0);
     let budget = ws.manifest.asset_budget_usd;
-    let amount = trf("{n} · ${spent} of ${budget}", &[("n", &n.to_string()), ("spent", &format!("{spent:.2}")), ("budget", &format!("{budget:.2}"))]);
-    ui.label(RichText::new(amount).font(theme::mono(12.5)).color(if spent >= budget { t.warning } else { t.text_dim }));
-    let step = craft_anything_engines::assets::usd(app.asset_budget_step());
-    if widgets::link(ui, &trf("Raise the budget by {amount}", &[("amount", &step)])).clicked() {
-        app.raise_asset_budget();
+    let (count, spent, remaining) = assets.map_or_else(
+        || ("…".to_string(), "…".to_string(), "…".to_string()),
+        |(count, spent)| (count.to_string(), format!("{spent:.2}"), format!("{:.2}", (budget - spent).max(0.0))),
+    );
+    let amount = trf("Assets: {n} · estimated spent ${spent}", &[("n", &count), ("spent", &spent)]);
+    ui.label(RichText::new(amount).font(theme::mono(12.5)).color(if assets.is_some_and(|(_, spent)| spent >= budget) { t.warning } else { t.text_dim }));
+    ui.label(
+        RichText::new(trf("Budget ${budget} · remaining ${remaining}", &[("budget", &format!("{budget:.2}")), ("remaining", &remaining)]))
+            .font(theme::mono(12.5))
+            .color(t.text_dim),
+    );
+    ui.add_enabled_ui(!saving, |ui| {
+        let id = egui::Id::new(("project-asset-budget", &ws.root));
+        let mut draft: (f64, String) = ui.data(|data| data.get_temp(id)).unwrap_or_else(|| (budget, budget.to_string()));
+        if draft.0 != budget {
+            draft = (budget, budget.to_string());
+        }
+        widgets::caption(ui, "Shared asset budget (USD)");
+        ui.horizontal(|ui| {
+            widgets::named(
+                ui.add(egui::TextEdit::singleline(&mut draft.1).desired_width(100.0).frame(widgets::text_field_frame_compact(&t))),
+                "Asset budget in USD",
+            );
+            let value = draft.1.trim().parse::<f64>().ok().filter(|v| v.is_finite() && (0.0..=10_000.0).contains(v));
+            if ui.add_enabled(value.is_some_and(|v| v != budget), egui::Button::new(tr("Save budget"))).clicked()
+                && let Some(value) = value
+            {
+                app.act("project_assets_budget", serde_json::json!({"project": ws.root, "budget_usd": value}), tr("Save asset settings"));
+            }
+        });
+        if !draft.1.trim().parse::<f64>().is_ok_and(|v| v.is_finite() && (0.0..=10_000.0).contains(&v)) {
+            widgets::caption(ui, "Enter an amount from 0 to 10000 USD.");
+        }
+        ui.data_mut(|data| data.insert_temp(id, draft));
+        let step = craft_anything_engines::assets::usd(app.asset_budget_step());
+        if widgets::link(ui, &trf("Raise the budget by {amount}", &[("amount", &step)])).clicked() {
+            app.raise_asset_budget();
+        }
+    });
+    if saving {
+        widgets::caption(ui, "Saving asset settings…");
     }
     ui.add_space(12.0);
 }
@@ -1699,6 +1790,81 @@ impl CraftApp {
 mod tests {
     use super::*;
     use craft_anything_ai::AgentEvent;
+
+    /// A broken ledger is shown as unavailable until repaired, never as an empty spending history.
+    #[test]
+    fn asset_sidebar_reports_a_broken_ledger_without_resetting_spending() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let ledger = ws.root.join("assets.json");
+        let broken = b"{not-json";
+        std::fs::write(&ledger, broken).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.facts = Facts::read(&ws, None);
+        assert!(app.facts.assets_error.is_some());
+        assert_eq!(std::fs::read(&ledger).unwrap(), broken);
+        let mut setup = false;
+        let mut h = Harness::builder().with_size(egui::vec2(320.0, 750.0)).build_ui_state(
+            move |ui, (app, ws)| {
+                if !setup {
+                    CraftApp::setup_context(ui.ctx());
+                    setup = true;
+                    return;
+                }
+                asset_line(app, ui, ws);
+            },
+            (app, ws),
+        );
+        h.run_steps(2);
+        h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
+        h.get_by_label("Assets: … · estimated spent $…");
+        h.get_by_label("Budget $5.00 · remaining $…");
+        assert!(h.query_by_label("Assets: 0 · estimated spent $0.00").is_none());
+        std::fs::write(&ledger, b"[]").unwrap();
+        let (app, ws) = h.state_mut();
+        app.facts = Facts::read(ws, None);
+        h.run_steps(2);
+        assert!(h.query_by_label("Asset spending is unavailable. Repair assets.json before generating.").is_none());
+        h.get_by_label("Assets: 0 · estimated spent $0.00");
+        h.get_by_label("Budget $5.00 · remaining $5.00");
+    }
+
+    /// Cached spending stays hidden until it belongs to the project displayed by the sidebar.
+    #[test]
+    fn asset_sidebar_never_uses_another_projects_cached_spend() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.facts = Facts { root: dir.path().join("previous-project"), assets: (4, 20.0), ..Default::default() };
+        // Render this component directly to exercise the guard independently of the app's
+        // normal pre-draw reset when the open project changes.
+        let mut setup = false;
+        let mut h = Harness::builder().with_size(egui::vec2(320.0, 700.0)).build_ui_state(
+            move |ui, (app, ws)| {
+                if !setup {
+                    CraftApp::setup_context(ui.ctx());
+                    setup = true;
+                    return;
+                }
+                asset_line(app, ui, ws);
+            },
+            (app, ws),
+        );
+        h.run_steps(2);
+        h.get_by_label("Scenario");
+        h.get_by_label("ElevenLabs");
+        h.get_by_label("Save budget");
+        h.get_by_label("Assets: … · estimated spent $…");
+        h.get_by_label("Budget $5.00 · remaining $…");
+        assert!(h.query_by_label("Assets: 4 · estimated spent $20.00").is_none());
+        let (app, ws) = h.state_mut();
+        app.facts = Facts { root: ws.root.clone(), assets: (1, 0.51), ..Default::default() };
+        h.run_steps(2);
+        h.get_by_label("Assets: 1 · estimated spent $0.51");
+        h.get_by_label("Budget $5.00 · remaining $4.49");
+    }
 
     #[test]
     fn the_app_starts_with_the_persons_settings_while_the_engine_is_busy() {

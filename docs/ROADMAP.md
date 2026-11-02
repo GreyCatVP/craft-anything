@@ -317,6 +317,12 @@ Owner: maintainers · Status: in progress (Codex resume needs a real install)
 
 ### R1.4 Asset provider trait
 Owner: open · Status: done (branch `feature/r1.4-asset-providers`)
+- [x] Add Scenario image/3D and ElevenLabs speech, sound effects and music through the asset-provider tools — one-bit, branch `feature/scenario-elevenlabs-assets` (explicit contributor request; local provider, tool and UI tests)
+- [x] Separate masked Scenario API key and API secret inputs; preserve stored credentials and clarify authentication and key-storage behavior — one-bit, branch `feature/scenario-elevenlabs-assets` (PR review follow-up; UI form regression tests)
+- [x] Project sidebar controls for each asset provider, an editable shared asset budget, and spent/remaining estimates on every project; enforce provider choices in generation tools — one-bit, branch `feature/scenario-elevenlabs-assets` (PR review follow-up; migration, provider gating and UI persistence tests)
+- [x] Review budget failure paths: checked ledger reads, receipt-first output saving, reported cost overruns, exact precursor quotes, paused choices and one current per-turn policy with live keys counted only for enabled providers
+- [ ] Add durable spending reservations and reconciliation for crashes, unrecordable receipts and provider requests with an unknown billing outcome; current accounting records returned costs and warns against blind retries
+- [ ] Exercise Scenario image → 3D and ElevenLabs speech, sound effects and music with real credentials; compare spending estimates against invoices (needs keys)
 - [x] `AssetProvider` (image, 3D, later audio) with a cost estimate; fal becomes one impl
 - [x] Model ids and prices in a table; prompts read prices from it (today `assets_note` repeats
       "$0.53")
@@ -345,9 +351,10 @@ Owner: open · Status: done (branch `feature/r1.4-asset-providers`)
       says they're now off when some were made before
 - [ ] Run Nano Banana Pro once with a real key (a picture, then a 3D model from it) and check the
       picture's size and the invoice ($0.15)
-- [ ] fal bills pictures "by rounding up to the nearest megapixel"; estimates use the exact size.
-      Confirm on a real invoice whether a 1024×1024 picture bills as 1 or 2 megapixels, then round
-      in the table (needs a key)
+- [x] fal FLUX estimates conservatively round up to whole decimal megapixels, selected by table
+      metadata; flat-rate and fractional-pricing models keep their existing behavior
+- [ ] Confirm on a real invoice whether fal's effective billing unit makes a 1024×1024 picture
+      bill as 1 or 2 megapixels; the current estimate uses the larger bound (needs a key)
 
 ### R1.5 External engine trait in L3
 Owner: open · Status: in progress (branch `feature/r1.5-engine-table`: table and pins done; transports pending)

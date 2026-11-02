@@ -2,7 +2,7 @@
 //! refinements.
 
 use super::*;
-use craft_anything_engines::assets::{Catalogue, Shape, about_usd};
+use craft_anything_engines::assets::{AssetKind, Catalogue, Shape, about_usd};
 
 pub(super) const RULES: &str = "\
 Rules:
@@ -59,6 +59,7 @@ const WEBSITE_FROM_OUTSIDE: &str = "capture/ holds what a visitor of the live si
 /// Clean room: what the builder has of an app or a game. Nothing inside it was read.
 const PROGRAM_FROM_OUTSIDE: &str = "capture/README.md says what we could see from outside. Clean room: nothing inside the program, its files or its folder was read, and you must not open, list, read, run or decompile anything there either (the tools that look inside are off, and reading its files is refused). Build from the person's request and description, the pictures in reference/ and, when capture/ has one, the picture of it running; ask the person with core_person_ask about anything you can't see.";
 
+/// Assemble the first builder prompt from the target evidence, project policy and kind-specific guidance.
 pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) -> String {
     let ws = cx.ws;
     let m = &ws.manifest;
@@ -91,6 +92,7 @@ pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) ->
         stack_and_library_steps(&m.request, &m.stack, cx.editor),
         steps(cx.deep),
     );
+    s.push_str(&format!("\n\n{}", project_assets_note(cx)));
     for section in kind.brief_sections(cx) {
         s.push_str(&format!("\n\n{section}"));
     }
@@ -125,10 +127,65 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
     })
 }
 
-/// Realistic assets with fal.ai: what each tool makes and costs (prices from the asset table,
-/// for the picture model `image_model` names), the budget, where the engine loads them from, and
-/// that every design is original.
-pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
+/// Current provider choices and shared spending limits, for every first brief and follow-up.
+pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
+    let providers = craft_anything_engines::assets::AssetProviders::built_in();
+    let mut ids: Vec<String> = providers.ids().into_iter().map(str::to_owned).collect();
+    for id in cx.ws.manifest.asset_providers.iter().flatten() {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    let states =
+        ids.iter().map(|id| format!("{id}: {}", if cx.ws.manifest.asset_provider_allowed(id) { "enabled" } else { "disabled" })).collect::<Vec<_>>().join(", ");
+    let budget = cx.ws.manifest.asset_budget_usd;
+    let Some(spent) = cx.asset_spent else { return ASSET_POLICY_UNAVAILABLE.into() };
+    let remaining = (budget - spent).max(0.0);
+    let status = format!(
+        "Project asset providers: {states}. These are the person's choices: do not re-enable a disabled provider unless they request it. Only enabled providers may generate assets; each needs its own key. Model overrides and image precursors must also use enabled providers. Images, 3D models and audio share one budget: ${budget:.2}, estimated spent ${spent:.2}, remaining ${remaining:.2}."
+    );
+    if !ids.iter().any(|id| cx.ws.manifest.asset_provider_allowed(id)) {
+        format!("{status} Generated assets are now off for this project. Do not generate new assets. Keep the ones already in app/.")
+    } else if cx.assets {
+        format!("{status} Use project_assets_allow to inspect the current provider choices and assets_key_status to check keys before choosing models.")
+    } else {
+        format!("{status} No asset provider key is available to this builder; use existing assets or simple shapes and colours.")
+    }
+}
+
+/// Fail closed when either the manifest or checked spending cannot establish current permission.
+pub(super) const ASSET_POLICY_UNAVAILABLE: &str = "The project's current asset choices or spending could not be read safely. Do not generate assets or authorize new spending. Keep existing assets until the settings can be read.";
+
+/// Whether a model of this kind has effective project permission in the current checked snapshot.
+/// Catalogue provider ids keep new providers data-driven instead of assuming every key unlocks every modality.
+pub(super) fn asset_kind_allowed(cx: &BriefCx<'_>, kind: AssetKind) -> bool {
+    if !cx.assets || cx.asset_spent.is_none() {
+        return false;
+    }
+    let table = Catalogue::built_in();
+    let allowed = |provider: &str| cx.ws.manifest.asset_provider_allowed(provider);
+    match kind {
+        AssetKind::Image => table.images().iter().any(|model| allowed(&model.provider)),
+        AssetKind::Model3d => table.models_3d().iter().any(|model| allowed(&model.provider)),
+        _ => table.audio_models().iter().any(|model| model.kind == kind && allowed(&model.provider)),
+    }
+}
+
+/// Game asset guidance includes only permitted modalities, using the same checked spending snapshot.
+pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
+    let Some(spent) = cx.asset_spent else { return ASSET_POLICY_UNAVAILABLE.into() };
+    let images = asset_kind_allowed(cx, AssetKind::Image);
+    let models = asset_kind_allowed(cx, AssetKind::Model3d);
+    let audio = [
+        (AssetKind::Speech, "assets_speech_generate makes dialogue from text and a voice_id."),
+        (AssetKind::SoundEffect, "assets_sound_generate makes sound effects."),
+        (AssetKind::Music, "assets_music_generate makes original music."),
+    ];
+    let audio_notes: Vec<_> = audio.iter().filter(|(kind, _)| asset_kind_allowed(cx, *kind)).map(|(_, note)| *note).collect();
+    if !images && !models && audio_notes.is_empty() {
+        return String::new();
+    }
+    let ws = cx.ws;
     let folder = match game::Builder::from_stack(&ws.manifest.stack) {
         Some(game::Builder::Unity) => "Unity loads them from Assets/, e.g. Assets/Generated/",
         Some(game::Builder::Godot) => "Godot loads them from the project, e.g. assets/generated/",
@@ -136,17 +193,41 @@ pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
         _ => "e.g. assets/generated/",
     };
     let budget = ws.manifest.asset_budget_usd;
-    let spent = ws.assets_spent();
-    let table = Catalogue::built_in();
-    // An unknown picture model is reported by the tool itself; the note quotes the default's price.
-    let picture = table.image_model(image_model).or_else(|_| table.image_model(None)).map(|m| m.cost(Shape::Square));
-    let (model_cost, picture_cost) = match (table.model_3d(None).map(|m| m.cost(true)), picture) {
-        (Ok(model), Ok(picture)) => (format!(" ({} each)", about_usd(model + picture)), format!(" ({})", about_usd(picture))),
-        _ => (String::new(), String::new()),
-    };
-    format!(
-        "Realistic assets: you can make them with fal.ai. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description{model_cost}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture{picture_cost} for textures, skies, backgrounds and menu art. This project's asset budget is ${budget:.2} (${spent:.2} used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it ({folder}). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. List each generated file in app/CREDITS.md as made with fal.ai."
-    )
+    let mut note = if images || models { "Realistic assets:" } else { "Generated audio:" }.to_string();
+    note.push_str(" Use enabled asset providers and choose models they supply. Each operation requires its own provider key; a key for one provider does not unlock the others.");
+    if images || models {
+        let table = Catalogue::built_in();
+        let allowed = |provider: &str| ws.manifest.asset_provider_allowed(provider);
+        // Quote only permitted models: a disabled configured default is not a usable estimate.
+        let picture = table
+            .image_model(cx.image_model)
+            .ok()
+            .filter(|m| allowed(&m.provider))
+            .or_else(|| table.image_model(None).ok().filter(|m| allowed(&m.provider)))
+            .or_else(|| table.images().iter().find(|m| allowed(&m.provider)));
+        let model = table
+            .model_3d(cx.model_3d)
+            .ok()
+            .filter(|m| allowed(&m.provider))
+            .or_else(|| table.model_3d(None).ok().filter(|m| allowed(&m.provider)))
+            .or_else(|| table.models_3d().iter().find(|m| allowed(&m.provider)));
+        if images {
+            let price = picture.map(|m| format!(" ({})", about_usd(m.cost(Shape::Square)))).unwrap_or_default();
+            note.push_str(&format!(" assets_image_generate makes a picture{price} for textures, skies, backgrounds and menu art."));
+        }
+        if models {
+            let price = model.map(|m| format!(" ({} each)", about_usd(m.cost(true) + picture.map_or(0.0, |p| p.cost(Shape::Square))))).unwrap_or_default();
+            let source = if images { "a description or an existing picture" } else { "an existing picture; new picture precursors are not permitted" };
+            note.push_str(&format!(" assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from {source}{price}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast."));
+        }
+        note.push_str(" Picture and 3D prices are estimates for permitted models; selected models can differ. Every visual asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork.");
+    }
+    for audio_note in audio_notes {
+        note.push(' ');
+        note.push_str(audio_note);
+    }
+    note.push_str(&format!(" This project's asset budget is ${budget:.2} (${spent:.2} used), shared by every operation. Prioritize assets essential to play and use existing assets for the rest. Save each one inside app/ where the engine loads it ({folder}). Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used."));
+    note
 }
 
 /// Sent once when a Deep-mode build turn ended without decompiling anything.

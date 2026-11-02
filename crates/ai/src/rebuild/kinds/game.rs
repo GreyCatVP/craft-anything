@@ -4,10 +4,6 @@
 use super::*;
 use craft_anything_engines::game;
 
-/// Told to a resumed builder when the person turned generated assets off after some were made.
-const ASSETS_NOW_OFF: &str =
-    "Generated assets are now off for this project: don't make more with assets_image_generate or assets_model_generate. Keep the ones already in app/.";
-
 pub struct GameKind;
 
 impl GameKind {
@@ -71,31 +67,29 @@ impl TargetKind for GameKind {
         "a playable game that plays like the original: the same rules, controls, numbers and feel"
     }
 
+    /// Add game study and verification instructions, including asset guidance only when enabled and keyed.
     fn brief_sections(&self, cx: &BriefCx) -> Vec<String> {
         let target = &cx.ws.manifest.target;
         if matches!(target, TargetRef::Website { .. }) {
             return vec![screenshot::SCREENSHOT_CONTRACT.to_string(), self_test::SELF_TEST_CONTRACT.to_string()];
         }
         // Paid, so only when the person turned it on for this project and a key is set up.
-        let generated = cx.assets && cx.ws.manifest.generate_assets;
+        let generated = asset_kind_allowed(cx, craft_anything_engines::assets::AssetKind::Image)
+            && asset_kind_allowed(cx, craft_anything_engines::assets::AssetKind::Model3d);
         let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
-        if generated {
-            s.push(assets_note(cx.ws, cx.image_model));
-        }
+        s.extend(self.follow_up_sections(cx));
         s.push(screenshot::SCREENSHOT_CONTRACT.to_string());
         s.push(self_test::SELF_TEST_CONTRACT.to_string());
         s
     }
 
-    /// The person may have turned generated assets on (or added a key) or off since the brief.
+    /// Refresh game art guidance for follow-ups when the project permits generation and a key is available.
     fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
-        if cx.assets && cx.ws.manifest.generate_assets {
-            vec![assets_note(cx.ws, cx.image_model)]
-        } else if !cx.ws.assets().is_empty() {
-            vec![ASSETS_NOW_OFF.to_string()]
-        } else {
-            Vec::new()
+        if !cx.assets || cx.asset_spent.is_none() {
+            return Vec::new();
         }
+        let note = assets_note(cx);
+        if note.is_empty() { Vec::new() } else { vec![note] }
     }
 
     /// Every game must play its core loop; a game of a website has no mechanics sheet (its brief

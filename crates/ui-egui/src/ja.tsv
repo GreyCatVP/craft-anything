@@ -237,6 +237,20 @@ Game engines	ゲームエンジン
 Game files	ゲームファイル
 General	一般
 Generate custom pictures and models	独自の画像とモデルを生成
+Generate pictures, models and audio	画像、モデル、音声を生成
+Generate speech	読み上げを生成
+Generate a sound effect	効果音を生成
+Generate music	音楽を生成
+Needs an asset provider key. Until then the game is built without generated assets.	素材サービスのキーが必要です。追加するまで、生成素材を使わずにゲームを作成します。
+Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	各サービスのアカウントで支払います。3D モデルは約 {model}、画像は約 {picture}。音声の料金は長さによって異なります。オフの場合、生成素材を使わずにゲームを作成します。
+Add a provider key	サービスのキーを追加
+Your asset provider keys	素材サービスのキー
+Use fal.ai, Scenario or ElevenLabs for generated assets.	fal.ai、Scenario、ElevenLabs で素材を生成します。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	ご自身のサービスアカウントでオリジナルの画像、モデル、読み上げ、効果音、音楽を生成します。視覚素材の概算料金はモデルが {model}、画像が {picture} です。各プロジェクトの予算は {budget} です。キーは利用可能な場合はシステムのキーチェーンに、それ以外の場合は非公開のローカルキーファイルに保存されます。設定 → ビルドで画像と 3D のサービスを選択できます。
+Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	fal.ai または Scenario で画像と 3D モデルを、ElevenLabs で読み上げ、効果音、音楽を生成します。モデルは約 {model}、各プロジェクトの予算は {budget} です。設定 → ビルドで視覚モデルを選択できます。
+3D model generator	3D モデル生成サービス
+What pictures are turned into 3D models with.	画像を 3D モデルに変換するサービス。
+What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	承認を求める前に、新しいゲームが画像、3D モデル、音声の生成に使用できる金額です。各プロジェクトが独自の予算を保持します。
 Generated art (games)	生成アート(ゲーム)
 Generated assets	生成アセット
 Generated pictures and 3D models are made with fal.ai.	生成画像と 3D モデルは fal.ai で作成します。
@@ -493,6 +507,7 @@ Pick the app, game or file to rebuild	再構築するアプリ、ゲーム、フ
 Pick the folder for this project	このプロジェクトのフォルダを選ぶ
 Pick the game's folder	ゲームのフォルダを選ぶ
 Picture model	画像モデル
+Unavailable model: {id}	利用できないモデル: {id}
 Pictures	画像
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	IoStore コンテナからはまだ画像を保存できません。中身を見ることはできます。
 Pictures of the original	元の画像
@@ -832,3 +847,18 @@ your files there are the app, edited in place	そこにあるファイルがア�
 — use the filter to find the rest.	— 残りは絞り込みで探してください。
 ← Back	← 戻る
 ↑↓ to move · Enter to run · Esc to close	↑↓ で移動 · Enter で実行 · Esc で閉じる
+API key	API キー
+API secret	API シークレット
+{name} API secret	{name} の API シークレット
+Paste your {name} API secret	{name} の API シークレットを貼り付け
+Save asset settings	素材設定を保存
+Key needed	キーが必要
+Manage provider keys	プロバイダーのキーを管理
+Assets: {n} · estimated spent ${spent}	素材：{n} · 推定支出 ${spent}
+Budget ${budget} · remaining ${remaining}	予算 ${budget} · 残額 ${remaining}
+Shared asset budget (USD)	素材の共有予算（USD）
+Asset budget in USD	素材の予算（USD）
+Save budget	予算を保存
+Saving asset settings…	素材設定を保存中…
+Enter an amount from 0 to 10000 USD.	0〜10000 USD の金額を入力してください。
+Asset spending is unavailable. Repair assets.json before generating.	素材の支出を読み取れません。生成する前に assets.json を修復してください。

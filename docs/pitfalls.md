@@ -49,6 +49,11 @@ Don't close or rewrite other people's work without asking.
 
 ## Tests
 
+**An accepted socket inherited nonblocking mode on another platform.** A local test server
+polled a nonblocking listener, then assumed its accepted streams would block while reading.
+Set each accepted stream's mode explicitly before reading and retain its read timeout; Linux
+and BSD-derived systems differ in whether the listener's flags are inherited.
+
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
 created folders in the real config directory (`Session::default()` uses it).
@@ -218,6 +223,12 @@ so #53 merged with a long line rustfmt rewraps. Run `cargo fmt --all --check` la
 edit, right before committing.
 
 ## Design
+
+**A damaged spending ledger looked like an empty project.** Budget authorization must use a
+checked ledger read; only a missing ledger is empty. Never overwrite an unreadable history with
+a new row. After a provider returns, record its reported cost before publishing its output:
+rejecting a late cost overrun or deleting an output cannot undo an expense already incurred.
+Surface the error, retain known spending and stop any following paid stage instead of hiding it.
 
 **Reading literals and skipping the rest.** The Electron window reader skipped a spread inside
 `webPreferences`, so a window whose preferences came partly from another object was reported as

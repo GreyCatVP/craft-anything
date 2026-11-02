@@ -8,6 +8,14 @@ but output is incomplete in a known way · **Fixed** = was broken or partial in 
 and re-checked · **Unverified** = implemented, not runnable here (needs a device, engine or OS
 we don't have); source reviewed · **New** = added since the audit, unit-tested and smoke-tested.
 
+## Generated assets (2026-11-02)
+
+**New:** `assets_speech_generate`, `assets_sound_generate`, and `assets_music_generate` use
+ElevenLabs; the existing image and model tools can select Scenario. Provider protocol tests use
+local HTTP servers; engine tests cover provider selection, project opt-in, budget checks, file
+confinement and asset records. Scenario and ElevenLabs have not been exercised with live keys.
+The existing fal.ai defaults remain available. See [provider setup and spending estimates](extending.md#built-in-generated-assets).
+
 ## Summary by toolset
 
 | Toolset | Verified | Partial | Fixed | Unverified | Notes |
