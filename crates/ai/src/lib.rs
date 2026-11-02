@@ -67,7 +67,7 @@ impl BackendKind {
             BackendKind::Openai => &[openai::OPENAI_DEFAULT_MODEL],
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes"],
+            BackendKind::AgentCli => &["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "omp"],
         }
     }
 
@@ -344,9 +344,15 @@ impl AiHub {
         self.save_config(&cfg)
     }
 
-    /// Add (or replace) a backend, storing its key in the keychain when given.
+    /// Add (or replace) a backend, storing its key in the keychain when given. An agent whose
+    /// plain command starts an interactive session ([`cli_agents::acp::ACP_BY_DEFAULT`]) gets ACP
+    /// on; a caller that names its options keeps them.
     pub fn add_backend(&self, cfg: BackendConfig, key: Option<String>) -> Result<(), ToolError> {
-        self.add_backend_with(BackendEntry { config: cfg, options: BackendOptions::default() }, key)
+        let mut options = BackendOptions::default();
+        if cfg.kind == BackendKind::AgentCli && cli_agents::acp::acp_by_default(&cfg.model) {
+            options.acp = Some(true);
+        }
+        self.add_backend_with(BackendEntry { config: cfg, options }, key)
     }
 
     /// Add an OpenAI-compatible server by its address: Ollama or LM Studio on another computer, or

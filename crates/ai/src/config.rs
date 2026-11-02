@@ -56,7 +56,8 @@ pub struct BackendOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
     /// Agent CLIs that speak ACP (`cli_agents::acp::ACP_AGENTS`): chat over it, one agent process
-    /// per conversation (off unless set).
+    /// per conversation (off unless set, or on for an agent in `ACP_BY_DEFAULT` added without
+    /// options).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acp: Option<bool>,
 }
