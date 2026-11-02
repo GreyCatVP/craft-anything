@@ -679,6 +679,10 @@ What the person asks for comes first, in every kind; the stack table is only the
 - [ ] Make: a game whose request names a technology the stack table doesn't know (Phaser, Bevy…)
       still needs the default engine installed to start, though the builder is told to use what
       was named; ask the person, or let such a game start without an engine
+- [ ] Build check: a page asked for in plain HTML and CSS has nothing to build, but the check
+      only knows Cargo.toml, package.json and engine projects ("No project to build found in
+      app/"), so a builder added a placeholder package.json (`"build": "node -e \"0\""`) to pass;
+      count a static site (an `index.html` in app/) as built
 - [x] CLI: after the tool name, `--project` is the tool's own option when it has one
       (`rebuild-check --project <folder>`, `project-show --project <folder>`), as `--format` is;
       otherwise, and always before the tool name, it's the global investigation folder
