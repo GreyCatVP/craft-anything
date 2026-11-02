@@ -496,14 +496,16 @@ pub fn never_unasked(ws: Option<&Workspace>, tool: &str, input: &Value) -> Optio
             (system || ours).then(|| refuse("changes system files or Craft Anything's own records")).flatten()
         }
         "Bash" | "PowerShell" => {
-            let c = s("command").to_ascii_lowercase();
+            let command = s("command");
+            let c = command.to_ascii_lowercase();
             if PUBLISH.iter().any(|k| c.contains(k)) {
                 return refuse("publishes or pushes anything");
             }
             if SYSTEM_COMMANDS.iter().any(|k| c.contains(k)) {
                 return refuse("changes the system, its settings or its users, or shuts it down");
             }
-            if DELETES.iter().any(|k| c.contains(k)) && deletes_outside(&c, ws) {
+            // Paths keep their case: on a Mac or Linux `/Users/x` isn't `/users/x`.
+            if DELETES.iter().any(|k| c.contains(k)) && deletes_outside(&command, ws) {
                 return refuse("deletes anything outside the project or the temp folder");
             }
             None
@@ -554,11 +556,12 @@ fn deletes_outside(command: &str, ws: Option<&Workspace>) -> bool {
     let temp = std::env::temp_dir();
     let roots: Vec<PathBuf> = ws.map(|w| w.root.clone()).into_iter().chain([temp, PathBuf::from("/tmp"), PathBuf::from("c:/tmp")]).collect();
     command.split(|c: char| c.is_whitespace() || c == '"' || c == '\'').any(|tok| {
-        if tok.contains("..") || tok.starts_with('~') || tok.contains("$home") || tok.contains("%userprofile%") || tok.contains("$env:") {
+        let lower = tok.to_ascii_lowercase();
+        if tok.contains("..") || tok.starts_with('~') || lower.contains("$home") || lower.contains("%userprofile%") || lower.contains("$env:") {
             return true;
         }
         // Git Bash writes C:\x as /c/x.
-        let tok = tok.strip_prefix("/c/").map(|r| format!("c:/{r}")).unwrap_or_else(|| tok.to_string());
+        let tok = tok.strip_prefix("/c/").or_else(|| tok.strip_prefix("/C/")).map(|r| format!("c:/{r}")).unwrap_or_else(|| tok.to_string());
         let absolute = tok.starts_with('/') || tok.get(1..3).is_some_and(|d| d == ":/" || d == ":\\");
         absolute && !roots.iter().any(|r| inside(r, Path::new(&tok)))
     })
@@ -863,6 +866,22 @@ mod tests {
         let v = e.call("core_person_ask", json!({"question": "Blue or red?"}), crate::CallOptions::new(crate::Caller::Mcp)).unwrap().to_json();
         assert_eq!(v["result"]["answered"], false);
         assert!(v["result"]["note"].as_str().unwrap().contains("decide questions yourself"));
+    }
+
+    #[test]
+    fn auto_mode_deletes_inside_a_project_whose_path_has_capitals() {
+        // Regression: the command was lower-cased before its paths were compared, so on a Mac
+        // (`/Users/…`, `/var/folders/…/T/`) deleting the project's own build folder was refused.
+        let (_d, mut w) = ws();
+        w.root = PathBuf::from(if cfg!(windows) { "D:/Projects/MyGame" } else { "/Users/Me/Projects/MyGame" });
+        let root = w.root.display().to_string();
+        let rm = |cmd: String| never_unasked(Some(&w), "Bash", &json!({"command": cmd}));
+        assert_eq!(rm(format!("rm -rf \"{root}/app/Build\"")), None);
+        assert_eq!(rm(format!("RM -RF \"{root}/Intermediate\"")), None, "the command's own case doesn't matter");
+        assert!(rm(format!("rm -rf \"{root}/../Other\"")).is_some(), "climbing out is still refused");
+        assert!(rm("rm -rf $HOME/stuff".into()).is_some());
+        let elsewhere = if cfg!(windows) { "D:/Projects/Other" } else { "/Users/Me/Projects/Other" };
+        assert!(rm(format!("rm -rf \"{elsewhere}\"")).is_some(), "a neighbouring folder is still outside");
     }
 
     #[test]

@@ -854,9 +854,10 @@ Gaps found while using the app for real projects.
       be checked
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
-- [ ] Two engine tests fail on a Mac, on `main` too: `real_binary_end_to_end_if_present` expects
-      `/bin/ls` to be Linux, and `auto_mode_keeps_going_but_never_does_the_dangerous_things` is
-      refused `rm -rf` in a temp folder under `/var/folders` — claimed: Claude, branch bugfix/r3.11-mac-engine-tests
+- [x] Two engine tests failed on a Mac: `real_binary_end_to_end_if_present` expected `/bin/ls` to
+      be Linux (it now expects the system it runs on), and Auto mode refused deleting inside a
+      project whose path has capitals (`/Users/…`, `/var/folders/…/T/`): the command was lower-cased
+      before its paths were compared. Paths keep their case now
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -1117,9 +1118,15 @@ against what its original was recorded answering.
 - [ ] `native_source_folder_write` uses the built-in decompiler only: use Ghidra in Deep mode when it's there
 - [ ] `native_publisher_show` hashes the file minus the signature fields, not section by section;
       a file with unusual gaps between sections can read as different
-- [ ] Two engine tests fail on a Mac, on `main` too: `real_binary_end_to_end_if_present` expects
-      `/bin/ls` to be Linux, and `auto_mode_keeps_going_but_never_does_the_dangerous_things`
-      refuses `rm -rf` of a temp path under `/var/folders` — claimed: Claude, branch bugfix/r3.11-mac-engine-tests
+- [x] Two engine tests failed on a Mac: `real_binary_end_to_end_if_present` expected `/bin/ls` to
+      be Linux (it now expects the system it runs on), and Auto mode refused deleting inside a
+      project whose path has capitals (`/Users/…`, `/var/folders/…/T/`): the command was lower-cased
+      before its paths were compared. Paths keep their case now
+- [ ] Auto mode's delete check splits a command at spaces, quotes included, so deleting inside a
+      project whose path has a space (`rm -rf "D:/Unreal Projects/Game/Build"`) is refused as outside it
+- [ ] `waiting_keeps_it_running_until_cancelled_then_stops_it` fails now and then in a full engine run:
+      it frees a port, then checks nothing listens there after stopping, and a test beside it may get
+      that port; seen once on a Mac, passed 8 runs alone
 - [ ] Looked at and left for later, as niche for now: firmware image kinds (ESP32, U-Boot, device
       trees, Intel HEX), Erlang BEAM, GPU code objects, kernel modules, GameCube DOL, Mac crash
       reports, SAZ and qlog captures, protobuf bodies, R8 mappings, JNI links, MCP over HTTP

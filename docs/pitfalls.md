@@ -359,6 +359,12 @@ the final check failed a finished build; Try again then studied the original aga
 builder the first brief. A run decides what's left from what the project records, not from which
 button started it, and a check that couldn't look says nothing about the build.
 
+**Lower-casing a command, then comparing its paths.** Auto mode lower-cased a shell command to
+match keywords, then checked its paths against the project folder with that same text; Windows
+compares paths without case, so only a Mac showed it: deleting `/Users/…/app/Build` in the
+person's own project was refused. Match keywords on a lower-cased copy and compare paths as
+written; test a path rule with capitals and a folder outside the temp directory.
+
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts
 broke, and "Basic Membership" lost a word. It also tested whole tokens, so a secret inside a URL or
