@@ -806,6 +806,7 @@ Pick the folder for this project	選擇此專案的資料夾
 Pick the game's folder	選擇遊戲資料夾
 Picture a program's window	擷取程式視窗圖片
 Picture model	圖片模型
+Unavailable model: {id}	模型無法使用：{id}
 Pictures	圖片
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	目前不支援從 IoStore 容器儲存圖片，但可以檢視其中的內容。
 Pictures of the original	原作圖片

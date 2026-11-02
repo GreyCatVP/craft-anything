@@ -695,6 +695,7 @@ Generated art (games)	Graphismes générés (jeux)
 Budget for a new project	Budget d'un nouveau projet
 What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Ce qu'un nouveau jeu peut dépenser en images et modèles 3D générés avant qu'on vous demande. Chaque projet garde le sien.
 Picture model	Modèle d'images
+Unavailable model: {id}	Modèle indisponible : {id}
 What pictures and textures are made with.	Ce qui sert à créer les images et les textures.
 a picture	une image
 Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	Les plugins ajoutent des outils que Craft Anything propose comme les siens : serveurs MCP (une commande ou une adresse ; lisez leurs outils après l'ajout) ou composants WebAssembly (un fichier .wasm, qui ne peut toucher ni à vos fichiers ni au réseau).

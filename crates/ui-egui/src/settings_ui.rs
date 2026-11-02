@@ -629,7 +629,10 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
     );
     let table = craft_anything_engines::assets::Catalogue::built_in();
     row(ui, "Picture model", "What pictures and textures are made with.", |ui| {
-        let current = table.image_model(a.image_model.as_deref()).or_else(|_| table.image_model(None)).map(|m| m.name.clone()).unwrap_or_default();
+        let current = table
+            .image_model(a.image_model.as_deref())
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", a.image_model.as_deref().unwrap_or_default())]));
         egui::ComboBox::from_id_salt("image-model").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
             for m in table.images() {
                 let price = crate::usage::asset_cost_words(m.cost(craft_anything_engines::assets::Shape::Square));
@@ -643,7 +646,10 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
         });
     });
     row(ui, "3D model generator", "What pictures are turned into 3D models with.", |ui| {
-        let current = table.model_3d(a.model_3d.as_deref()).or_else(|_| table.model_3d(None)).map(|m| m.name.clone()).unwrap_or_default();
+        let current = table
+            .model_3d(a.model_3d.as_deref())
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", a.model_3d.as_deref().unwrap_or_default())]));
         egui::ComboBox::from_id_salt("model-3d").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
             for m in table.models_3d() {
                 let price = crate::usage::asset_cost_words(m.cost(true));

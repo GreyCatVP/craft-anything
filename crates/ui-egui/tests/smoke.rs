@@ -428,6 +428,71 @@ fn a_project_with_assets_off_and_none_recorded_still_shows_the_budget() {
     h.get_by_label("Save budget");
 }
 
+/// Unknown saved model IDs stay visible and unchanged until a valid catalogue choice is clicked.
+#[test]
+fn unavailable_asset_models_are_preserved_until_explicitly_replaced() {
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
+        a.settings.assets.image_model = Some("missing-picture-model".into());
+        a.settings.assets.model_3d = Some("missing-3d-model".into());
+        a
+    });
+    h.run_steps(3);
+    h.get_by_value("Unavailable model: missing-picture-model");
+    h.get_by_value("Unavailable model: missing-3d-model");
+    assert_eq!(h.state().settings.assets.image_model.as_deref(), Some("missing-picture-model"));
+    assert_eq!(h.state().settings.assets.model_3d.as_deref(), Some("missing-3d-model"));
+
+    let table = craft_anything_engines::assets::Catalogue::built_in();
+    let image = table.image_model(None).unwrap();
+    h.get_by_value("Unavailable model: missing-picture-model").scroll_to_me();
+    h.run();
+    h.get_by_value("Unavailable model: missing-picture-model").click();
+    h.run();
+    h.get_by_label_contains(&format!("{} · {} ·", image.name, image.provider)).click();
+    h.run_steps(3);
+    h.get_by_value(&image.name);
+    assert!(h.query_by_value("Unavailable model: missing-picture-model").is_none());
+    assert_eq!(h.state().settings.assets.image_model.as_deref(), Some(image.id.as_str()));
+    assert_eq!(h.state().settings.assets.model_3d.as_deref(), Some("missing-3d-model"));
+
+    let model = table.model_3d(None).unwrap();
+    h.get_by_value("Unavailable model: missing-3d-model").scroll_to_me();
+    h.run();
+    h.get_by_value("Unavailable model: missing-3d-model").click();
+    h.run();
+    h.get_by_label_contains(&format!("{} · {} ·", model.name, model.provider)).click();
+    h.run_steps(3);
+    h.get_by_value(&model.name);
+    assert!(h.query_by_value("Unavailable model: missing-3d-model").is_none());
+    assert_eq!(h.state().settings.assets.model_3d.as_deref(), Some(model.id.as_str()));
+    assert_eq!(h.state().settings.assets.image_model.as_deref(), Some(image.id.as_str()));
+}
+
+/// Unset and blank model IDs still display the catalogue defaults without rewriting settings.
+#[test]
+fn unspecified_asset_models_display_defaults_without_changing_settings() {
+    let table = craft_anything_engines::assets::Catalogue::built_in();
+    for saved in [None, Some(String::new()), Some("  ".into())] {
+        let original = saved.clone();
+        let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+            let mut a = demo::app(demo::engine(Mode::Beginner, true));
+            a.state.settings_open = true;
+            a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
+            a.settings.assets.image_model = saved.clone();
+            a.settings.assets.model_3d = saved;
+            a
+        });
+        h.run_steps(3);
+        h.get_by_value(&table.image_model(None).unwrap().name);
+        h.get_by_value(&table.model_3d(None).unwrap().name);
+        assert_eq!(h.state().settings.assets.image_model, original);
+        assert_eq!(h.state().settings.assets.model_3d, original);
+    }
+}
+
 #[test]
 fn an_engine_download_shows_in_the_title_bar_on_every_screen() {
     use craft_anything_engines::game::Builder;
