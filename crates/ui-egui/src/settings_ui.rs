@@ -305,6 +305,19 @@ fn engines(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
+/// Keep both selectors in place while their model-specific choices load or fail. Loading is
+/// scheduled after drawing, and a failed lookup stays visible until explicitly retried.
+fn model_options_loading(ui: &mut Ui, backend: &str) {
+    ui.add_enabled_ui(false, |ui| {
+        for (id, label) in [("model-context", "Context window"), ("model-reasoning", "Reasoning")] {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(tr(label));
+                egui::ComboBox::from_id_salt((id, backend)).icon(widgets::combo_icon).selected_text(tr("Default")).show_ui(ui, |_| {});
+            });
+        }
+    });
+}
+
 /// Draw AI settings and model pickers, preserving drafts during contention and invalidating confirmed context changes.
 fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if app.agent_model_picker.as_ref().is_some_and(|p| app.hub.model_context(&p.context.backend.config.name).is_ok_and(|current| current != p.context)) {
@@ -323,6 +336,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
     let mut chosen_effort = None;
     let (mut pick_agent_model, mut chosen_agent_model, mut remote_program) = (None, None, None);
+    let (mut tune_models, mut save_tuning) = (Vec::new(), None);
     // The AI whose Remove was pressed once: asked again before its key is deleted.
     let confirm_id = egui::Id::new("remove-ai");
     let confirming: Option<String> = ui.data(|d| d.get_temp(confirm_id));
@@ -438,6 +452,69 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                             }
                         });
                     }
+                    if craft_anything_ai::model_options::supported(b) {
+                        if let Some(draft) = app.model_tuning.get_mut(&b.name) {
+                            if let Some(choices) = &draft.choices {
+                                let mut changed = false;
+                                ui.add_enabled_ui(!draft.saving, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(tr("Context window"));
+                                        let label = draft
+                                            .context
+                                            .and_then(|value| choices.context.iter().find(|choice| choice.value == value))
+                                            .map(|choice| tr(&choice.label))
+                                            .unwrap_or_else(|| tr("Default"));
+                                        egui::ComboBox::from_id_salt(("model-context", &b.name)).icon(widgets::combo_icon).selected_text(label).show_ui(
+                                            ui,
+                                            |ui| {
+                                                changed |= ui.selectable_value(&mut draft.context, None, tr("Default")).changed();
+                                                for choice in &choices.context {
+                                                    changed |= ui.selectable_value(&mut draft.context, Some(choice.value), tr(&choice.label)).changed();
+                                                }
+                                            },
+                                        );
+                                    });
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(tr("Reasoning"));
+                                        let label = draft
+                                            .reasoning
+                                            .and_then(|value| choices.reasoning.iter().find(|choice| choice.value == value))
+                                            .map(|choice| choice.label.clone())
+                                            .unwrap_or_else(|| tr("Default"));
+                                        egui::ComboBox::from_id_salt(("model-reasoning", &b.name)).icon(widgets::combo_icon).selected_text(label).show_ui(
+                                            ui,
+                                            |ui| {
+                                                changed |= ui.selectable_value(&mut draft.reasoning, None, tr("Default")).changed();
+                                                for choice in &choices.reasoning {
+                                                    let response = ui.selectable_value(&mut draft.reasoning, Some(choice.value), &choice.label);
+                                                    changed |= response.changed();
+                                                    if let Some(description) = &choice.description {
+                                                        response.on_hover_text(description);
+                                                    }
+                                                }
+                                            },
+                                        );
+                                    });
+                                });
+                                if changed {
+                                    save_tuning = Some(draft.params());
+                                }
+                            } else {
+                                model_options_loading(ui, &b.name);
+                                if let Some(error) = &draft.error {
+                                    ui.add(egui::Label::new(RichText::new(error).color(t.danger)).wrap());
+                                    if icons::button(ui, "refresh-cw", 24.0, false, "Load model options").clicked() {
+                                        tune_models.push(b.name.clone());
+                                    }
+                                } else {
+                                    ui.spinner();
+                                }
+                            }
+                        } else {
+                            model_options_loading(ui, &b.name);
+                            tune_models.push(b.name.clone());
+                        }
+                    }
                 });
             });
             ui.add_space(6.0);
@@ -527,6 +604,12 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if close_picker {
         app.model_picker = None;
         app.agent_model_picker = None;
+    }
+    for name in tune_models {
+        app.pick_model_options(&name);
+    }
+    if let Some(params) = save_tuning {
+        app.set_model_options(params);
     }
     if let Some(name) = remove {
         ui.data_mut(|d| d.remove::<String>(confirm_id));
@@ -904,5 +987,157 @@ mod tests {
         app.hub.set_enabled("OpenCode", false).unwrap();
         draw(&mut app);
         assert!(app.agent_model_picker.is_none(), "a confirmed settings change still invalidates the picker");
+    }
+}
+
+#[cfg(test)]
+mod model_options_tests {
+    use super::*;
+    use craft_anything_ai::config::{CliContext, CliReasoningEffort};
+    use craft_anything_ai::model_options::{ModelOption, ModelTuning};
+
+    fn app_with_backend() -> CraftApp {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, false));
+        app.engine.session().settings.ai = Default::default();
+        app.backends = vec![craft_anything_ai::BackendConfig {
+            name: "Copilot test".into(),
+            kind: BackendKind::AgentCli,
+            model: "copilot".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        }];
+        app
+    }
+
+    fn render(app: &mut CraftApp) -> String {
+        let context = egui::Context::default();
+        crate::theme::install_fonts(&context);
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| ai(app, ui));
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some(text.galley.text().to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn model_controls_render_context_and_reasoning_without_loading_a_cli() {
+        let mut app = app_with_backend();
+        let mut draft = crate::ModelTuningDraft {
+            backend: "Copilot test".into(),
+            cli_model: Some("test-model".into()),
+            choices: None,
+            context: Some(CliContext::Long),
+            reasoning: Some(CliReasoningEffort::Minimal),
+            saving: false,
+            error: None,
+        };
+        draft.set_choices(ModelTuning {
+            model: "test-model".into(),
+            context: vec![ModelOption { value: CliContext::Long, label: "1M".into(), description: None }],
+            reasoning: vec![ModelOption { value: CliReasoningEffort::High, label: "high".into(), description: None }],
+        });
+        assert_eq!(draft.reasoning, None, "a model must not inherit an unsupported effort");
+        draft.reasoning = Some(CliReasoningEffort::High);
+        app.model_tuning.insert(draft.backend.clone(), draft);
+        let text = render(&mut app);
+        assert!(text.contains("Context window") && text.contains("Reasoning") && text.contains("1M") && text.contains("high"), "{text}");
+        assert_eq!(app.model_tuning["Copilot test"].params().context, Some(CliContext::Long));
+    }
+
+    #[test]
+    fn model_controls_are_always_visible_and_discovery_is_not_requeued_each_frame() {
+        let mut app = app_with_backend();
+        let text = render(&mut app);
+        assert!(text.contains("Context window") && text.contains("Reasoning"), "{text}");
+        let jobs = app.jobs.list.len();
+        assert!(app.model_tuning.contains_key("Copilot test"));
+        render(&mut app);
+        assert_eq!(app.jobs.list.len(), jobs);
+        app.model_tuning.get_mut("Copilot test").unwrap().error = Some("Discovery unavailable".into());
+        let text = render(&mut app);
+        assert!(text.contains("Context window") && text.contains("Reasoning") && text.contains("Discovery unavailable"), "{text}");
+        assert_eq!(app.jobs.list.len(), jobs, "failed discovery waits for an explicit retry");
+    }
+
+    #[test]
+    fn model_option_changes_save_without_closing_the_controls() {
+        let mut app = app_with_backend();
+        app.hub.add_backend(app.backends[0].clone(), None).unwrap();
+        app.backend_options = app.hub.options();
+        let state = crate::ModelTuningDraft {
+            backend: "Copilot test".into(),
+            cli_model: None,
+            choices: None,
+            context: Some(CliContext::Long),
+            reasoning: Some(CliReasoningEffort::High),
+            saving: false,
+            error: None,
+        };
+        let params = state.params();
+        app.model_tuning.insert(state.backend.clone(), state);
+        app.set_model_options(params);
+        assert!(app.model_tuning["Copilot test"].saving);
+        let started = std::time::Instant::now();
+        while app.model_tuning["Copilot test"].saving && started.elapsed() < std::time::Duration::from_secs(3) {
+            for finished in app.jobs.poll() {
+                app.handle_done(finished);
+            }
+            std::thread::park_timeout(std::time::Duration::from_millis(5));
+        }
+        assert!(!app.model_tuning["Copilot test"].saving);
+        assert_eq!(app.hub.options()["Copilot test"].cli_context, Some(CliContext::Long));
+        assert_eq!(app.backend_options["Copilot test"].cli_reasoning_effort, Some(CliReasoningEffort::High));
+    }
+
+    #[test]
+    fn choosing_a_model_automatically_repopulates_its_options() {
+        let mut app = app_with_backend();
+        app.hub
+            .add_backend_with(
+                craft_anything_ai::BackendEntry {
+                    config: app.backends[0].clone(),
+                    options: craft_anything_ai::BackendOptions {
+                        cli_model: Some("old-model".into()),
+                        command: Some("craft-anything-no-such-test-agent".into()),
+                        ..Default::default()
+                    },
+                },
+                None,
+            )
+            .unwrap();
+        app.backend_options = app.hub.options();
+        app.model_tuning.insert(
+            "Copilot test".into(),
+            crate::ModelTuningDraft {
+                backend: "Copilot test".into(),
+                cli_model: Some("old-model".into()),
+                choices: None,
+                context: None,
+                reasoning: None,
+                saving: false,
+                error: Some("Old choices".into()),
+            },
+        );
+        app.set_model("Copilot test", "new-model");
+        let started = std::time::Instant::now();
+        while app.backend_options["Copilot test"].cli_model.as_deref() != Some("new-model") && started.elapsed() < std::time::Duration::from_secs(3) {
+            for finished in app.jobs.poll() {
+                app.handle_done(finished);
+            }
+            std::thread::park_timeout(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(app.backend_options["Copilot test"].cli_model.as_deref(), Some("new-model"));
+        assert!(!app.model_tuning.contains_key("Copilot test"));
+        let text = render(&mut app);
+        assert!(text.contains("new-model") && text.contains("Context window") && text.contains("Reasoning"), "{text}");
+        assert_eq!(app.model_tuning["Copilot test"].cli_model.as_deref(), Some("new-model"));
+        assert_eq!(app.model_tuning["Copilot test"].error, None);
     }
 }

@@ -165,6 +165,20 @@ pub enum Done {
         context: craft_anything_ai::ModelContext,
         result: Result<Vec<craft_anything_ai::AgentModel>, ToolError>,
     },
+    ModelTuning {
+        name: String,
+        cli_model: Option<String>,
+        result: Result<craft_anything_ai::model_options::ModelTuning, ToolError>,
+    },
+    ModelChanged {
+        name: String,
+        model: String,
+        result: Result<craft_anything_ai::BackendOptions, ToolError>,
+    },
+    ModelOptionsSaved {
+        params: craft_anything_ai::model_options::SetModelOptions,
+        result: Result<(), ToolError>,
+    },
     Picked {
         pick: Pick,
         path: Option<PathBuf>,
@@ -289,6 +303,39 @@ pub struct TargetInfo {
     pub bytes: Arc<[u8]>,
 }
 
+/// Cached choices and editable values for one backend/model. Changes save immediately; controls
+/// stay in place while discovery or a save is pending, and failures retain a retryable state.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModelTuningDraft {
+    pub backend: String,
+    pub cli_model: Option<String>,
+    pub choices: Option<craft_anything_ai::model_options::ModelTuning>,
+    pub context: Option<craft_anything_ai::config::CliContext>,
+    pub reasoning: Option<craft_anything_ai::config::CliReasoningEffort>,
+    #[serde(default)]
+    pub saving: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ModelTuningDraft {
+    /// Drop an override the selected model does not advertise before presenting its controls.
+    pub fn set_choices(&mut self, choices: craft_anything_ai::model_options::ModelTuning) {
+        self.context = self.context.filter(|value| choices.context.iter().any(|choice| choice.value == *value));
+        self.reasoning = self.reasoning.filter(|value| choices.reasoning.iter().any(|choice| choice.value == *value));
+        self.choices = Some(choices);
+    }
+
+    pub fn params(&self) -> craft_anything_ai::model_options::SetModelOptions {
+        craft_anything_ai::model_options::SetModelOptions {
+            backend: self.backend.clone(),
+            expected_cli_model: self.cli_model.clone(),
+            context: self.context,
+            reasoning: self.reasoning,
+        }
+    }
+}
+
 /// The last snapshot of the session, refreshed whenever the lock is free and something changed.
 #[derive(Debug, Clone, Default)]
 pub struct SessionView {
@@ -299,6 +346,8 @@ pub struct SessionView {
     pub ledger: Vec<Evidence>,
     pub ledger_len: usize,
     pub unknowns: Vec<Unknown>,
+    /// Recorded answers (`fnd_*`), distinct from the evidence ledger that supports them.
+    pub findings: Vec<craft_anything_engine::tools::investigation_tools::Finding>,
     pub project: Option<String>,
     pub project_allows: Vec<String>,
 }
@@ -378,6 +427,7 @@ pub struct CraftApp {
     pub model_picker: Option<(String, Option<Vec<String>>)>,
     pub agent_model_picker: Option<builders::AgentModelPicker>,
     model_request: u64,
+    pub model_tuning: std::collections::BTreeMap<String, ModelTuningDraft>,
     /// The agent app whose program the file dialog is choosing.
     pub picking_program_for: Option<String>,
     /// The backend the person chose to build with (Settings → AI), if any.
@@ -485,6 +535,7 @@ impl CraftApp {
             model_picker: None,
             agent_model_picker: None,
             model_request: 0,
+            model_tuning: Default::default(),
             picking_program_for: None,
             builder: None,
             extractor: None,
@@ -764,6 +815,7 @@ impl CraftApp {
             },
             ledger_len: s.ledger_len(),
             unknowns: s.unknowns().take(500).cloned().collect(),
+            findings: craft_anything_engine::tools::investigation_tools::cached(&s).findings,
             project: s.project.as_ref().map(|p| p.meta.name.clone()),
             project_allows: s.project.as_ref().map(|p| p.meta.allowed_tools.clone()).unwrap_or_default(),
         };
@@ -1190,6 +1242,7 @@ impl CraftApp {
             match e {
                 AgentEvent::ToolFinished { .. } => self.view_dirty = true,
                 AgentEvent::TurnDone { backend, input_tokens, output_tokens, cost_usd, cost_is_estimate } => {
+                    self.view_dirty = true;
                     self.session_usage.add_turn(input_tokens, output_tokens, cost_usd, cost_is_estimate);
                     let cost = cost_usd.map(|c| format!(", ${c:.4}")).unwrap_or_default();
                     self.log(false, format!("{backend}: {input_tokens} in / {output_tokens} out{cost}"));
@@ -1356,6 +1409,10 @@ impl CraftApp {
                 self.builder = builder;
                 self.extractor = extractor;
                 self.backend_options = options;
+                self.model_tuning.retain(|name, state| {
+                    self.backends.iter().any(|backend| backend.name == *name && craft_anything_ai::model_options::supported(backend))
+                        && self.backend_options.get(name).and_then(|options| options.cli_model.as_ref()) == state.cli_model.as_ref()
+                });
             }
             Done::ModelChoices { name, result } => match result {
                 // Kept only while the picker is still open for that AI.
@@ -1371,6 +1428,70 @@ impl CraftApp {
                 // changed contexts once it can read the session again; saving rechecks too.
                 if let Some(picker) = self.agent_model_picker.as_mut().filter(|p| p.request == request && p.context == context) {
                     picker.result = Some(result.map_err(|e| e.for_people()));
+                }
+            }
+            Done::ModelTuning { name, cli_model, result } => {
+                let current = self.backend_options.get(&name).and_then(|options| options.cli_model.clone());
+                if self.model_tuning.get(&name).is_some_and(|state| state.cli_model == cli_model) {
+                    if current != cli_model {
+                        self.model_tuning.remove(&name);
+                    } else {
+                        match result {
+                            Ok(choices) => {
+                                if let Some(draft) = self.model_tuning.get_mut(&name) {
+                                    draft.set_choices(choices);
+                                }
+                            }
+                            Err(error) => {
+                                if let Some(state) = self.model_tuning.get_mut(&name) {
+                                    state.error = Some(error.for_people());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Done::ModelChanged { name, model, result } => match result {
+                Ok(options) => {
+                    if let Some(backend) = self.backends.iter_mut().find(|backend| backend.name == name) {
+                        if backend.kind != craft_anything_ai::BackendKind::AgentCli {
+                            backend.model = model;
+                        }
+                        self.backend_options.insert(name.clone(), options);
+                    }
+                    self.model_tuning.remove(&name);
+                }
+                Err(error) => {
+                    if let Some(state) = self.model_tuning.get_mut(&name) {
+                        state.saving = false;
+                    }
+                    self.toast(error.for_people(), true);
+                }
+            },
+            Done::ModelOptionsSaved { params, result } => {
+                let current = self.backend_options.get(&params.backend).and_then(|options| options.cli_model.clone());
+                if current == params.expected_cli_model {
+                    if result.is_ok()
+                        && let Some(options) = self.backend_options.get_mut(&params.backend)
+                    {
+                        options.cli_context = params.context;
+                        options.cli_reasoning_effort = params.reasoning;
+                        options.effort = None;
+                    }
+                    if let Some(state) = self.model_tuning.get_mut(&params.backend) {
+                        state.saving = false;
+                        if result.is_err()
+                            && let Some(options) = self.backend_options.get(&params.backend)
+                        {
+                            state.context = options.cli_context;
+                            state.reasoning = options
+                                .cli_reasoning_effort
+                                .or_else(|| options.effort.and_then(|effort| serde_json::from_value(serde_json::Value::String(effort.as_str().into())).ok()));
+                        }
+                    }
+                }
+                if let Err(error) = result {
+                    self.toast(error.for_people(), true);
                 }
             }
             Done::BackendAdded { name, result } => match result {

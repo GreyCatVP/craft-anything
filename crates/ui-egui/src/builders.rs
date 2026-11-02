@@ -207,10 +207,51 @@ impl CraftApp {
     /// Use `model` for an AI from now on.
     pub fn set_model(&mut self, name: &str, model: &str) {
         self.model_picker = None;
+        if let Some(state) = self.model_tuning.get_mut(name) {
+            state.saving = true;
+        }
         let (hub, name, model) = (self.hub.clone(), name.to_string(), model.to_string());
         self.jobs.spawn(tr("Change an AI's model"), false, move |_| {
-            hub.set_model(&name, &model).map_err(|e| e.message)?;
-            Ok(crate::backends(&hub))
+            let result = hub.set_model(&name, &model).and_then(|_| {
+                hub.options().get(&name).cloned().ok_or_else(|| craft_anything_engine::evidence::ToolError::invalid("The AI backend was removed."))
+            });
+            Ok(crate::Done::ModelChanged { name, model, result })
+        });
+    }
+
+    /// Populate the persistent model controls on a worker, once for each backend/model pair.
+    pub fn pick_model_options(&mut self, name: &str) {
+        let options = self.backend_options.get(name).cloned().unwrap_or_default();
+        let reasoning = options
+            .cli_reasoning_effort
+            .or_else(|| options.effort.and_then(|effort| serde_json::from_value(serde_json::Value::String(effort.as_str().into())).ok()));
+        self.model_tuning.insert(
+            name.into(),
+            crate::ModelTuningDraft {
+                backend: name.into(),
+                cli_model: options.cli_model.clone(),
+                choices: None,
+                context: options.cli_context,
+                reasoning,
+                saving: false,
+                error: None,
+            },
+        );
+        let (hub, name, cli_model) = (self.hub.clone(), name.to_string(), options.cli_model);
+        self.jobs.spawn(tr("Load model options"), false, move |_| {
+            let result = hub.model_tuning(&name);
+            Ok(crate::Done::ModelTuning { name, cli_model, result })
+        });
+    }
+
+    pub fn set_model_options(&mut self, params: craft_anything_ai::model_options::SetModelOptions) {
+        if let Some(state) = self.model_tuning.get_mut(&params.backend) {
+            state.saving = true;
+        }
+        let hub = self.hub.clone();
+        self.jobs.spawn(tr("Set model options"), false, move |_| {
+            let result = hub.set_model_options(&params);
+            Ok(crate::Done::ModelOptionsSaved { params, result })
         });
     }
 

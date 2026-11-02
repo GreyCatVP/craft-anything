@@ -260,6 +260,9 @@ impl CraftApp {
         for (root, e) in &events {
             if open.as_ref() == Some(root) {
                 apply(&mut self.state.feed, e);
+                if matches!(e, RunEvent::Agent(AgentEvent::ToolFinished { .. } | AgentEvent::TurnDone { .. })) {
+                    self.view_dirty = true;
+                }
             }
             // The run saves its usage at each agent turn and when it ends; read it again then.
             if matches!(e, RunEvent::Ask(_)) {

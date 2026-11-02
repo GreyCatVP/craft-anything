@@ -19,7 +19,7 @@ How to work:
 Working memory (the investigation files):
 1. The current brief, plan, hypotheses, findings and handoff are below. Read them before acting; if a handoff exists, resume from it instead of starting over.
 2. On a new question, call core_brief_write and core_plan_update before any analysis tool.
-3. After each batch of tool calls, keep the memory current: core_plan_update step statuses, core_hypothesis_record / core_hypothesis_update as claims are tested, core_finding_record once something is settled (findings must cite evidence ids).
+3. After each batch of tool calls, keep the memory current: core_plan_update step statuses, core_hypothesis_record / core_hypothesis_update as claims are tested, core_finding_record once something is settled (findings must cite evidence ids). Correct an existing finding with core_finding_edit, keeping its id and citing the evidence for the correction; pass based_on_revision from core_investigation_show.
 4. Before you finish your reply, call core_handoff_write: where things stand, what's next, and traps to avoid.
 5. Reports come from findings and evidence, never from chat alone.";
 
@@ -44,7 +44,7 @@ pub fn system_prompt(beginner: bool, clean_room: bool, investigation: &str) -> S
 /// loop, and point it at our MCP tools.
 pub fn cli_preamble(beginner: bool) -> String {
     format!(
-        "{METHOD}\n\n{}\n\nUse the craft-anything MCP tools for all analysis (start with core_investigation_show).\n\n## Request\n",
+        "{METHOD}\n\n{}\n\nUse the craft-anything MCP tools for all analysis (start with core_session_show, core_targets_list and core_investigation_show). The MCP server shares this investigation with the app; use its open targets and recorded findings rather than inventing ids or maintaining a separate findings file.\n\n## Request\n",
         if beginner { BEGINNER } else { EXPERIENCED }
     )
 }

@@ -113,6 +113,8 @@ const ACTIONS: &[Action] = &[
     a("set_effort",          "change how hard a Claude AI thinks",             Cli("ai effort <name> <level>")),
     a("pick_agent_model",    "list an agent's visible models and thinking depths", Tool(&["ai_models_list"])),
     a("set_agent_model",     "choose an agent's model and thinking depth",     Tool(&["ai_model_set"])),
+    a("pick_model_options",  "discover context and reasoning for a model",     Tool(&["ai_model_options_show"])),
+    a("set_model_options",   "save a model's context and reasoning choices",   Tool(&["ai_model_options_set"])),
     a("choose_backend",      "pick the AI brain",                              Cli("chat <question> --backend")),
     a("set_role",            "choose which AI builds or extracts",             Cli("ai extractor <name>")),
 

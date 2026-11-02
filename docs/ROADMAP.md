@@ -357,6 +357,21 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
+- [x] GitHub Copilot through its own CLI login and ACP, without credential import:
+      discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
+      unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
+      — claimed: qu-gg, branch `feature/r2.2-copilot-integration` (recorded during PR preparation)
+- [x] Copilot: typed context tiers and full named reasoning range, selected-model ACP reasoning
+      discovery, inline GUI controls, CLI/MCP option tools, stale-model guards and next-turn
+      chat refresh. Metadata checked against CLI 1.0.105 without a model prompt; tests cover flags,
+      persistence, resets and headless rendering
+- [x] Copilot settings UX: context and reasoning stay visible under each backend, load once for
+      the selected model, reload automatically after a model change and save each selection
+      immediately; loading, retryable failures and save errors keep the controls in place
+- [x] Local agent chats share a saved investigation and open-target metadata with MCP; background
+      refresh makes recorded findings visible in the workbench Evidence pane. `core_finding_edit`
+      corrects a finding with checked evidence and an optional revision guard. Engine, process-level
+      MCP and headless rendering tests cover sharing, mode boundaries and finding ids
 - [x] Offer OpenCode locally and over SSH with its own visible chat models and supported thinking
       depths (Low, Medium, High, Xhigh, Max) in settings and headless clients. Choices are validated
       before saving; explicit choices are refused at execution until native MCP support is available.

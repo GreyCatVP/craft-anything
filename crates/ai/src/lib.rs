@@ -19,6 +19,7 @@ pub mod key_tools;
 pub mod keys;
 pub mod model;
 pub mod model_tools;
+pub mod model_options;
 pub mod openai;
 pub mod price;
 pub mod prompt;
@@ -75,7 +76,7 @@ impl BackendKind {
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::Gemini => openai::GEMINI_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki"],
+            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "gemini-cli", "opencode", "antigravity", "hermes", "maki"],
         }
     }
 
@@ -118,16 +119,13 @@ pub fn effort_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -
 }
 
 /// The model an AI uses, when it can be chosen (Settings → AI, #123): an API's own, or the one
-/// Claude Code is asked for. `None` for an agent app that picks its own.
+/// a coding agent is asked for. `None` for an agent app that picks its own.
 pub fn model_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -> Option<String> {
     match config.kind {
-        BackendKind::AgentCli if config.model == "claude-code" => {
-            Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| anthropic::DEFAULT_MODEL.to_string()))
-        }
         BackendKind::AgentCli if cli_agents::adapter_for(&config.model).has_model_catalog() => {
-            Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| "OpenCode default".into()))
+            Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| format!("{} default", cli_agents::display_for(&config.model))))
         }
-        BackendKind::AgentCli => None,
+        BackendKind::AgentCli => cli_agents::adapter_for(&config.model).model_in_use(options),
         _ => Some(config.model.clone()),
     }
 }
@@ -295,6 +293,7 @@ pub fn tools() -> Vec<craft_anything_engine::ToolSpec> {
     let mut v = rebuild::tools::specs();
     v.extend(key_tools::specs());
     v.extend(model_tools::specs());
+    v.extend(model_options::specs());
     v
 }
 
@@ -489,7 +488,14 @@ impl AiHub {
         let mut cfg = self.config_to_change()?;
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
         match b.config.kind {
-            BackendKind::AgentCli => b.options.cli_model = Some(model.to_string()),
+            BackendKind::AgentCli => {
+                if model_options::supported(&b.config) && b.options.cli_model.as_deref() != Some(model) {
+                    b.options.cli_context = None;
+                    b.options.cli_reasoning_effort = None;
+                    b.options.effort = None;
+                }
+                b.options.cli_model = Some(model.to_string());
+            }
             _ => b.config.model = model.to_string(),
         }
         self.save_config(&cfg)?;
@@ -509,8 +515,8 @@ impl AiHub {
         Ok(true)
     }
 
-    /// The models a backend can be set to (#123): the API's own list, or Claude's models for Claude
-    /// Code. Empty for an agent app that picks its own. Blocking (bounded); run it off the UI thread.
+    /// The models a backend can be set to: the API's or registered agent's list.
+    /// Empty for an agent app that picks its own. Blocking (bounded); run it off the UI thread.
     pub fn model_choices(&self, name: &str) -> Result<Vec<String>, ToolError> {
         let e = self.entry(name)?;
         if e.config.kind == BackendKind::AgentCli && cli_agents::adapter_for(&e.config.model).has_model_catalog() {
@@ -518,7 +524,7 @@ impl AiHub {
         }
         match (e.config.kind, model_in_use(&e.config, Some(&e.options))) {
             (_, None) => Ok(Vec::new()),
-            (BackendKind::AgentCli, Some(_)) => Ok(anthropic::MODELS.iter().map(|m| m.to_string()).collect()),
+            (BackendKind::AgentCli, Some(_)) => cli_agents::adapter_for(&e.config.model).model_choices(&e.config, &e.options),
             _ => self.list_models(name),
         }
     }
@@ -555,6 +561,23 @@ impl AiHub {
         // not overwrite another settings change that finished while it was running.
         let mut session = self.engine.session();
         config::save_agent_selection(&mut session, &self.settings_path(), context, options)
+    }
+
+    /// Context tiers and reasoning choices for a selected CLI model. Discovery is bounded and
+    /// sends no model prompt; call off the UI thread.
+    pub fn model_tuning(&self, name: &str) -> Result<model_options::ModelTuning, ToolError> {
+        let entry = self.entry(name)?;
+        if !model_options::supported(&entry.config) {
+            return Err(ToolError::invalid("This backend does not offer CLI model options."));
+        }
+        cli_agents::acp_model_tuning(&entry.config, &entry.options)
+    }
+
+    /// Save a model picker's two settings together, before replacing the in-memory config.
+    pub fn set_model_options(&self, params: &model_options::SetModelOptions) -> Result<(), ToolError> {
+        let mut config = self.config_to_change()?;
+        model_options::update(&mut config, params)?;
+        self.save_config(&config)
     }
 
     /// Remove a backend and its stored key. Returns false when there was no such backend.
@@ -663,10 +686,6 @@ impl AiHub {
         })
     }
 
-    fn project_root(&self) -> Option<PathBuf> {
-        self.engine.try_session().and_then(|s| s.project.as_ref().map(|p| p.root.clone()))
-    }
-
     /// Start a conversation with the lead backend (or the named one).
     pub fn start(&self, backend: Option<&str>, beginner: bool) -> Result<Box<dyn Conversation>, ToolError> {
         let cfg = self.config();
@@ -678,12 +697,7 @@ impl AiHub {
                 .ok_or_else(|| ToolError::unavailable("No AI is set up yet.").with_remediation("Add one in Settings → AI."))?,
         };
         if first.config.kind == BackendKind::AgentCli {
-            let spec = cli_agents::CliSpec::new(first.config.clone(), first.options.clone(), beginner, self.project_root());
-            let (deep, logs) = {
-                let session = self.engine.session();
-                (!session.clean_room(), failure_log::dir_in(&session.config_dir()))
-            };
-            return Ok(cli_agents::conversation(cli_agents::CliSpec { deep, logs: Some(logs), ..spec }));
+            return Ok(Box::new(cli_agents::SharedConversation::new(self.engine.clone(), first, beginner)?));
         }
         let mut chain = vec![self.build_model(&first)?];
         for name in cfg.chain_from(&first.config.name).into_iter().skip(1) {

@@ -565,13 +565,14 @@ impl Worker {
     /// How the builder's agent runs. Reads the session once: a lock taken twice in one statement
     /// is held by the first until the statement ends, and the second then waits forever.
     fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions) -> CliSpec {
-        let (deep, config_dir) = {
+        let (deep, config_dir, targets) = {
             let session = self.engine.session();
-            (!session.clean_room(), session.config_dir())
+            (!session.clean_room(), session.config_dir(), session.shared_targets())
         };
         CliSpec {
             builder: Some(Builder { investigation: Some(ws.investigation_dir()), inbox: ws.inbox_dir() }),
             deep,
+            targets,
             logs: Some(crate::failure_log::dir_in(&config_dir)),
             resume: ws.manifest.agent_session.clone(),
             preamble: Some(
@@ -1046,6 +1047,13 @@ impl Worker {
                 agent.stop();
             }
             for e in agent.poll() {
+                if matches!(e, AgentEvent::ToolFinished { .. } | AgentEvent::TurnDone { .. }) {
+                    let mut session = self.engine.session();
+                    let project = session.project.clone().filter(|project| project.root == ws.investigation_dir());
+                    if let Some(project) = project {
+                        session.open_project(project)?;
+                    }
+                }
                 match &e {
                     AgentEvent::TextDelta { text } => reply.push_str(text),
                     // Our own loop asks before tools that need consent. The Build tools are the

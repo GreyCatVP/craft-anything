@@ -10,6 +10,52 @@ pub const MAX_TARGET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 pub type TargetId = String;
 
+/// Metadata handed to an agent's MCP session. No file contents or caches cross the command
+/// line; Deep mode reloads and verifies the file, while Clean room keeps only this metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TargetContext {
+    pub path: PathBuf,
+    pub sha256: String,
+    pub kind: TargetKind,
+    pub raw: Option<RawSpec>,
+}
+
+impl TargetContext {
+    pub fn from_target(target: &Target) -> Self {
+        Self { path: target.path.clone(), sha256: target.sha256.clone(), kind: target.kind, raw: target.raw.clone() }
+    }
+
+    pub fn open(&self, clean_room: bool) -> Result<Target, ToolError> {
+        if !self.path.is_absolute() || self.sha256.len() != 64 || !self.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(ToolError::invalid("A shared target needs an absolute path and a SHA-256 hash."));
+        }
+        let mut target = if clean_room {
+            Target {
+                id: format!("t_{}", self.sha256.get(..12).unwrap_or_default()),
+                path: self.path.clone(),
+                name: self.path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                sha256: self.sha256.clone(),
+                kind: self.kind,
+                bytes: Arc::from([]),
+                raw: self.raw.clone(),
+            }
+        } else {
+            let target = Target::load(&self.path)?;
+            if target.sha256 != self.sha256 {
+                return Err(ToolError::invalid("The shared target changed after it was opened.")
+                    .with_remediation("Reopen the target in Craft Anything, then start a new conversation."));
+            }
+            target
+        };
+        if self.raw.is_some() || self.kind == TargetKind::DosCom {
+            target.kind = self.kind;
+            target.raw = self.raw.clone();
+        }
+        Ok(target)
+    }
+}
+
 /// What kind of thing a target is. Detected from content, never from the extension alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]

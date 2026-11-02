@@ -141,6 +141,31 @@ fn mcp_over_stdio() {
 }
 
 #[test]
+fn mcp_restores_the_desktop_target_before_listing_tools() {
+    use craft_anything_engine::target::{Target, TargetContext};
+    let config = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("shared.bin");
+    std::fs::write(&file, b"shared-target").unwrap();
+    let target = Target::load(&file).unwrap();
+    let context = serde_json::to_string(&TargetContext::from_target(&target)).unwrap();
+    let input = [
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}),
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"core_targets_list","arguments":{}}}),
+    ].iter().map(|message| format!("{message}\n")).collect::<String>();
+    for mode in ["--deep", "--clean-room"] {
+        let output = cli_with_stdin(&["mcp", mode, "--target", &context], config.path(), input.as_bytes());
+        assert!(output.success, "{}", output.stderr_text());
+        let messages: Vec<Value> = output.stdout_text().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let response = messages.iter().find(|message| message["id"] == 2).unwrap();
+        assert_eq!(response["result"]["isError"], false, "{response}");
+        let value: Value = serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(value["result"]["targets"][0]["target_id"], target.id, "{value}");
+    }
+}
+
+#[test]
 fn raw_binary_open_params_tool_format_and_project_evidence_across_processes() {
     let cfg = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();

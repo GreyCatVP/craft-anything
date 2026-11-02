@@ -61,6 +61,9 @@ pub enum Command {
         /// `core_action_approve`); the Craft Anything app answers them.
         #[arg(long)]
         inbox: Option<PathBuf>,
+        /// Target metadata from the desktop (JSON); repeat for each target, active target last.
+        #[arg(long = "target")]
+        targets: Vec<String>,
     },
     /// Connect Craft Anything to your coding-agent apps.
     Setup(setup_cmd::SetupArgs),
@@ -243,7 +246,7 @@ fn run(cli: Cli) -> u8 {
             }
             0
         }
-        Command::Mcp { all_tools, inbox } => {
+        Command::Mcp { all_tools, inbox, targets } => {
             let engine = match make_engine(cli.project.as_deref(), cli.deep_for_run()) {
                 Ok(e) => e,
                 Err(e) => {
@@ -261,6 +264,15 @@ fn run(cli: Cli) -> u8 {
                 engine.session().ext.insert(Arc::new(keys));
             }
             let mut opts = craft_anything_mcp::ServerOptions::from_env();
+            // Share target metadata without reading original files in Clean room.
+            let targets: Result<Vec<craft_anything_engine::target::TargetContext>, _> = targets.iter().map(|target| serde_json::from_str(target)).collect();
+            let restored = targets
+                .map_err(|error| ToolError::invalid(format!("Invalid shared target: {error}")))
+                .and_then(|targets| engine.session().restore_targets(&targets));
+            if let Err(error) = restored {
+                eprintln!("craft-anything mcp: {}", error.message);
+                return 1;
+            }
             opts.all_tools |= *all_tools;
             opts.allow_run = cli.allow_run;
             match craft_anything_mcp::serve_stdio(engine, opts) {

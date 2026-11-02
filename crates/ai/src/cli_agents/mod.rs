@@ -11,6 +11,9 @@
 pub mod acp;
 pub mod adapters;
 pub mod models;
+mod shared;
+
+pub(crate) use shared::SharedConversation;
 
 pub use acp::AcpConversation;
 pub use adapters::{AgentAdapter, AgentAdapters, ArgsCx};
@@ -38,6 +41,7 @@ pub const MCP_NAME: &str = "craft-anything";
 pub const KNOWN: &[(&str, &str, &str)] = &[
     ("claude-code", "claude", "Claude Code"),
     ("codex", "codex", "Codex"),
+    ("copilot", "copilot", "GitHub Copilot"),
     ("gemini-cli", "gemini", "Gemini CLI"),
     ("antigravity", "agy", "Antigravity"),
     ("opencode", "opencode", "OpenCode"),
@@ -130,10 +134,10 @@ pub fn check_builder_tools(adapter: &dyn AgentAdapter, agent: &str, options: &Ba
 /// The requested transport, shared by builder preflight and execution. ACP cannot carry explicit
 /// catalogue model/variant selections yet, so those must pass the native adapter's checks.
 fn selected_acp_args(adapter: &dyn AgentAdapter, agent: &str, options: &BackendOptions) -> Option<&'static [&'static str]> {
-    if adapter.has_model_catalog() && (options.cli_model.is_some() || options.cli_thinking.is_some()) {
+    if adapter.has_model_catalog() && !adapter.requires_acp() && (options.cli_model.is_some() || options.cli_thinking.is_some()) {
         return None;
     }
-    acp::acp_args(agent).filter(|_| options.acp == Some(true))
+    acp::acp_args(agent).filter(|_| options.acp.unwrap_or_else(|| adapter.requires_acp()))
 }
 
 fn toml_string(s: &str) -> String {
@@ -377,6 +381,8 @@ pub struct CliSpec {
     pub beginner: bool,
     /// The working folder (and, without `builder`, the investigation handed to our MCP server).
     pub project: Option<PathBuf>,
+    /// The desktop's open targets, active last; the MCP child restores them before serving.
+    pub targets: Vec<craft_anything_engine::target::TargetContext>,
     /// Build mode: the agent may edit files in the working folder.
     pub builder: Option<Builder>,
     /// A saved agent session to continue.
@@ -389,7 +395,7 @@ pub struct CliSpec {
     pub preamble: Option<String>,
     /// How each agent CLI is driven.
     pub adapters: AgentAdapters,
-    /// A question about a build: read-only, and a resumed session is forked and not kept, so the
+    /// A question about a build: read-only, with a fresh session or an unkept fork, so the
     /// builder's own session is never changed. Only adapters that
     /// [answer questions](adapters::AgentAdapter::answers_questions) take it.
     pub question: bool,
@@ -417,6 +423,13 @@ fn mcp_for(spec: &CliSpec, remote: bool) -> McpCommand {
     if spec.deep && spec.builder.is_some() {
         mcp.args.push("--all-tools".into());
     }
+    if !remote {
+        for target in &spec.targets {
+            if let Ok(target) = serde_json::to_string(target) {
+                mcp.args.extend(["--target".into(), target]);
+            }
+        }
+    }
     mcp
 }
 
@@ -427,6 +440,7 @@ impl CliSpec {
             options,
             beginner,
             project,
+            targets: Vec::new(),
             builder: None,
             resume: None,
             deep: false,
@@ -438,8 +452,8 @@ impl CliSpec {
     }
 }
 
-/// The conversation for a chat with an agent CLI: over ACP when the backend asks for it and the
-/// agent speaks it (a local, non-building run), else one CLI run per message.
+/// The conversation for a chat with an agent CLI: over ACP when the backend enables or requires
+/// it and the agent speaks it (a local, non-building run), else one CLI run per message.
 pub fn conversation(spec: CliSpec) -> Box<dyn Conversation> {
     match acp_for(&spec).filter(|_| spec.builder.is_none()) {
         // In Clean room the agent's own file, shell and web requests are refused, not put to the
@@ -451,8 +465,8 @@ pub fn conversation(spec: CliSpec) -> Box<dyn Conversation> {
 }
 
 /// The conversation for a builder run: over ACP (permission requests decided by `approver`, the
-/// approval policy) when the backend asks for it and the agent speaks it, else one CLI run per
-/// message (approvals through our approval tool).
+/// approval policy) when the backend enables or requires it and the agent speaks it, else one
+/// CLI run per message (approvals through our approval tool).
 pub fn builder_conversation(spec: CliSpec, approver: acp::Approver) -> Box<dyn Conversation> {
     match acp_for(&spec) {
         Some(c) => Box::new(c.with_approver(approver)),
@@ -460,21 +474,71 @@ pub fn builder_conversation(spec: CliSpec, approver: acp::Approver) -> Box<dyn C
     }
 }
 
-/// An ACP conversation for `spec`, when its backend asks for ACP (`acp = true`), runs locally
-/// and its agent speaks ACP.
+/// An ACP conversation for a local backend that enables or requires ACP. The adapter chooses
+/// the tool restrictions for this access mode; questions omit MCP startup flags and never load
+/// the builder's session. Unsupported routes return to the CLI runner, which refuses ACP-only agents.
 fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     let agent = spec.config.model.clone();
-    let local = spec.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let adapter = spec.adapters.for_agent(&agent);
+    if spec.question && !adapter.answers_questions() {
+        return None;
+    }
+    let local = spec.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let acp_args = selected_acp_args(adapter.as_ref(), &agent, &spec.options).filter(|_| local)?;
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
-    let mut args = spec.options.args.clone();
+    let access = match (spec.question, spec.deep, spec.builder.is_some()) {
+        (true, true, _) => Access::Question,
+        (true, false, _) => Access::CleanRoomQuestion,
+        (false, true, true) => Access::Build,
+        (false, false, true) => Access::CleanRoomBuild,
+        _ => Access::Analyse,
+    };
+    let mut args = adapter.acp_options(&spec.options, access);
     args.extend(acp_args.iter().map(|a| a.to_string()));
     args.extend(acp::model_args(&agent, spec.options.cli_model.as_deref()));
     let cwd = spec.project.clone().or_else(|| std::env::current_dir().ok()).unwrap_or_else(std::env::temp_dir);
     let mcp = mcp_for(spec, false);
+    if !spec.question {
+        args.extend(adapter.acp_mcp_options(&mcp));
+    }
     let preamble = spec.preamble.clone().unwrap_or_else(|| crate::prompt::cli_preamble(spec.beginner));
-    Some(AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, spec.resume.clone()).with_preamble(preamble).with_logs(spec.logs.clone()))
+    Some(
+        AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, if spec.question { None } else { spec.resume.clone() })
+            .with_validation(adapter.validate_options(&spec.options))
+            .with_adapter(adapter)
+            .with_question(spec.question)
+            .with_preamble(preamble)
+            .with_logs(spec.logs.clone()),
+    )
+}
+
+/// Copilot's selectable models from a fresh local ACP session, with `auto` offered once at the
+/// front. No MCP server or model prompt is sent, and a stale model override can't prevent the
+/// catalogue from loading. Blocking, with a 15-second metadata wait: call off the UI thread.
+pub fn acp_model_choices(config: &BackendConfig, options: &BackendOptions) -> Result<Vec<String>, ToolError> {
+    let mut spec = CliSpec::new(config.clone(), options.clone(), false, None);
+    spec.question = true;
+    spec.options.cli_model = None;
+    spec.options.cli_context = None;
+    spec.options.cli_reasoning_effort = None;
+    spec.options.effort = None;
+    let conversation = acp_for(&spec).ok_or_else(|| ToolError::invalid("This agent needs a local ACP connection to list its models."))?;
+    let mut models = conversation.model_choices(Duration::from_secs(15))?;
+    models.retain(|model| model != "auto");
+    models.insert(0, "auto".into());
+    Ok(models)
+}
+
+/// Discover settings for the backend's selected model, without a tool server or model prompt.
+pub fn acp_model_tuning(config: &BackendConfig, options: &BackendOptions) -> Result<crate::model_options::ModelTuning, ToolError> {
+    let mut spec = CliSpec::new(config.clone(), options.clone(), false, None);
+    spec.question = true;
+    spec.options.cli_context = None;
+    spec.options.cli_reasoning_effort = None;
+    spec.options.effort = None;
+    let conversation = acp_for(&spec).ok_or_else(|| ToolError::invalid("Model settings need a local ACP connection."))?;
+    let metadata = conversation.model_metadata(Duration::from_secs(15))?;
+    Ok(crate::model_options::ModelTuning::from_metadata(metadata.current_model, &metadata.config_options))
 }
 
 /// A conversation backed by an agent CLI. Each message is one CLI run; Claude Code runs resume
@@ -612,6 +676,16 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
     let mut adapter = spec.adapters.for_agent(&agent);
+    if adapter.requires_acp() {
+        let _ = tx.send(AgentEvent::Error {
+            message: format!("{name} requires a local ACP connection."),
+            remediation: Some(
+                "Use the installed Copilot CLI on this computer, remove the SSH host and do not disable ACP. Sign in separately with `copilot login`.".into(),
+            ),
+            log: None,
+        });
+        return nothing_done(&name);
+    }
     if let Err(e) = adapter.check_native_options(&spec.options) {
         let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
         return nothing_done(&name);
@@ -2045,6 +2119,47 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         assert!(reg.for_agent("claude").resumes() && !reg.for_agent("codex").resumes() && reg.for_agent("antigravity").resumes());
         // Registering an adapter for an existing id replaces that one.
         reg.register(Arc::new(EchoAgent));
-        assert_eq!(format!("{reg:?}"), r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "echo-agent"]"#);
+        assert_eq!(format!("{reg:?}"), r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "copilot", "echo-agent"]"#);
+    }
+
+    #[test]
+    fn copilot_defaults_to_local_acp_without_changing_other_agents() {
+        let config =
+            BackendConfig { name: "Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+        let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+        assert!(acp_for(&spec).is_some());
+        assert_eq!(program_for("copilot"), "copilot");
+        assert_eq!(display_for("copilot"), "GitHub Copilot");
+        spec.options.acp = Some(false);
+        assert!(acp_for(&spec).is_none());
+        spec.options.acp = Some(true);
+        spec.config.ssh_host = Some("build-machine".into());
+        assert!(acp_for(&spec).is_none());
+        spec.config.ssh_host = None;
+        spec.options.acp = None;
+        spec.config.model = "gemini-cli".into();
+        assert!(acp_for(&spec).is_none());
+        spec.options.acp = Some(true);
+        assert!(acp_for(&spec).is_some());
+        spec.question = true;
+        assert!(acp_for(&spec).is_none());
+        spec.config.model = "copilot".into();
+        assert!(acp_for(&spec).is_some());
+    }
+
+    #[test]
+    fn copilot_never_falls_back_to_native_or_ssh_execution() {
+        for host in [None, Some("build-machine".to_string())] {
+            let config =
+                BackendConfig { name: "Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: host, enabled: true };
+            let options = BackendOptions { acp: Some(false), command: Some("no-such-copilot-xyz".into()), ..Default::default() };
+            let spec = CliSpec::new(config, options, false, None);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let state = RunState { session: Arc::default(), verified: Arc::default(), lost: Arc::default(), failure: Arc::default() };
+            let done = run_cli(&spec, "hello", false, &sender, &Stop::default(), &state);
+            let mut output: Vec<_> = receiver.try_iter().collect();
+            output.push(done);
+            assert!(matches!(&output[..], [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }] if message.contains("local ACP")));
+        }
     }
 }

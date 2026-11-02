@@ -141,6 +141,7 @@ Answers come from {brain}. To build, set up a coding agent in Settings → AI.	�
 App	應用程式
 App details on device	裝置上的應用程式詳細資訊
 Apple apps	Apple 應用程式
+Apply model options	套用模型選項
 Approve an agent action	核准代理操作
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	應用程式和遊戲：持續改進，直到與參考圖片達到此相似度。關閉後僅回報相似度。
 Architectures	架構
@@ -281,6 +282,7 @@ Connect to a browser	連線至瀏覽器
 Connect {name}	連線至 {name}
 Connected devices	已連線的裝置
 Connected phone	已連線的手機
+Context window	上下文視窗
 Continue	繼續
 Contradicted	存在矛盾
 Control-flow graph: a map of every path a function can take, like a flowchart.	控制流程圖：像流程圖一樣，展示函式可能執行的每一條路徑。
@@ -330,6 +332,7 @@ Deep	深度
 Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	深度模式現在會使用 Ghidra 反編譯。首次分析大型程式可能需要幾分鐘。
 Deep mode on	深度模式已開啟
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	深度：使用所有可用工具讀取其程式碼、檔案和網頁原始碼；已安裝 Ghidra 時也會使用它。按一下切換。
+Default	預設
 Delete a project	刪除專案
 Delete it	刪除
 Delete the project	刪除專案
@@ -402,6 +405,7 @@ Export a report (Markdown)	匯出報告 (Markdown)
 Export captured scripts	匯出擷取的指令碼
 Export evidence	匯出證據
 Export report	匯出報告
+Extended	延伸
 Extract an archive	解壓縮封存檔
 Extract firmware	擷取韌體
 Extract with this	用此工具擷取
@@ -630,6 +634,7 @@ List strings	列出字串
 Live: the project's latest build	目前：專案的最新建置
 Load a picture	載入圖片
 Load a screenshot	載入螢幕擷取畫面
+Load model options	載入模型選項
 Loading…	正在載入…
 Log	記錄
 Look again	重新尋找
@@ -677,6 +682,7 @@ Memory for Ghidra	Ghidra 記憶體用量
 Minimise	最小化
 Mode	模式
 Model	模型
+Model options	模型選項
 Model: {model}	模型：{model}
 Modules	模組
 More detail	更多詳細資訊
@@ -885,6 +891,7 @@ Read the project	讀取專案
 Reading what's inside…	正在讀取內部內容…
 Ready	就緒
 Ready: {what} is on this computer.	已就緒：此電腦上已有 {what}。
+Reasoning	推理
 Rebuild status	重建狀態
 Record a finding	記錄發現
 Record a hypothesis	記錄假設
@@ -989,6 +996,7 @@ Server address	伺服器位址
 Session status	工作階段狀態
 Set a project's asset budget	設定專案素材預算
 Set an AI's program	設定 AI 的程式
+Set model options	設定模型選項
 Set one up	設定一個
 Set up a brain…	設定 AI 助手…
 Set up a builder	設定建置助手
@@ -998,6 +1006,7 @@ Show a project	顯示專案
 Show folder	顯示資料夾
 Show me everything	顯示全部內容
 Show me the proof	檢視證據
+Show model options	顯示模型選項
 Show pinned builds	顯示釘選的建置
 Show settings	顯示設定
 Show the answer	顯示回答
@@ -1021,6 +1030,7 @@ Some plugins couldn't be read:	部分外掛無法讀取：
 Something a program borrows from the operating system or a library, like "open a file".	程式從作業系統或程式庫呼叫的功能，例如「開啟檔案」。
 Something a program or library offers for other programs to use.	程式或程式庫提供給其他程式使用的功能。
 Source	原始碼
+Standard	標準
 Start	開始
 Start a Frida session	啟動 Frida 工作階段
 Start a GDB session	啟動 GDB 工作階段
@@ -1152,6 +1162,7 @@ Unreal IoStore	Unreal IoStore
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal 使用 Apple 的 Xcode 建置遊戲，可從 App Store 免費取得。
 Unreal is here, but it also needs Visual Studio's C++ tools.	已安裝 Unreal，但還需要 Visual Studio 的 C++ 工具。
 Unreal pak	Unreal pak
+Update a finding	更新發現
 Update a hypothesis	更新假設
 Update an open question	更新待解答的問題
 Update the checklist	更新檢查清單

@@ -6,10 +6,12 @@
 use super::*;
 
 mod antigravity;
+mod copilot;
 mod hermes;
 mod maki;
 mod opencode;
 pub use antigravity::Antigravity;
+pub use copilot::Copilot;
 pub use hermes::Hermes;
 pub use maki::Maki;
 pub use opencode::OpenCode;
@@ -27,8 +29,8 @@ pub struct ArgsCx<'a> {
     pub builder: bool,
     /// Clean room: reads go through our approval tool too, so the original stays out of reach.
     pub reads_checked: bool,
-    /// A question about a build: only reading (none in Clean room), a resumed session forked and
-    /// not kept, no tool server.
+    /// A question about a build: only reading (none in Clean room), no tool server, and a fresh
+    /// session or a fork that leaves the builder's session unchanged.
     pub question: bool,
 }
 
@@ -62,6 +64,41 @@ pub trait AgentAdapter: Send + Sync {
     fn check_native_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
         Ok(())
     }
+
+    /// Use ACP by default and refuse the per-message CLI runner. An explicit `acp = false` or
+    /// an SSH host must fail rather than opening an interactive agent with no approval channel.
+    fn requires_acp(&self) -> bool {
+        false
+    }
+    /// Startup arguments before the ACP flags: models, effort and the tools this access mode
+    /// may expose. The default keeps the backend's extra arguments unchanged.
+    fn acp_options(&self, options: &BackendOptions, _access: Access) -> Vec<String> {
+        options.args.clone()
+    }
+    /// Session-only MCP startup flags for an agent that needs more than `session/new`'s server
+    /// list. Questions never receive these flags, and the person's saved config isn't changed.
+    fn acp_mcp_options(&self, _mcp: &McpCommand) -> Vec<String> {
+        Vec::new()
+    }
+    /// Refuse backend options that could bypass this adapter's restrictions, before its ACP
+    /// process starts. The refusal is kept on the conversation and reported by `send`.
+    fn validate_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
+        Ok(())
+    }
+    /// The model shown in Settings: an explicit choice or the CLI's own default. `None` means
+    /// the agent picks its model and doesn't offer a model selector here.
+    fn model_in_use(&self, _options: Option<&BackendOptions>) -> Option<String> {
+        None
+    }
+    /// Models the person can choose, from a catalogue or a bounded agent query. May block:
+    /// call off the UI thread. Empty means this agent offers no choices.
+    fn model_choices(&self, _config: &BackendConfig, _options: &BackendOptions) -> Result<Vec<String>, ToolError> {
+        Ok(Vec::new())
+    }
+    /// Whether this adapter offers context and reasoning controls beyond the model selector.
+    fn supports_model_tuning(&self) -> bool {
+        false
+    }
     /// `(help invocation, substrings it must mention)`, checked once before the first run; when
     /// they're missing the run falls back to the plain adapter. Empty: nothing to check.
     fn required_flags(&self) -> (&'static [&'static str], &'static [&'static str]) {
@@ -85,8 +122,8 @@ pub trait AgentAdapter: Send + Sync {
     fn resumes(&self) -> bool {
         false
     }
-    /// It honours [`ArgsCx::question`]: it can be held to reading only, and a resumed session
-    /// isn't changed. Questions about a build go only to adapters that say so.
+    /// It honours [`ArgsCx::question`]: it can be held to reading only, using a fresh session
+    /// or leaving a resumed session unchanged. Questions go only to adapters that say so.
     fn answers_questions(&self) -> bool {
         false
     }
@@ -109,7 +146,7 @@ pub trait AgentAdapter: Send + Sync {
     fn signed_in(&self, _program: &str) -> Option<bool> {
         None
     }
-    /// The plain-words fix when [`signed_in`](AgentAdapter::signed_in) says no.
+    /// The plain-words fix when sign-in preflight or ACP startup fails. Login stays in the CLI.
     fn sign_in_fix(&self) -> Option<String> {
         None
     }
@@ -157,7 +194,7 @@ impl Default for AgentAdapters {
 }
 
 impl AgentAdapters {
-    /// Claude Code, Codex, Gemini CLI, OpenCode, Antigravity, Hermes and Maki.
+    /// The built-in coding agents, including Copilot's ACP-only adapter.
     pub fn built_in() -> AgentAdapters {
         AgentAdapters {
             adapters: vec![
@@ -168,6 +205,7 @@ impl AgentAdapters {
                 Arc::new(Antigravity),
                 Arc::new(Hermes),
                 Arc::new(Maki),
+                Arc::new(Copilot),
             ],
         }
     }
@@ -275,6 +313,14 @@ impl AgentAdapter for ClaudeCode {
 
     fn check_tool_server(&self, stop: &CancelToken) -> Result<(), ToolError> {
         cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop)
+    }
+
+    fn model_in_use(&self, options: Option<&BackendOptions>) -> Option<String> {
+        Some(options.and_then(|options| options.cli_model.clone()).unwrap_or_else(|| crate::anthropic::DEFAULT_MODEL.into()))
+    }
+
+    fn model_choices(&self, _config: &BackendConfig, _options: &BackendOptions) -> Result<Vec<String>, ToolError> {
+        Ok(crate::anthropic::MODELS.iter().map(|model| model.to_string()).collect())
     }
 
     fn args(&self, cx: &ArgsCx) -> Vec<String> {

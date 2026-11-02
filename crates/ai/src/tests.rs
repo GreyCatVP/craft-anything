@@ -254,6 +254,8 @@ input_per_mtok = 1.0
     assert!(h.set_role(Role::Builder, None).is_err());
     assert!(h.set_enabled("Claude Code", false).is_err());
     assert!(h.remove_backend("Claude Code").is_err());
+    let options = crate::model_options::SetModelOptions { backend: "Claude Code".into(), expected_cli_model: None, context: None, reasoning: None };
+    assert_eq!(h.set_model_options(&options).unwrap_err().code, ErrorCode::BadSettings);
     assert_eq!(std::fs::read(&file).unwrap(), before, "the settings file was changed");
     assert!(h.keys.get("Other").is_none(), "a refused add stored its key");
 }
@@ -335,6 +337,159 @@ fn a_claude_ais_effort_is_changed() {
     assert_eq!(effort(&h, "Codex"), None, "an agent that doesn't take Claude's levels");
     assert!(h.set_effort("Codex", Some(Effort::Max)).is_err());
     assert!(!h.set_effort("Nobody", Some(Effort::Low)).unwrap());
+}
+
+#[test]
+fn copilot_is_added_without_an_api_key_and_keeps_its_agent_id_when_models_change() {
+    let (hub, _directory) = hub();
+    let config =
+        BackendConfig { name: "GitHub Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+    assert!(!config.kind.needs_key());
+    assert_eq!(model_in_use(&config, None).as_deref(), Some("Copilot CLI default"));
+    hub.add_backend(config, None).unwrap();
+    hub.set_model("GitHub Copilot", "chosen-copilot-model").unwrap();
+    let backend = hub.backends().into_iter().find(|backend| backend.name == "GitHub Copilot").unwrap();
+    let options = hub.options();
+    assert_eq!(backend.model, "copilot");
+    assert_eq!(model_in_use(&backend, options.get(&backend.name)).as_deref(), Some("chosen-copilot-model"));
+}
+
+#[test]
+fn copilot_tuning_is_saved_and_reset_when_the_selected_model_changes() {
+    use crate::config::{CliContext, CliReasoningEffort};
+    let (hub, _directory) = hub();
+    let config = BackendConfig { name: "Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+    hub.add_backend(config, None).unwrap();
+    let params = crate::model_options::SetModelOptions {
+        backend: "Copilot".into(),
+        expected_cli_model: None,
+        context: Some(CliContext::Long),
+        reasoning: Some(CliReasoningEffort::Xhigh),
+    };
+    hub.set_model_options(&params).unwrap();
+    assert_eq!(hub.options()["Copilot"].cli_context, Some(CliContext::Long));
+    assert_eq!(hub.options()["Copilot"].cli_reasoning_effort, Some(CliReasoningEffort::Xhigh));
+    hub.set_model("Copilot", "another-model").unwrap();
+    assert_eq!(hub.options()["Copilot"].cli_context, None);
+    assert_eq!(hub.options()["Copilot"].cli_reasoning_effort, None);
+    assert!(hub.set_model_options(&params).is_err());
+}
+
+/// Exercise the installed CLI, not just our argument builder: the loopback model must see
+/// exactly the allowed tools in every access mode, including genuinely tool-free questions.
+/// Kept opt-in because it needs external programs, never because it needs a real account.
+#[test]
+#[ignore = "requires Copilot CLI and Node.js; uses an isolated CLI home and a loopback model, never a real account"]
+fn copilot_cli_enforces_mcp_only_and_empty_tool_filters() {
+    use crate::cli_agents::{Access, AcpConversation, AgentAdapter, ArgsCx, McpCommand};
+    use craft_anything_platform::Process;
+
+    /// Only the child's environment changes: no saved CLI credentials, inherited provider key
+    /// or token helper may reach the fixture. The production adapter still supplies its policy.
+    struct OfflineCopilot {
+        url: String,
+        home: PathBuf,
+    }
+
+    impl AgentAdapter for OfflineCopilot {
+        fn ids(&self) -> &'static [&'static str] {
+            &["copilot"]
+        }
+
+        fn args(&self, _context: &ArgsCx) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn process(&self, program: &str) -> Process {
+            crate::cli_agents::adapters::Copilot
+                .process(program)
+                .env("HOME", &self.home)
+                .env("COPILOT_HOME", &self.home)
+                .env("COPILOT_OFFLINE", "true")
+                .env("COPILOT_PROVIDER_BASE_URL", &self.url)
+                .env("COPILOT_PROVIDER_TYPE", "openai")
+                .env("COPILOT_MODEL", "craft-test")
+                .env_remove("COPILOT_PROVIDER_API_KEY")
+                .env_remove("COPILOT_PROVIDER_API_KEY_COMMAND")
+                .env_remove("COPILOT_PROVIDERS_CONFIG")
+                .env_remove("COPILOT_GITHUB_TOKEN")
+                .env_remove("GH_TOKEN")
+                .env_remove("GITHUB_TOKEN")
+        }
+    }
+
+    for (access, mut expected) in [
+        (Access::Analyse, vec!["craft-anything-core_target_triage"]),
+        (Access::Build, vec!["craft-anything-core_target_triage"]),
+        (Access::CleanRoomBuild, vec!["craft-anything-core_target_triage"]),
+        (Access::Question, vec!["view", "grep", "glob"]),
+        (Access::CleanRoomQuestion, Vec::new()),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("mcp.cjs");
+        // Offer one registered tool and one that must be filtered out. Record requests so a
+        // question that accidentally starts the server is caught even if it calls no tool.
+        std::fs::write(
+            &script,
+            r#"const readline = require('node:readline');
+const input = readline.createInterface({input: process.stdin});
+input.on('line', line => {
+    const request = JSON.parse(line);
+    require('node:fs').appendFileSync(__dirname + '/mcp-requests.log', request.method + '\n');
+    if (request.id === undefined) return;
+    let result = {};
+    if (request.method === 'initialize') {
+        result = {protocolVersion: '2024-11-05', capabilities: {tools: {}}, serverInfo: {name: 'craft-test', version: '1'}};
+    } else if (request.method === 'tools/list') {
+        result = {tools: ['core_target_triage', 'unexpected_fixture_tool'].map(name => ({name, description: name, inputSchema: {type: 'object', properties: {}}}))};
+    }
+    process.stdout.write(JSON.stringify({jsonrpc: '2.0', id: request.id, result}) + '\n');
+});
+"#,
+        )
+        .unwrap();
+        let body = chat_sse(&[
+            json!({"id":"test", "choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":null}]}),
+            json!({"id":"test", "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}),
+        ]);
+        let (url, seen) = mock(vec![(200, "text/event-stream", body)]);
+        let program = std::env::var("CRAFT_TEST_COPILOT").unwrap_or_else(|_| "copilot".into());
+        let mut args = crate::cli_agents::adapters::Copilot.acp_options(&BackendOptions::default(), access);
+        args.extend(["--acp".into(), "--stdio".into()]);
+        let mcp = McpCommand { command: "node".into(), args: vec![script.display().to_string()], notes: None };
+        let question = matches!(access, Access::Question | Access::CleanRoomQuestion);
+        if !question {
+            args.extend(crate::cli_agents::adapters::Copilot.acp_mcp_options(&mcp));
+        }
+        let mut conversation = AcpConversation::new("Copilot test", "copilot", program, args, directory.path().into(), mcp, None)
+            .with_adapter(Arc::new(OfflineCopilot { url, home: directory.path().into() }))
+            .with_question(question);
+        conversation.send("Reply with done. Do not call any tools.");
+        let started = Instant::now();
+        let mut output = Vec::new();
+        while started.elapsed() < Duration::from_secs(30) && !output.iter().any(|event| matches!(event, AgentEvent::TurnDone { .. })) {
+            output.extend(conversation.poll());
+            std::thread::park_timeout(Duration::from_millis(10));
+        }
+        assert!(output.iter().any(|event| matches!(event, AgentEvent::TurnDone { .. })), "{output:?}");
+        assert!(!output.iter().any(|event| matches!(event, AgentEvent::Error { .. })), "{output:?}");
+        let requests = seen.lock().unwrap();
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        // Assert what reached the model, not what the CLI accepted on its command line:
+        // startup can succeed while a tool is missing or an empty filter restores native tools.
+        let mut tools: Vec<&str> = requests[0]
+            .body
+            .get("tools")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|tool| tool.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        tools.sort();
+        expected.sort();
+        assert_eq!(tools, expected, "{access:?}");
+        assert_eq!(directory.path().join("mcp-requests.log").exists(), !question);
+    }
 }
 
 /// #54, #98: a server on another computer is added by its address, with a model that can chat
