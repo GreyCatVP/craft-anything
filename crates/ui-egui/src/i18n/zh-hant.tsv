@@ -204,6 +204,7 @@ Capture menus, dialogs and tabs	擷取選單、對話方塊和分頁
 Change	變更
 Change a setting	變更設定
 Change an AI's model	變更 AI 的模型
+Change how hard an AI thinks	變更 AI 的思考力度
 Change it	變更
 Change…	變更…
 Check	檢查
@@ -364,6 +365,7 @@ Duplicate the project	建立專案副本
 Each answer says how sure we are: Seen it, Worked it out or Best guess.	每個回答都會說明可信程度：已觀察、已推導或推測。
 Edit a project file	編輯專案檔案
 Edit them in place	直接編輯
+Effort:	思考力度：
 Electron and JavaScript	Electron 與 JavaScript
 Electron fuses	Electron 功能開關
 Engines	引擎
