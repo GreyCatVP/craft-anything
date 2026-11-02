@@ -792,8 +792,8 @@ Gaps found while using the app for real projects.
       ([localisation](localization.md))
 - [ ] A Simplified Chinese README (`README.zh.md`) translated from `README.md`, linked from the
       language switcher in `README.md` and `README.ja.md` — claimed: maple323, branch docs/readme-zh
-- [ ] A Korean README (`README.ko.md`) translated from `README.md`, linked from the language
-      switcher in every README — claimed: rech4210, branch docs/readme-ko
+- [x] A Korean README (`README.ko.md`) was translated from `README.md` and linked from the
+      language switcher in every README
 - [ ] `README.ja.md` is behind `README.md`: the whole Craft App Suite section is missing, so the
       Japanese translation needs a catch-up pass
 - [x] First run sets up who builds, not only who answers, and no longer says the purpose is saved
