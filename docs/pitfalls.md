@@ -247,6 +247,7 @@ edit, right before committing.
 **An early error without a terminal event.** Model validation returned after reporting an error,
 but headless chat waits for `TurnDone`, not just an idle worker. Preflight failures and cancellation
 must finish the event sequence too; regression tests check both the error/status and the terminal event.
+Worker-thread creation failures need the same terminal event even though no worker ever started.
 
 **Reading literals and skipping the rest.** The Electron window reader skipped a spread inside
 `webPreferences`, so a window whose preferences came partly from another object was reported as

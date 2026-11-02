@@ -662,6 +662,7 @@ impl CraftApp {
             // Keep the guard through the write so a model-selection save cannot be overtaken
             // by an older settings snapshot. This runs on the worker, never the UI thread.
             let session = engine.session();
+            session.label("Save settings");
             session.settings.save().map_err(|e| e.message)?;
             Ok(Done::Nothing)
         }));

@@ -320,6 +320,8 @@ Owner: open · Status: in progress
       selection, and render the remote-host placeholder visibly in the setup instructions.
 - [x] Hold the UI settings worker's session guard through its disk save so it cannot overwrite
       a newer model selection; reverify the existing terminal-event regression for validation failures.
+- [x] Label the settings-save guard so filesystem I/O is identifiable as a running job by the lock tracker.
+- [x] Finish a failed CLI worker-thread start with a terminal event after its error so headless chat stops polling.
 - [ ] Synchronize the UI exit-time settings save with the session's latest AI table and other writers.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
