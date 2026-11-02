@@ -275,9 +275,10 @@ fn native_function_disassemble(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolO
             text.push_str(&line);
             text.push('\n');
         }
+        let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
         let e = ev(ctx, "native_function_disassemble", params_json(&p))?
             .result(json!({"function": f.name, "entry": hex(f.entry), "assembly": text, "instructions": insns.len()}))
-            .summary(format!("{} instructions of {}.", insns.len(), f.name))
+            .summary(format!("{} instructions of {name}.", insns.len()))
             .coverage(Coverage::complete(insns.len() as u64))
             .location(Location::address(f.entry))
             .build()?;
@@ -289,11 +290,12 @@ fn native_function_callees_list(ctx: &mut Ctx<'_>, params: Value) -> Result<Tool
     with_proc!(ctx, params, ProcParams, |p, st, t, f| {
         let user = user_names(t);
         let names = |a: u64| user.get(&a).cloned();
+        let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
         let list = an::callees(&st.prog, f, &names);
         let unresolved = list.iter().filter(|c| c["indirect"] == true).count();
         let mut b = ev(ctx, "native_function_callees_list", params_json(&p))?
             .result(json!({"function": f.name, "entry": hex(f.entry), "callees": list}))
-            .summary(format!("{} makes {} calls ({unresolved} unresolved).", f.name, list.len()))
+            .summary(format!("{name} makes {} calls ({unresolved} unresolved).", list.len()))
             .confidence(Confidence::Derived)
             .coverage(Coverage::complete(list.len() as u64))
             .location(Location::address(f.entry));
@@ -308,14 +310,14 @@ fn native_function_callers_list(ctx: &mut Ctx<'_>, params: Value) -> Result<Tool
     with_proc!(ctx, params, ProcParams, |p, st, t, f| {
         let user = user_names(t);
         let names = |a: u64| user.get(&a).cloned();
+        let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
         let list = an::callers(&st.prog, f, &names);
         let pointers =
             st.prog.xrefs_to.get(&f.entry).map(|v| v.iter().filter(|x| x.kind == XrefKind::Pointer || x.kind == XrefKind::Data).count()).unwrap_or(0);
         let mut b = ev(ctx, "native_function_callers_list", params_json(&p))?
             .result(json!({"function": f.name, "entry": hex(f.entry), "callers": list, "address_taken": pointers}))
             .summary(format!(
-                "{} is called from {} places{}.",
-                f.name,
+                "{name} is called from {} places{}.",
                 list.len(),
                 if pointers > 0 { format!(" and its address is taken {pointers} times") } else { String::new() }
             ))
@@ -356,9 +358,10 @@ fn native_function_references_list(ctx: &mut Ctx<'_>, params: Value) -> Result<T
                 }
             }
         }
+        let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
         let e = ev(ctx, "native_function_references_list", params_json(&p))?
             .result(json!({"function": f.name, "entry": hex(f.entry), "direction": p.direction, "references": rows}))
-            .summary(format!("{} {:?} references for {}.", rows.len(), p.direction, f.name).to_lowercase())
+            .summary(format!("{} {:?} references for {name}.", rows.len(), p.direction).to_lowercase())
             .confidence(Confidence::Derived)
             .coverage(Coverage::complete(rows.len() as u64))
             .location(Location::address(f.entry))
@@ -405,10 +408,11 @@ fn native_function_pseudocode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
     let f = resolve_function(t, &st.prog, &p.function)?;
     let user = user_names(t);
     let names = |a: u64| user.get(&a).cloned();
+    let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
     let ps = lift(&st.img, &st.prog, f, &names);
     let e = ev(ctx, "native_function_pseudocode", params_json(&p))?
         .result(json!({"function": name_of(t, &st.prog, f.entry), "entry": hex(f.entry), "signature": ps.signature, "pseudo_code": ps.text, "calls": ps.calls, "strings": ps.strings, "structured": ps.structured, "gotos": ps.gotos, "inline_asm": ps.asm_fallbacks, "engine": "clean-room lifter"}))
-        .summary(format!("Pseudo-C for {} ({} lines{}).", f.name, ps.text.lines().count(), if ps.structured { "" } else { ", partly unstructured" }))
+        .summary(format!("Pseudo-C for {name} ({} lines{}).", ps.text.lines().count(), if ps.structured { "" } else { ", partly unstructured" }))
         .confidence(Confidence::Inferred)
         .target_content(true)
         .limitations(ps.limitations.iter().map(|(c, m)| Limitation::new(c.clone(), m.clone())))
@@ -455,11 +459,12 @@ fn insn_json(st: &super::native_common::NativeState, t: &crate::session::OpenTar
 
 fn native_function_instructions_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     with_proc!(ctx, params, ProcParams, |p, st, t, f| {
+        let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
         let insns = st.prog.instructions(&st.img, f, true);
         let rows: Vec<Value> = insns.iter().map(|i| insn_json(&st, t, i)).collect();
         let e = ev(ctx, "native_function_instructions_list", params_json(&p))?
             .result(json!({"function": f.name, "entry": hex(f.entry), "instructions": rows}))
-            .summary(format!("{} instructions in {}.", rows.len(), f.name))
+            .summary(format!("{} instructions in {name}.", rows.len()))
             .coverage(Coverage::complete(rows.len() as u64))
             .location(Location::address(f.entry))
             .build()?;
@@ -481,7 +486,10 @@ fn native_function_find(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         }
     };
     let summary = match f {
-        Some(f) => format!("{a:#x} is inside {} (+{:#x}).", f.name, a - f.entry),
+        Some(f) => {
+            let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
+            format!("{a:#x} is inside {name} (+{:#x}).", a - f.entry)
+        }
         None => format!("{a:#x} isn't inside a known function."),
     };
     let mut b =
@@ -762,5 +770,32 @@ mod tests {
         // by address works too
         let r = call(&e, "native_function_show", json!({"function": format!("{:#x}", l.code_va)}));
         assert_eq!(r["result"]["name"], "main");
+    }
+
+    /// #350: Function summaries use the annotated name after a rename.
+    #[test]
+    fn function_summaries_use_annotated_name_after_rename() {
+        let (bytes, l) = tk::elf64(tk::ElfArch::X86_64, true);
+        let e = engine_with("prog", &bytes);
+        call(&e, "native_function_label", json!({"function": "main", "name": "renamed_entry"}));
+
+        let dis = call(&e, "native_function_disassemble", json!({"function": "renamed_entry"}));
+        assert!(dis["summary"].as_str().unwrap().contains("instructions of renamed_entry."));
+
+        let callees = call(&e, "native_function_callees_list", json!({"function": "renamed_entry"}));
+        assert!(callees["summary"].as_str().unwrap().starts_with("renamed_entry makes "));
+
+        let callers = call(&e, "native_function_callers_list", json!({"function": "renamed_entry"}));
+        assert!(callers["summary"].as_str().unwrap().starts_with("renamed_entry is called from "));
+
+        let refs = call(&e, "native_function_references_list", json!({"function": "renamed_entry"}));
+        assert!(refs["summary"].as_str().unwrap().contains("for renamed_entry."));
+
+        let insns = call(&e, "native_function_instructions_list", json!({"function": "renamed_entry"}));
+        assert!(insns["summary"].as_str().unwrap().contains("instructions in renamed_entry."));
+
+        let inside = format!("{:#x}", l.code_va + 4);
+        let find = call(&e, "native_function_find", json!({"address": inside}));
+        assert!(find["summary"].as_str().unwrap().contains("is inside renamed_entry "));
     }
 }
