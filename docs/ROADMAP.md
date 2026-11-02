@@ -534,7 +534,8 @@ Owner: maintainers · Status: in progress (built; live runs need keys)
       on a computer without it, the copy is put back where Claude Code finds it (`restore_session`) so
       the same session carries on, and if that fails the new session is handed the kept requests and
       replies (`handoff`, up to 16k characters)
-- [ ] A live run of a project copied between two computers with Claude Code (#451, #452)
+- [ ] A live run of a project copied between two real computers with Claude Code (#451, #452); done on
+      one Mac with a second `CLAUDE_CONFIG_DIR` standing in for the other computer (STATUS.md)
 - [ ] Session copies for other agents that keep sessions (ACP agents' `session/load`) (#451)
 
 ### R2.2 More coding agents
