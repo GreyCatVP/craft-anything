@@ -219,7 +219,94 @@ mod tests {
     use crate::Engine;
     use craft_anything_testkit::sqlite as fx;
     use craft_anything_testkit::temp_file;
-    use serde_json::json;
+    use serde_json::{Value, json};
+
+    fn check_without_rowid(sql: &str, stored: Vec<Vec<fx::Val>>, expected: Value) {
+        let e = Engine::new(crate::testing::session());
+        let p = temp_file("rows.db", &fx::without_rowid_db(sql, &stored));
+        let count = expected.as_array().unwrap().len();
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t", "limit": count + 1}));
+        assert_eq!(v["result"]["tables"][0]["row_count"], count, "WITHOUT ROWID row_count");
+        let rows = v["result"]["rows"]["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), count);
+        for (row, values) in rows.iter().zip(expected.as_array().unwrap()) {
+            assert_eq!(row["rowid"], Value::Null);
+            assert_eq!(&row["values"], values);
+        }
+        assert_eq!(v["coverage"]["status"], "complete");
+        assert_eq!(v["coverage"]["total"], count);
+        assert_eq!(v["coverage"]["next_offset"], Value::Null);
+        assert!(v["result"]["rows"]["notes"].as_array().unwrap().is_empty());
+        let first = call(&e, "db_sqlite_show", json!({"path": p, "table": "t", "limit": 1}));
+        assert_eq!(first["result"]["rows"]["rows"][0]["values"], expected[0]);
+        assert_eq!(first["coverage"]["total"], count);
+        assert_eq!(first["coverage"]["next_offset"], 1);
+        let last = call(&e, "db_sqlite_show", json!({"path": p, "table": "t", "offset": count - 1, "limit": 2}));
+        assert_eq!(last["result"]["rows"]["rows"][0]["values"], expected[count - 1]);
+        assert_eq!(last["coverage"]["next_offset"], Value::Null);
+        assert_eq!(last["coverage"]["status"], "complete");
+    }
+
+    #[test]
+    fn without_rowid_b1_composite_key() {
+        use fx::Val::{Int, Text};
+        check_without_rowid(
+            "CREATE TABLE t(a TEXT, b INT, PRIMARY KEY(a,b)) WITHOUT ROWID",
+            vec![vec![Text("j".into()), Int(2)], vec![Text("k".into()), Int(1)], vec![Text("m".into()), Int(3)]],
+            json!([["j", 2], ["k", 1], ["m", 3]]),
+        );
+    }
+
+    #[test]
+    fn without_rowid_b2_interior_rows() {
+        use fx::Val::Text;
+        let pad = "p".repeat(200);
+        let rows = (0..3000).map(|i| vec![Text(format!("k{i:04}")), Text(pad.clone())]).collect();
+        let expected = (0..3000).map(|i| json!([format!("k{i:04}"), pad])).collect::<Vec<_>>();
+        check_without_rowid("CREATE TABLE t(a TEXT PRIMARY KEY, pad TEXT) WITHOUT ROWID", rows, json!(expected));
+    }
+
+    #[test]
+    fn without_rowid_b4_integer_key() {
+        use fx::Val::{Int, Text};
+        check_without_rowid(
+            "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT) WITHOUT ROWID",
+            vec![vec![Int(5), Text("a".into())], vec![Int(9), Text("b".into())]],
+            json!([[5, "a"], [9, "b"]]),
+        );
+    }
+
+    #[test]
+    fn without_rowid_b5_declaration_order() {
+        use fx::Val::{Int, Text};
+        check_without_rowid(
+            "CREATE TABLE t(v TEXT, k INT PRIMARY KEY) without\n rowid ;",
+            vec![vec![Int(5), Text("a".into())], vec![Int(9), Text("b".into())]],
+            json!([["a", 5], ["b", 9]]),
+        );
+    }
+
+    #[test]
+    fn without_rowid_b3_rowid_control() {
+        let e = Engine::new(crate::testing::session());
+        let p = temp_file("rows.db", &fx::indexed_rowid_db());
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
+        assert_eq!(v["result"]["tables"][0]["row_count"], 2);
+        assert_eq!(v["result"]["rows"]["rows"], json!([{"rowid": 1, "values": ["z", 1]}, {"rowid": 2, "values": ["a", 2]}]));
+    }
+
+    #[test]
+    fn without_rowid_overflow_and_composite_storage_order() {
+        use fx::Val::{Int, Text};
+        let pad = "x".repeat(2000);
+        let rows = (0..5).rev().map(|i| vec![Int(i), Text(format!("k{i}")), Text(pad.clone())]).collect();
+        let expected = (0..5).rev().map(|i| json!([pad, format!("k{i}"), i])).collect::<Vec<_>>();
+        check_without_rowid(
+            "CREATE TABLE t(pad TEXT, \"a key\" TEXT, b INT, CONSTRAINT pk PRIMARY KEY(b DESC, \"a key\" COLLATE BINARY)) WITHOUT ROWID",
+            rows,
+            json!(expected),
+        );
+    }
 
     #[test]
     fn inspects_schema_and_rows() {

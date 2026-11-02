@@ -151,7 +151,8 @@ impl Serialize for CellValue {
 /// One table row.
 #[derive(Debug, Clone, Serialize)]
 pub struct Row {
-    pub rowid: i64,
+    /// Absent for WITHOUT ROWID tables.
+    pub rowid: Option<i64>,
     pub values: Vec<CellValue>,
 }
 
@@ -178,6 +179,7 @@ pub struct RowCount {
 /// Accumulator for a bounded b-tree row walk: the rows gathered so far, a visited-page set to
 /// stop cycles, the remaining page-walk budget, how many rows are wanted, and any notes.
 struct RowWalk {
+    index_tree: bool,
     visited: Vec<u32>,
     budget: usize,
     out: Vec<Row>,
@@ -188,7 +190,7 @@ struct RowWalk {
 
 impl RowWalk {
     fn new(want: usize) -> Self {
-        RowWalk { visited: Vec::new(), budget: MAX_PAGES_WALKED, out: Vec::new(), notes: Vec::new(), want }
+        RowWalk { index_tree: false, visited: Vec::new(), budget: MAX_PAGES_WALKED, out: Vec::new(), notes: Vec::new(), want }
     }
 }
 
@@ -379,12 +381,17 @@ impl<'a> SqliteDb<'a> {
         schema.into_iter().find(|o| o.name.eq_ignore_ascii_case(name))
     }
 
-    /// Count the rows of the table rooted at `rootpage` by walking its b-tree leaves.
+    fn without_rowid_table(&self, rootpage: u32) -> Option<SchemaObject> {
+        self.schema().0.into_iter().find(|obj| obj.obj_type == "table" && obj.rootpage == rootpage && is_without_rowid(&obj.sql))
+    }
+
+    /// Count the rows of the table rooted at `rootpage`, including interior index records.
     pub fn count_rows(&self, rootpage: u32) -> RowCount {
         let mut count: u64 = 0;
         let mut visited = Vec::new();
         let mut budget = MAX_PAGES_WALKED;
-        let bounded = !self.count_leaf_cells(rootpage, 0, &mut visited, &mut budget, &mut count);
+        let index_tree = self.btree_header_off(rootpage).and_then(|hdr| self.data.get(hdr)).is_some_and(|ptype| matches!(*ptype, 0x02 | 0x0a));
+        let bounded = !self.count_leaf_cells(rootpage, 0, &mut visited, &mut budget, &mut count, index_tree);
         RowCount { count, bounded }
     }
 
@@ -394,23 +401,34 @@ impl<'a> SqliteDb<'a> {
         // Collect offset+limit rows, then drop the leading `offset`.
         let want = offset.saturating_add(limit);
         let mut w = RowWalk::new(want);
+        let table = self.without_rowid_table(rootpage);
+        w.index_tree = table.is_some();
         self.collect_table_rows(&mut w, rootpage, 0);
+        if let Some(table) = table {
+            if let Some(order) = without_rowid_order(&table) {
+                for row in &mut w.out {
+                    row.values = order.iter().map(|&i| row.values.get(i).cloned().unwrap_or(CellValue::Null)).collect();
+                }
+            } else {
+                w.notes.push("Could not determine the primary-key column order; values remain in storage order.".into());
+            }
+        }
         let hit_cap = w.out.len() >= want && want > 0;
         let skipped = offset.min(w.out.len());
         let mut page: Vec<Row> = w.out.into_iter().skip(offset).take(limit).collect();
         let (schema, _) = self.schema();
         if let Some(index) = schema.iter().find(|o| o.obj_type == "table" && o.rootpage == rootpage).and_then(|o| rowid_alias_index(&o.sql)) {
             for row in &mut page {
-                if let Some(value @ CellValue::Null) = row.values.get_mut(index) {
-                    *value = CellValue::Int(row.rowid);
+                if let (Some(rowid), Some(value @ CellValue::Null)) = (row.rowid, row.values.get_mut(index)) {
+                    *value = CellValue::Int(rowid);
                 }
             }
         }
         RowPage { rows: page, offset: skipped, truncated: hit_cap, notes: w.notes }
     }
 
-    /// Recursively count leaf cells. Returns false when a budget stopped the walk.
-    fn count_leaf_cells(&self, pageno: u32, depth: usize, visited: &mut Vec<u32>, budget: &mut usize, count: &mut u64) -> bool {
+    /// Recursively count rows. Returns false when a budget stopped the walk.
+    fn count_leaf_cells(&self, pageno: u32, depth: usize, visited: &mut Vec<u32>, budget: &mut usize, count: &mut u64, index_tree: bool) -> bool {
         if depth > MAX_DEPTH || *budget == 0 {
             return false;
         }
@@ -423,11 +441,18 @@ impl<'a> SqliteDb<'a> {
         let ptype = *self.data.get(hdr).unwrap_or(&0);
         let ncells = read_u16_be(self.data, hdr.saturating_add(3)).unwrap_or(0) as usize;
         match ptype {
-            0x0d => {
+            0x0d if !index_tree => {
                 *count = count.saturating_add(ncells as u64);
                 true
             }
-            0x05 => {
+            0x0a if index_tree => {
+                *count = count.saturating_add(ncells as u64);
+                true
+            }
+            0x05 | 0x02 if (ptype == 0x02) == index_tree => {
+                if index_tree {
+                    *count = count.saturating_add(ncells as u64);
+                }
                 let mut ok = true;
                 // Child pointers live in each cell; the right-most pointer is in the header.
                 for i in 0..ncells {
@@ -435,11 +460,11 @@ impl<'a> SqliteDb<'a> {
                         return false;
                     }
                     if let Some(child) = self.interior_child(pageno, hdr, i) {
-                        ok &= self.count_leaf_cells(child, depth + 1, visited, budget, count);
+                        ok &= self.count_leaf_cells(child, depth + 1, visited, budget, count, index_tree);
                     }
                 }
                 if let Some(right) = read_u32_be(self.data, hdr.saturating_add(8)) {
-                    ok &= self.count_leaf_cells(right, depth + 1, visited, budget, count);
+                    ok &= self.count_leaf_cells(right, depth + 1, visited, budget, count, index_tree);
                 }
                 ok
             }
@@ -463,26 +488,40 @@ impl<'a> SqliteDb<'a> {
         let ncells = read_u16_be(self.data, hdr.saturating_add(3)).unwrap_or(0) as usize;
         let cell_ptr_base = hdr.saturating_add(if ptype == 0x05 || ptype == 0x02 { 12 } else { 8 });
         match ptype {
-            0x0d => {
+            0x0d | 0x0a if (ptype == 0x0a) == w.index_tree => {
                 for i in 0..ncells {
                     if w.want != 0 && w.out.len() >= w.want {
                         return;
                     }
                     let Some(ptr) = read_u16_be(self.data, cell_ptr_base.saturating_add(i * 2)) else { continue };
                     let cell_off = base.saturating_add(ptr as usize);
-                    match self.read_table_leaf_cell(cell_off, &mut w.notes) {
+                    let row = if w.index_tree { self.read_index_cell(cell_off, &mut w.notes) } else { self.read_table_leaf_cell(cell_off, &mut w.notes) };
+                    match row {
                         Some(row) => w.out.push(row),
                         None => w.notes.push(format!("Skipped an unreadable row on page {pageno}.")),
                     }
                 }
             }
-            0x05 => {
+            0x05 | 0x02 if (ptype == 0x02) == w.index_tree => {
                 for i in 0..ncells {
                     if (w.want != 0 && w.out.len() >= w.want) || w.budget == 0 {
                         return;
                     }
                     if let Some(child) = self.interior_child(pageno, hdr, i) {
                         self.collect_table_rows(w, child, depth + 1);
+                    }
+                    if w.index_tree {
+                        if w.want != 0 && w.out.len() >= w.want {
+                            return;
+                        }
+                        let row = read_u16_be(self.data, cell_ptr_base.saturating_add(i * 2))
+                            .and_then(|ptr| base.checked_add(ptr as usize))
+                            .and_then(|off| off.checked_add(4))
+                            .and_then(|off| self.read_index_cell(off, &mut w.notes));
+                        match row {
+                            Some(row) => w.out.push(row),
+                            None => w.notes.push(format!("Skipped an unreadable row on page {pageno}.")),
+                        }
                     }
                 }
                 if let Some(right) = read_u32_be(self.data, hdr.saturating_add(8)) {
@@ -493,7 +532,7 @@ impl<'a> SqliteDb<'a> {
         }
     }
 
-    /// The left-child page number of cell `i` on an interior table page.
+    /// The left-child page number of cell `i` on an interior page.
     fn interior_child(&self, pageno: u32, hdr: usize, i: usize) -> Option<u32> {
         let base = self.page_base(pageno)?;
         let cell_ptr_base = hdr.checked_add(12)?;
@@ -511,7 +550,19 @@ impl<'a> SqliteDb<'a> {
         let payload = self.assemble_payload(body_off, payload_len, true, notes)?;
         let values = parse_record(&payload);
         let rowid = i64::from_le_bytes(rowid.to_le_bytes());
-        Some(Row { rowid, values })
+        Some(Row { rowid: Some(rowid), values })
+    }
+
+    /// Index cells hold a whole row, without a rowid, using the index local-payload formula.
+    fn read_index_cell(&self, cell_off: usize, notes: &mut Vec<String>) -> Option<Row> {
+        let (payload_len, n) = varint(self.data, cell_off)?;
+        let payload_len = usize::try_from(payload_len).ok()?;
+        if payload_len > MAX_CELL_SIZE {
+            notes.push("Skipped an index record exceeding the cell-size cap.".into());
+            return None;
+        }
+        let payload = self.assemble_payload(cell_off.checked_add(n)?, payload_len, false, notes)?;
+        Some(Row { rowid: None, values: parse_record(&payload) })
     }
 
     /// Assemble a cell payload: the local part plus any overflow-page chain, capped.
@@ -651,6 +702,54 @@ fn blob_value(slice: &[u8], len: usize) -> CellValue {
     let digest = sha2::Sha256::digest(slice);
     let prefix: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
     CellValue::Blob { len, sha256_prefix: prefix }
+}
+
+fn is_without_rowid(sql: &str) -> bool {
+    let Some(close) = sql.rfind(')') else { return false };
+    sql_tokens(close.checked_add(1).and_then(|start| sql.get(start..)).unwrap_or(""))
+        .windows(2)
+        .any(|pair| pair.first().is_some_and(|s| s.eq_ignore_ascii_case("WITHOUT")) && pair.get(1).is_some_and(|s| s.eq_ignore_ascii_case("ROWID")))
+}
+
+/// Output-column positions in the stored record: PK columns first, then all remaining columns.
+fn without_rowid_order(table: &SchemaObject) -> Option<Vec<usize>> {
+    let open = table.sql.find('(')?;
+    let close = table.sql.rfind(')')?;
+    let body = table.sql.get(open.checked_add(1)?..close)?;
+    let mut stored = Vec::new();
+    for segment in split_top_level(body) {
+        let tokens = sql_tokens(segment);
+        let Some(pk) = tokens
+            .windows(2)
+            .position(|pair| pair.first().is_some_and(|s| s.eq_ignore_ascii_case("PRIMARY")) && pair.get(1).is_some_and(|s| s.eq_ignore_ascii_case("KEY")))
+        else {
+            continue;
+        };
+        let table_constraint = tokens.first().is_some_and(|s| s.eq_ignore_ascii_case("PRIMARY") || s.eq_ignore_ascii_case("CONSTRAINT"));
+        let names: Vec<&str> = if table_constraint {
+            let tail = tokens.get(pk.checked_add(3)?..)?;
+            let end = tail.iter().position(|s| *s == ")")?;
+            tail.get(..end)?.split(|s| *s == ",").filter_map(|part| part.first().copied()).collect()
+        } else {
+            vec![*tokens.first()?]
+        };
+        for token in names {
+            let (name, _) = take_identifier(token);
+            let position = table.columns.iter().position(|column| column.name.eq_ignore_ascii_case(&name))?;
+            if !stored.contains(&position) {
+                stored.push(position);
+            }
+        }
+    }
+    if stored.is_empty() {
+        return None;
+    }
+    for i in 0..table.columns.len() {
+        if !stored.contains(&i) {
+            stored.push(i);
+        }
+    }
+    (0..table.columns.len()).map(|i| stored.iter().position(|&column| column == i)).collect()
 }
 
 /// Parse column names and types from a CREATE TABLE statement (best effort, bounded).
@@ -972,7 +1071,7 @@ mod tests {
 
         let page = parsed.read_rows(items.rootpage, 0, 10);
         assert_eq!(page.rows.len(), 3);
-        assert_eq!(page.rows[0].rowid, 1);
+        assert_eq!(page.rows[0].rowid, Some(1));
         assert_eq!(page.rows[0].values[0], CellValue::Int(1));
         assert_eq!(page.rows[0].values[1], CellValue::Text { text: "alpha".into(), truncated: false });
         assert_eq!(page.rows[0].values[2], CellValue::Real(1.5));
@@ -985,7 +1084,7 @@ mod tests {
         // Paging: offset 1, limit 1 yields the second row only.
         let mid = parsed.read_rows(items.rootpage, 1, 1);
         assert_eq!(mid.rows.len(), 1);
-        assert_eq!(mid.rows[0].rowid, 2);
+        assert_eq!(mid.rows[0].rowid, Some(2));
 
         // find_object is case-insensitive.
         assert!(parsed.find_object("ITEMS").is_some());
@@ -1017,7 +1116,7 @@ mod tests {
         let page = db.read_rows(2, 0, 10);
         assert_eq!(page.rows.len(), 2);
         for (row, (rowid, _)) in page.rows.iter().zip(&rows) {
-            assert_eq!(row.rowid, *rowid);
+            assert_eq!(row.rowid, Some(*rowid));
             let mut expected = vec![CellValue::Text { text: "x".into(), truncated: false }; columns.len()];
             expected[column] = if alias { CellValue::Int(*rowid) } else { CellValue::Null };
             assert_eq!(row.values, expected, "{declaration}, rowid {rowid}");
@@ -1053,11 +1152,9 @@ mod tests {
 
     #[test]
     fn a_without_rowid_table_has_no_rowid_alias() {
-        // Only test alias classification here; index b-tree reading is a separate defect.
-        let sql = "CREATE TABLE t(id INTEGER PRIMARY KEY) WITHOUT ROWID";
-        let bytes = craft_anything_testkit::sqlite::table_db(sql, &[(7, vec![craft_anything_testkit::sqlite::Val::Null])]);
-        let db = SqliteDb::parse(&bytes).expect("fixture parses");
-        assert_eq!(db.read_rows(2, 0, 1).rows[0].values, vec![CellValue::Null]);
+        // Read through the index b-tree (database_tools `without_rowid_b4_integer_key` covers the rows).
+        assert_eq!(rowid_alias_index("CREATE TABLE t(id INTEGER PRIMARY KEY) WITHOUT ROWID"), None);
+        assert_eq!(rowid_alias_index("CREATE TABLE t(id INTEGER PRIMARY KEY)"), Some(0));
     }
 
     #[test]
@@ -1101,6 +1198,27 @@ mod tests {
                     let _ = parsed.read_rows(obj.rootpage, 0, 100);
                 }
                 let _ = parsed.read_rows(2, 0, 100);
+            }
+        }
+    }
+
+    #[test]
+    fn without_rowid_damaged_pages_never_panic() {
+        use craft_anything_testkit::sqlite::{Val, without_rowid_db};
+        let rows = (0..9).map(|i| vec![Val::Int(i), Val::Text("x".repeat(2000))]).collect::<Vec<_>>();
+        let base = without_rowid_db("CREATE TABLE t(k INT PRIMARY KEY, v TEXT) WITHOUT ROWID", &rows);
+        for cut in (100..base.len()).step_by(31) {
+            let db = SqliteDb::parse(&base[..cut]).unwrap();
+            let _ = db.count_rows(2);
+            let _ = db.read_rows(2, 1, 20);
+        }
+        for off in 4096..4120 {
+            for value in [0, 2, 10, 255] {
+                let mut bytes = base.clone();
+                bytes[off] = value;
+                let db = SqliteDb::parse(&bytes).unwrap();
+                let _ = db.count_rows(2);
+                let _ = db.read_rows(2, 0, 20);
             }
         }
     }
