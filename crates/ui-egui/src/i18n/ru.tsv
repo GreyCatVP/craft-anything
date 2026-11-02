@@ -160,7 +160,7 @@ Asking for its models…	Запрашиваем его модели…
 Asset catalog	Каталог ресурсов
 At most this many rounds of fixes after the first build.	Не более такого числа раундов исправлений после первой сборки.
 Attach pictures	Прикрепить изображения
-Attach pictures (or drop them here)	Прикрепить изображения (или перетащить их сюда)
+Attach pictures (or drop or paste them here)	Прикрепить изображения (или перетащить или вставить их сюда)
 Auto mode	Авторежим
 Automatic	Автоматически
 Automatic ({name})	Автоматически ({name})
@@ -616,6 +616,7 @@ List segments	Список сегментов
 List shared Cutter sessions	Список общих сессий Cutter
 List strings	Список строк
 Live: the project's latest build	В реальном времени: последняя сборка проекта
+Load a picture	Загрузить изображение
 Load a screenshot	Загрузить скриншот
 Loading…	Загрузка…
 Log	Журнал
@@ -787,6 +788,7 @@ Page through evidence	Листать доказательства
 Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	Часть приложения зависла, поэтому она была остановлена, а остальное продолжило работу. Ваша работа сохранена.
 Part of the app is stuck. Restarting clears it, and your work is kept.	Часть приложения зависла. Перезапуск очистит её, а ваша работа сохранена.
 Part of this screen hit a bug and was skipped. Your work is safe.	Часть этого экрана столкнулась с ошибкой и была пропущена. Ваша работа в безопасности.
+Paste pictures	Вставить изображения
 Paste your API key (kept in your system keychain)	Вставьте ключ API (хранится в системной связке ключей)
 Paste your {name} key	Вставьте ключ {name}
 Path	Путь
@@ -1065,6 +1067,7 @@ The builder's questions	Вопросы конструктора
 The builder's questions come to you as cards, and it waits for your answer.	Вопросы конструктора приходят к вам в виде карточек, и он ждёт вашего ответа.
 The builder's questions will come to you.	Вопросы конструктора придут к вам.
 The built-in engines still show you everything they find.	Встроенные движки по-прежнему показывают вам всё, что находят.
+The clipboard can't be read:	Не удалось прочитать буфер обмена:
 The code	Код
 The code format Android apps use.	Формат кода, который используют приложения Android.
 The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	Оценка агента кодирования по ценам API, а не ваш счёт. По подписке это не списывается.
@@ -1075,6 +1078,8 @@ The installer is open. Follow its steps, then come back here.	Установщи
 The lowest-level human-readable form of machine code: one small instruction per line.	Самая низкоуровневая форма машинного кода, читаемая человеком: одна небольшая инструкция на строку.
 The names were removed from the program before it was shipped, so we have to work them out.	Имена были удалены из программы до её выпуска, поэтому нам приходится их вычислять.
 The packed contents of an Electron app (a website inside a desktop app)	Упакованное содержимое приложения Electron (веб-сайт внутри настольного приложения)
+The pasted picture wasn't attached: another screen was opened meanwhile.	Вставленное изображение не прикреплено: тем временем был открыт другой экран.
+The picture on the clipboard is too large.	Изображение в буфере обмена слишком большое.
 The program's machine code written out as one tiny instruction per line.	Машинный код программы, записанный в виде одной крошечной инструкции на строку.
 The project's name and round	Название проекта и раунд
 The raw result	Сырой результат
@@ -1085,6 +1090,7 @@ The {} view isn't available yet in this build.	Вид «{}» пока недос
 Theme	Тема
 There's no /{name} command. You can use {commands}.	Команды /{name} нет. Можно использовать {commands}.
 There's no AI brain set up yet, so here's what the built-in engines found:	«Мозг» ИИ ещё не настроен, поэтому вот что нашли встроенные движки:
+There's no picture on the clipboard to paste.	В буфере обмена нет изображения для вставки.
 They're my app: edit them in place	Это моё приложение: редактировать на месте
 Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	То, что программа берёт у операционной системы или библиотек, например «открыть файл» или «нарисовать окно».
 Things a program or library offers for other programs to use.	То, что программа или библиотека предлагает другим программам для использования.

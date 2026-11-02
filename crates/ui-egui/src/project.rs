@@ -406,6 +406,52 @@ impl CraftApp {
     }
 }
 
+impl CraftApp {
+    /// A small picture of each file in `files` for its chip in a prompt box, decoded on a worker
+    /// the first time it's asked for (`None` until then, or if it can't be read). Pictures no
+    /// prompt box holds any more are forgotten.
+    pub fn previews(&mut self, ctx: &egui::Context, files: &[PathBuf]) -> Vec<Option<egui::TextureHandle>> {
+        let (attached, make) = (&self.state.project_attachments, &self.state.make.pictures);
+        self.previews.retain(|p, _| attached.contains(p) || make.contains(p) || files.contains(p));
+        files.iter().map(|p| self.preview(ctx, p)).collect()
+    }
+
+    fn preview(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+        if let Some(t) = self.previews.get(path) {
+            return if let Thumb::Ready(t) = t { Some(t.clone()) } else { None };
+        }
+        self.previews.insert(path.to_path_buf(), Thumb::Loading);
+        let (p, ctx) = (path.to_path_buf(), ctx.clone());
+        self.jobs.spawn(tr("Load a picture"), false, move |_| {
+            use craft_anything_engine::tools::web_common::{decode_picture, resize};
+            // The same size limit as attaching: a larger file wouldn't be sent anyway.
+            let small = std::fs::metadata(&p).is_ok_and(|m| m.len() <= 20 * 1024 * 1024);
+            let image =
+                small.then(|| std::fs::read(&p).ok()).flatten().and_then(|b| decode_picture(&b).ok()).filter(|i| i.width > 0 && i.height > 0).map(|img| {
+                    let longest = img.width.max(img.height);
+                    // In u64: a picture's own sizes can be anything up to the decode budget.
+                    let scaled = |side: u32| u32::try_from(u64::from(side) * u64::from(PREVIEW_PIXELS) / u64::from(longest)).unwrap_or(PREVIEW_PIXELS).max(1);
+                    let img = if longest > PREVIEW_PIXELS { resize(&img, scaled(img.width), scaled(img.height)) } else { img };
+                    let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba);
+                    ctx.load_texture(format!("preview:{}", p.display()), ci, egui::TextureOptions::LINEAR)
+                });
+            Ok(Done::Preview { path: p, image })
+        });
+        None
+    }
+
+    pub fn preview_ready(&mut self, path: PathBuf, image: Option<egui::TextureHandle>) {
+        // Removed from the box while it was decoded: nothing shows it.
+        if self.previews.contains_key(&path) {
+            self.previews.insert(path, image.map_or(Thumb::Missing, Thumb::Ready));
+        }
+    }
+}
+
+/// The longest side of an attachment's picture as decoded (twice its hover size in points, so
+/// it's sharp on a high-density screen).
+const PREVIEW_PIXELS: u32 = 720;
+
 /// How much of a page's screenshot a thumbnail shows (from the top), and its widest, in pixels.
 const THUMB_TOP: u32 = 1800;
 const THUMB_WIDTH: u32 = 720;
@@ -1530,6 +1576,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
             .unwrap_or("Ask for a change, e.g. \"make the header blue\" or \"add a contact form\""))
     };
     ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
+        let previews = app.previews(ui.ctx(), &app.state.project_attachments.clone());
         let history = || {
             let asked = app.workspace.as_ref().and_then(|w| app.asked.get(&w.root)).map_or(&[][..], Vec::as_slice);
             crate::just_ask::prompts(&app.state.feed, asked)
@@ -1542,7 +1589,8 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
                 name: "Ask for a change",
                 hint,
                 rows: (1, 8),
-                attach: Some("Attach pictures (or drop them here)"),
+                attach: Some("Attach pictures (or drop or paste them here)"),
+                previews: &previews,
                 // The one way to pause (Continue picks up where it stopped).
                 stop_button: running.then_some("Pause"),
                 stopping: pausing,
@@ -1567,6 +1615,9 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
         }
         if out.attach {
             app.pick(crate::Pick::Attach);
+        }
+        if out.paste {
+            app.paste_pictures(true);
         }
         if out.stop {
             app.pause();
@@ -1638,6 +1689,47 @@ impl CraftApp {
             if craft_anything_engine::workspace::is_picture(&f) && !list.contains(&f) {
                 list.push(f);
             }
+        }
+    }
+
+    /// Pictures pasted with Ctrl+V: attached to the project's next message (`attach`), else added
+    /// as pictures of the original on Make. The clipboard is read on a worker; one with no
+    /// picture says so.
+    pub fn paste_pictures(&mut self, attach: bool) {
+        // Tests never read the person's clipboard.
+        if self.headless {
+            return;
+        }
+        // Where it goes is decided now: another project may be open by the time it's read.
+        let project = if attach {
+            match &self.workspace {
+                Some(ws) => Some(ws.root.clone()),
+                None => return,
+            }
+        } else {
+            None
+        };
+        // Pastes still attached somewhere are kept when old ones are cleared out.
+        let mut keep: Vec<PathBuf> = self.state.project_attachments.iter().chain(&self.state.make.pictures).cloned().collect();
+        keep.extend(self.state.unsent.values().flat_map(|(_, files)| files.iter().cloned()));
+        keep.extend(self.drafts.values().flat_map(|d| d.attachments.iter().cloned()));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.jobs.spawn(tr("Paste pictures"), false, move |_| {
+            let files = crate::paste::read_pictures(&craft_anything_engine::workspace::pasted_dir(), &keep)?;
+            if files.is_empty() {
+                return Err(tr("There's no picture on the clipboard to paste."));
+            }
+            Ok(Done::Pasted { project, files })
+        });
+    }
+
+    /// Pasted pictures were read: attached to the project they were pasted in while it's still
+    /// open, or added to Make's pictures while Make is still showing.
+    pub(crate) fn pasted(&mut self, project: Option<PathBuf>, files: Vec<PathBuf>) {
+        match project {
+            Some(root) if self.workspace.as_ref().is_some_and(|w| w.root == root) => self.attach(files),
+            None if self.state.screen == Screen::Home => self.add_pictures(files),
+            _ => self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true),
         }
     }
 

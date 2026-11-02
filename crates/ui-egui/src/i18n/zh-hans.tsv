@@ -160,7 +160,7 @@ Asking for its models…	正在获取可用模型…
 Asset catalog	资源目录
 At most this many rounds of fixes after the first build.	首次构建后，最多进行这么多轮修正。
 Attach pictures	附上图片
-Attach pictures (or drop them here)	附加图片 (或拖到这里)
+Attach pictures (or drop or paste them here)	附加图片 (或拖到这里、粘贴到这里)
 Auto mode	自动模式
 Automatic	自动
 Automatic ({name})	自动 ({name})
@@ -616,6 +616,7 @@ List segments	列出区段
 List shared Cutter sessions	列出共享的 Cutter 会话
 List strings	列出字符串
 Live: the project's latest build	当前：项目的最新构建
+Load a picture	加载图片
 Load a screenshot	加载截图
 Loading…	正在加载…
 Log	日志
@@ -787,6 +788,7 @@ Page through evidence	分页浏览证据
 Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	应用的某个部分卡住，已将其停止，其他部分继续运行。你的工作已保留。
 Part of the app is stuck. Restarting clears it, and your work is kept.	应用的某个部分卡住了。重启即可恢复，你的工作会保留。
 Part of this screen hit a bug and was skipped. Your work is safe.	此界面的一部分出现错误，已跳过。你的工作内容是安全的。
+Paste pictures	粘贴图片
 Paste your API key (kept in your system keychain)	粘贴 API 密钥 (保存在系统钥匙串中)
 Paste your {name} key	粘贴你的 {name} 密钥
 Path	路径
@@ -1065,6 +1067,7 @@ The builder's questions	构建助手的问题
 The builder's questions come to you as cards, and it waits for your answer.	构建助手的问题会以卡片形式交给你，并等待你的回答。
 The builder's questions will come to you.	构建助手的问题会交给你回答。
 The built-in engines still show you everything they find.	内置引擎仍会显示它们发现的所有内容。
+The clipboard can't be read:	无法读取剪贴板:
 The code	代码
 The code format Android apps use.	Android 应用使用的代码格式。
 The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	这是编程智能体按 API 价格估算的费用，并非你的实际账单；订阅不会按此金额收费。
@@ -1075,6 +1078,8 @@ The installer is open. Follow its steps, then come back here.	安装程序已打
 The lowest-level human-readable form of machine code: one small instruction per line.	机器码最底层的可读形式，每行一条简短指令。
 The names were removed from the program before it was shipped, so we have to work them out.	程序发布前移除了这些名称，因此需要推导它们。
 The packed contents of an Electron app (a website inside a desktop app)	Electron 应用的打包内容 (桌面应用中的网站)
+The pasted picture wasn't attached: another screen was opened meanwhile.	粘贴的图片没有附加:期间打开了另一个页面。
+The picture on the clipboard is too large.	剪贴板中的图片太大。
 The program's machine code written out as one tiny instruction per line.	将程序的机器码写成每行一条简单指令的形式。
 The project's name and round	项目名称与轮次
 The raw result	原始结果
@@ -1085,6 +1090,7 @@ The {} view isn't available yet in this build.	此版本暂不提供 {} 视图�
 Theme	主题
 There's no /{name} command. You can use {commands}.	没有 /{name} 命令。你可以使用 {commands}。
 There's no AI brain set up yet, so here's what the built-in engines found:	尚未设置 AI 助手，以下是内置引擎的发现：
+There's no picture on the clipboard to paste.	剪贴板中没有可粘贴的图片。
 They're my app: edit them in place	这些就是我的应用：原位编辑
 Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	程序借用操作系统或库提供的功能，例如“打开文件”或“绘制窗口”。
 Things a program or library offers for other programs to use.	程序或库提供给其他程序使用的功能。

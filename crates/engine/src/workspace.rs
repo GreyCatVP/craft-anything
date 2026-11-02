@@ -1047,6 +1047,71 @@ fn picture_number(p: &Path) -> u32 {
     p.file_stem().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix("picture-")).and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
+/// The most pixels a pasted picture may have (a 16K screen): more is refused before encoding.
+const MAX_PASTED_PIXELS: u64 = 15360 * 8640;
+
+/// The largest picture a message sends ([`copy_pictures`] skips bigger files).
+const MAX_PICTURE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Where pictures pasted from the clipboard wait until their message is sent: this person's own
+/// cache folder (never a temp folder other users can read).
+pub fn pasted_dir() -> PathBuf {
+    dirs::cache_dir().or_else(|| dirs::home_dir().map(|h| h.join(".cache"))).unwrap_or_else(std::env::temp_dir).join("Craft Anything").join("pasted")
+}
+
+/// Save a picture pasted from the clipboard (8-bit RGBA, `width`×`height`) as `pasted-<time>.png`
+/// in `dir`, readable only by this person, where it waits until its message is sent (which
+/// copies it into the project). Pastes from earlier days are cleared out first, except those in
+/// `keep` (still attached to a draft or a message).
+pub fn save_pasted_picture(dir: &Path, width: u32, height: u32, rgba: Vec<u8>, keep: &[PathBuf]) -> Result<PathBuf, ToolError> {
+    let pixels = u64::from(width).saturating_mul(u64::from(height));
+    if pixels == 0 || pixels > MAX_PASTED_PIXELS {
+        return Err(ToolError::new(ErrorCode::OverLimit, format!("the pasted picture is {width}×{height}; at most a 16K screen fits")));
+    }
+    if pixels.checked_mul(4) != Some(rgba.len() as u64) {
+        return Err(ToolError::invalid("the pasted picture's pixels don't match its size"));
+    }
+    let png = crate::tools::web_common::encode_png(&crate::tools::web_common::Image { width, height, rgba })?;
+    if png.len() as u64 > MAX_PICTURE_BYTES {
+        let mb = png.len() / (1024 * 1024);
+        return Err(ToolError::new(ErrorCode::OverLimit, format!("the pasted picture is {mb} MB as a PNG; a message takes pictures up to 20 MB"))
+            .with_remediation("Paste a smaller part of the screen, or save it as a JPEG and attach the file."));
+    }
+    std::fs::create_dir_all(dir).map_err(|e| ToolError::io(dir.display(), e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    forget_old_pastes(dir, keep);
+    // The name is taken with create_new, so two pastes (or two copies of the app) never share one.
+    let ms = now_ms();
+    let mut n = 1u32;
+    let path = loop {
+        let path = if n == 1 { dir.join(format!("pasted-{ms}.png")) } else { dir.join(format!("pasted-{ms}-{n}.png")) };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => break path,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n = n.saturating_add(1),
+            Err(e) => return Err(ToolError::io(path.display(), e)),
+        }
+    };
+    craft_anything_platform::fs::write_atomic_private(&path, &png)?;
+    Ok(path)
+}
+
+/// Remove pastes over a day old from `dir` (only ours: `pasted-….png`), except those in `keep`.
+fn forget_old_pastes(dir: &Path, keep: &[PathBuf]) {
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        let ours = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("pasted-") && n.ends_with(".png"));
+        let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+        if ours && old && !keep.contains(&p) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// The default projects folder: `Documents/Craft Anything`, else `~/Craft Anything`.
 pub fn default_projects_dir() -> PathBuf {
     dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from(".")).join("Craft Anything")
@@ -1055,6 +1120,31 @@ pub fn default_projects_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pasted_picture_is_saved_as_a_png_and_bad_sizes_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = save_pasted_picture(dir.path(), 2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255], &[]).unwrap();
+        assert!(is_picture(&p));
+        let bytes = std::fs::read(&p).unwrap();
+        assert_eq!(crate::tools::web_common::png_dimensions(&bytes).unwrap(), (2, 1));
+        let second = save_pasted_picture(dir.path(), 2, 1, vec![0; 8], &[]).unwrap();
+        assert_ne!(p, second, "two pastes in one millisecond don't overwrite each other");
+        assert!(save_pasted_picture(dir.path(), 2, 2, vec![0; 8], &[]).is_err(), "pixels that don't match the size");
+        assert!(save_pasted_picture(dir.path(), 0, 0, Vec::new(), &[]).is_err());
+        assert!(save_pasted_picture(dir.path(), u32::MAX, u32::MAX, Vec::new(), &[]).is_err());
+        assert_eq!(pictures_in(dir.path()).len(), 2, "fresh pastes are kept");
+        // A day later, a paste clears out old ones, but not one still attached somewhere.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+        for f in [&p, &second] {
+            std::fs::File::options().write(true).open(f).unwrap().set_modified(old).unwrap();
+        }
+        let third = save_pasted_picture(dir.path(), 2, 1, vec![0; 8], std::slice::from_ref(&second)).unwrap();
+        assert!(!p.exists() && second.exists() && third.exists());
+        let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        names.sort();
+        assert_eq!(names.len(), 2, "no temp files left behind: {names:?}");
+    }
 
     #[test]
     fn a_projects_usage_adds_up_across_runs_and_a_newer_file_is_left_alone() {

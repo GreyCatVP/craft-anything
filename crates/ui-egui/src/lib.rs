@@ -25,6 +25,7 @@ pub mod just_ask;
 pub mod make;
 pub mod manage;
 pub mod palette;
+pub mod paste;
 pub mod pins;
 pub mod project;
 pub mod prompt_box;
@@ -167,6 +168,11 @@ pub enum Done {
     Pictures(Vec<PathBuf>),
     /// Pictures for the next message were chosen.
     ToAttach(Vec<PathBuf>),
+    /// Pictures were pasted: for the project open then (`Some`), or for Make (`None`).
+    Pasted {
+        project: Option<PathBuf>,
+        files: Vec<PathBuf>,
+    },
     /// The game engines on this computer were listed.
     GameEngines(craft_anything_engines::game::Inventory),
     /// What engine made the game at `path`.
@@ -219,6 +225,11 @@ pub enum Done {
     Facts(project::Facts),
     /// A screenshot thumbnail was decoded (`None` when it couldn't be).
     Thumb {
+        path: PathBuf,
+        image: Option<egui::TextureHandle>,
+    },
+    /// An attachment's picture for its chip in a prompt box.
+    Preview {
         path: PathBuf,
         image: Option<egui::TextureHandle>,
     },
@@ -387,6 +398,8 @@ pub struct CraftApp {
     open_url: Option<String>,
     /// The open project's screenshot thumbnails (dropped when another project opens).
     pub thumbs: std::collections::HashMap<PathBuf, project::Thumb>,
+    /// Pictures of the attachments in the prompt boxes (`CraftApp::previews`).
+    pub previews: std::collections::HashMap<PathBuf, project::Thumb>,
     /// The kinds of thing this app can make; a fork registers its own here.
     pub kinds: craft_anything_ai::rebuild::KindRegistry,
     /// Game engines on this computer (`None` until the first look finishes).
@@ -469,6 +482,7 @@ impl CraftApp {
             pins_read_at: None,
             open_url: None,
             thumbs: Default::default(),
+            previews: Default::default(),
             kinds: craft_anything_ai::rebuild::KindRegistry::built_in(),
             game_engines: None,
             asset_keys: None,
@@ -1255,6 +1269,7 @@ impl CraftApp {
             Done::PicturesAdded(added) => self.pictures_added(added),
             Done::Created { ws, request, backend, pictures } => self.created(*ws, request, backend, pictures),
             Done::Thumb { path, image } => self.thumb_ready(path, image),
+            Done::Preview { path, image } => self.preview_ready(path, image),
             Done::Tool { tool, params, route, result } => self.tool_done(tool, params, route, result),
             Done::Acted { tool, result } => self.acted(tool, result),
             Done::Opened { path, result } => match result {
@@ -1363,6 +1378,7 @@ impl CraftApp {
             }
             Done::Pictures(files) => self.add_pictures(files),
             Done::ToAttach(files) => self.attach(files),
+            Done::Pasted { project, files } => self.pasted(project, files),
             Done::Attached { root, text, attachments, files } => self.deliver(root, text, attachments, files),
             Done::GameEngines(inv) => self.engines_found(inv),
             Done::GameFound { path, found } => {
