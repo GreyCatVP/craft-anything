@@ -46,6 +46,20 @@ bytes. Reading or unpacking preserves those bytes. Synthetic graphs cover UTF-16
 surrogate pair), Latin1 and binary members across both supported module-record and offsets-block
 sizes. A freshly compiled Bun program and the CLI/MCP transport were not run for this correction.
 
+### Project asset controls
+
+Every project's details panel exposes the registered asset providers, including app projects whose
+recorded stack is Rust + egui. Each provider has its own switch. The panel always shows the asset
+count, estimated spending, shared budget and remaining amount, even when all providers are off.
+An exact budget edit is saved with **Save budget**; changing the default in Settings still affects
+only new projects. Asset spending is separate from the coding agent's AI usage cost.
+
+Provider choices are enforced by the generation tools before any paid stage, retained across
+builder saves and project duplication, and persisted in `craft.json` version 3. Old projects keep
+their previous master asset opt-in behavior until individual providers are selected. UI and backend
+tests cover independent provider switches, exact/lowered budgets, existing spending, reopening,
+migration and disabled-provider no-spend cases. No new live generation was needed for these controls.
+
 ### Linux Unreal setup
 
 Unreal installations registered in `~/.config/Epic/UnrealEngine/Install.ini` are found on Linux.

@@ -319,6 +319,7 @@ Owner: maintainers · Status: in progress (Codex resume needs a real install)
 Owner: open · Status: done (branch `feature/r1.4-asset-providers`)
 - [x] Add Scenario image/3D and ElevenLabs speech, sound effects and music through the asset-provider tools — one-bit, branch `feature/scenario-elevenlabs-assets` (explicit contributor request; local provider, tool and UI tests)
 - [x] Separate masked Scenario API key and API secret inputs; preserve stored credentials and clarify authentication and key-storage behavior — one-bit, branch `feature/scenario-elevenlabs-assets` (PR review follow-up; UI form regression tests)
+- [x] Project sidebar controls for each asset provider, an editable shared asset budget, and spent/remaining estimates on every project; enforce provider choices in generation tools — one-bit, branch `feature/scenario-elevenlabs-assets` (PR review follow-up; migration, provider gating and UI persistence tests)
 - [ ] Exercise Scenario image → 3D and ElevenLabs speech, sound effects and music with real credentials; compare spending estimates against invoices (needs keys)
 - [x] `AssetProvider` (image, 3D, later audio) with a cost estimate; fal becomes one impl
 - [x] Model ids and prices in a table; prompts read prices from it (today `assets_note` repeats

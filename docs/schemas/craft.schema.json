@@ -37,6 +37,16 @@
       "format": "double",
       "default": 5.0
     },
+    "asset_providers": {
+      "description": "Explicit provider ids allowed for this project. None preserves the legacy all-provider\nchoice; an empty list allows none. The master generate_assets switch still applies.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
     "awaiting_check": {
       "description": "The builder finished its turn and the run's checks haven't reported on it yet, so a run\nthat picks this up only needs to check: nothing is left to build.",
       "type": "boolean"

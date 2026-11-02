@@ -41,8 +41,21 @@ and grant only the permissions needed for generation and asset access.
 
 Choose the picture and 3D models in Settings → Builds. Headless settings use `[assets] image_model`
 and `model_3d`; individual image/model tool calls can override their model. Existing fal.ai defaults
-are preserved. Turn on generated assets for the project (`project_assets_allow`) before generating.
-Having a key alone does not enable spending.
+are preserved. Every project's sidebar has **Generated assets** controls, including app projects
+whose recorded stack is not a game engine. Turn providers on or off individually there. A key
+alone does not enable spending, and a disabled provider is refused by the generation tools even
+when a model override selects it. Turning a provider off affects new operations; an already-running
+generation operation can finish.
+
+The same sidebar shows the shared asset budget, estimated spending and remaining amount. Edit
+the budget and press **Save budget** to change this project's budget, including lowering it. The
+spending tally comes from generated asset records and is separate from the coding agent's AI cost.
+Provider switches and budget edits are saved with the project; disabling a provider keeps its
+previous asset records and spending. Provider switches do not change the selected image/3D models.
+
+Headless clients use `project_assets_allow` with `project`, `provider` and `allow` to control a
+single provider; omit `allow` to read its status. Omitting `provider` retains the existing master
+asset switch. `project_assets_budget` reads or sets the shared budget and reports spending.
 
 For example, these settings select Scenario for both stages and give a new project enough budget
 for a model and its source picture:

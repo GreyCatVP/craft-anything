@@ -159,8 +159,9 @@ OpenAI-compatible servers are available for questions and analysis (Settings →
 
 Generated assets can use your own **Scenario** account for pictures and 3D models, and
 **ElevenLabs** for text-to-speech, sound effects and music. Add credentials in Settings → AI →
-Game assets, choose picture and 3D models in Settings → Builds, and turn on generated assets
-for the project. The CLI and MCP use the same tools and project budget.
+Game assets and choose picture and 3D models in Settings → Builds. The project sidebar lets you
+switch each provider on or off, edit the shared asset budget and see estimated spending and the
+remaining amount. The CLI and MCP use the same tools and project budget.
 See [asset provider setup and spending estimates](docs/extending.md#built-in-generated-assets).
 
 ## Built for agents
