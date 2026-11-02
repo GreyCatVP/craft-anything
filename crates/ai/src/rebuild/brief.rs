@@ -300,31 +300,108 @@ pub(super) fn continue_prompt(kind: &dyn TargetKind) -> String {
     )
 }
 
-/// For an agent whose saved session isn't on this computer (the project was copied from another
-/// one, or moved): the whole brief, then what was made so far and where to find it, and the
-/// earlier conversation as the project kept it (`handoff`), else its last summary, so it carries
-/// on from the project rather than starting over.
-pub(super) fn resumed_elsewhere(brief: &str, last_reply: &str, handoff: Option<&str>) -> String {
+/// Why a builder starts a run without the conversation that built the project so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Without {
+    /// Its saved session isn't on this computer (the project was copied from another one, or
+    /// moved).
+    Elsewhere,
+    /// It has none to continue: it doesn't carry a conversation on from one run to the next, or
+    /// it never saved one.
+    NotCarried,
+}
+
+/// For a builder that starts without the conversation that built the project (`why`: its saved
+/// session isn't on this computer, or it has none to continue): the whole brief, then what was
+/// made so far and where to find it, the earlier conversation as the project kept it
+/// (`handoff`), else its last summary, so it carries on from the project rather than starting
+/// over, and last what it's asked to do now (`then`: the person's request or the carry-on), so
+/// that isn't lost inside the brief.
+pub(super) fn under_way(brief: &str, why: Without, last_reply: &str, handoff: Option<&str>, then: Option<&str>) -> String {
+    let earlier = match why {
+        Without::Elsewhere => {
+            "an earlier conversation built it, but that conversation isn't on this computer (the project was started on another computer or in another folder)"
+        }
+        Without::NotCarried => "an earlier conversation built it, and you start this one without it",
+    };
+    let next = match then {
+        Some(_) => "then do what's asked at the end: build on what's there, and change or replace it where that asks you to.",
+        None => "then carry on from there instead of starting again.",
+    };
     let mut s = format!(
-        "{brief}\n\nThis project is already under way: an earlier conversation built it, but that conversation isn't on this computer (the project was started on another computer or in another folder). Everything made so far is in app/. Before changing anything, look through app/ and the open questions (core_unknowns_show) to see what's done, then carry on from there instead of starting again."
+        "{brief}\n\nThis project is already under way: {earlier}. Everything made so far is in app/. Before changing anything, look through app/ and the open questions (core_unknowns_show) to see what's done, {next}"
     );
     if let Some(h) = handoff.map(str::trim).filter(|h| !h.is_empty()) {
         s.push_str(&format!(
             "\n\nThe earlier conversation, as the project kept it (oldest first; when it was long, the newest part is kept and long messages are cut short):\n\n{h}"
         ));
-        return s;
-    }
-    let last = last_reply.trim();
-    if !last.is_empty() {
-        let last: String = last.chars().take(2000).collect();
+    } else if !last_reply.trim().is_empty() {
+        let last: String = last_reply.trim().chars().take(2000).collect();
         s.push_str(&format!("\n\nWhat the earlier conversation last told the person:\n\"{last}\""));
+    }
+    if let Some(t) = then.map(str::trim).filter(|t| !t.is_empty()) {
+        s.push_str(&format!("\n\n{t}"));
     }
     s
 }
 
+/// What the person asks of a project under way. Their words come first and are done in full: they
+/// may change what it's built with, and a passing check isn't the same as a request done.
 pub(super) fn follow_up(message: &str, kind: &dyn TargetKind) -> String {
     let build = kind.rebuild_words();
     format!(
-        "The person asks: \"{message}\"\n\nMake the change in app/, then {build}, fix any errors and check it with rebuild_check. Reply with 1-3 plain sentences on what changed."
+        "The person asks: \"{message}\"\n\nThis is their request now, and it comes first: do all of it. It may change what the project is built with (its language, framework, engine or platform); then build with what they asked for, even where the brief, the project's settings or what's already in app/ use something else: those are only defaults for what the request leaves open. Make the change in app/, then {build}, fix any errors and check it with rebuild_check. A passing check means the build works, not that the request is done (rebuild_check may only know how to check what the project was built with before), so before you reply, go through the request part by part and make sure each part is in app/. If a part can't be done, ask with core_person_ask before leaving it out; never drop it silently, and never undo the change to get past a check. Reply with 1-3 plain sentences on what changed, and say exactly what's left, if anything."
     )
+}
+
+/// How a run's first message to the builder is chosen.
+pub(super) struct Opening<'a> {
+    /// The person's message for this run.
+    pub message: Option<&'a str>,
+    /// Nothing is built yet: the builder gets the whole brief.
+    pub first: bool,
+    /// Carrying on after a stop.
+    pub carrying_on: bool,
+    /// Our own loop with an API model, not a coding agent.
+    pub api_loop: bool,
+    /// The builder continues the conversation that built the project so far, so it needs only
+    /// what's new.
+    pub has_history: bool,
+    /// That conversation as the project kept it, for a builder that starts without it.
+    pub handoff: Option<&'a str>,
+}
+
+/// The builder's first message of a run, and what to send instead when its saved session turns
+/// out not to be on this computer. Only a builder that has the earlier conversation gets the
+/// short follow-up; a coding agent that starts without it gets the whole brief, what was made,
+/// and the person's request last.
+pub(super) fn opening(kind: &dyn TargetKind, cx: &BriefCx, o: &Opening) -> (String, Option<String>) {
+    let ws = cx.ws;
+    // What's asked of a project under way: the person's request, or the carry-on after a stop.
+    let asked = match o.message {
+        Some(m) if !o.first => Some(follow_up(m, kind)),
+        None if o.carrying_on && !o.first => Some(continue_prompt(kind)),
+        _ => None,
+    };
+    let handed_over = |why| match &asked {
+        Some(a) => under_way(&brief(kind, cx, None), why, &ws.manifest.last_reply, o.handoff, Some(a)),
+        None => under_way(&brief(kind, cx, o.message), why, &ws.manifest.last_reply, o.handoff, None),
+    };
+    let prompt = match &asked {
+        // The project's settings as they are now, for an agent that carries on its session.
+        Some(a) if o.has_history => {
+            let now: String = kind.follow_up_sections(cx).iter().map(|s| format!("\n\n{s}")).collect();
+            format!("{a}{now}{}", pictures_reminder(ws))
+        }
+        Some(_) if !o.api_loop => handed_over(Without::NotCarried),
+        // An API loop without its transcript starts from the brief with the request added.
+        _ => {
+            let b = brief(kind, cx, o.message);
+            if o.api_loop { format!("{API_BUILDER}\n\n{b}") } else { b }
+        }
+    };
+    // A saved session may not be on this computer (the project was copied here): then a new one
+    // starts from the brief and what the project already has.
+    let fresh = (!o.api_loop && ws.manifest.agent_session.is_some()).then(|| handed_over(Without::Elsewhere));
+    (prompt, fresh)
 }

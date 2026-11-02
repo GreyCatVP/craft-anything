@@ -384,6 +384,13 @@ pub struct Manifest {
     /// this was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_by: Option<String>,
+    /// Whether `agent_session` holds the whole conversation from the first brief on: true when a
+    /// run whose builder continues its session saved it, false when that builder starts every
+    /// run afresh. None: saved before this was kept, and the agent's adapter says what such a
+    /// session holds (a Codex thread then often began with only a follow-up line). No version
+    /// step: an older build drops the field, which leaves None and costs at most one more brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_whole: Option<bool>,
     /// Kinds of agent action the person allowed for this workspace ("bash:npm", "web_fetch"…).
     #[serde(default)]
     pub allowed_actions: Vec<String>,
@@ -449,6 +456,7 @@ impl Manifest {
             checks: Vec::new(),
             agent_session: None,
             agent_session_by: None,
+            agent_session_whole: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
             asset_budget_usd: ASSET_BUDGET_USD,
@@ -1658,6 +1666,13 @@ mod tests {
         assert_eq!(m.agent_session_for("codex"), None);
         let text = serde_json::to_string(&m).unwrap();
         assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap().agent_session_by.as_deref(), Some("claude-code"));
+        // Whether it holds the whole conversation: unknown for a session saved before this was
+        // kept (and not written then), else kept as said.
+        assert!(!text.contains("agent_session_whole"));
+        assert_eq!(read_manifest(MANIFEST_V0.as_bytes()).unwrap().agent_session_whole, None);
+        m.agent_session_whole = Some(false);
+        let text = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap().agent_session_whole, Some(false));
     }
 
     /// A rename survives a stale save, a copy takes the build but not the conversation (nor its

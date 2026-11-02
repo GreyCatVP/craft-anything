@@ -757,6 +757,11 @@ impl Conversation for AcpConversation {
         self.failure.or_else(|| self.lock().as_ref().and_then(|s| s.core.failure))
     }
 
+    /// One agent process serves the whole chat.
+    fn continues_session(&self) -> bool {
+        true
+    }
+
     fn send(&mut self, text: &str) {
         self.send_prompt(text, false);
     }
