@@ -239,7 +239,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     }
     // Sans first: a mincho/serif fallback makes Japanese and Chinese UI text look like prose.
     let fallbacks = sans_first(fallbacks);
-    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "DMSans".to_owned());
+    let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
+    proportional.insert(0, "DMSans".to_owned());
+    // DM Sans has no arrows (→ ← ↑ ↓) or the ⌘ key; JetBrains Mono does, so it fills those
+    // glyphs in without changing the interface's proportional text.
+    proportional.insert(1, "JetBrainsMono".to_owned());
     fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "JetBrainsMono".to_owned());
     for fam in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts.families.entry(fam).or_default().extend(fallbacks.iter().cloned());
@@ -456,6 +460,17 @@ mod tests {
         assert_eq!(ordered[3], "craft:Shippori Mincho:Regular");
         assert_eq!(fallback_rank("craft:BIZ UDMincho:Regular"), FallbackRank::Serif);
         assert_eq!(fallback_rank("craft:BIZ UDPGothic:Regular"), FallbackRank::Local);
+    }
+
+    /// DM Sans has no arrows or the ⌘ key; the bundled mono face fills them in, so a local build
+    /// (without craft-fonts) never shows boxes for "Settings → Engines" or "Ctrl/⌘ K".
+    #[test]
+    fn interface_fonts_show_arrows_without_craft_fonts() {
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        let id = egui::FontId::proportional(14.0);
+        assert!(ctx.fonts_mut(|f| f.has_glyphs(&id, "→←↑↓⌘")), "arrows and the command key");
     }
 
     /// Releases are built with craft-fonts (#19), and so is CI; a build without them has only

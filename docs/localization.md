@@ -60,5 +60,7 @@ cargo run -p craft-anything-ui-egui --example snapshot -- --lang es-mx --only se
 Chinese glyphs use the existing craft-fonts fallback, which release and CI builds already include.
 Local builds must set `CRAFT_FONTS_DIR` to a craft-fonts checkout before compiling to get the same
 glyph coverage. Spanish uses the Latin glyphs already in `assets/fonts`; the catalog adds no font
-assets. Check each language, clipping, narrow windows and native file dialogs visually on each
+assets. DM Sans has no arrows or the ⌘ key, so proportional text falls back to the bundled
+JetBrains Mono for those, and a build without craft-fonts still shows `Settings → Engines` and
+`Ctrl/⌘ K`. Check each language, clipping, narrow windows and native file dialogs visually on each
 platform; catalog coverage alone does not verify layout or fonts.

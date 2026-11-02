@@ -483,10 +483,10 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         icons::show(ui, "triangle-alert", 16.0, t.danger);
-                        ui.add(egui::Label::new(RichText::new(message).color(t.text)).wrap());
+                        ui.add(egui::Label::new(RichText::new(tr(message)).color(t.text)).wrap());
                     });
                     if let Some(r) = remediation {
-                        ui.add(egui::Label::new(RichText::new(r).color(t.text_dim)).wrap());
+                        ui.add(egui::Label::new(RichText::new(tr(r)).color(t.text_dim)).wrap());
                     }
                     if let Some(l) = log
                         && widgets::open_log_button(ui, l)

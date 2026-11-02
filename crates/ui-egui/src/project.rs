@@ -1141,10 +1141,10 @@ fn draw_items(
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
                             icons::show(ui, "triangle-alert", 16.0, t.danger);
-                            ui.add(egui::Label::new(RichText::new(message).color(t.text)).wrap());
+                            ui.add(egui::Label::new(RichText::new(tr(message)).color(t.text)).wrap());
                         });
                         if let Some(r) = remediation {
-                            ui.add(egui::Label::new(RichText::new(r).color(t.text_dim)).wrap());
+                            ui.add(egui::Label::new(RichText::new(tr(r)).color(t.text_dim)).wrap());
                         }
                         if let Some(l) = log
                             && widgets::open_log_button(ui, l)
@@ -1156,12 +1156,12 @@ fn draw_items(
                         if last && !app.running() && !can_continue(app, ws) {
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
-                                if widgets::primary_icon(ui, Some("refresh-cw"), "Try again", true).clicked() {
+                                if widgets::primary_icon(ui, Some("refresh-cw"), &tr("Try again"), true).clicked() {
                                     *retry = true;
                                 }
                                 // A fix that names a command to run (sign in, install…) offers to copy it.
                                 if let Some(cmd) = remediation.as_deref().and_then(command_in)
-                                    && widgets::secondary(ui, Some("copy"), "Copy the command").on_hover_text(cmd).clicked()
+                                    && widgets::secondary(ui, Some("copy"), &tr("Copy the command")).on_hover_text(cmd).clicked()
                                 {
                                     ui.ctx().copy_text(cmd.to_string());
                                 }
