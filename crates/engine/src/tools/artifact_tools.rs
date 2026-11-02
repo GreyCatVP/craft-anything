@@ -471,11 +471,45 @@ fn integrity_error(inv: &Inventory) -> ToolError {
     .with_details(json!({"contradictions": inv.contradictions.iter().take(50).collect::<Vec<_>>()}))
 }
 
+fn show_limits(max_depth: u32, max_entries: usize, max_total_bytes: u64) -> InvLimits {
+    InvLimits { max_entries: max_entries.clamp(1, 1_000_000), max_depth: max_depth.min(6), max_total_bytes, ..InvLimits::default() }
+}
+
+/// Re-read the path a core_archive_show record names and check it is unchanged, then return its inventory at `limits`.
+/// The check uses the scope the record was made with, since a folder's id covers only the entries that scope lists.
+pub(crate) fn recorded_inventory(ev: &Evidence, limits: InvLimits, cancel: &CancelToken) -> Result<(Inventory, Subject), ToolError> {
+    let path = ev.params.get("path").and_then(Value::as_str).ok_or_else(|| ToolError::invalid("inventory evidence has no path"))?;
+    let num = |k: &str| ev.params.get(k).and_then(Value::as_u64);
+    let recorded = show_limits(
+        num("max_depth").map_or(default_depth(), |v| u32::try_from(v).unwrap_or(u32::MAX)),
+        num("max_entries").map_or(default_max_entries(), |v| usize::try_from(v).unwrap_or(usize::MAX)),
+        num("max_total_bytes").unwrap_or_else(default_max_total),
+    );
+    // A file's id is the hash of its bytes, whatever the scope; a folder's depends on the scope.
+    let check = if ev.subject.kind == "directory" { recorded } else { limits };
+    let (inv, subject) = inventory_path(Path::new(path), check, cancel)?;
+    if subject.sha256 != ev.subject.sha256 {
+        return Err(ToolError::new(ErrorCode::FileChanged, format!("{path} changed since evidence {} was recorded", ev.id))
+            .with_remediation("Run core_archive_show again, or pass the path directly."));
+    }
+    if same_limits(&check, &limits) {
+        return Ok((inv, subject));
+    }
+    inventory_path(Path::new(path), limits, cancel)
+}
+
+fn same_limits(a: &InvLimits, b: &InvLimits) -> bool {
+    a.max_entries == b.max_entries
+        && a.max_depth == b.max_depth
+        && a.max_nested_bytes == b.max_nested_bytes
+        && a.max_entry_bytes == b.max_entry_bytes
+        && a.max_total_bytes == b.max_total_bytes
+}
+
 fn core_archive_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: InspectArtifactParams = parse_params(params)?;
     let path = target_path(ctx, p.path.as_deref())?;
-    let limits =
-        InvLimits { max_entries: p.max_entries.clamp(1, 1_000_000), max_depth: p.max_depth.min(6), max_total_bytes: p.max_total_bytes, ..InvLimits::default() };
+    let limits = show_limits(p.max_depth, p.max_entries, p.max_total_bytes);
     ctx.report(None, format!("Inventorying {}", path.display()));
     let (inv, subject) = inventory_path(&path, limits, &ctx.cancel)?;
     let blocking = inv.contradictions.iter().any(|c| c.get("reason").and_then(Value::as_str).is_some_and(|r| r.contains("integrity") || r.contains("CRC")));
@@ -505,7 +539,7 @@ fn core_archive_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     }
     lims.push(Limitation::new("no_disk_images", "Disk images (DMG), installers (PKG/MSI) and compressed tarballs are listed as single files, not opened."));
     let ev = EvidenceBuilder::new("core_archive_show", subject, env(ctx))
-        .params(json!({"path": path, "if_tampered": p.if_tampered == IntegrityPolicy::Fail, "offset": p.offset, "limit": limit, "max_depth": limits.max_depth}))
+        .params(json!({"path": path, "if_tampered": p.if_tampered == IntegrityPolicy::Fail, "offset": p.offset, "limit": limit, "max_depth": limits.max_depth, "max_entries": limits.max_entries, "max_total_bytes": limits.max_total_bytes}))
         .result(json!({
             "path": path,
             "root": inv.root, "root_kind": inv.root_kind, "content_id": inv.content_id(),
@@ -705,12 +739,7 @@ fn inventory_input(ctx: &Ctx<'_>, v: &Value) -> Result<(Inventory, Option<String
     }
     let ev = resolve_evidence_input(ctx, v, &["core_archive_show"])?;
     // Evidence holds one page; re-read the recorded path for the full inventory and check it is unchanged.
-    let path = ev.params.get("path").and_then(Value::as_str).ok_or_else(|| ToolError::invalid("inventory evidence has no path"))?;
-    let (inv, subject) = inventory_path(Path::new(path), InvLimits::default(), &ctx.cancel)?;
-    if subject.sha256 != ev.subject.sha256 {
-        return Err(ToolError::new(ErrorCode::FileChanged, format!("{path} changed since evidence {} was recorded", ev.id))
-            .with_remediation("Run core_archive_show again, or pass the path directly."));
-    }
+    let (inv, _) = recorded_inventory(&ev, InvLimits::default(), &ctx.cancel)?;
     Ok((inv, Some(ev.id)))
 }
 
@@ -801,6 +830,55 @@ mod tests {
         let d2 = call(&e, "core_archives_compare", json!({"left": {"kind": "saved", "evidence_id": id}, "right": b})).unwrap();
         assert_eq!(d2["result"]["counts"], d["result"]["counts"]);
         assert!(call(&e, "core_archives_compare", json!({"left": "relative/path", "right": b})).is_err());
+    }
+
+    #[test]
+    fn folder_evidence_scope_is_not_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app");
+        std::fs::create_dir(&app).unwrap();
+        let l3 = fx::zip_stored(&[("leaf.txt", b"leaf")]);
+        let l2 = fx::zip_stored(&[("l3.zip", &l3)]);
+        let l1 = fx::zip_stored(&[("l2.zip", &l2)]);
+        std::fs::write(app.join("l1.zip"), &l1).unwrap();
+        std::fs::write(app.join("other.txt"), b"other").unwrap();
+        let e = Engine::new(crate::testing::session());
+        let tools = ["core_archives_compare", "android_app_graph_build", "apple_app_graph_build", "harmony_app_graph_build"];
+        let consume = |tool: &str, input: Value| {
+            let p = if tool == "core_archives_compare" { json!({"left": input, "right": app}) } else { json!({"inventory": input}) };
+            call(&e, tool, p)
+        };
+        let scopes = [json!({"max_depth": 2}), json!({"max_depth": 3}), json!({"max_entries": 2}), json!({"max_total_bytes": 10})];
+        let mut recorded = Vec::new();
+        for scope in scopes {
+            let mut p = scope.clone();
+            p["path"] = json!(app);
+            let inv = call(&e, "core_archive_show", p).unwrap();
+            let id = inv["id"].as_str().unwrap().to_string();
+            for tool in tools {
+                for input in [json!({"kind": "saved", "evidence_id": id}), inv.clone()] {
+                    let out = consume(tool, input).unwrap_or_else(|err| panic!("{scope} {tool}: {err:?}"));
+                    assert!(out["links"].as_array().unwrap().contains(&json!(id)), "{scope} {tool}");
+                    if tool == "core_archives_compare" {
+                        for k in ["added", "removed", "changed", "moved"] {
+                            assert_eq!(out["result"]["counts"][k], 0, "{scope} {k}");
+                        }
+                    }
+                }
+            }
+            recorded.push((id, inv));
+        }
+        // Real changes are still refused (both files change, so each recorded scope covers one).
+        std::fs::write(app.join("l1.zip"), fx::zip_stored(&[("l2.zip", b"changed")])).unwrap();
+        std::fs::write(app.join("other.txt"), b"changed").unwrap();
+        for (id, inv) in recorded {
+            for tool in tools {
+                for input in [json!({"kind": "saved", "evidence_id": id}), inv.clone()] {
+                    let err = consume(tool, input).unwrap_err();
+                    assert_eq!(err.code, ErrorCode::FileChanged, "{tool}");
+                }
+            }
+        }
     }
 
     #[test]

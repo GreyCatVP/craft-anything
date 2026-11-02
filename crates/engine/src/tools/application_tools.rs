@@ -3,7 +3,7 @@
 //! and coverage, and platform projections of artifact inventories. Pure computation over
 //! evidence (or over a path, analysed on the spot).
 
-use super::artifact_tools::{WalkOptions, abs_path, env, inventory_path, is_path_input, resolve_evidence_input, walk_dir};
+use super::artifact_tools::{WalkOptions, abs_path, env, inventory_path, is_path_input, recorded_inventory, resolve_evidence_input, walk_dir};
 use super::js_tools::load_graph;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use craft_anything_analysis::js_inventory::{InvLimits, Inventory};
@@ -11,7 +11,7 @@ use craft_anything_analysis::js_ledger::{Binding, Review, build_ledger, evaluate
 use craft_anything_analysis::js_source::{SourceGraph, build_source_graph, diff_source_and_bundle};
 use craft_anything_analysis::js_trace::{Direction, SeedKind, find_seeds, follow_feature, trace_semantics};
 use craft_anything_analysis::{js_compare, js_projection};
-use craft_anything_evidence::{Confidence, Coverage, CoverageStatus, ErrorCode, EvidenceBuilder, Limitation, Location, Subject, ToolError};
+use craft_anything_evidence::{Confidence, Coverage, CoverageStatus, EvidenceBuilder, Limitation, Location, Subject, ToolError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -716,11 +716,7 @@ fn projection_inventory(ctx: &Ctx<'_>, p: &ProjectionParams) -> Result<(Inventor
     let limits = InvLimits { max_depth: 2, ..InvLimits::default() };
     if let Some(v) = &p.inventory {
         let ev = resolve_evidence_input(ctx, v, &["core_archive_show"])?;
-        let path = ev.params.get("path").and_then(Value::as_str).ok_or_else(|| ToolError::invalid("inventory evidence has no path"))?;
-        let (inv, subject) = inventory_path(std::path::Path::new(path), limits, &ctx.cancel)?;
-        if subject.sha256 != ev.subject.sha256 {
-            return Err(ToolError::new(ErrorCode::FileChanged, format!("{path} changed since evidence {} was recorded", ev.id)));
-        }
+        let (inv, subject) = recorded_inventory(&ev, limits, &ctx.cancel)?;
         return Ok((inv, subject, Some(ev.id)));
     }
     let path = match &p.path {
