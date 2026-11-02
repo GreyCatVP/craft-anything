@@ -550,27 +550,34 @@ impl CraftApp {
     fn raise_asset_budget(&mut self) {
         let step = self.asset_budget_step();
         let Some(ws) = self.workspace.as_ref() else { return };
-        let params = serde_json::json!({"project": ws.root, "budget_usd": (ws.manifest.asset_budget_usd + step).min(10_000.0)});
-        self.act("project_assets_budget", params, tr("Raise the asset budget"));
+        let params = serde_json::json!({"project": ws.root});
+        self.change_assets("project_assets_budget", params, tr("Raise the asset budget"), Some(step));
     }
 
     /// Save through the engine, then reload on the same worker. Disable further asset edits
     /// until the saved settings arrive, so a second click never starts from an old value.
-    pub(crate) fn change_assets(&mut self, tool: &'static str, params: serde_json::Value, title: String) {
+    pub(crate) fn change_assets(&mut self, tool: &'static str, mut params: serde_json::Value, title: String, budget_step: Option<f64>) {
         if self.asset_change_job.is_some() {
             return;
         }
         let engine = self.engine.clone();
         let root = params.get("project").and_then(serde_json::Value::as_str).map(PathBuf::from);
         self.asset_change_job = Some(self.jobs.spawn(title, false, move |_| {
-            let result = engine
-                .call(
+            let result = (|| {
+                let root = root.as_deref().unwrap_or(Path::new(""));
+                if let Some(step) = budget_step {
+                    // A CLI or another app can change this budget while the sidebar is open.
+                    // Raising starts from disk; an explicit Save still sets the typed amount.
+                    let ws = Workspace::open(root)?;
+                    params["budget_usd"] = serde_json::json!((ws.manifest.asset_budget_usd + step).min(10_000.0));
+                }
+                engine.call(
                     tool,
                     params,
                     craft_anything_engine::CallOptions::new(craft_anything_engine::Caller::Ui).with_consent(craft_anything_engine::Consent::Granted),
-                )
-                .and_then(|_| Workspace::open(root.as_deref().unwrap_or(Path::new(""))))
-                .map(Box::new);
+                )?;
+                Workspace::open(root).map(Box::new)
+            })();
             Ok(Done::AssetSettings(result))
         }));
     }

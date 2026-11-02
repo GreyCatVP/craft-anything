@@ -364,12 +364,15 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     h.get_by_label("Scenario").click();
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.asset_provider_allowed("scenario"))));
     assert!(Workspace::open(&root).unwrap().manifest.asset_provider_allowed("elevenlabs"));
+    // A CLI edit while this page is open must not make Raise lower the saved budget.
+    Workspace::open(&root).unwrap().set_person(|m| m.asset_budget_usd = 20.0).unwrap();
+    assert_eq!(h.state().workspace.as_ref().unwrap().manifest.asset_budget_usd, 5.0);
     // Through the project_assets_budget tool, by the default budget from Settings.
     h.get_by_label("Raise the budget by $5.00").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == 10.0)));
-    assert_eq!(Workspace::open(&root).unwrap().manifest.asset_budget_usd, 10.0);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == 25.0)));
+    assert_eq!(Workspace::open(&root).unwrap().manifest.asset_budget_usd, 25.0);
     h.run_steps(2);
-    h.get_by_label("Budget $10.00 · remaining $9.49");
+    h.get_by_label("Budget $25.00 · remaining $24.49");
     // The explicit Save supports an exact amount and lowering it below the previous budget.
     for (amount, remaining) in [("2.25", "1.74"), ("0.25", "0.00")] {
         h.get_by_label("Asset budget in USD").click();

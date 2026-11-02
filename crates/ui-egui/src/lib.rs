@@ -798,7 +798,7 @@ impl CraftApp {
     /// as `Done::Acted` and is shown by `acted`. A click is the person's consent.
     pub fn act(&mut self, tool: &'static str, params: Value, title: String) {
         if matches!(tool, "project_assets_budget" | "project_assets_allow") {
-            self.change_assets(tool, params, title);
+            self.change_assets(tool, params, title, None);
             return;
         }
         let engine = self.engine.clone();
