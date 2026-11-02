@@ -12,14 +12,17 @@ use std::{sync::Arc, time::Duration};
 fn exit_save_preserves_latest_ai_and_pending_app_settings() {
     const CHILD: &str = "CRAFT_ANYTHING_EXIT_SAVE_TEST";
     let Some(dir) = std::env::var_os(CHILD) else {
-        let dir = tempfile::tempdir().unwrap();
-        Process::new(std::env::current_exe().unwrap())
-            .args(["--exact", "exit_save_preserves_latest_ai_and_pending_app_settings", "--nocapture"])
-            .env(CHILD, dir.path())
-            .env("CRAFT_ANYTHING_CONFIG_DIR", dir.path())
-            .timeout(Duration::from_secs(30))
-            .run_checked()
-            .unwrap();
+        for busy in ["false", "true"] {
+            let dir = tempfile::tempdir().unwrap();
+            Process::new(std::env::current_exe().unwrap())
+                .args(["--exact", "exit_save_preserves_latest_ai_and_pending_app_settings", "--nocapture"])
+                .env(CHILD, dir.path())
+                .env("CRAFT_ANYTHING_CONFIG_DIR", dir.path())
+                .env("CRAFT_ANYTHING_EXIT_SAVE_BUSY", busy)
+                .timeout(Duration::from_secs(30))
+                .run_checked()
+                .unwrap();
+        }
         return;
     };
     let dir = std::path::PathBuf::from(dir);
@@ -40,8 +43,41 @@ fn exit_save_preserves_latest_ai_and_pending_app_settings() {
     entry.options.cli_model = Some("test/new".into());
     entry.options.cli_thinking = Some(Effort::Max);
     hub.add_backend_with(entry.clone(), None).unwrap();
-    let latest_ai = engine.session().settings.ai.clone();
+    let mut latest_ai = engine.session().settings.ai.clone();
     assert_ne!(app.settings.ai, latest_ai);
+    if std::env::var("CRAFT_ANYTHING_EXIT_SAVE_BUSY").as_deref() == Ok("true") {
+        // A long tool holds the session until after shutdown returns, then commits newer AI data.
+        entry.options.cli_model = Some("test/final".into());
+        let mut config = AiConfig::from_table(&latest_ai).unwrap();
+        config.upsert(entry.clone());
+        latest_ai = config.to_table().unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_engine = engine.clone();
+        let committed = latest_ai.clone();
+        let worker = std::thread::spawn(move || {
+            let mut session = worker_engine.session();
+            session.label("Test running tool");
+            ready_tx.send(()).unwrap();
+            let _ = release_rx.recv_timeout(Duration::from_secs(5));
+            session.settings.ai = committed;
+            session.settings.save().unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let start = std::time::Instant::now();
+        app.on_exit();
+        assert!(start.elapsed() < Duration::from_secs(1), "shutdown must not wait for the tool");
+        assert!(Settings::path().with_extension("pending.toml").exists());
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        let saved = Settings::load();
+        assert_eq!(saved.ai, latest_ai, "startup keeps even an AI commit made after shutdown returned");
+        assert_eq!(saved.mode, Mode::Experienced);
+        assert_eq!(saved.language, "de");
+        assert!(!Settings::path().with_extension("pending.toml").exists());
+        assert_eq!(Settings::load(), saved, "recovery is durable and runs only once");
+        return;
+    }
     app.on_exit();
 
     let saved = Settings::load();

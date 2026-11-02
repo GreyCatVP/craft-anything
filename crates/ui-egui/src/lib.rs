@@ -1734,12 +1734,20 @@ impl eframe::App for CraftApp {
         }
         // A change not written yet (or one being written as the window closed) is written now.
         if self.persist && (self.settings_dirty || self.save_due.is_some() || self.saving.is_some()) {
-            let mut session = self.engine.session();
-            session.label("Save settings on exit");
-            // AI changes belong to the session; keep the app's other pending edits.
-            self.settings.ai = session.settings.ai.clone();
-            session.settings = self.settings.clone();
-            let _ = session.settings.save();
+            let saved = if let Some(mut session) = self.engine.try_session() {
+                session.label("Save settings on exit");
+                // AI changes belong to the session; keep the app's other pending edits.
+                self.settings.ai = session.settings.ai.clone();
+                session.settings = self.settings.clone();
+                session.settings.save().is_ok()
+            } else {
+                false
+            };
+            // A tool can hold the session for hours. Keep edits separately for startup recovery;
+            // never race its eventual save by merging a disk snapshot into config.toml here.
+            if !saved && let Err(e) = self.settings.defer_save_to(&Settings::path()) {
+                log::error!("Couldn't keep pending settings on exit: {}", e.message);
+            }
         }
     }
 }

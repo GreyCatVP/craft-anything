@@ -283,8 +283,10 @@ write another.
 The UI settings worker also released the session guard after cloning settings, letting that stale
 snapshot overwrite a later model-selection save. Keep the guard through the worker's disk write
 so session-based writers cannot overtake each other between reading and saving.
-The exit-time save needs the same guard and must merge the session's latest AI table before writing
-the app's pending settings; the UI's AI snapshot may predate a selection already committed by the hub.
+The exit-time save must merge the session's latest AI table before writing the app's pending settings;
+the UI's AI snapshot may predate a selection already committed by the hub. But waiting for that guard
+can hold shutdown behind a tool for hours. Try it once; if busy, durably defer only non-AI settings
+and recover them at startup against the latest committed AI table, rather than racing a live writer.
 
 **Keywords that only some code paths honour.** "…in Rust" picked Rust for apps but not for games, so
 a headless game rebuild stopped at once for want of Unity. It was found only by a live run. Run the

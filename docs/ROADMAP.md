@@ -324,6 +324,8 @@ Owner: open · Status: in progress
 - [x] Finish a failed CLI worker-thread start with a terminal event after its error so headless chat stops polling.
 - [x] Synchronize the UI exit-time settings save with the session's latest AI table and other writers;
       an isolated exit-save regression preserves the latest model/depth and pending app settings.
+- [x] Never wait for a running tool's session lock at shutdown: defer non-AI app edits in a versioned
+      sidecar when busy, then recover against the latest committed AI settings at startup.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 

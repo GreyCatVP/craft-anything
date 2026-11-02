@@ -78,6 +78,11 @@ setting from API/Claude `effort`: an unavailable OpenCode variant is refused, ne
 Hub and tool selections use the same save path: reread the settings file strictly, preserve unrelated
 disk changes, and reject a changed backend or project. Malformed settings are left untouched, and
 the session is updated only after a successful save.
+Closing the app also preserves the latest AI selection. If a running tool holds the session,
+pending non-AI app settings are kept in `config.pending.toml` instead of waiting for the tool or
+overwriting its settings. At the next startup they are merged with the latest saved AI table;
+the sidecar is removed only after a successful save. It uses the existing settings schema and
+migrations; unreadable or newer files are not overwritten by recovery.
 The current ACP transport cannot select models or variants, so an explicit choice uses the
 native adapter even if `acp = true` was previously set.
 
