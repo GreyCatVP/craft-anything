@@ -391,6 +391,14 @@ PIE program and shared library. Whenever an address crosses between engines, mov
 image bases (`ghidra::Rebase`, from the base the bridge reports) and say in the evidence which
 space each address is in.
 
+**An id that only means something on one computer, kept in a folder that travels.** The project
+saved Claude Code's session id, but the session itself lives in `~/.claude/projects/` on the
+computer (and under the folder) that started it; a project synced to another computer stopped at
+"No conversation found" (#452), and the retry for a cut-off turn asked for the same missing session
+three more times. Anything a project keeps must still work where the folder goes: keep what the id
+points to as well (`agent-session.jsonl`), tell "not here" apart from a failure by a typed signal
+(`Conversation::session_lost`), and never retry what can't succeed.
+
 ## Agent tooling
 
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were
