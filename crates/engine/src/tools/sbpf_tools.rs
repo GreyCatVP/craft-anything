@@ -124,6 +124,7 @@ pub struct DisasmParams {
 struct Prepared {
     encoding: &'static str,
     code: Vec<u8>,
+    truncated_text: Option<String>,
     base: u64,
     version: sbpf::SbpfVersion,
     version_source: String,
@@ -146,7 +147,7 @@ fn prepare(bytes: &[u8], encoding: Encoding, assume: AssumeVersion) -> Result<Pr
     let use_raw = matches!(encoding, Encoding::Raw) || (matches!(encoding, Encoding::Auto) && !is_elf);
     if use_raw {
         let (version, version_source) = version_for(assume, None);
-        return Ok(Prepared { encoding: "raw", code: bytes.to_vec(), base: 0, version, version_source, program: None });
+        return Ok(Prepared { encoding: "raw", code: bytes.to_vec(), truncated_text: None, base: 0, version, version_source, program: None });
     }
     // ELF path.
     let prog = solana::inspect(bytes).map_err(|e| format_err(e, "an ELF (Solana sBPF / eBPF) program"))?;
@@ -158,16 +159,23 @@ fn prepare(bytes: &[u8], encoding: Encoding, assume: AssumeVersion) -> Result<Pr
         .with_remediation("Use the native-code tools for a normal ELF, or pass encoding=raw to decode the bytes as raw sBPF."));
     }
     let (version, version_source) = version_for(assume, Some(prog.e_flags));
-    let (code, base) = match prog.text {
+    let (code, truncated_text, base) = match prog.text {
         Some(t) => {
             let start = usize::try_from(t.file_offset).unwrap_or(usize::MAX);
-            let len = usize::try_from(t.size).unwrap_or(0);
-            let slice = bytes.get(start..start.saturating_add(len)).unwrap_or(&[]).to_vec();
-            (slice, t.addr)
+            let len = usize::try_from(t.size).unwrap_or(usize::MAX);
+            match start.checked_add(len).and_then(|end| bytes.get(start..end)) {
+                Some(slice) => (slice.to_vec(), None, t.addr),
+                None => {
+                    let prefix = bytes.get(start..).unwrap_or(&[]).to_vec();
+                    let read = prefix.len();
+                    let note = format!(".text declares {} bytes at {:#x}, but the {}-byte file has {read}", t.size, t.file_offset, bytes.len());
+                    (prefix, Some(note), t.addr)
+                }
+            }
         }
-        None => (Vec::new(), prog.entry),
+        None => (Vec::new(), None, prog.entry),
     };
-    Ok(Prepared { encoding: "elf", code, base, version, version_source, program: Some(prog) })
+    Ok(Prepared { encoding: "elf", code, truncated_text, base, version, version_source, program: Some(prog) })
 }
 
 /// Resolve a `call imm` hash to a syscall name: first the program's own relocations/dynsym, then
@@ -323,6 +331,9 @@ fn formats_sbpf_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     for w in prog.map(|p| p.warnings.clone()).unwrap_or_default() {
         lims.push(Limitation::new("parse_warning", w));
     }
+    if let Some(note) = &prep.truncated_text {
+        lims.push(Limitation::new("text_truncated", note.clone()));
+    }
 
     let result = match p.detail {
         Detail::Summary => json!({
@@ -367,6 +378,8 @@ fn formats_sbpf_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         }),
     };
 
+    let base_cov = if p.detail == Detail::Complete { cov } else { Coverage::complete(1) };
+    let coverage = if prep.truncated_text.is_some() { static_input::partial(insns.len() as u64) } else { base_cov };
     let mut ev = builder(
         ctx,
         "formats_sbpf_show",
@@ -378,7 +391,7 @@ fn formats_sbpf_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     .confidence(if prog.is_some() { Confidence::Observed } else { Confidence::Derived })
     .authority(Authority::OriginalFiles)
     .limitations(lims)
-    .coverage(if p.detail == Detail::Complete { cov } else { Coverage::complete(1) })
+    .coverage(coverage)
     .location(Location::new("path", input.path.display().to_string()));
     if let Some(prog) = prog {
         ev = ev.location(Location::new("virtual_address", format!("{:#x}", prog.entry)).with_label("entrypoint"));
@@ -420,6 +433,17 @@ fn formats_sbpf_disassemble(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutp
     let lines: Vec<Value> = insns.iter().map(|n| insn_json(n, prog)).collect();
     let text_dump: Vec<String> = insns.iter().map(|n| n.text()).collect();
 
+    let mut lims = vec![Limitation::new(
+        "static_only",
+        "Decoding only; nothing was executed. Decoding starts exactly at the given offset, which must land on an instruction boundary.",
+    )];
+    for w in prog.map(|p| p.warnings.clone()).unwrap_or_default() {
+        lims.push(Limitation::new("parse_warning", w));
+    }
+    if let Some(note) = &prep.truncated_text {
+        lims.push(Limitation::new("text_truncated", note.clone()));
+    }
+    let coverage = if prep.truncated_text.is_some() { static_input::partial(insns.len() as u64) } else { Coverage::complete(insns.len() as u64) };
     let summary = format!("Disassembled {} instruction(s) of {} sBPF code from byte {:#x} (base {:#x}).", insns.len(), prep.version.name(), start, prep.base);
     let ev = builder(
         ctx,
@@ -439,11 +463,8 @@ fn formats_sbpf_disassemble(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutp
     .summary(summary)
     .confidence(Confidence::Observed)
     .authority(Authority::OriginalFiles)
-    .limitations([Limitation::new(
-        "static_only",
-        "Decoding only; nothing was executed. Decoding starts exactly at the given offset, which must land on an instruction boundary.",
-    )])
-    .coverage(Coverage::complete(insns.len() as u64))
+    .limitations(lims)
+    .coverage(coverage)
     .location(Location::new("path", input.path.display().to_string()))
     .build()?;
     Ok(ToolOutput::evidence(ev))
@@ -528,5 +549,55 @@ mod tests {
         assert!(err.message.contains("not") && err.message.contains("EM_BPF"));
         // But raw mode will still decode the bytes without complaint.
         let _ = call(&e, "formats_sbpf_show", json!({"encoding": "raw"}));
+    }
+
+    #[test]
+    fn truncated_text_section_reports_partial_coverage_and_limitation() {
+        fn build_elf(declared_size: u64, keep_code: bool) -> Vec<u8> {
+            let extra = usize::from(keep_code) * 8;
+            let mut b = vec![0u8; 280 + extra];
+            b[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+            for (o, v) in [(16, 3u16), (18, 247), (52, 64), (58, 64), (60, 3), (62, 2)] {
+                b[o..o + 2].copy_from_slice(&v.to_le_bytes());
+            }
+            for (o, v) in [(20, 1u32), (128, 1), (132, 1), (192, 7), (196, 3)] {
+                b[o..o + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            for (o, v) in [(24, 0x1000u64), (40, 64), (136, 6), (144, 0x1000), (152, 280), (160, declared_size), (176, 8)] {
+                b[o..o + 8].copy_from_slice(&v.to_le_bytes());
+            }
+            for (o, v) in [(216, 256u64), (224, 17), (240, 1)] {
+                b[o..o + 8].copy_from_slice(&v.to_le_bytes());
+            }
+            b[256..273].copy_from_slice(b"\0.text\0.shstrtab\0");
+            if keep_code {
+                b[280] = 0x95;
+            }
+            b
+        }
+
+        let e = Engine::new(crate::testing::session());
+        let readable = temp_file("readable.so", &build_elf(8, true));
+        let truncated = temp_file("truncated.so", &build_elf(16, true));
+        let empty = temp_file("empty.so", &build_elf(0, false));
+
+        let show_ok = call(&e, "formats_sbpf_show", json!({"path": readable.to_string_lossy()}));
+        assert_eq!(show_ok["result"]["disassembly"]["total"], 1);
+        assert_eq!(show_ok["coverage"]["status"], "complete");
+
+        let show_empty = call(&e, "formats_sbpf_show", json!({"path": empty.to_string_lossy()}));
+        assert_eq!(show_empty["result"]["disassembly"]["total"], 0);
+        assert_eq!(show_empty["coverage"]["status"], "complete");
+        assert_eq!(show_empty["limitations"].as_array().unwrap().len(), 3);
+
+        let show_trunc = call(&e, "formats_sbpf_show", json!({"path": truncated.to_string_lossy()}));
+        assert_eq!(show_trunc["result"]["disassembly"]["total"], 1);
+        assert_eq!(show_trunc["coverage"]["status"], "partial");
+        assert!(show_trunc["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "text_truncated"));
+
+        let dis_trunc = call(&e, "formats_sbpf_disassemble", json!({"path": truncated.to_string_lossy()}));
+        assert_eq!(dis_trunc["result"]["count"], 1);
+        assert_eq!(dis_trunc["coverage"]["status"], "partial");
+        assert!(dis_trunc["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "text_truncated"));
     }
 }

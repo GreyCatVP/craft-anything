@@ -455,8 +455,14 @@ pub fn inspect(data: &[u8]) -> Result<SolanaProgram, FormatError> {
         .or_else(|| symbols.iter().find(|s| s.name == "entrypoint"))
         .map(|s| s.name.clone());
 
-    if text.is_none() {
-        warnings.push("no .text (executable PROGBITS) section found".into());
+    match text {
+        Some(t) => {
+            let end = usize::try_from(t.file_offset).ok().and_then(|s| usize::try_from(t.size).ok().and_then(|l| s.checked_add(l)));
+            if end.is_none_or(|e| e > data.len()) {
+                warnings.push(format!(".text section at {:#x} ({} bytes) extends past end of file ({} bytes)", t.file_offset, t.size, data.len()));
+            }
+        }
+        None => warnings.push("no .text (executable PROGBITS) section found".into()),
     }
 
     Ok(SolanaProgram {
