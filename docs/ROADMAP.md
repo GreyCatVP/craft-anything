@@ -525,6 +525,11 @@ Owner: maintainers · Status: in progress (built; live runs need keys)
       context, no cost); a remote one gets the cloud budget and its price (#374)
 - [ ] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
       services whose real window differs from 150k (#374)
+- [ ] A project moved to another computer (or folder) keeps building with Claude Code: when the saved
+      `agent_session` isn't there, start a fresh session from the brief and what's in `app/` instead of
+      failing (#446) — claimed: Claude Code, branch bugfix/r2.1-missing-agent-session
+- [ ] Keep enough of a coding agent's conversation in the project that it travels with the folder, as
+      `transcript.json` does for API builders (#446)
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
