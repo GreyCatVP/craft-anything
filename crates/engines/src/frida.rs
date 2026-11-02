@@ -160,20 +160,21 @@ impl Frida {
     /// `frida-ls-devices`, parsed.
     pub fn list_devices(&self, selector: Option<&Selector>) -> Result<Vec<FridaDevice>, ToolError> {
         // frida-ls-devices has no -H flag, so a remote address can't be listed with it; report the
-        // remote as a single device instead, the way frida-ps/frida take -H.
-        if let Some(sel) = selector {
-            if let Some(r) = &sel.remote {
-                validate_address(&r.address)?;
-                return Ok(vec![FridaDevice {
-                    device_id: r.address.clone(),
-                    kind: "remote".into(),
-                    name: format!("Remote ({})", r.address),
-                }]);
-            }
+        // remote as a single device instead, the way frida-ps/frida take -H. The entry is made up
+        // from the address: nothing is contacted here, so a typo still "finds" a device.
+        if let Some(sel) = selector
+            && let Some(r) = &sel.remote
+        {
+            validate_address(&r.address)?;
+            return Ok(vec![FridaDevice {
+                device_id: r.address.clone(),
+                kind: "remote".into(),
+                name: format!("Remote ({}) (not contacted; frida-ps -H checks it)", r.address),
+            }]);
         }
         let prog = self.sibling("frida-ls-devices");
-        let mut args: Vec<OsString> = Vec::new();
-        // Only a remote selector affects device listing; a device_id would be meaningless here.
+        let args: Vec<OsString> = Vec::new();
+        // On Windows this tool crashes without a real console, then hangs instead of exiting.
         #[cfg(windows)]
         {
             if !prog.is_file() {
@@ -416,6 +417,33 @@ mod tests {
         let processes = Frida::new(frida).list_processes(&selector).unwrap();
         assert_eq!(processes.len(), 1, "{processes:?}");
         assert_eq!(processes[0].pid, 12);
+    }
+
+    #[test]
+    fn a_remote_selector_lists_one_uncontacted_device() {
+        // The remote branch answers from the address alone: a path that cannot run proves no
+        // program is started.
+        let frida = Frida::new("/nonexistent/definitely/not/frida");
+        let selector = Selector {
+            device_id: None,
+            remote: Some(Remote { address: "10.0.0.5:27042".into(), token: None, certificate: None, origin: None, keepalive_interval: None }),
+        };
+        let devices = frida.list_devices(Some(&selector)).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].kind, "remote");
+        assert_eq!(devices[0].device_id, "10.0.0.5:27042");
+        assert!(devices[0].name.contains("not contacted"));
+    }
+
+    #[test]
+    fn an_invalid_remote_address_is_refused() {
+        let frida = Frida::new("/nonexistent/definitely/not/frida");
+        let selector = Selector {
+            device_id: None,
+            remote: Some(Remote { address: "not an address!".into(), token: None, certificate: None, origin: None, keepalive_interval: None }),
+        };
+        let err = frida.list_devices(Some(&selector)).unwrap_err();
+        assert_eq!(err.code, ErrorCode::BadInput);
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "frida_devices_find",
             "Frida devices",
-            "List devices Frida can see with `frida-ls-devices` (local, usb, remote). Pass remote to query a remote frida-server; its auth is forwarded to the CLI and never returned.",
+            "List devices Frida can see with `frida-ls-devices` (local, usb, remote). Pass remote to get one entry for a remote address without contacting it, so its reachability and auth are unverified (`frida-ps -H` checks it); its auth is forwarded to the CLI and never returned.",
             "See which devices the instrumentation tool can reach.",
             Frida,
             base,
