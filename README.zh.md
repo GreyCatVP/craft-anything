@@ -16,7 +16,7 @@
 <h1 align="center">Craft Anything</h1>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.ja.md">日本語</a> · <b>简体中文</b>
+  <a href="README.md">English</a> · <a href="README.ja.md">日本語</a> · <b>简体中文</b> · <a href="README.ko.md">한국어</a>
 </p>
 
 <p align="center">
