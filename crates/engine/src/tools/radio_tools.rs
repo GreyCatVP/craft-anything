@@ -166,7 +166,7 @@ fn radio_recording_decode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
             "limit": limit,
             "messages": page,
             "other_lines": other,
-            "stderr": stderr.get(..stderr.len().min(16 << 10)).unwrap_or(""),
+            "stderr": stderr.get(..stderr.floor_char_boundary(16 << 10)).unwrap_or(""),
         }))
         .summary(format!("rtl_433 decoded {} message(s) from {} kind(s) of device.", msgs.len(), by_model.len()))
         .confidence(Confidence::Observed)

@@ -178,6 +178,8 @@ Owner: open · Status: done (branch chore/r0.5-cleanups)
       from `DT_HASH` or `DT_GNU_HASH` (moved out of `dart.rs`), `Binary` symbols, imports and exports are
       filled from it, `elf::dynamic_symbols` reads versions through `DT_VERSYM`/`DT_VERDEF`/`DT_VERNEED`,
       and the prologue scan walks executable segments (#223)
+- [x] Cut external-tool stderr at a character boundary, so a 64 KiB (objdump, rizin) or 16 KiB (rtl_433) cap
+      inside a multibyte character no longer drops the whole stderr (#287).
 
 ### R0.8 Tests never touch the real machine
 Owner: open · Status: done, except protecting `main` (a maintainer setting)

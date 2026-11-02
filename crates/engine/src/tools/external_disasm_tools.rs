@@ -231,7 +231,7 @@ fn text_evidence(
             "offset": offset,
             "limit": limit,
             "output": page.join("\n"),
-            "stderr": stderr.get(..stderr.len().min(64 << 10)).unwrap_or(""),
+            "stderr": stderr.get(..stderr.floor_char_boundary(64 << 10)).unwrap_or(""),
         }))
         .summary(format!("{headline}: {total} lines of output{}.", if out.success { String::new() } else { format!(", exit code {:?}", out.code) }))
         .confidence(Confidence::Observed)
@@ -494,5 +494,27 @@ mod tests {
         }
         let err = e.call("native_rizin_command_run", serde_json::json!({"path": p, "command": "w x"}), crate::CallOptions::new(crate::Caller::Mcp));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn stderr_cut_inside_a_multibyte_character_keeps_the_text_before_it() {
+        let mut session = crate::testing::session();
+        let ctx =
+            Ctx { tool: "native_objdump_run", session: &mut session, cancel: crate::CancelToken::default(), progress: &|_| {}, caller: crate::Caller::Cli };
+        // 64 KiB falls inside the arrow in the first case and right after it in the second.
+        for (ascii, kept) in [(65535, 65535), (65533, 65536)] {
+            let mut stderr = vec![b'a'; ascii];
+            stderr.extend_from_slice("\u{2192}tail".as_bytes());
+            let out = Output { code: Some(1), success: false, stderr, ..Default::default() };
+            let subject = Subject { kind: "engine".into(), sha256: None, name: Some("objdump".into()) };
+            let ToolOutput::Evidence(ev) =
+                text_evidence(&ctx, "native_objdump_run", subject, json!({}), Path::new("objdump"), &[], &out, 0, 10, "objdump".into()).unwrap()
+            else {
+                panic!("expected evidence");
+            };
+            let s = ev.result["stderr"].as_str().unwrap();
+            assert_eq!(s.len(), kept);
+            assert!(s.starts_with("aaa"));
+        }
     }
 }
