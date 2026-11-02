@@ -157,6 +157,17 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
             } else if let Some(history) = b.history.filter(|_| focused && !b.recall) {
                 browse(ui, id, text, history);
             }
+            // What Tab would complete to, when the box starts with a partial command name. egui
+            // decides keyboard navigation at the start of the pass, so the field keeps Tab only
+            // while there is something to complete; anywhere else Tab moves focus as usual.
+            let completing = completed_command(text);
+            if focused
+                && let Some(completed) = &completing
+                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+            {
+                text.clone_from(completed);
+                cursor_to_end(ui.ctx(), id, text);
+            }
             // No "more below" fade: the frame after each keystroke the scroll area briefly
             // measures a few points of overflow, and the fade blinked over the line being typed.
             ui.spacing_mut().scroll.fade.strength = 0.0;
@@ -170,30 +181,24 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                         .desired_width(f32::INFINITY)
                         .font(egui::FontId::proportional(b.font_size))
                         // Enter sends; Shift+Enter starts a new line.
-                        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))),
+                        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)))
+                        .event_filter(egui::EventFilter {
+                            tab: completing.is_some(),
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            ..egui::EventFilter::default()
+                        }),
                 );
                 widgets::named(r.clone(), b.name);
                 if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) && !text.trim().is_empty() {
                     out.send = true;
                 }
-                // Tab completes a slash command name.
-                if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                    let t = text.trim_start();
-                    if let Some(rest) = t.strip_prefix('/') {
-                        let name = rest.split_whitespace().next().unwrap_or(rest);
-                        if !name.is_empty() {
-                            if let Some(full) = crate::slash::complete(name) {
-                                let leading = &text[..text.len() - t.len()];
-                                *text = format!("{leading}/{full} ");
-                            }
-                        }
-                    }
-                }
             });
-                // Hint: available slash commands when typing one.
-                if text.trim_start().starts_with('/') && !text.trim().contains(' ') {
-                    ui.label(RichText::new(format!("Commands: {}", crate::slash::names())).size(theme::CAPTION).color(t.text_faint));
-                }
+            // Hint: available slash commands when typing one.
+            if text.trim_start().starts_with('/') && !text.trim().contains(' ') {
+                ui.label(RichText::new(format!("{} {}", tr("Commands:"), crate::slash::names())).size(theme::CAPTION).color(t.text_faint));
+            }
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if let Some(tip) = b.attach
                     && icons::button(ui, "paperclip", 30.0, false, tip).clicked()
@@ -218,6 +223,23 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
         })
     });
     out
+}
+
+/// What Tab would complete the box to, when it starts with a partial command name. Only the
+/// name is replaced, so a question after it is kept; `None` when there is nothing to complete.
+fn completed_command(text: &str) -> Option<String> {
+    let trimmed = text.trim_start();
+    let rest = trimmed.strip_prefix('/')?;
+    let name = rest.split_whitespace().next().unwrap_or(rest);
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let full = crate::slash::complete(name)?;
+    if name.eq_ignore_ascii_case(full) {
+        return None;
+    }
+    let leading = text.len() - trimmed.len();
+    Some(format!("{}/{full} {}", &text[..leading], rest[name.len()..].trim_start()))
 }
 
 /// The cursor is at this character, selecting nothing (or there's no text, or no cursor yet).

@@ -43,6 +43,9 @@ pub fn names() -> String {
 
 /// Complete a partial command name (without the leading slash) when there's exactly one match.
 pub fn complete(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        return None;
+    }
     let matches: Vec<&str> = COMMANDS.iter().filter(|(n, _)| n.starts_with(name)).map(|(n, _)| *n).collect();
     if matches.len() == 1 { Some(matches[0]) } else { None }
 }
@@ -64,5 +67,13 @@ mod tests {
         for text in ["make it blue", "use a/b testing", "/usr/bin is missing", "/", "/ a space", "/src/main.rs crashes"] {
             assert_eq!(read(text), Typed::Message, "{text}");
         }
+    }
+
+    #[test]
+    fn a_partial_name_completes_only_when_one_command_matches() {
+        assert_eq!(complete("b"), Some("btw"));
+        assert_eq!(complete("bt"), Some("btw"));
+        assert_eq!(complete(""), None);
+        assert_eq!(complete("x"), None);
     }
 }

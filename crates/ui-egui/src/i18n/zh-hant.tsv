@@ -249,6 +249,7 @@ Code reconstructed from a program that looks like the C language. Close to what 
 Code signature	程式碼簽章
 Coding agent app	程式設計代理應用程式
 Command palette (Ctrl/⌘ K)	命令面板 (Ctrl/⌘ K)
+Commands:	指令：
 Compare WebAssembly interfaces	比較 WebAssembly 介面
 Compare module exports	比較模組匯出
 Compare two .NET builds	比較兩個 .NET 建置

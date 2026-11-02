@@ -416,6 +416,27 @@ fn the_prompt_box_sends_on_enter_with_its_pictures() {
 }
 
 #[test]
+fn tab_completes_a_slash_command_and_keeps_focus() {
+    use craft_anything_ai::rebuild::StandIns;
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let a = Workspace::create(d.path(), "Alpha", "A notes app", TargetRef::None).unwrap();
+    let (dir, runs) = (d.path().to_path_buf(), StandIns::new());
+    let mut h = harness(move || stand_in_app(dir, &runs));
+    h.run_steps(2);
+    h.state_mut().open_workspace(a);
+    h.run_steps(2);
+    h.get_by_label("Ask for a change").focus();
+    h.run_steps(2);
+    h.get_by_label("Ask for a change").type_text("/b");
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(h.state().state.project_input, "/btw ");
+    assert!(h.get_by_label("Ask for a change").is_focused(), "the box keeps focus");
+}
+
+#[test]
 fn pictures_of_the_original_go_with_the_draft_then_into_the_project() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
     let d = tempfile::tempdir().unwrap();
