@@ -91,6 +91,7 @@ pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) ->
         stack_and_library_steps(&m.request, &m.stack, cx.editor),
         steps(cx.deep),
     );
+    s.push_str(&format!("\n\n{}", project_assets_note(cx)));
     for section in kind.brief_sections(cx) {
         s.push_str(&format!("\n\n{section}"));
     }
@@ -125,10 +126,34 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
     })
 }
 
-/// Assets from configured providers: what each tool makes and costs (prices from the asset table,
-/// for the picture model `image_model` names), the budget, where the engine loads them from, and
-/// that every design is original.
-pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
+/// Current provider choices and shared spending limits, for every first brief and follow-up.
+pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
+    let providers = craft_anything_engines::assets::AssetProviders::built_in();
+    let mut ids: Vec<String> = providers.ids().into_iter().map(str::to_owned).collect();
+    for id in cx.ws.manifest.asset_providers.iter().flatten() {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    let states =
+        ids.iter().map(|id| format!("{id}: {}", if cx.ws.manifest.asset_provider_allowed(id) { "enabled" } else { "disabled" })).collect::<Vec<_>>().join(", ");
+    let budget = cx.ws.manifest.asset_budget_usd;
+    let spent = cx.ws.assets_spent();
+    let remaining = (budget - spent).max(0.0);
+    let status = format!(
+        "Project asset providers: {states}. These are the person's choices: do not re-enable a disabled provider unless they request it. Only enabled providers may generate assets; each needs its own key. Model overrides and image precursors must also use enabled providers. Images, 3D models and audio share one budget: ${budget:.2}, estimated spent ${spent:.2}, remaining ${remaining:.2}."
+    );
+    if !ids.iter().any(|id| cx.ws.manifest.asset_provider_allowed(id)) {
+        format!("{status} Generated assets are now off for this project. Do not generate new assets. Keep the ones already in app/.")
+    } else if cx.assets {
+        format!("{status} Use project_assets_allow to inspect the current provider choices and assets_key_status to check keys before choosing models.")
+    } else {
+        format!("{status} No asset provider key is available to this builder; use existing assets or simple shapes and colours.")
+    }
+}
+
+/// Game art guidance and price estimates for the configured picture and 3D models.
+pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>) -> String {
     let folder = match game::Builder::from_stack(&ws.manifest.stack) {
         Some(game::Builder::Unity) => "Unity loads them from Assets/, e.g. Assets/Generated/",
         Some(game::Builder::Godot) => "Godot loads them from the project, e.g. assets/generated/",
@@ -140,12 +165,12 @@ pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
     let table = Catalogue::built_in();
     // An unknown picture model is reported by the tool itself; the note quotes the default's price.
     let picture = table.image_model(image_model).or_else(|_| table.image_model(None)).map(|m| m.cost(Shape::Square));
-    let (model_cost, picture_cost) = match (table.model_3d(None).map(|m| m.cost(true)), picture) {
+    let (model_cost, picture_cost) = match (table.model_3d(model_3d).or_else(|_| table.model_3d(None)).map(|m| m.cost(true)), picture) {
         (Ok(model), Ok(picture)) => (format!(" ({} each)", about_usd(model + picture)), format!(" ({})", about_usd(picture))),
         _ => (String::new(), String::new()),
     };
     format!(
-        "Realistic assets: use the configured asset providers. Images and 3D support fal.ai and Scenario (choose model explicitly or use Settings); audio uses ElevenLabs. Each operation requires its own provider key; a key for one provider does not unlock the others. The picture and 3D prices below are estimates using the configured picture model and the default 3D model; selected models can differ. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description{model_cost}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture{picture_cost} for textures, skies, backgrounds and menu art. This project's asset budget is ${budget:.2} (${spent:.2} used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it ({folder}). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. assets_speech_generate makes dialogue from text and a voice_id; assets_sound_generate makes sound effects; assets_music_generate makes original music. Audio operations share this asset budget. Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used."
+        "Realistic assets: use the configured asset providers. Images and 3D support fal.ai and Scenario (choose model explicitly or use Settings); audio uses ElevenLabs. Each operation requires its own provider key; a key for one provider does not unlock the others. The picture and 3D prices below are estimates using the configured picture and 3D models; selected models can differ. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description{model_cost}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture{picture_cost} for textures, skies, backgrounds and menu art. This project's asset budget is ${budget:.2} (${spent:.2} used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it ({folder}). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. assets_speech_generate makes dialogue from text and a voice_id; assets_sound_generate makes sound effects; assets_music_generate makes original music. Audio operations share this asset budget. Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used."
     )
 }
 

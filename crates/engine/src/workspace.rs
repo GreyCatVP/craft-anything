@@ -76,10 +76,10 @@ fn copy_tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool, depth: usize)
 }
 
 /// The current `craft.json` format version. Bumping it means appending a step to [`MANIFEST_STEPS`].
-pub const MANIFEST_VERSION: u32 = 2;
+pub const MANIFEST_VERSION: u32 = 3;
 
 /// The steps that bring an older `craft.json` forward; step `i` goes from version `i` to `i + 1`.
-const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2];
+const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2, manifest_v2_to_v3];
 const _: () = assert!(MANIFEST_STEPS.len() == MANIFEST_VERSION as usize, "one step per craft.json version");
 
 /// Version 0 (no `version` field) has the same shape as version 1; only the number is new.
@@ -91,6 +91,12 @@ fn manifest_v0_to_v1(doc: &mut Value) -> Result<(), String> {
 /// both default to a project made the usual way. The number is new so an older build, which would
 /// look for the app in app/, opens such a project read-only instead of saving over it.
 fn manifest_v1_to_v2(doc: &mut Value) -> Result<(), String> {
+    if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
+}
+
+/// Version 3 adds provider choices. Missing means the legacy master switch controls all providers.
+/// Older builds open this version read-only so they cannot overwrite those choices.
+fn manifest_v2_to_v3(doc: &mut Value) -> Result<(), String> {
     if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
 }
 
@@ -395,6 +401,10 @@ pub struct Manifest {
     /// it on; it also needs a key for an asset provider).
     #[serde(default)]
     pub generate_assets: bool,
+    /// Explicit provider ids allowed for this project. None preserves the legacy all-provider
+    /// choice; an empty list allows none. The master generate_assets switch still applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_providers: Option<Vec<String>>,
     /// The app is the project folder itself: the person's own files, which the builder edits in
     /// place, instead of app/.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -437,6 +447,7 @@ impl Manifest {
             last_reply: String::new(),
             asset_budget_usd: ASSET_BUDGET_USD,
             generate_assets: false,
+            asset_providers: None,
             app_in_root: false,
             start_files: Vec::new(),
             builder: None,
@@ -451,10 +462,16 @@ impl Manifest {
         self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
     }
 
+    /// Whether the person allows this provider to generate paid assets in this project.
+    pub fn asset_provider_allowed(&self, provider: &str) -> bool {
+        self.generate_assets && self.asset_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
+    }
+
     /// Take the fields the person owns from `other` (what's on disk).
     fn take_person_fields(&mut self, other: &Manifest) {
         self.asset_budget_usd = other.asset_budget_usd;
         self.generate_assets = other.generate_assets;
+        self.asset_providers.clone_from(&other.asset_providers);
         self.allowed_actions = other.allowed_actions.clone();
         self.builder.clone_from(&other.builder);
         self.questions = other.questions;
@@ -656,6 +673,7 @@ impl Workspace {
         copy.set_person(|c| {
             c.asset_budget_usd = budget;
             c.generate_assets = generate;
+            c.asset_providers.clone_from(&m.asset_providers);
             c.builder = builder;
             c.allowed_actions = allowed;
             c.questions = questions;
@@ -1084,6 +1102,7 @@ mod tests {
             .set_person(|m| {
                 m.asset_budget_usd = 20.0;
                 m.generate_assets = true;
+                m.asset_providers = Some(vec!["scenario".into()]);
                 m.allowed_actions.push("bash:npm".into());
             })
             .unwrap();
@@ -1094,11 +1113,43 @@ mod tests {
         let disk = Workspace::open(&run.root).unwrap().manifest;
         assert_eq!((disk.asset_budget_usd, disk.generate_assets), (20.0, true));
         assert_eq!(disk.allowed_actions, ["bash:npm"]);
+        assert_eq!(disk.asset_providers, Some(vec!["scenario".into()]));
         assert_eq!((disk.status, disk.note.as_str()), (Status::Building, "Building"), "the run's own fields are saved");
         // A setter on the old copy starts from what's on disk too.
         run.set_person(|m| m.asset_budget_usd = 25.0).unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
         assert_eq!((disk.asset_budget_usd, disk.generate_assets), (25.0, true));
+        assert_eq!(disk.asset_providers, Some(vec!["scenario".into()]));
+    }
+
+    #[test]
+    fn provider_choices_migrate_from_legacy_and_survive_duplication() {
+        let old = br#"{"version":2,"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true}"#;
+        let mut m = read_manifest(old).unwrap();
+        assert_eq!(m.version, MANIFEST_VERSION);
+        assert!(m.asset_providers.is_none());
+        assert!(m.asset_provider_allowed("scenario") && m.asset_provider_allowed("custom"));
+        m.asset_providers = Some(vec!["scenario".into()]);
+        assert!(m.asset_provider_allowed("scenario"));
+        assert!(!m.asset_provider_allowed("fal"));
+        m.generate_assets = false;
+        assert!(!m.asset_provider_allowed("scenario"));
+        m.generate_assets = true;
+        m.asset_providers = Some(Vec::new());
+        assert!(!m.asset_provider_allowed("scenario"));
+
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "Original", "x", TargetRef::None).unwrap();
+        ws.set_person(|m| {
+            m.generate_assets = true;
+            m.asset_providers = Some(vec!["scenario".into()]);
+        })
+        .unwrap();
+        let copy = ws.duplicate("Copy").unwrap();
+        let saved = Workspace::open(&copy.root).unwrap().manifest;
+        assert!(saved.asset_provider_allowed("scenario"));
+        assert!(!saved.asset_provider_allowed("fal"));
+        assert_eq!(saved.asset_providers, ws.manifest.asset_providers);
     }
 
     #[test]

@@ -4,9 +4,6 @@
 use super::*;
 use craft_anything_engines::game;
 
-/// Told to a resumed builder when the person turned generated assets off after some were made.
-const ASSETS_NOW_OFF: &str = "Generated assets are now off for this project: don't use assets_image_generate, assets_model_generate, assets_speech_generate, assets_sound_generate or assets_music_generate. Keep the ones already in app/.";
-
 pub struct GameKind;
 
 impl GameKind {
@@ -79,22 +76,15 @@ impl TargetKind for GameKind {
         let generated = cx.assets && cx.ws.manifest.generate_assets;
         let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
         if generated {
-            s.push(assets_note(cx.ws, cx.image_model));
+            s.push(assets_note(cx.ws, cx.image_model, cx.model_3d));
         }
         s.push(screenshot::SCREENSHOT_CONTRACT.to_string());
         s.push(self_test::SELF_TEST_CONTRACT.to_string());
         s
     }
 
-    /// The person may have turned generated assets on (or added a key) or off since the brief.
     fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
-        if cx.assets && cx.ws.manifest.generate_assets {
-            vec![assets_note(cx.ws, cx.image_model)]
-        } else if !cx.ws.assets().is_empty() {
-            vec![ASSETS_NOW_OFF.to_string()]
-        } else {
-            Vec::new()
-        }
+        if cx.assets && cx.ws.manifest.generate_assets { vec![assets_note(cx.ws, cx.image_model, cx.model_3d)] } else { Vec::new() }
     }
 
     /// Every game must play its core loop; a game of a website has no mechanics sheet (its brief

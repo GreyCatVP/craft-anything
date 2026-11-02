@@ -63,6 +63,8 @@ pub struct BriefCx<'a> {
     pub assets: bool,
     /// The picture model chosen in Settings (an asset-table id); `None` = the table's default.
     pub image_model: Option<&'a str>,
+    /// The configured 3D model; None uses the catalogue default.
+    pub model_3d: Option<&'a str>,
 }
 
 /// The words the app uses for a kind's result.

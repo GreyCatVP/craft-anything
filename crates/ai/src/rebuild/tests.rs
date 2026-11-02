@@ -13,7 +13,7 @@ fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
-    super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None }, extra)
+    super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None, model_3d: None }, extra)
 }
 fn refine(k: &str, check: &CheckResult) -> String {
     kind(k).refine(check)
@@ -248,7 +248,9 @@ fn games_hear_about_generated_assets_only_when_allowed_and_with_a_key() {
     assert!(with.contains("assets_model_generate") && with.contains("$5.00") && with.contains("Assets/Generated/"), "{with}");
     assert!(with.contains("never a recognisable character, logo or brand artwork"));
     assert!(!brief(&ws, "game", false, false, None, false, None).contains("assets_model_generate"), "no key, no asset tools");
-    assert!(!brief(&ws, "app", false, false, None, true, None).contains("assets_model_generate"), "games only");
+    let app = brief(&ws, "app", false, false, None, true, None);
+    assert!(app.contains("Project asset providers:") && app.contains("share one budget"));
+    assert!(!app.contains("assets_model_generate"), "long game art guidance stays game-specific");
 }
 
 #[test]
@@ -266,11 +268,13 @@ fn the_assets_note_reads_prices_from_the_asset_table() {
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     // The default picture model is Nano Banana Pro ($0.15 a picture).
-    let before = "Realistic assets: use the configured asset providers. Images and 3D support fal.ai and Scenario (choose model explicitly or use Settings); audio uses ElevenLabs. Each operation requires its own provider key; a key for one provider does not unlock the others. The picture and 3D prices below are estimates using the configured picture model and the default 3D model; selected models can differ. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description (about $0.65 each); set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture (about $0.15) for textures, skies, backgrounds and menu art. This project's asset budget is $5.00 ($0.00 used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it (e.g. assets/generated/). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. assets_speech_generate makes dialogue from text and a voice_id; assets_sound_generate makes sound effects; assets_music_generate makes original music. Audio operations share this asset budget. Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used.";
-    assert_eq!(assets_note(&ws, None), before);
-    assert_eq!(assets_note(&ws, Some("no-such-model")), before, "an unknown model quotes the default's prices");
-    let schnell = assets_note(&ws, Some("flux-schnell"));
+    let before = "Realistic assets: use the configured asset providers. Images and 3D support fal.ai and Scenario (choose model explicitly or use Settings); audio uses ElevenLabs. Each operation requires its own provider key; a key for one provider does not unlock the others. The picture and 3D prices below are estimates using the configured picture and 3D models; selected models can differ. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description (about $0.65 each); set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture (about $0.15) for textures, skies, backgrounds and menu art. This project's asset budget is $5.00 ($0.00 used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it (e.g. assets/generated/). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. assets_speech_generate makes dialogue from text and a voice_id; assets_sound_generate makes sound effects; assets_music_generate makes original music. Audio operations share this asset budget. Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used.";
+    assert_eq!(assets_note(&ws, None, None), before);
+    assert_eq!(assets_note(&ws, Some("no-such-model"), None), before, "an unknown model quotes the default's prices");
+    let schnell = assets_note(&ws, Some("flux-schnell"), None);
     assert!(schnell.contains("(about $0.50 each)") && schnell.contains("a picture (under $0.01)"), "{schnell}");
+    let scenario = assets_note(&ws, Some("scenario-gemini-3-1"), Some("scenario-meshy"));
+    assert!(scenario.contains("(about $11.00 each)"), "configured 3D and image prices: {scenario}");
 }
 
 #[test]
@@ -507,7 +511,7 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let ws = Workspace::create(d.path(), "Deck", "Make slides", TargetRef::None).unwrap();
     let checks = kinds.get("slides").unwrap().checks(&ws);
     assert_eq!(checks.iter().map(|c| c.id()).collect::<Vec<_>>(), ["outline"]);
-    let b = super::brief(&SlidesKind, &BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None }, None);
+    let b = super::brief(&SlidesKind, &BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None }, None);
     assert!(b.contains("What to build: a slide deck."), "{b}");
 }
 
@@ -649,7 +653,7 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx { ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None };
+    let cx = |ws| BriefCx { ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None };
     assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
@@ -1284,25 +1288,29 @@ fn website_check_compares_the_text_and_names_what_is_missing() {
 }
 
 #[test]
-fn a_resumed_game_builder_hears_the_asset_choice_as_it_is_now() {
+fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
-    let game = kind("game");
     fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
-        BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None }
+        BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None }
     }
-    assert!(game.follow_up_sections(&cx(&ws, true)).is_empty(), "off and never used: nothing to say");
+    assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
     // Turned on after the first build, with a key: the follow-up carries the asset note and budget.
     ws.set_person(|m| m.generate_assets = true).unwrap();
-    let on = game.follow_up_sections(&cx(&ws, true));
-    assert!(on[0].contains("assets_model_generate") && on[0].contains("$5.00"), "{on:?}");
-    assert!(game.follow_up_sections(&cx(&ws, false)).is_empty(), "no key: not offered");
+    let on = project_assets_note(&cx(&ws, true));
+    assert!(on.contains("scenario: enabled") && on.contains("$5.00"), "{on:?}");
+    assert!(project_assets_note(&cx(&ws, false)).contains("No asset provider key"));
+    ws.set_person(|m| m.asset_providers = Some(vec!["scenario".into()])).unwrap();
+    let explicit = project_assets_note(&cx(&ws, true));
+    assert!(explicit.contains("scenario: enabled") && explicit.contains("fal: disabled") && explicit.contains("elevenlabs: disabled"));
+    for kind in ["game", "app", "website"] {
+        assert!(brief(&ws, kind, false, false, None, true, None).contains("scenario: enabled"));
+    }
     // Turned off after some were made: say so.
     let rec = craft_anything_engine::workspace::AssetRecord { file: "a.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.5, at_ms: 1 };
     ws.record_asset(rec).unwrap();
     ws.set_person(|m| m.generate_assets = false).unwrap();
-    assert!(game.follow_up_sections(&cx(&ws, true))[0].contains("now off"));
-    assert!(kind("website").follow_up_sections(&cx(&ws, true)).is_empty());
+    assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
 }
 
 #[test]

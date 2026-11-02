@@ -641,10 +641,23 @@ impl Worker {
         let s = self.engine.session();
         let (deep, ghidra) = (!s.clean_room(), s.settings.ghidra_launcher().is_some());
         let image_model = s.settings.assets.image_model.clone();
+        let model_3d = s.settings.assets.model_3d.clone();
         drop(s);
-        let cx = BriefCx { ws, deep, ghidra, editor: self.editor.as_deref(), assets: self.assets, image_model: image_model.as_deref() };
+        let cx = BriefCx {
+            ws,
+            deep,
+            ghidra,
+            editor: self.editor.as_deref(),
+            assets: self.assets,
+            image_model: image_model.as_deref(),
+            model_3d: model_3d.as_deref(),
+        };
         // The project's settings as they are now, for an agent that carries on its session.
-        let now = || kind.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>() + &pictures_reminder(ws);
+        let now = || {
+            kind.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>()
+                + &format!("\n\n{}", project_assets_note(&cx))
+                + &pictures_reminder(ws)
+        };
         let mut prompt = match &opts.message {
             // An agent with a saved session gets the follow-up; one without (an API loop) starts
             // from the brief with the request added.

@@ -328,6 +328,10 @@ fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
     let not_project = || ToolError::new(ErrorCode::FeatureMissing, "Assets can only be generated inside a Craft Anything project.");
     let inbox = inbox(ctx).ok_or_else(not_project)?;
     let ws = workspace_of(&inbox).ok_or_else(not_project)?;
+    if ws.is_read_only() {
+        return Err(ToolError::new(ErrorCode::NoPermission, "This project's settings were written by a newer Craft Anything; asset generation is disabled.")
+            .with_remediation("Update Craft Anything before generating assets for this project."));
+    }
     if !ws.manifest.generate_assets {
         return Err(ToolError::new(ErrorCode::NoPermission, "The person hasn't turned on generated assets for this project.").with_remediation(
             "Make these assets with simple shapes and colours instead, and tell the person they can turn on generated assets for this game in the app.",
@@ -345,6 +349,10 @@ fn no_key(provider: &str) -> ToolError {
 impl Job {
     /// The key for `provider`, checked before anything is asked or spent.
     fn key(&self, provider: &dyn AssetProvider) -> Result<String, ToolError> {
+        if !self.ws.manifest.asset_provider_allowed(provider.id()) {
+            return Err(ToolError::new(ErrorCode::NoPermission, format!("{} is disabled for this project.", provider.name()))
+                .with_remediation("Use an enabled provider, or ask the person to enable this provider in the project's asset settings."));
+        }
         let key = self.keys.get(provider.id()).ok_or_else(|| no_key(provider.name()))?;
         provider.validate_key(key)?;
         Ok(key.to_string())
@@ -478,8 +486,6 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let model_req = AssetRequest::Model3d { model, image_url: "https://example.invalid/preflight.png", textured, faces };
     let provider = j.providers.for_request(&model_req)?;
     let key = j.key(provider.as_ref())?;
-    let mut estimate = provider.estimate(&model_req)?;
-    valid_cost(estimate)?;
     // From a prompt, a picture is made first: with the picture model chosen in Settings.
     let mut picture_maker = None;
     if from_prompt {
@@ -487,11 +493,17 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         let picture_req = AssetRequest::Image { model: image_model, prompt: &p.prompt, shape: Shape::Square };
         let picture_provider = j.providers.for_request(&picture_req)?;
         let picture_key = j.key(picture_provider.as_ref())?;
-        let picture_cost = picture_provider.estimate(&picture_req)?;
-        valid_cost(picture_cost)?;
-        estimate += picture_cost;
         save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?;
         picture_maker = Some((image_model, picture_provider, picture_key));
+    }
+    // All participating providers are allowed and keyed before asking any provider for a quote.
+    let mut estimate = provider.estimate(&model_req)?;
+    valid_cost(estimate)?;
+    if let Some((image_model, picture_provider, _)) = &picture_maker {
+        let req = AssetRequest::Image { model: image_model, prompt: &p.prompt, shape: Shape::Square };
+        let picture_cost = picture_provider.estimate(&req)?;
+        valid_cost(picture_cost)?;
+        estimate += picture_cost;
     }
     let source = if from_prompt { None } else { Some(image_source(&j.ws, image)?) };
     within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
@@ -746,6 +758,7 @@ mod tests {
     struct Recording {
         id: &'static str,
         calls: craft_anything_platform::sync::Mutex<Vec<AssetKind>>,
+        estimates: craft_anything_platform::sync::Mutex<Vec<AssetKind>>,
         estimate: Option<f64>,
     }
 
@@ -757,6 +770,7 @@ mod tests {
             self.id
         }
         fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
+            self.estimates.lock().unwrap().push(req.kind());
             Ok(self.estimate.unwrap_or_else(|| req.listed_cost()))
         }
         fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
@@ -767,7 +781,7 @@ mod tests {
     }
 
     fn recording_engine(w: &Workspace, provider: &'static str, estimate: Option<f64>) -> (crate::Engine, std::sync::Arc<Recording>) {
-        let stub = std::sync::Arc::new(Recording { id: provider, calls: Default::default(), estimate });
+        let stub = std::sync::Arc::new(Recording { id: provider, calls: Default::default(), estimates: Default::default(), estimate });
         let mut providers = AssetProviders::built_in();
         providers.register(stub.clone());
         let mut session = crate::testing::session();
@@ -784,6 +798,55 @@ mod tests {
             ("assets_sound_generate", json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"}), AssetKind::SoundEffect),
             ("assets_music_generate", json!({"prompt":"A calm piano theme", "duration_seconds":3.0, "save_as":"audio/theme.mp3"}), AssetKind::Music),
         ]
+    }
+
+    #[test]
+    fn disabled_providers_cannot_spend_through_audio_or_model_overrides_or_precursors() {
+        let (_d, mut w) = ws();
+        let (engine, audio) = recording_engine(&w, "elevenlabs", None);
+        w.set_person(|m| m.asset_providers = Some(vec!["scenario".into()])).unwrap();
+        for (tool, params, _) in audio_calls() {
+            assert_eq!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::NoPermission);
+        }
+        assert!(audio.calls.lock().unwrap().is_empty());
+        assert!(audio.estimates.lock().unwrap().is_empty());
+        // No fal key is configured: the provider's permission must still win over missing keys.
+        for (tool, params) in [
+            ("assets_image_generate", json!({"prompt":"a crate", "model":"flux-schnell", "save_as":"crate.png"})),
+            ("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})),
+        ] {
+            assert_eq!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::NoPermission);
+        }
+        let (engine, scenario) = recording_engine(&w, "scenario", None);
+        // Scenario may make the model, but its default fal precursor is disabled.
+        let params = json!({"prompt":"a crate", "model":"scenario-meshy", "image_model":"flux-schnell", "save_as":"crate.glb"});
+        assert_eq!(engine.call("assets_model_generate", params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::NoPermission);
+        assert!(scenario.calls.lock().unwrap().is_empty());
+        assert!(scenario.estimates.lock().unwrap().is_empty());
+        assert!(w.assets().is_empty());
+        assert_eq!(w.assets_spent(), 0.0);
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+        assert!(!w.app_dir().join("crate.png").exists());
+        assert!(!w.app_dir().join("crate.glb").exists());
+    }
+
+    #[test]
+    fn future_project_settings_refuse_all_paid_generation() {
+        let (_d, w) = ws();
+        let (engine, stub) = recording_engine(&w, "elevenlabs", None);
+        let mut future = w.manifest.clone();
+        future.version = crate::workspace::MANIFEST_VERSION + 1;
+        std::fs::write(w.root.join("craft.json"), serde_json::to_vec(&future).unwrap()).unwrap();
+        let original = std::fs::read(w.root.join("craft.json")).unwrap();
+        let mut calls: Vec<_> = audio_calls().into_iter().map(|(tool, params, _)| (tool, params)).collect();
+        calls.push(("assets_image_generate", json!({"prompt":"a crate", "save_as":"crate.png"})));
+        calls.push(("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})));
+        for (tool, params) in calls {
+            assert_eq!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::NoPermission);
+        }
+        assert!(stub.calls.lock().unwrap().is_empty());
+        assert!(w.assets().is_empty());
+        assert_eq!(std::fs::read(w.root.join("craft.json")).unwrap(), original);
     }
 
     #[test]
