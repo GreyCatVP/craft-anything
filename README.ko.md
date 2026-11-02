@@ -92,7 +92,7 @@
 
 ## <a id="how-it-works"></a>작동 방식
 
-대상을 가리키고 원하는 것을 말한 뒤 시작을 누르세요. Craft Anything은 네 단계로 진행하며,
+대상을 가리키고 원하는 것을 말한 뒤 Start를 누르세요. Craft Anything은 네 단계로 진행하며,
 결정이 여러분의 몫이면 쉬운 말로 물어봅니다.
 
 1. **Study:** 원본을 살펴봅니다. 모든 너비의 페이지, 코드, 파일, 실행 방식을 확인합니다.
@@ -103,8 +103,8 @@
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/make.png" alt="Make 화면: 재현할 웹사이트, 앱 또는 게임을 고르고, 주소를 입력하고, Clean room 또는 Deep 중 하나를 고르고, 원하는 것을 말한 뒤 시작을 누릅니다" width="100%"><br>
-      <sub><b>Make:</b> 재현할 대상을 고르고, 원하는 것을 말한 뒤 시작을 누르세요.</sub>
+      <img src="docs/images/make.png" alt="Make 화면: 재현할 웹사이트, 앱 또는 게임을 고르고, 주소를 입력하고, Clean room 또는 Deep 중 하나를 고르고, 원하는 것을 말한 뒤 Start를 누릅니다" width="100%"><br>
+      <sub><b>Make:</b> 재현할 대상을 고르고, 원하는 것을 말한 뒤 Start를 누르세요.</sub>
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/project-game.png" alt="모든 단계가 끝난 뱀 게임 프로젝트와 게임 플레이 버튼" width="100%"><br>
@@ -305,7 +305,7 @@ Copyright (c) 2026 ArtCraft Team and the Craft Anything contributors. 필수 고
 
 스크린샷에 보이는 것은 그 용도로 만든 예시 프로젝트입니다: example.com, 뱀 게임, 작은 계산기 프로그램.
 
-[`docs/brand/`](docs/brand/)에 있는 ArtCraft 이름, 워드마크, 로고는 ArtCraft Team의 상표이며 이 라이선스의 적용을 받지 않습니다. 수정하지 않은 상태에서만, 이 저장소와 Craft Anything의 일부로서에만 사용할 수 있으며, 이때 [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt)를 따라야 합니다. 포크와 수정본은 이를 제거해야 합니다.
+[`docs/brand/`](docs/brand/)에 있는 ArtCraft 이름, 워드마크, 로고는 ArtCraft Team의 상표이며 이 라이선스의 적용을 받지 않습니다. 수정하지 않은 상태에서만, 이 저장소와 Craft Anything의 일부로서만 사용할 수 있으며, 이때 [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt)를 따라야 합니다. 포크와 수정본은 이를 제거해야 합니다.
 
 <p align="center">
   <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
