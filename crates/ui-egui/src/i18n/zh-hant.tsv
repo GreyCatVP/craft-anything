@@ -1,4 +1,4 @@
-# zh-hant: original Chinese UI translations. Licensed MIT OR Apache-2.0.
+﻿# zh-hant: original Chinese UI translations. Licensed MIT OR Apache-2.0.
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
  GB	 GB
  and {n} more	，另有 {n} 項
@@ -1360,3 +1360,6 @@ your files there are the app, edited in place	該位置的檔案就是應用程�
 … {} older	… 還有 {} 則較早內容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 選擇 · Enter 執行 · Esc 關閉
+
+Some shared files had to be copied ({copied} bytes) because the drive doesn't support hard links.
+Some shared files had to be copied ({copied} bytes) because the drive doesn't support hard links.
