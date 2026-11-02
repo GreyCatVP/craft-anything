@@ -521,7 +521,11 @@ impl Lifter<'_> {
     }
 
     fn ret_canon(&self) -> String {
-        if self.mode == Mode::A64 { "x0".into() } else { "rax".into() }
+        match self.mode {
+            Mode::A64 => "x0".into(),
+            Mode::A32 | Mode::T32 => "r0".into(),
+            _ => "rax".into(),
+        }
     }
 
     fn ret_reg_name(&self) -> String {
@@ -1046,7 +1050,7 @@ pub fn lift(img: &Image, prog: &Program, f: &Function, names: &dyn Fn(u64) -> Op
     'outer: for v in per_block.iter().rev() {
         for i in v.iter().rev() {
             if matches!(i.flow, Flow::Call { .. } | Flow::IndirectCall { .. }) {
-                ret_reg = if mode == Mode::A64 { "x0".into() } else { "rax".into() };
+                ret_reg = ret_canon.into();
                 break 'outer;
             }
             if i.writes.iter().any(|w| w == ret_canon)
@@ -1293,5 +1297,50 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn arm32_calls_keep_their_return_value_in_r0() {
+        use craft_anything_formats::Arch;
+        fn words(ws: &[u32]) -> Vec<u8> {
+            ws.iter().flat_map(|w| w.to_le_bytes()).collect()
+        }
+        fn arm_elf(code: &[u8], thumb: bool) -> Vec<u8> {
+            let mut b = vec![0u8; 0x100];
+            b[0..7].copy_from_slice(b"\x7fELF\x01\x01\x01");
+            for (o, v) in [(16, 2u16), (18, 40), (40, 52), (42, 32), (44, 1)] {
+                b[o..o + 2].copy_from_slice(&v.to_le_bytes());
+            }
+            let n = code.len() as u32;
+            for (o, v) in [(20, 1u32), (24, 0x1000 | u32::from(thumb)), (28, 52), (36, 0x0500_0000), (52, 1)] {
+                b[o..o + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            for (o, v) in [(56, 0x100u32), (60, 0x1000), (64, 0x1000), (68, n), (72, n), (76, 5), (80, 0x100)] {
+                b[o..o + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            b.extend_from_slice(code);
+            b
+        }
+        fn lift_entry(image: Image) -> String {
+            let program = Program::analyze(&image, &Limits::default(), &NoControl).unwrap();
+            let f = program.functions.get(&0x1000).unwrap();
+            lift(&image, &program, f, &|_| None).text
+        }
+
+        let call_ret = words(&[0xe92d_4010, 0xeb00_0001, 0xe8bd_8010, 0xe320_f000, 0xe3a0_0007, 0xe12f_ff1e]);
+        let used_call = words(&[0xe92d_4010, 0xeb00_0002, 0xe280_1001, 0xe1a0_0001, 0xe8bd_8010, 0xe3a0_0007, 0xe12f_ff1e]);
+        let leaf = words(&[0xe3a0_0007, 0xe12f_ff1e]);
+
+        let ar = lift_entry(Image::raw(Arc::from(call_ret.clone()), Arch::Arm, 0x1000));
+        let au = lift_entry(Image::raw(Arc::from(used_call), Arch::Arm, 0x1000));
+        let al = lift_entry(Image::raw(Arc::from(leaf), Arch::Arm, 0x1000));
+        let ae = lift_entry(Image::parse(Arc::from(arm_elf(&call_ret, false))).unwrap());
+        let tr = lift_entry(Image::parse(Arc::from(arm_elf(&[0x10, 0xb5, 0x98, 0x47, 0x10, 0xbd], true))).unwrap());
+
+        assert!(ar.contains("return r0;") && !ar.contains("rax"), "{ar}");
+        assert!(ae.contains("return r0;") && !ae.contains("rax"), "{ae}");
+        assert!(tr.contains("return r0;") && !tr.contains("rax"), "{tr}");
+        assert!(au.contains("r0 = sub_1014();") && au.contains("r1 = r0 + 1;") && au.contains("return r0;"), "{au}");
+        assert!(al.contains("r0 = 7;") && al.contains("return r0;") && !al.contains("rax"), "{al}");
     }
 }
