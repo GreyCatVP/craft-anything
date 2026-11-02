@@ -607,7 +607,8 @@ Owner: maintainers · Status: in progress
 
 ### R2.5 Behaviour checks for non-web builds
 Owner: open · Status: in progress
-- [ ] Keep mechanics behavior unverified when only the sheet has been read (claimed: contributor, branch bugfix/verification-gates)
+- [x] Keep mechanics behavior unverified when only the sheet has been read: no literal-use claims,
+      persisted unknowns and an explicit usable-build summary; no builder retries for a missing oracle
 - [x] Standard `--screenshot <path>` contract in every app and game brief, enforced by
       `ScreenshotCheck` after the build check (no picture, an unreadable or blank picture fails);
       checks run in order and a failed one stops the rest
@@ -617,17 +618,19 @@ Owner: open · Status: in progress
 - [x] Compare JPEG, WebP and GIF reference pictures too (`web_common::decode_picture`)
 - [x] `MECHANICS.md` gains a structured twin (`app/mechanics.json`, `engine::mechanics`, schema in
       `docs/schemas/`): `MechanicsCheck` fails a game without a readable sheet and notes values
-      without a source and numbers not in the code as written
+      without a source; runtime behavior remains unverified
 - [x] Apps in Deep mode keep the sheet too: the brief asks for it when a program target is
       decompiled, and `DeepOnly(MechanicsCheck)` checks it only then (`Check::applies`)
 - [x] Honest game checks (a Deep-mode Unreal rebuild reached Ready as a first slice: a cave, no
       player, enemies, mission or HUD): every game brief asks for `--self-test <file.json>` (play
       the core loop with scripted input, measure it from the game's own state) and
       `SelfTestCheck` runs it after the screenshot, failing until `move`, `act` and `hud` all pass;
-      `MechanicsCheck` fails when a sourced number isn't in the code as written (estimates may
-      stay out; Unreal's generated folders aren't read as code); in Deep mode on a program,
+      `MechanicsCheck` requires a readable sheet and records behavioral comparison as unknown
+      (a literal, an equivalent calculation or the self-test doesn't verify its values); in Deep mode on a program,
       `DeepOnly(CreditsCheck)` requires `app/CREDITS.md` and `app/README.md` opening with the
       brief's private-use line
+- [ ] Give console run comparisons a numeric-output oracle when needed: word likeness drops
+      single-character tokens, so bare `4.5` and `9.0` both compare as empty output
 - [ ] Behaviour checks that use the sheet: run the build with scripted input and measure values
       (speed, jump height, fire rate) against it (needs R2.4's scripted input)
 - [ ] Hold the self-test to what the check can see too: picture the game after its scripted
