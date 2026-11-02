@@ -392,7 +392,9 @@ fn default_recover_limit() -> usize {
     500
 }
 
-fn collect_scripts(ctx: &Ctx<'_>, roots: &[String], max_files: usize) -> Result<(Vec<(String, PathBuf)>, Vec<String>), ToolError> {
+type Scripts = Vec<(String, PathBuf)>;
+
+fn collect_scripts(ctx: &Ctx<'_>, roots: &[String], max_files: usize) -> Result<(Scripts, Vec<String>), ToolError> {
     let mut out = Vec::new();
     let mut notes = Vec::new();
     for r in roots {
