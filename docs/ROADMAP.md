@@ -305,6 +305,9 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
+- [ ] Offer OpenCode locally and over SSH with its own visible chat models and supported thinking
+      depths (Low, Medium, High, Xhigh, Max) in settings and headless clients — claimed: OpenCode, branch feature/r2.2-opencode-models
+
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
 - [ ] A table of what each adapter gets (our tool server, approvals, resume, notes mid-turn, a
