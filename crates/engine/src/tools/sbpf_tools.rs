@@ -7,7 +7,7 @@ use super::native_common::{page, spec};
 use super::static_input::{self, builder, format_err};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use craft_anything_disasm::sbpf;
-use craft_anything_evidence::{Authority, Confidence, Coverage, Limitation, Location, ToolError};
+use craft_anything_evidence::{Authority, Confidence, Coverage, CoverageStatus, Limitation, Location, ToolError};
 use craft_anything_formats::solana;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -378,8 +378,10 @@ fn formats_sbpf_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         }),
     };
 
-    let base_cov = if p.detail == Detail::Complete { cov } else { Coverage::complete(1) };
-    let coverage = if prep.truncated_text.is_some() { static_input::partial(insns.len() as u64) } else { base_cov };
+    let mut coverage = if p.detail == Detail::Complete { cov } else { Coverage::complete(1) };
+    if prep.truncated_text.is_some() {
+        coverage.status = CoverageStatus::Partial;
+    }
     let mut ev = builder(
         ctx,
         "formats_sbpf_show",
