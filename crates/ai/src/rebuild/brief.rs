@@ -125,7 +125,7 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
     })
 }
 
-/// Realistic assets with fal.ai: what each tool makes and costs (prices from the asset table,
+/// Assets from configured providers: what each tool makes and costs (prices from the asset table,
 /// for the picture model `image_model` names), the budget, where the engine loads them from, and
 /// that every design is original.
 pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
@@ -145,7 +145,7 @@ pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
         _ => (String::new(), String::new()),
     };
     format!(
-        "Realistic assets: you can make them with fal.ai. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description{model_cost}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture{picture_cost} for textures, skies, backgrounds and menu art. This project's asset budget is ${budget:.2} (${spent:.2} used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it ({folder}). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. List each generated file in app/CREDITS.md as made with fal.ai."
+        "Realistic assets: use the configured asset providers. Images and 3D support fal.ai and Scenario (choose model explicitly or use Settings); audio uses ElevenLabs. Each operation requires its own provider key; a key for one provider does not unlock the others. The picture and 3D prices below are estimates using the configured picture model and the default 3D model; selected models can differ. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description{model_cost}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture{picture_cost} for textures, skies, backgrounds and menu art. This project's asset budget is ${budget:.2} (${spent:.2} used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it ({folder}). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. assets_speech_generate makes dialogue from text and a voice_id; assets_sound_generate makes sound effects; assets_music_generate makes original music. Audio operations share this asset budget. Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used."
     )
 }
 

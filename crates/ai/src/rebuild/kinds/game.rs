@@ -5,8 +5,7 @@ use super::*;
 use craft_anything_engines::game;
 
 /// Told to a resumed builder when the person turned generated assets off after some were made.
-const ASSETS_NOW_OFF: &str =
-    "Generated assets are now off for this project: don't make more with assets_image_generate or assets_model_generate. Keep the ones already in app/.";
+const ASSETS_NOW_OFF: &str = "Generated assets are now off for this project: don't use assets_image_generate, assets_model_generate, assets_speech_generate, assets_sound_generate or assets_music_generate. Keep the ones already in app/.";
 
 pub struct GameKind;
 
