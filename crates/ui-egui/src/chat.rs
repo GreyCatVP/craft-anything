@@ -320,7 +320,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, dense: bool) {
     let answering = app.answering();
     let hint = if dense { tr("Ask the agent…") } else { tr("Ask anything, e.g. \"What does this program do?\"") };
     ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
-        let history = || app.state.chat.iter().filter_map(|i| if let ChatItem::User(text) = i { Some(text.clone()) } else { None }).collect();
+        let history = || app.state.chat.iter().filter_map(|i| if let ChatItem::User(text) = i { Some(crate::prompt_box::Prompt { text: text.clone(), pictures: Vec::new() }) } else { None }).collect();
         let out = crate::prompt_box::show(
             ui,
             &mut app.state.input,

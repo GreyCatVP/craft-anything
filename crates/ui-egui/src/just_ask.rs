@@ -204,7 +204,7 @@ mod tests {
         // The feed stores the shown text with its "(n pictures attached)" line, and the
         // pictures travel with the same UserItem.
         let pics = [std::path::PathBuf::from("attachments/picture-1.png")];
-        let feed = [FeedItem::User(UserItem::new("Make it blue\n(1 picture attached)", pics.clone()))];
+        let feed = [FeedItem::User(UserItem::new("Make it blue\n(1 picture attached)".to_string(), pics.to_vec()))];
         let list = [asked("where are the files", 1)];
         let out = prompts(&feed, &list);
         assert_eq!(out[0].text, "Make it blue");

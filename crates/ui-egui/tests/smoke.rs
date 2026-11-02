@@ -288,7 +288,7 @@ fn an_engine_download_shows_in_the_title_bar_on_every_screen() {
 #[test]
 fn a_projects_conversation_and_place_come_back_after_a_restart() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
-    use craft_anything_ui_egui::state::FeedItem;
+    use craft_anything_ui_egui::state::{FeedItem, UserItem};
     struct Mem(std::collections::HashMap<String, String>);
     impl eframe::Storage for Mem {
         fn get_string(&self, key: &str) -> Option<String> {

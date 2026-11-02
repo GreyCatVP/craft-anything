@@ -160,9 +160,9 @@ fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
                     }
                 }
                 RunEvent::Agent(_) => {}
-                RunEvent::Note(text) => {
+                RunEvent::Note { shown, .. } => {
                     end_line(&mut line_open);
-                    println!("  + {text}");
+                    println!("  + {shown}");
                 }
                 RunEvent::Ask(r) => {
                     end_line(&mut line_open);
