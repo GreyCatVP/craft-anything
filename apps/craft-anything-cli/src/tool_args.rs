@@ -292,7 +292,7 @@ pub fn help(spec: &ToolSpec, schema: &Value) -> String {
     }
     if spec.requires == Requires::Target {
         s.push_str("\nTarget options (how <target-path> is opened):\n");
-        s.push_str("  --architecture                 x86, x86_64, arm or arm64 for a raw binary (implies --format raw-binary)\n");
+        s.push_str("  --architecture                 x86, x86_64, arm or arm64 for a raw binary (implies --format raw-binary); another processor (e.g. sh4) with --language-id, in Deep mode\n");
         s.push_str("  --entry-point                  Load/entry address (0x-hex) for a raw binary\n");
         s.push_str("  --format                       raw-binary or dos-com to force how the file is read\n");
         s.push_str("  --language-id                  Deep mode only: pin a Ghidra processor language\n");

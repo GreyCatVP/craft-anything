@@ -3,10 +3,11 @@
 //! metadata and UI-action tracing. The heavy lifting lives in `craft_anything_analysis::native`.
 
 use super::native_common::{from_report, hex, image, native, params_json, resolve_function, select_document, spec, user_names};
+use super::native_function::locate;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use craft_anything_analysis::native as an;
 use craft_anything_disasm::pseudo::lift;
-use craft_anything_evidence::{Confidence, Coverage, Limitation, Location, ToolError};
+use craft_anything_evidence::{Confidence, Coverage, ErrorCode, Limitation, Location, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -520,34 +521,82 @@ fn native_functions_decompile(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
     if p.addresses.len() > 64 {
         return Err(ToolError::invalid("at most 64 functions per batch"));
     }
-    let st = native(ctx)?;
-    let t = ctx.session.active()?;
-    let user = user_names(t);
-    let names = |a: u64| user.get(&a).cloned();
+    // A program the built-in engine can't analyse fails the whole batch, as before, unless Deep
+    // mode can still read it (a processor only Ghidra decodes).
+    if let Err(e) = native(ctx)
+        && !(e.code == ErrorCode::NotSupported && !ctx.session.clean_room())
+    {
+        return Err(e);
+    }
     let mut items = Vec::new();
     let mut ok = 0;
+    let mut from_deep = 0;
     let mut locations = Vec::new();
+    let mut deep_unavailable: Vec<String> = Vec::new();
     for (i, a) in p.addresses.iter().enumerate() {
         ctx.cancel.check()?;
         ctx.report(Some(i as f32 / p.addresses.len().max(1) as f32), format!("decompiling {a}"));
-        match resolve_function(t, &st.prog, a) {
-            Ok(f) => {
-                let ps = lift(&st.img, &st.prog, f, &names);
-                ok += 1;
-                locations.push(Location::address(f.entry));
-                items.push(json!({"input": a, "ok": true, "entry": hex(f.entry), "signature": ps.signature, "pseudo_code": ps.text, "structured": ps.structured, "limitations": ps.limitations.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>()}));
+        // Each function as native_function_pseudocode gives it: Ghidra in Deep mode, the built-in
+        // lifter otherwise or when Ghidra can't.
+        let (at, our_base, gap) = match locate(ctx, a) {
+            Ok(found) => found,
+            Err(e) if e.code == ErrorCode::Cancelled => return Err(e),
+            Err(e) => {
+                items.push(json!({"input": a, "ok": false, "error": e.message}));
+                continue;
             }
-            Err(e) => items.push(json!({"input": a, "ok": false, "error": e.message})),
+        };
+        let why_not_deep = match super::deep::decompile(ctx, at, our_base) {
+            Ok(Ok(d)) => {
+                ok += 1;
+                from_deep += 1;
+                locations.push(Location::address(d.entry()));
+                let mut item = d.item();
+                item["input"] = json!(a);
+                item["ok"] = json!(true);
+                items.push(item);
+                continue;
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(why) => why,
+        };
+        if let Some(why) = why_not_deep.clone()
+            && !deep_unavailable.contains(&why)
+        {
+            deep_unavailable.push(why);
         }
+        if let Some(gap) = gap {
+            items.push(json!({"input": a, "ok": false, "error": gap.explained(why_not_deep).message}));
+            continue;
+        }
+        let st = native(ctx)?;
+        let t = ctx.session.active()?;
+        let f = resolve_function(t, &st.prog, a)?;
+        let user = user_names(t);
+        let names = |a: u64| user.get(&a).cloned();
+        let ps = lift(&st.img, &st.prog, f, &names);
+        ok += 1;
+        locations.push(Location::address(f.entry));
+        items.push(json!({"input": a, "ok": true, "entry": hex(f.entry), "signature": ps.signature, "pseudo_code": ps.text, "structured": ps.structured, "engine": "clean-room lifter", "limitations": ps.limitations.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>()}));
     }
     let n = p.addresses.len();
+    let builtin = ok - from_deep;
     let e = super::native_common::ev(ctx, "native_functions_decompile", params_json(&p))?
-        .result(json!({"items": items, "succeeded": ok, "failed": n - ok}))
+        .result(json!({"items": items, "succeeded": ok, "failed": n - ok, "from_deep_engine": from_deep}))
         .summary(format!("Decompiled {ok} of {n} functions."))
-        .confidence(Confidence::Inferred)
+        // Ghidra's answers are derived; one from the built-in lifter makes the set inferred.
+        .confidence(if builtin == 0 && from_deep > 0 { Confidence::Derived } else { Confidence::Inferred })
         .coverage(Coverage::complete(n as u64))
         .locations(locations)
-        .limitation(Limitation::new("pseudo_code_inferred", "pseudo-C from the clean-room lifter is register-level and approximate"))
+        .limitations((builtin > 0).then(|| Limitation::new("pseudo_code_inferred", "pseudo-C from the clean-room lifter is register-level and approximate")))
+        .limitations((from_deep > 0).then(|| {
+            Limitation::new("deep_engine", "items whose engine is ghidra come from the external Deep engine (Ghidra), not the original source; addresses in Ghidra's names (FUN_…, DAT_…) are Ghidra's")
+        }))
+        .limitations(
+            deep_unavailable
+                .into_iter()
+                .map(|why| Limitation::new("deep_engine_unavailable", format!("{why} Those functions came from the built-in decompiler, which is less exact, or not at all."))),
+        )
         .build()?;
     Ok(ToolOutput::evidence(e))
 }

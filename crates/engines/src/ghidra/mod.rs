@@ -142,6 +142,10 @@ pub struct Config {
     pub compiler_spec: Option<String>,
     /// Java's memory for Ghidra in GB ([`HEAP_GB`] bounds it); `None`: half this computer's memory.
     pub memory_gb: Option<u64>,
+    /// Where raw machine code (no container saying where it goes) is loaded, e.g. 0x8c010000 for
+    /// a Dreamcast `1ST_READ.BIN`: Ghidra's raw loader is told so with the language, so its
+    /// addresses are the program's own. `None` for a file whose headers say where it loads.
+    pub load_base: Option<u64>,
 }
 
 impl Config {
@@ -162,8 +166,9 @@ const ANALYSED_MARKER: &str = "analysed.ok";
 
 /// `analyzeHeadless` arguments for the one-time analysis: import the snapshot, analyse it and save
 /// it in the cached project (no bridge yet), with the optional processor/compiler-spec pin. A
-/// `-cspec` is only emitted alongside a `-processor`, matching Ghidra's requirement. Pure, so it
-/// can be unit-tested without a Ghidra install.
+/// `-cspec` is only emitted alongside a `-processor`, matching Ghidra's requirement, and so is
+/// the raw loader with its base address (`load_base`, for raw machine code), since Ghidra's raw
+/// loader needs a language. Pure, so it can be unit-tested without a Ghidra install.
 pub(crate) fn analyse_args(
     project_dir: &Path,
     snapshot: &Path,
@@ -171,6 +176,7 @@ pub(crate) fn analyse_args(
     script_dir: &Path,
     language_id: Option<&str>,
     compiler_spec: Option<&str>,
+    load_base: Option<u64>,
 ) -> Vec<OsString> {
     let mut a: Vec<OsString> =
         vec![project_dir.as_os_str().to_owned(), OsString::from(PROJECT_NAME), OsString::from("-import"), snapshot.as_os_str().to_owned()];
@@ -180,6 +186,9 @@ pub(crate) fn analyse_args(
         if let Some(cspec) = compiler_spec.map(str::trim).filter(|s| !s.is_empty()) {
             a.push(OsString::from("-cspec"));
             a.push(OsString::from(cspec));
+        }
+        if let Some(base) = load_base {
+            a.extend([OsString::from("-loader"), OsString::from("BinaryLoader"), OsString::from("-loader-baseAddr"), OsString::from(format!("{base:#x}"))]);
         }
     }
     for (flag, v) in [("-log", log.as_os_str()), ("-scriptPath", script_dir.as_os_str()), ("-preScript", std::ffi::OsStr::new(FAST_SCRIPT_NAME))] {
@@ -501,7 +510,7 @@ pub fn analyse(
     let mut running = headless(
         cfg,
         &scratch.0,
-        analyse_args(&project_dir, &snapshot, &log, &script_dir, cfg.language_id.as_deref(), cfg.compiler_spec.as_deref()),
+        analyse_args(&project_dir, &snapshot, &log, &script_dir, cfg.language_id.as_deref(), cfg.compiler_spec.as_deref(), cfg.load_base),
         remaining,
     )?;
     let mut last_progress = Instant::now();
@@ -609,7 +618,7 @@ impl Session {
         // First ping proves the token and that analysis finished.
         let info = client.ping(cancel, deadline)?;
         let version = info.get("provider").and_then(|p| p.get("version")).and_then(Value::as_str).map(String::from);
-        let image_base = image_base_of(&info);
+        let image_base = loaded_at(cfg).or_else(|| image_base_of(&info));
         if info.get("analysis_cut_short").and_then(Value::as_bool) == Some(true) {
             return Err(GhidraError::Timeout("Ghidra reported that analysis timed out".into()));
         }
@@ -696,6 +705,13 @@ fn decompiled(entry: u64, v: &Value) -> Option<DeepFunction> {
 }
 
 /// Where the bridge's handshake says Ghidra loaded the program (`None` when it didn't say).
+/// Where Ghidra holds raw code's first byte, when we told it ([`analyse_args`] uses the raw loader
+/// only with a language). Its raw loader puts the bytes there but leaves the program's image base
+/// at 0, so the base the bridge reports would move every address by the load address.
+pub(crate) fn loaded_at(cfg: &Config) -> Option<u64> {
+    cfg.load_base.filter(|_| cfg.language_id.as_deref().is_some_and(|l| !l.trim().is_empty()))
+}
+
 fn image_base_of(ping: &Value) -> Option<u64> {
     ping.get("target").and_then(|t| t.get("image_base")).and_then(Value::as_str).and_then(parse_hex)
 }
