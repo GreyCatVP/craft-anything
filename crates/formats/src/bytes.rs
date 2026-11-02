@@ -72,7 +72,12 @@ impl<'a> Reader<'a> {
         let mut result = 0u64;
         for i in 0..10usize {
             let b = self.u8(off.checked_add(i)?)?;
-            result |= u64::from(b & 0x7f).checked_shl(7 * i as u32)?;
+            let payload = u64::from(b & 0x7f);
+            let shift = 7 * i as u32;
+            if shift > 0 && payload.checked_shl(shift)? >> shift != payload {
+                return None;
+            }
+            result |= payload << shift;
             if b & 0x80 == 0 {
                 return Some((result, i + 1));
             }
@@ -94,5 +99,18 @@ mod tests {
         assert_eq!(r.cstr(0, 10).as_deref(), Some("\u{1}\u{2}\u{3}"));
         assert_eq!(Reader::new(&[0xe5, 0x8e, 0x26]).uleb128(0), Some((624485, 3)));
         assert_eq!(Reader::new(&[0x80; 12]).uleb128(0), None);
+    }
+
+    #[test]
+    fn uleb128_rejects_overflow() {
+        let mut v = vec![0x80; 9];
+        v.push(0x7f);
+        assert_eq!(Reader::new(&v).uleb128(0), None);
+        let mut v = vec![0x80; 9];
+        v.push(0x02);
+        assert_eq!(Reader::new(&v).uleb128(0), None);
+        let mut v = vec![0xff; 9];
+        v.push(0x01);
+        assert_eq!(Reader::new(&v).uleb128(0), Some((u64::MAX, 10)));
     }
 }
