@@ -206,7 +206,15 @@ pub struct CsScan {
 #[derive(Debug, Clone)]
 enum Scope {
     Namespace(String),
-    Type { full: String, simple: String, is_enum: bool },
+    /// `positional` holds a record's positional properties, added when the body closes unless the body
+    /// declares a member of the same name; `start` is the member count when the body opened.
+    Type {
+        full: String,
+        simple: String,
+        is_enum: bool,
+        positional: Vec<CsMember>,
+        start: usize,
+    },
     Block,
 }
 
@@ -351,6 +359,33 @@ fn param_type(p: &[T]) -> String {
     if byref { format!("ref {s}") } else { s }
 }
 
+/// Properties a positional record declares through its parameter list `params`.
+fn positional_properties(kind: &str, params: &[T], type_name: &str, line: u32) -> Vec<CsMember> {
+    if !kind.starts_with("record") {
+        return Vec::new();
+    }
+    split_commas(params)
+        .into_iter()
+        .filter_map(|p| {
+            let (p, _) = strip_prefix(p);
+            let p = p.get(..p.iter().position(|t| is_p(t, '=')).unwrap_or(p.len())).unwrap_or(&[]);
+            let name = p.last().and_then(ident)?;
+            if p.len() < 2 {
+                return None;
+            }
+            Some(CsMember {
+                kind: "property",
+                type_name: type_name.to_string(),
+                name: name.to_string(),
+                generic_arity: 0,
+                params: vec![],
+                ty: param_type(p),
+                line,
+            })
+        })
+        .collect()
+}
+
 struct Scanner {
     scopes: Vec<Scope>,
     file_ns: String,
@@ -375,7 +410,7 @@ impl Scanner {
 
     fn current_type(&self) -> Option<(&str, &str, bool)> {
         match self.scopes.last()? {
-            Scope::Type { full, simple, is_enum } => Some((full, simple, *is_enum)),
+            Scope::Type { full, simple, is_enum, .. } => Some((full, simple, *is_enum)),
             _ => None,
         }
     }
@@ -604,9 +639,11 @@ impl Scanner {
                             self.out.types.push(CsType { full_name: full.clone(), kind: kind.clone(), generic_arity: arity, line });
                         }
                         // Positional records declare a constructor and properties.
+                        let mut positional = Vec::new();
                         if let Some(p) = h.iter().position(|x| is_p(x, '(')) {
                             let close = matching(&h, p, '(', ')').unwrap_or(h.len());
-                            let params: Vec<String> = split_commas(h.get(p + 1..close).unwrap_or(&[])).into_iter().map(param_type).collect();
+                            let list = h.get(p + 1..close).unwrap_or(&[]);
+                            let params: Vec<String> = split_commas(list).into_iter().map(param_type).collect();
                             self.push(CsMember {
                                 kind: "constructor",
                                 type_name: full.clone(),
@@ -616,8 +653,10 @@ impl Scanner {
                                 ty: "void".into(),
                                 line,
                             });
+                            positional = positional_properties(&kind, list, &full, line);
                         }
-                        self.scopes.push(Scope::Type { full, simple: name, is_enum: kind == "enum" });
+                        let start = self.out.members.len();
+                        self.scopes.push(Scope::Type { full, simple: name, is_enum: kind == "enum", positional, start });
                     } else if self.current_type().is_some() {
                         self.member(&h, true);
                         self.scopes.push(Scope::Block);
@@ -632,7 +671,15 @@ impl Scanner {
                     }
                     cur.clear();
                     expr_depth = 0;
-                    self.scopes.pop();
+                    if let Some(Scope::Type { full, positional, start, .. }) = self.scopes.pop() {
+                        // A member of the same name replaces the synthesized property.
+                        for m in positional {
+                            let declared = self.out.members.get(start..).unwrap_or(&[]).iter().any(|d| d.type_name == full && d.name == m.name);
+                            if !declared {
+                                self.push(m);
+                            }
+                        }
+                    }
                 }
                 Tok::Punct(';') => {
                     let h = std::mem::take(&mut cur);
@@ -646,7 +693,8 @@ impl Scanner {
                         let full = if prefix.is_empty() { name } else { format!("{prefix}.{name}") };
                         if let Some(p) = h.iter().position(|x| is_p(x, '(')) {
                             let close = matching(&h, p, '(', ')').unwrap_or(h.len());
-                            let params: Vec<String> = split_commas(h.get(p + 1..close).unwrap_or(&[])).into_iter().map(param_type).collect();
+                            let list = h.get(p + 1..close).unwrap_or(&[]);
+                            let params: Vec<String> = split_commas(list).into_iter().map(param_type).collect();
                             self.push(CsMember {
                                 kind: "constructor",
                                 type_name: full.clone(),
@@ -656,6 +704,9 @@ impl Scanner {
                                 ty: "void".into(),
                                 line,
                             });
+                            for m in positional_properties(&kind, list, &full, line) {
+                                self.push(m);
+                            }
                         }
                         if self.out.types.len() < 200_000 {
                             self.out.types.push(CsType { full_name: full, kind, generic_arity: arity, line });
@@ -952,5 +1003,77 @@ public sealed class Box<T> : IDisposable where T : class
             weird.push(char::from_u32(i * 7 % 0x2fff).unwrap_or('x'));
         }
         let _ = scan(&weird);
+    }
+
+    #[test]
+    fn positional_record_declares_properties() {
+        use crate::dotnet::model::PropertyInfo;
+        use crate::dotnet::{MethodInfo, Param, TypeInfo};
+        let method = |name: &str, params: &[&str], ty: &str| MethodInfo {
+            token: String::new(),
+            name: name.into(),
+            key: String::new(),
+            signature: name.into(),
+            return_type: ty.into(),
+            params: params.iter().map(|p| Param { name: String::new(), ty: (*p).into() }).collect(),
+            generic_params: vec![],
+            visibility: "public",
+            modifiers: vec![],
+            code_type: "il",
+            internal_call: false,
+            pinvoke: false,
+            rva: 0,
+            body: None,
+        };
+        let members = Members {
+            types: vec![TypeInfo {
+                token: "0x02000002".into(),
+                full_name: "N.Point".into(),
+                namespace: "N".into(),
+                name: "Point".into(),
+                kind: "class",
+                visibility: "public",
+                modifiers: vec![],
+                extends: Some("object".into()),
+                enclosing_type: None,
+                generic_params: vec![],
+                interfaces: vec![],
+                fields: vec![],
+                methods: vec![
+                    method(".ctor", &["int", "int"], "void"),
+                    method("get_X", &[], "int"),
+                    method("set_X", &["int"], "void"),
+                    method("get_Y", &[], "int"),
+                    method("set_Y", &["int"], "void"),
+                ],
+                properties: vec![PropertyInfo { name: "X".into(), ty: "int".into() }, PropertyInfo { name: "Y".into(), ty: "int".into() }],
+                events: vec![],
+            }],
+            total_types: 1,
+            total_methods: 5,
+            total_fields: 0,
+            truncated: false,
+            warnings: vec![],
+        };
+        for src in [
+            "namespace N { public record Point(int X, int Y); }",
+            "namespace N { public record Point(int X, int Y) { } }",
+            "namespace N { public record Point(int X, int Y) { public int X { get; init; } = X; } }",
+            "namespace N { public record Point(int X, [property: Obsolete] int Y) { public int X { get; init; } = X; public int Y { get; init; } = Y; } }",
+        ] {
+            let s = scan(src);
+            let props: Vec<(&str, &str, &str)> =
+                s.members.iter().filter(|m| m.kind == "property").map(|m| (m.type_name.as_str(), m.name.as_str(), m.ty.as_str())).collect();
+            assert_eq!(props.len(), 2, "{src}: {props:?}");
+            assert!(props.contains(&("N.Point", "X", "int")), "{src}: {props:?}");
+            assert!(props.contains(&("N.Point", "Y", "int")), "{src}: {props:?}");
+            let r = reconcile(&members, &s);
+            assert!(r.missing.is_empty(), "{src}: {:?}", r.missing);
+            assert!(r.extra.is_empty(), "{src}: {:?}", r.extra);
+            assert_eq!(r.matched.len(), 3, "{src}");
+        }
+        // A class with a primary constructor does not get properties.
+        let s = scan("namespace N { public class C(int x) { } }");
+        assert!(s.members.iter().all(|m| m.kind != "property"));
     }
 }
