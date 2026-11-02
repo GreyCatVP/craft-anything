@@ -154,7 +154,7 @@ Owner: open · Status: done (branch chore/r0.5-cleanups)
 - [x] The Agent console keeps its size: its history and prompt box came out 17 points taller than
       the bottom panel, which grew by that every frame until its maximum and then cut off the top
       of the Agent / Jobs / Log tabs (`chat::conversation`)
-- [ ] `yaxpeax-arm` 0.5.0 panics ("register number out of range") on an A32 `STRD`/`LDRD` with
+- [x] `yaxpeax-arm` 0.5.0 panics ("register number out of range") on an A32 `STRD`/`LDRD` with
       Rt = 15 (e.g. the word `0xc0c7fef3`), so one such word fails the whole analysis of a 32-bit
       ARM program; decode it as invalid instead — claimed: rech4210, branch bugfix/arm-a32-ldrd-rt15-panic
 - [x] Unchecked `o + 4`/`o + 8` on section and program header offsets in `formats/src/dart.rs`

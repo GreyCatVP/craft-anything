@@ -842,6 +842,14 @@ fn decode_a32(mode: Mode, bytes: &[u8], addr: u64, fmt: bool) -> Option<Insn> {
     use yaxpeax_arm::armv7::{ConditionCode as C, InstDecoder, Opcode, Operand};
     let dec = if mode == Mode::T32 { InstDecoder::default_thumb() } else { InstDecoder::default() };
     let window = bytes.get(..bytes.len().min(4))?;
+    if mode == Mode::A32 {
+        let word = u32::from_le_bytes(window.try_into().ok()?);
+        // A32 extra load/store: L=0 and SH=10/11 select LDRD/STRD.
+        // Rt=15 would make yaxpeax construct the nonexistent second register r16.
+        if word & 0x0e10_00d0 == 0x0000_00d0 && (word >> 12) & 0xf == 15 {
+            return None;
+        }
+    }
     let mut reader = U8Reader::new(window);
     let inst = dec.decode(&mut reader).ok()?;
     let len = u8::try_from(inst.len().to_const()).ok().filter(|l| *l > 0)?;
@@ -1148,6 +1156,33 @@ mod tests {
         c.apply(&mut b);
         assert_eq!(b.refs, vec![0x2010]);
         assert_eq!(c.value("x0"), Some(0x2010));
+    }
+
+    #[test]
+    fn a32_doubleword_rt15_is_invalid() {
+        assert!(decode(Mode::A32, &[0xf3, 0xfe, 0xc7, 0xc0], 0, true).is_none());
+        for word in [0xe1c0_f0d0u32, 0xe1c0_f0f0, 0xe180_f0d1, 0xe180_f0f1] {
+            assert!(decode(Mode::A32, &word.to_le_bytes(), 0, true).is_none());
+        }
+    }
+
+    #[test]
+    fn a32_doubleword_other_registers_still_decode() {
+        // LDRD/STRD immediate and register forms, including valid Rt=2.
+        for base in [0xe1c0_00d0u32, 0xe1c0_00f0, 0xe180_00d1, 0xe180_00f1] {
+            for rt in 0..15 {
+                let word = base | (rt << 12);
+                assert!(decode(Mode::A32, &word.to_le_bytes(), 0, true).is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn a32_single_register_loads_and_stores_still_decode() {
+        // Ordinary LDR/STR, plus extra halfword/signed loads with Rt=15.
+        for word in [0xe590_2000u32, 0xe580_2000, 0xe1d0_f0b0, 0xe1d0_f0d0, 0xe1d0_f0f0] {
+            assert!(decode(Mode::A32, &word.to_le_bytes(), 0, true).is_some());
+        }
     }
 
     #[test]
