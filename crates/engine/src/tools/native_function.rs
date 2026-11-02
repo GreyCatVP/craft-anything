@@ -359,9 +359,13 @@ fn native_function_references_list(ctx: &mut Ctx<'_>, params: Value) -> Result<T
             }
         }
         let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
+        let dir = match p.direction {
+            Direction::Incoming => "incoming",
+            Direction::Outgoing => "outgoing",
+        };
         let e = ev(ctx, "native_function_references_list", params_json(&p))?
             .result(json!({"function": f.name, "entry": hex(f.entry), "direction": p.direction, "references": rows}))
-            .summary(format!("{} {:?} references for {name}.", rows.len(), p.direction).to_lowercase())
+            .summary(format!("{} {dir} references for {name}.", rows.len()))
             .confidence(Confidence::Derived)
             .coverage(Coverage::complete(rows.len() as u64))
             .location(Location::address(f.entry))
@@ -777,25 +781,25 @@ mod tests {
     fn function_summaries_use_annotated_name_after_rename() {
         let (bytes, l) = tk::elf64(tk::ElfArch::X86_64, true);
         let e = engine_with("prog", &bytes);
-        call(&e, "native_function_label", json!({"function": "main", "name": "renamed_entry"}));
+        call(&e, "native_function_label", json!({"function": "main", "name": "RenamedEntry"}));
 
-        let dis = call(&e, "native_function_disassemble", json!({"function": "renamed_entry"}));
-        assert!(dis["summary"].as_str().unwrap().contains("instructions of renamed_entry."));
+        let dis = call(&e, "native_function_disassemble", json!({"function": "RenamedEntry"}));
+        assert!(dis["summary"].as_str().unwrap().contains("instructions of RenamedEntry."));
 
-        let callees = call(&e, "native_function_callees_list", json!({"function": "renamed_entry"}));
-        assert!(callees["summary"].as_str().unwrap().starts_with("renamed_entry makes "));
+        let callees = call(&e, "native_function_callees_list", json!({"function": "RenamedEntry"}));
+        assert!(callees["summary"].as_str().unwrap().starts_with("RenamedEntry makes "));
 
-        let callers = call(&e, "native_function_callers_list", json!({"function": "renamed_entry"}));
-        assert!(callers["summary"].as_str().unwrap().starts_with("renamed_entry is called from "));
+        let callers = call(&e, "native_function_callers_list", json!({"function": "RenamedEntry"}));
+        assert!(callers["summary"].as_str().unwrap().starts_with("RenamedEntry is called from "));
 
-        let refs = call(&e, "native_function_references_list", json!({"function": "renamed_entry"}));
-        assert!(refs["summary"].as_str().unwrap().contains("for renamed_entry."));
+        let refs = call(&e, "native_function_references_list", json!({"function": "RenamedEntry"}));
+        assert!(refs["summary"].as_str().unwrap().contains("references for RenamedEntry."));
 
-        let insns = call(&e, "native_function_instructions_list", json!({"function": "renamed_entry"}));
-        assert!(insns["summary"].as_str().unwrap().contains("instructions in renamed_entry."));
+        let insns = call(&e, "native_function_instructions_list", json!({"function": "RenamedEntry"}));
+        assert!(insns["summary"].as_str().unwrap().contains("instructions in RenamedEntry."));
 
         let inside = format!("{:#x}", l.code_va + 4);
         let find = call(&e, "native_function_find", json!({"address": inside}));
-        assert!(find["summary"].as_str().unwrap().contains("is inside renamed_entry "));
+        assert!(find["summary"].as_str().unwrap().contains("is inside RenamedEntry "));
     }
 }
