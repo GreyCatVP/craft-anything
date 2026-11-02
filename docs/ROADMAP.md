@@ -141,7 +141,7 @@ No `deny.toml` exists. The survey found no GPL, AGPL or SSPL crates, and only MP
 
 ### R0.5 Small correctness items from the survey
 Owner: open · Status: done (branch chore/r0.5-cleanups)
-- [ ] Decode Objective-C chained pointer offsets past file-empty PAGEZERO mappings; claimed: contributor, branch bugfix/macho-pagezero-pointers
+- [x] Decode Objective-C chained pointer offsets past file-empty PAGEZERO mappings (#296).
 - [x] Checked arithmetic on file offsets in `elf.rs`: `va_to_off` adds a segment's file offset to an
       address delta unchecked, so a `PT_LOAD` at offset `u64::MAX` overflows, found by a lint scan
       of `crates/formats` (#43)

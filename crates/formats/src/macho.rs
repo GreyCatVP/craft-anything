@@ -423,20 +423,22 @@ fn decode_ptr(b: &Binary, raw: u64) -> Option<u64> {
     if raw == 0 {
         return None;
     }
-    if b.is_mapped(raw) {
+    // __PAGEZERO is mapped but has no file bytes. A small chained target
+    // offset inside it must still reach the image-base fallback below.
+    if b.va_to_offset(raw).is_some() {
         return Some(raw);
     }
     if raw >> 63 != 0 {
         // authenticated rebase: low 32 bits are an offset from the image base
         let t = b.image_base.wrapping_add(raw & 0xffff_ffff);
-        return b.is_mapped(t).then_some(t);
+        return b.va_to_offset(t).is_some().then_some(t);
     }
     let t36 = raw & 0xf_ffff_ffff;
-    if b.is_mapped(t36) {
+    if b.va_to_offset(t36).is_some() {
         return Some(t36);
     }
     let t = b.image_base.wrapping_add(t36);
-    b.is_mapped(t).then_some(t)
+    b.va_to_offset(t).is_some().then_some(t)
 }
 
 fn section_words(data: &[u8], b: &Binary, names: &[&str]) -> Vec<u64> {
@@ -631,6 +633,39 @@ mod tests {
         let meta = objc_metadata(&m, &b);
         assert_eq!(meta.classes.len(), 1);
         assert!(meta.classes[0].methods.is_empty());
+    }
+
+    #[test]
+    fn objc_chained_offsets_do_not_resolve_into_pagezero() {
+        let mut data = tk::macho64();
+        let b = crate::parse_binary(&data).unwrap();
+        let list = b.sections.iter().find(|s| s.name == "__objc_classlist").unwrap().addr;
+        let class = b.read_ptr(&data, list).unwrap();
+        let raw_ro = b.read_ptr(&data, class + 32).unwrap();
+        for (slot, target) in [(list, class), (class + 32, raw_ro)] {
+            let off = b.va_to_offset(slot).unwrap() as usize;
+            let encoded = (1u64 << 52) | (target - b.image_base);
+            data[off..off + 8].copy_from_slice(&encoded.to_le_bytes());
+        }
+        assert!(b.is_mapped(class - b.image_base));
+        assert!(b.va_to_offset(class - b.image_base).is_none());
+        let meta = objc_metadata(&data, &b);
+        assert_eq!(meta.classes.len(), 1, "{meta:?}");
+        assert_eq!(meta.classes[0].name, tk::OBJC_CLASS);
+        assert_eq!(meta.classes[0].methods[0].selector, tk::OBJC_SELECTOR);
+        assert_eq!(meta.classes[0].methods[0].imp, Some(tk::MACHO_BASE + tk::MACHO_TEXT_OFF + tk::x64::HIDDEN));
+        let fat = tk::macho_fat(&[data]);
+        let fat_binary = crate::parse_binary(&fat).unwrap();
+        let fat_meta = objc_metadata(&fat, &fat_binary);
+        assert_eq!(fat_meta.classes.len(), 1, "{fat_meta:?}");
+        assert_eq!(fat_meta.classes[0].methods[0].selector, tk::OBJC_SELECTOR);
+        assert_eq!(decode_ptr(&b, class), Some(class));
+        let offset = class - b.image_base;
+        assert_eq!(decode_ptr(&b, offset), Some(class));
+        assert_eq!(decode_ptr(&b, (1u64 << 63) | offset), Some(class));
+        assert_eq!(decode_ptr(&b, u64::MAX), None);
+        assert_eq!(decode_ptr(&b, b.image_base + 0x0fff_ffff), None);
+        assert_eq!(decode_ptr(&b, 0), None);
     }
 
     #[test]
