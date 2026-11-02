@@ -617,6 +617,42 @@ mod tests {
     }
 
     #[test]
+    fn recover_embedded_source_from_long_inline_map() {
+        use base64::Engine as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let source = format!("// {}\nexport const value = 1;\n", "a".repeat(5_000));
+        let map = json!({
+            "version": 3,
+            "file": "app.js",
+            "sources": ["src/original.js"],
+            "sourcesContent": [&source],
+            "names": [],
+            "mappings": "AACA"
+        });
+        let raw_map = serde_json::to_vec(&map).unwrap();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(raw_map);
+        let script = format!("export const value=1;\n//# sourceMappingURL=data:application/json;base64,{encoded}\n");
+        let input = dir.path().join("app.js");
+        std::fs::write(&input, script).unwrap();
+        let out = dir.path().join("recovered");
+        let e = Engine::new(crate::testing::session());
+
+        let result = call(&e, "js_sources_restore", json!({"path": input, "output_directory": out})).unwrap();
+
+        let recovered = out.join("sources/app/src/original.js");
+        assert_eq!(std::fs::read_to_string(recovered).unwrap(), source);
+        assert!(result["summary"].as_str().unwrap().contains("1 original source(s) from maps"));
+        assert!(
+            result["result"]["outputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|output| { output["kind"] == "original-source" && output["source_map_source"] == "src/original.js" })
+        );
+    }
+
+    #[test]
     fn source_location_via_script() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("app.js"), "a();b();\n//# sourceMappingURL=app.js.map\n").unwrap();
