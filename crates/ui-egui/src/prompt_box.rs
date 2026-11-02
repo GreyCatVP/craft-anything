@@ -176,8 +176,24 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                 if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) && !text.trim().is_empty() {
                     out.send = true;
                 }
+                // Tab completes a slash command name.
+                if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                    let t = text.trim_start();
+                    if let Some(rest) = t.strip_prefix('/') {
+                        let name = rest.split_whitespace().next().unwrap_or(rest);
+                        if !name.is_empty() {
+                            if let Some(full) = crate::slash::complete(name) {
+                                let leading = &text[..text.len() - t.len()];
+                                *text = format!("{leading}/{full} ");
+                            }
+                        }
+                    }
+                }
             });
-            ui.add_space(4.0);
+                // Hint: available slash commands when typing one.
+                if text.trim_start().starts_with('/') && !text.trim().contains(' ') {
+                    ui.label(RichText::new(format!("Commands: {}", crate::slash::names())).size(theme::CAPTION).color(t.text_faint));
+                }
             ui.horizontal(|ui| {
                 if let Some(tip) = b.attach
                     && icons::button(ui, "paperclip", 30.0, false, tip).clicked()

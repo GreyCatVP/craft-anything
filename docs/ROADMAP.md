@@ -706,7 +706,7 @@ Gaps found while using the app for real projects.
 - [x] Slash commands in a project's prompt box: `/btw` asks about the build in place of the old
       `?` prefix; a new one is a `slash::Command` and a row in `COMMANDS`. A mistyped command stays
       in the box rather than starting a build; a path like `/usr/bin` is a plain message
-- [ ] Typing `/` lists the commands, and Tab completes one
+- [x] Typing `/` lists the commands, and Tab completes one
 - [x] Questions about a build show in the conversation where they were asked, so a long answer
       scrolls with it and leaves the prompt box alone; each folds to one line, and they're kept in
       the project (`questions.json`, the newest 200, `rebuild_questions_list`), in their place

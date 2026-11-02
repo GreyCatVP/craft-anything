@@ -41,6 +41,12 @@ pub fn names() -> String {
     COMMANDS.iter().map(|(n, _)| format!("/{n}")).collect::<Vec<_>>().join(", ")
 }
 
+/// Complete a partial command name (without the leading slash) when there's exactly one match.
+pub fn complete(name: &str) -> Option<&'static str> {
+    let matches: Vec<&str> = COMMANDS.iter().filter(|(n, _)| n.starts_with(name)).map(|(n, _)| *n).collect();
+    if matches.len() == 1 { Some(matches[0]) } else { None }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
