@@ -491,11 +491,25 @@ struct RunState {
     lost: Arc<AtomicBool>,
 }
 
+/// End a turn: take the next message first, then say the turn is done (`send(done)`), since
+/// whoever reads `TurnDone` may send the next message at once. The other order refuses it ("Still
+/// working") with no `TurnDone`, and the caller waits forever.
+fn end_turn(busy: &AtomicBool, done: AgentEvent, send: impl FnOnce(AgentEvent)) {
+    busy.store(false, Ordering::SeqCst);
+    send(done);
+}
+
+/// The `TurnDone` that ends a turn of `backend` with no usage to report.
+fn nothing_done(backend: &str) -> AgentEvent {
+    AgentEvent::TurnDone { backend: backend.to_string(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false }
+}
+
 /// One message as one run of the agent's program (here or over SSH), its events sent on `tx`
-/// as they come and a `TurnDone` at the end, whatever happened. The session it reports is kept for
-/// the next message; one it was asked to continue but doesn't have is forgotten and flagged in
+/// as they come. Returns the `TurnDone` that ends the turn, whatever happened, for the caller to
+/// send once the conversation can take the next message. The session it reports is kept for the
+/// next message; one it was asked to continue but doesn't have is forgotten and flagged in
 /// `state.lost` before the error that says so is sent.
-fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, state: &RunState) {
+fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, state: &RunState) -> AgentEvent {
     let RunState { session, verified, lost } = state;
     let name = spec.config.name.clone();
     let agent = spec.config.model.clone();
@@ -531,7 +545,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
             remediation: Some("Ask with Claude Code, or with an AI that has an API key.".into()),
             log: None,
         });
-        return;
+        return nothing_done(&name);
     }
     let access = match (&spec.builder, spec.deep, spec.question) {
         (_, true, true) => Access::Question,
@@ -618,13 +632,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
             let _ = tx.send(shown.error_event(&agent, e));
         }
     }
-    let _ = tx.send(AgentEvent::TurnDone {
-        backend: name,
-        input_tokens: p.input_tokens,
-        output_tokens: p.output_tokens,
-        cost_usd: p.cost_usd,
-        cost_is_estimate: true,
-    });
+    AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd: p.cost_usd, cost_is_estimate: true }
 }
 
 /// What's needed to explain a failed CLI run: the command with the person's message left out, and
@@ -754,7 +762,9 @@ impl Conversation for CliConversation {
     }
 
     /// Runs the message on a thread of its own; a message while one is running is refused with an
-    /// error event, and a runner that panics still ends its turn.
+    /// error event. Every turn ends with `TurnDone`, a runner that panics or can't start included,
+    /// and the conversation takes the next message before that's sent: whoever reads it may send
+    /// the next message at once (a session that wasn't there is followed by a fresh start).
     fn send(&mut self, text: &str) {
         if self.busy.swap(true, Ordering::SeqCst) {
             let _ = self.tx.send(AgentEvent::Error {
@@ -770,22 +780,19 @@ impl Conversation for CliConversation {
         let state = RunState { session: self.session.clone(), verified: self.verified.clone(), lost: self.lost.clone() };
         let text = text.to_string();
         let spawned = std::thread::Builder::new().name("ai-cli".into()).spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_cli(&spec, &text, &tx, &stop, &state)));
-            if r.is_err() {
+            let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_cli(&spec, &text, &tx, &stop, &state))).unwrap_or_else(|_| {
                 let _ = tx.send(AgentEvent::Error { message: "The agent runner hit a bug and stopped safely.".into(), remediation: None, log: None });
-                let _ = tx.send(AgentEvent::TurnDone {
-                    backend: spec.config.name.clone(),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cost_usd: None,
-                    cost_is_estimate: false,
-                });
-            }
-            busy.store(false, Ordering::SeqCst);
+                nothing_done(&spec.config.name)
+            });
+            end_turn(&busy, done, |e| {
+                let _ = tx.send(e);
+            });
         });
         if spawned.is_err() {
-            self.busy.store(false, Ordering::SeqCst);
             let _ = self.tx.send(AgentEvent::Error { message: "Couldn't start a worker thread.".into(), remediation: None, log: None });
+            end_turn(&self.busy, nothing_done(&self.spec.config.name), |e| {
+                let _ = self.tx.send(e);
+            });
         }
     }
 
@@ -1249,6 +1256,55 @@ mod tests {
         }
         let text: String = all.iter().filter_map(|e| if let AgentEvent::TextDelta { text } = e { Some(text.clone()) } else { None }).collect();
         assert_eq!(text, "read 40000 bytes", "{all:?}");
+    }
+
+    /// Whoever reads `TurnDone` may send the next message at once (a session that wasn't there is
+    /// followed by a fresh start), so the conversation takes it before the turn is said to be
+    /// done. The race this prevents lasts nanoseconds, too short to catch from outside, so the
+    /// order is checked where it's made.
+    #[test]
+    fn a_turn_is_said_to_be_done_only_once_the_next_message_can_be_taken() {
+        let busy = AtomicBool::new(true);
+        let mut sent = None;
+        end_turn(&busy, nothing_done("Claude"), |e| {
+            assert!(!busy.load(Ordering::SeqCst), "TurnDone sent while still busy");
+            sent = Some(e);
+        });
+        assert!(matches!(sent, Some(AgentEvent::TurnDone { .. })));
+    }
+
+    /// Message after message, each turn ends with `TurnDone`, with nothing refused as "still
+    /// working" when the next is sent the moment the last is done.
+    #[cfg(unix)]
+    #[test]
+    fn the_next_message_is_taken_as_soon_as_a_turn_is_done() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("claude");
+        let reply = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"s1"}"#;
+        std::fs::write(&program, format!("#!/bin/sh\ncat >/dev/null\necho '{reply}'\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config =
+            BackendConfig { name: "Claude".into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+        let mut c = CliConversation::new(CliSpec::new(config, options, false, None));
+        for round in 0..25 {
+            c.send("go");
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut events = Vec::new();
+            loop {
+                let got = c.poll();
+                let done = got.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. }));
+                events.extend(got);
+                if done {
+                    assert!(!c.is_busy(), "round {round}: the turn was said to be done while still busy");
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline, "round {round}: no TurnDone: {events:?}");
+                std::hint::spin_loop();
+            }
+            assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "round {round}: {events:?}");
+        }
     }
 
     /// #91: a Mac app with no CLI beside it reached Claude Code, which stopped with a stack trace.

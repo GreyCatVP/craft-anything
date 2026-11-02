@@ -527,8 +527,8 @@ Owner: maintainers · Status: in progress (built; live runs need keys)
       services whose real window differs from 150k (#374)
 - [x] A project moved to another computer (or folder) keeps building with Claude Code: when the saved
       `agent_session` isn't there (`Conversation::session_lost`), a fresh session starts from the brief,
-      the builder's last summary and what's in `app/` instead of failing, and questions about the build
-      are answered from the files (#452)
+      the builder's last summary and what's in `app/` instead of failing; questions about the build put
+      the kept session back first, else are answered from the files and forget the missing one (#452)
 - [x] The coding agent's conversation travels with the project folder (#451): after every turn the
       project keeps a copy of Claude Code's session (`agent-session.jsonl`, `AgentAdapter::session_file`);
       on a computer without it, the copy is put back where Claude Code finds it (`restore_session`) so
