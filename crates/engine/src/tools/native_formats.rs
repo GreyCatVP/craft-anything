@@ -544,10 +544,10 @@ fn core_target_triage(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, To
         t.kind,
         TargetKind::Elf | TargetKind::Pe | TargetKind::MachO | TargetKind::MachOFat | TargetKind::Managed | TargetKind::DosCom | TargetKind::RawBinary
     );
-    let parsed = if native_kind || t.kind == TargetKind::Unknown { super::native_common::image_for(&t).ok() } else { None };
+    let parsed = if native_kind || t.kind == TargetKind::Unknown { super::native_common::image_for(&t).map(Some) } else { Ok(None) };
     let builder = EvidenceBuilder::new("core_target_triage", t.subject(), Environment::builtin(ctx.session.clean_room())).params(json!({"path": p.path}));
     let ev = match parsed {
-        Some(img) => {
+        Ok(Some(img)) => {
             let mut r = an::triage(&img.bin, &img.data, &t.name);
             if t.kind == TargetKind::Managed {
                 r.result["plain_english"] = json!(format!("{} This is a .NET assembly: use the .NET tools for readable C#-level results.", r.summary));
@@ -555,8 +555,22 @@ fn core_target_triage(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, To
             }
             builder.result(r.result).summary(r.summary).confidence(r.confidence).limitations(r.limitations).locations(r.locations).build()?
         }
-        None => {
+        fallback => {
             let (mut plain, mut toolsets, mut tools) = non_native_triage(&t);
+            let mut builder = builder;
+            if let Err(error) = fallback
+                && native_kind
+            {
+                let kind = t.kind.plain();
+                plain = format!(
+                    "{} starts like {}{}, but we couldn't read it as one. Check that the file is complete and undamaged.",
+                    t.name,
+                    kind.get(..1).unwrap_or_default().to_lowercase(),
+                    kind.get(1..).unwrap_or_default()
+                );
+                tools = vec![("native_bytes_show", "inspect the unreadable file's raw bytes")];
+                builder = builder.limitation(Limitation::new("native_parse_failed", error.message));
+            }
             // A game's folder: what it's made with, its libraries and its size.
             let game = (t.kind == TargetKind::Directory).then(|| craft_anything_engines::game::profile(&t.path));
             let game = game.and_then(|g| g.summary(&t.name).map(|s| (g, s)));
@@ -765,6 +779,42 @@ mod tests {
     use super::super::native_common::test_support::*;
     use craft_anything_testkit as tk;
     use serde_json::json;
+
+    #[test]
+    fn triage_explains_an_unreadable_elf_header() {
+        let mut header = vec![0u8; 64];
+        header[..16].copy_from_slice(b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0");
+        header[16..20].copy_from_slice(&[2, 0, 62, 0]);
+        header[20] = 1;
+        header[52] = 64;
+        header[54] = 56;
+        header[58] = 64;
+        let e = engine_with("truncated.elf", &header[..16]);
+        let path = tk::temp_file("truncated.elf", &header[..16]);
+        let parse_error = craft_anything_formats::parse_binary(&header[..16]).unwrap_err().to_string();
+        for params in [json!({}), json!({"path": path.to_string_lossy()})] {
+            let r = call(&e, "core_target_triage", params.clone());
+            assert_eq!(r["result"]["kind"], "elf");
+            let plain = r["result"]["plain_english"].as_str().unwrap();
+            assert!(plain.starts_with("truncated.elf starts like a Linux (or Unix) program, but we couldn't read it"), "{plain}");
+            assert!(!plain.contains("isn't a format we recognise yet"));
+            let error = call_err(&e, "native_layout_show", params);
+            let limitation = r["limitations"].as_array().unwrap().iter().find(|l| l["code"] == "native_parse_failed").unwrap();
+            assert!(limitation["message"].as_str().unwrap().ends_with(&parse_error));
+            assert!(error.message.ends_with(&parse_error));
+            assert!(r["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "detected_by_content"));
+        }
+        let complete = engine_with("complete.elf", &header);
+        let r = call(&complete, "core_target_triage", json!({}));
+        assert!(r["summary"].as_str().unwrap().contains("Linux"));
+        assert!(r["summary"].as_str().unwrap().contains("x86_64"));
+        call(&complete, "native_layout_show", json!({}));
+        let text = engine_with("notes.txt", b"plain text");
+        let r = call(&text, "core_target_triage", json!({}));
+        assert_eq!(r["result"]["kind"], "unknown");
+        assert!(r["summary"].as_str().unwrap().contains("isn't a format we recognise yet"));
+        assert!(!r["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "native_parse_failed"));
+    }
 
     #[test]
     fn pe_resources_and_layout() {
