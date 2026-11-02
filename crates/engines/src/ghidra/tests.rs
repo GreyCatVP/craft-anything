@@ -95,7 +95,7 @@ fn serve(stream: TcpStream, expected: &str, saw_eof: &Arc<AtomicBool>) {
             break; // close on a bad token
         }
         let result = match req.method.as_str() {
-            "ping" => "{\"name\":\"fake\",\"provider\":{\"id\":\"ghidra\",\"version\":\"12.1.4\"},\"analysed\":true,\"analysis_cut_short\":false}"
+            "ping" => "{\"name\":\"fake\",\"provider\":{\"id\":\"ghidra\",\"version\":\"12.1.4\"},\"analysed\":true,\"analysis_cut_short\":false,\"target\":{\"name\":\"t\",\"image_base\":\"0x100000\"}}"
                 .to_string(),
             "native_functions_list" => "{\"functions\":[{\"name\":\"main\",\"address\":\"0x401000\"}]}".to_string(),
             // As the real bridge: a known function, code its analysis never made a function (made
@@ -134,6 +134,8 @@ fn framing_ping_and_methods() {
     let mut client = Client::connect(fake.addr, "secret-token", deadline).expect("connect");
     let info = client.ping(&no_cancel(), deadline).expect("ping");
     assert_eq!(info["provider"]["id"], "ghidra");
+    assert_eq!(image_base_of(&info), Some(0x10_0000), "the handshake says where Ghidra loaded the program");
+    assert_eq!(image_base_of(&serde_json::json!({"target": {"name": "t"}})), None, "an older bridge doesn't say");
 
     let list = client.request("native_functions_list", serde_json::json!({}), &no_cancel(), deadline).expect("list");
     assert_eq!(list["functions"][0]["name"], "main");
@@ -360,18 +362,23 @@ fn the_first_analysis_in_a_fresh_store_starts_instead_of_waiting_for_a_lock_it_c
 /// read-only data: `start` jumps through the table it is handed, so no code names them. Returns
 /// the program and the addresses of `triple`, the second function and the table.
 fn pointer_table_elf() -> (Vec<u8>, u64, u64, u64) {
-    const BASE: u64 = 0x40_0000;
-    let (start, triple, negate, table) = (BASE + 0x100, BASE + 0x110, BASE + 0x120, BASE + 0x1000);
+    pointer_table_elf_at(0x40_0000, 2)
+}
+
+/// [`pointer_table_elf`] loaded at `base`, with ELF type `e_type` (2 executable, 3 position
+/// independent).
+fn pointer_table_elf_at(base: u64, e_type: u8) -> (Vec<u8>, u64, u64, u64) {
+    let (start, triple, negate, table) = (base + 0x100, base + 0x110, base + 0x120, base + 0x1000);
     let mut b = vec![0u8; 0x1010];
     let put = |b: &mut Vec<u8>, off: usize, bytes: &[u8]| b[off..off + bytes.len()].copy_from_slice(bytes);
     // ELF header: ET_EXEC, x86-64, two program headers, no sections.
     put(&mut b, 0, b"\x7fELF\x02\x01\x01");
-    put(&mut b, 16, &[2, 0, 62, 0, 1, 0, 0, 0]);
+    put(&mut b, 16, &[e_type, 0, 62, 0, 1, 0, 0, 0]);
     put(&mut b, 24, &start.to_le_bytes());
     put(&mut b, 32, &0x40u64.to_le_bytes());
     put(&mut b, 52, &[64, 0, 56, 0, 2, 0, 64, 0]);
     // PT_LOAD r-x (headers and code), PT_LOAD r-- (the table).
-    for (i, (flags, off, va, size)) in [(5u32, 0u64, BASE, 0x1000u64), (4, 0x1000, table, 0x10)].into_iter().enumerate() {
+    for (i, (flags, off, va, size)) in [(5u32, 0u64, base, 0x1000u64), (4, 0x1000, table, 0x10)].into_iter().enumerate() {
         let o = 0x40 + i * 56;
         put(&mut b, o, &1u32.to_le_bytes());
         put(&mut b, o + 4, &flags.to_le_bytes());
@@ -419,6 +426,48 @@ fn live_ghidra_makes_and_decompiles_code_reached_only_through_a_pointer_table() 
     }
     // Made once, then found again, still marked as made on demand.
     assert!(session.decompile(triple).unwrap().expect("an answer").created);
+}
+
+#[test]
+fn addresses_move_between_our_image_base_and_the_engines() {
+    // Ghidra loads a position-independent ELF at 0x100000; we read it at 0.
+    let pie = Rebase::new(0, Some(0x10_0000));
+    assert!(!pie.is_identity());
+    assert_eq!((pie.to_engine(0x1160), pie.from_engine(0x10_1160)), (0x10_1160, 0x1160));
+    // Below the base it's moved from (not in the program): left as it is, never wrapped.
+    assert_eq!(pie.from_engine(0x40), 0x40);
+    let near_top = Rebase::new(0, Some(u64::MAX - 1));
+    assert_eq!(near_top.to_engine(0x10), 0x10, "no overflow");
+    // Same base, or an engine that didn't say: nothing moves.
+    for same in [Rebase::new(0x40_0000, Some(0x40_0000)), Rebase::new(0x40_0000, None)] {
+        assert!(same.is_identity());
+        assert_eq!((same.to_engine(0x40_1000), same.from_engine(0x40_1000)), (0x40_1000, 0x40_1000));
+    }
+}
+
+/// Real Ghidra (as above): a position-independent ELF is loaded away from 0, the handshake says
+/// where, and our addresses reach the right code once moved there.
+#[test]
+fn live_ghidra_reports_where_it_loaded_a_position_independent_elf() {
+    let Some(store) = std::env::var_os("CRAFT_ANYTHING_TEST_GHIDRA").map(PathBuf::from) else { return };
+    let temp = tempfile::Builder::new().prefix("ghidra-live").tempdir().unwrap();
+    let cfg = Config {
+        analyze_headless: get::headless(None, &store).expect("Ghidra in the engine store"),
+        java_home: get::java_home(None, &store),
+        startup_timeout: Duration::from_secs(600),
+        store_dir: temp.path().to_path_buf(),
+        language_id: None,
+        compiler_spec: None,
+        memory_gb: Some(4),
+    };
+    let (elf, triple, _, _) = pointer_table_elf_at(0, 3);
+    let session = Session::start(&cfg, &elf, &craft_anything_evidence::sha256_hex(&elf), &"ef".repeat(32), &|| false, &|_, _| {}).expect("Ghidra starts");
+    let base = session.image_base().expect("the handshake says where the program is");
+    assert_ne!(base, 0, "Ghidra moves a program whose lowest segment is at 0");
+    let rebase = Rebase::new(0, Some(base));
+    let made = session.decompile(rebase.to_engine(triple)).unwrap().expect("an answer");
+    assert_eq!(rebase.from_engine(made.entry), triple);
+    assert!(made.pseudocode.as_deref().unwrap_or_default().contains("* 3"), "{made:?}");
 }
 
 #[test]

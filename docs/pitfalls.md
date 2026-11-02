@@ -371,6 +371,13 @@ wrote its own pak reader in Python for a large archive. Tools an AI drives make 
 can (folders), take whole sets in one call, and every brief says to fix the call rather than
 replace the tool. Read an AI run's transcript for tools it gave up on.
 
+**Two engines, two address spaces.** Ghidra loads a position-independent ELF (lowest segment at
+0) at 0x100000, while the built-in engine reads it where its headers say. Handing Ghidra our
+address found nothing there, and Deep mode quietly fell back to the built-in decompiler for every
+PIE program and shared library. Whenever an address crosses between engines, move it by their
+image bases (`ghidra::Rebase`, from the base the bridge reports) and say in the evidence which
+space each address is in.
+
 ## Agent tooling
 
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were

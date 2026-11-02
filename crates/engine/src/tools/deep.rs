@@ -120,13 +120,29 @@ fn remember(ctx: &mut Ctx<'_>, provider: Result<Arc<dyn DeepDecompiler>, String>
     provider.map_err(Some)
 }
 
-/// Decompile `entry` with the deep engine if available. `Err(why)` → the caller uses the built-in
-/// lifter and passes on why Ghidra wasn't used (`None` in Clean room). `Ok(Err(..))` only for a
-/// cancellation the caller should surface.
-pub fn pseudo_code(ctx: &mut Ctx<'_>, entry: u64, params: serde_json::Value) -> Result<Result<ToolOutput, ToolError>, Option<String>> {
+/// An address for the deep engine, and whose address space it is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum At {
+    /// The built-in engine's, as every other tool reports it.
+    Ours(u64),
+    /// Already Ghidra's: the address in a name Ghidra made (`FUN_00101160`).
+    Engine(u64),
+}
+
+/// Decompile the function at `at` with the deep engine if available. `our_base` is the image
+/// base the built-in engine reads the program at; Ghidra may have loaded it elsewhere (a
+/// position-independent ELF goes to 0x100000), so addresses are moved between the two.
+/// `Err(why)` → the caller uses the built-in lifter and passes on why Ghidra wasn't used (`None`
+/// in Clean room). `Ok(Err(..))` only for a cancellation the caller should surface.
+pub fn pseudo_code(ctx: &mut Ctx<'_>, at: At, our_base: u64, params: serde_json::Value) -> Result<Result<ToolOutput, ToolError>, Option<String>> {
     let provider = provider_for_active(ctx)?;
+    let rebase = ghidra::Rebase::new(our_base, provider.image_base());
+    let entry = match at {
+        At::Ours(a) => rebase.to_engine(a),
+        At::Engine(a) => a,
+    };
     match provider.decompile(entry) {
-        Ok(Some(df)) => Ok(build_evidence(ctx, provider.as_ref(), df, params)),
+        Ok(Some(df)) => Ok(build_evidence(ctx, provider.as_ref(), df, rebase, params)),
         Ok(None) => Err(Some("Ghidra had no answer for this function.".into())),
         Err(ghidra::GhidraError::Cancelled) => Ok(Err(ToolError::cancelled())),
         Err(e) => {
@@ -150,7 +166,13 @@ pub fn pseudo_code(ctx: &mut Ctx<'_>, entry: u64, params: serde_json::Value) -> 
     }
 }
 
-fn build_evidence(ctx: &Ctx<'_>, provider: &dyn DeepDecompiler, df: DeepFunction, params: serde_json::Value) -> Result<ToolOutput, ToolError> {
+fn build_evidence(
+    ctx: &Ctx<'_>,
+    provider: &dyn DeepDecompiler,
+    df: DeepFunction,
+    rebase: ghidra::Rebase,
+    params: serde_json::Value,
+) -> Result<ToolOutput, ToolError> {
     let subject = ctx.session.active()?.target.subject();
     let env = Environment {
         clean_room: false,
@@ -160,22 +182,38 @@ fn build_evidence(ctx: &Ctx<'_>, provider: &dyn DeepDecompiler, df: DeepFunction
         language_id: provider.language_id(),
     };
     let line_count = df.pseudocode.as_deref().map(|p| p.lines().count()).unwrap_or(0);
+    // The entry as every other tool gives it; Ghidra's own only when it differs.
+    let entry = rebase.from_engine(df.entry);
+    let mut result = serde_json::json!({
+        "function": df.name,
+        "entry": format!("{entry:#x}"),
+        "signature": df.signature,
+        "pseudo_code": df.pseudocode,
+        "engine": provider.engine(),
+    });
+    if !rebase.is_identity() {
+        result["engine_entry"] = serde_json::json!(format!("{:#x}", df.entry));
+    }
     let mut e = EvidenceBuilder::new("native_function_pseudocode", subject, env)
         .params(params)
-        .result(serde_json::json!({
-            "function": df.name,
-            "entry": format!("{:#x}", df.entry),
-            "signature": df.signature,
-            "pseudo_code": df.pseudocode,
-            "engine": provider.engine(),
-        }))
+        .result(result)
         .summary(format!("Pseudo-C for {} from the Deep engine ({line_count} lines).", df.name))
         // Deep decompilation is derived by a mature external engine: stronger than the built-in
         // inferred lifter, but still a reading aid rather than source.
         .confidence(Confidence::Derived)
         .target_content(true)
         .limitation(Limitation::new("deep_engine", "the pseudo-C comes from the external Deep engine (Ghidra), not the original source"))
-        .location(Location::address(df.entry));
+        .location(Location::address(entry));
+    if !rebase.is_identity() {
+        e = e.limitation(Limitation::new(
+            "engine_rebased",
+            format!(
+                "Ghidra loaded this program at {:#x}, not where the built-in engine reads it ({:#x}); entry is the built-in address, engine_entry Ghidra's, and the addresses in Ghidra's names inside the pseudo-C (FUN_…, DAT_…) are Ghidra's",
+                rebase.theirs(),
+                rebase.ours(),
+            ),
+        ));
+    }
     if df.created {
         e = e.limitation(Limitation::new(
             "made_on_demand",
@@ -183,4 +221,90 @@ fn build_evidence(ctx: &Ctx<'_>, provider: &dyn DeepDecompiler, df: DeepFunction
         ));
     }
     Ok(ToolOutput::evidence(e.build()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::native_common::test_support::*;
+    use super::*;
+    use craft_anything_testkit as tk;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A deep engine that loaded the program at `base`, not where its headers say, as Ghidra does
+    /// with a position-independent ELF: it knows only its own addresses, and remembers the last
+    /// one it was asked for.
+    struct Moved {
+        base: u64,
+        asked: AtomicU64,
+    }
+
+    impl DeepDecompiler for Moved {
+        fn engine(&self) -> &'static str {
+            "ghidra"
+        }
+        fn engine_version(&self) -> Option<String> {
+            Some("test".into())
+        }
+        fn image_base(&self) -> Option<u64> {
+            Some(self.base)
+        }
+        fn decompile(&self, entry: u64) -> Result<Option<DeepFunction>, ghidra::GhidraError> {
+            self.asked.store(entry, Ordering::SeqCst);
+            if entry < self.base {
+                return Err(ghidra::GhidraError::Bridge { code: "not_found".into(), message: "the address is not in executable memory".into() });
+            }
+            let pseudocode = Some(format!("int FUN_{entry:08x}(void) {{ return 0; }}"));
+            Ok(Some(DeepFunction { entry, name: format!("FUN_{entry:08x}"), signature: None, pseudocode, created: false }))
+        }
+        fn list_functions(&self) -> Result<Vec<DeepFunction>, ghidra::GhidraError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn a_function_named_in_our_addresses_reaches_an_engine_that_loaded_the_program_elsewhere() {
+        let (elf, l) = tk::elf64(tk::ElfArch::X86_64, true);
+        let e = engine_with("prog", &elf);
+        const SHIFT: u64 = 0x10_0000;
+        let moved = Arc::new(Moved { base: tk::ELF_BASE + SHIFT, asked: AtomicU64::new(0) });
+        {
+            let mut s = e.session();
+            s.settings.deep_mode = true;
+            let provider: Arc<dyn DeepDecompiler> = moved.clone();
+            s.active_mut().unwrap().ext.insert(Arc::new(DeepSlot { provider: Ok(provider) }));
+        }
+        // By name: the engine is asked for its own address, and the answer is in ours.
+        let r = call(&e, "native_function_pseudocode", json!({"function": "main"}));
+        assert_eq!(r["environment"]["engine"], "ghidra", "{r}");
+        assert_eq!(moved.asked.load(Ordering::SeqCst), l.code_va + SHIFT);
+        assert_eq!(r["result"]["entry"], format!("{:#x}", l.code_va));
+        assert_eq!(r["result"]["engine_entry"], format!("{:#x}", l.code_va + SHIFT));
+        let why = r["limitations"].as_array().unwrap().iter().find(|x| x["code"] == "engine_rebased").expect("says the addresses were moved");
+        assert!(why.to_string().contains(&format!("{:#x}", tk::ELF_BASE + SHIFT)), "{why}");
+        // A name Ghidra made carries Ghidra's address: passed on as it is. (A suffix with a hex
+        // letter: one of only digits is read as decimal until #318 is fixed.)
+        let ghidra_name = format!("FUN_{:08x}", l.code_va + SHIFT + 0x7a00);
+        let r = call(&e, "native_function_pseudocode", json!({"function": ghidra_name}));
+        assert_eq!(moved.asked.load(Ordering::SeqCst), l.code_va + SHIFT + 0x7a00);
+        assert_eq!(r["result"]["entry"], format!("{:#x}", l.code_va + 0x7a00));
+    }
+
+    #[test]
+    fn an_engine_at_our_base_gets_our_addresses_unchanged() {
+        let (elf, l) = tk::elf64(tk::ElfArch::X86_64, true);
+        let e = engine_with("prog", &elf);
+        let same = Arc::new(Moved { base: tk::ELF_BASE, asked: AtomicU64::new(0) });
+        {
+            let mut s = e.session();
+            s.settings.deep_mode = true;
+            let provider: Arc<dyn DeepDecompiler> = same.clone();
+            s.active_mut().unwrap().ext.insert(Arc::new(DeepSlot { provider: Ok(provider) }));
+        }
+        let r = call(&e, "native_function_pseudocode", json!({"function": "main"}));
+        assert_eq!(same.asked.load(Ordering::SeqCst), l.code_va);
+        assert_eq!(r["result"]["entry"], format!("{:#x}", l.code_va));
+        assert!(r["result"].get("engine_entry").is_none(), "{r}");
+        assert!(!r["limitations"].as_array().unwrap().iter().any(|x| x["code"] == "engine_rebased"));
+    }
 }

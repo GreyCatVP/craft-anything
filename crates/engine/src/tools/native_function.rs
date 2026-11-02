@@ -374,20 +374,24 @@ fn native_function_pseudocode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
     // built-in analysis stops short on a huge program (a 200 MB game has far more functions than
     // it maps), so in Deep mode an address it can't place (0x…, FUN_…, sub_…) goes to Ghidra,
     // which analysed the whole program and finds the function containing it.
-    let (entry, unknown) = {
+    // Ghidra may load the program somewhere else (a position-independent ELF goes to 0x100000),
+    // so the deep hook is told whose address this is: ours, or one from a name Ghidra made.
+    let (at, our_base, unknown) = {
         let st = native(ctx)?;
         let t = ctx.session.active()?;
+        let our_base = st.img.bin.image_base;
         match resolve_function(t, &st.prog, &p.function) {
-            Ok(f) => (f.entry, None),
+            Ok(f) => (super::deep::At::Ours(f.entry), our_base, None),
             Err(e) => match ghidra_address(&p.function).filter(|_| !ctx.session.clean_room()) {
-                Some(a) => (a, Some(e)),
+                Some(a) if is_ghidra_name(&p.function) => (super::deep::At::Engine(a), our_base, Some(e)),
+                Some(a) => (super::deep::At::Ours(a), our_base, Some(e)),
                 None => return Err(e),
             },
         }
     };
     // Deep mode (Ghidra) is preferred through this same tool id when it is on and available;
     // otherwise, and whenever anything about it fails, we use the built-in clean-room lifter.
-    let why_not_deep = match super::deep::pseudo_code(ctx, entry, params_json(&p)) {
+    let why_not_deep = match super::deep::pseudo_code(ctx, at, our_base, params_json(&p)) {
         Ok(result) => return result,
         Err(why) => why,
     };
@@ -419,6 +423,13 @@ fn native_function_pseudocode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
 }
 
 /// An address Ghidra can look up: `0x…`, a bare hex address, or a generated name like `FUN_…`.
+/// Whether `function` is a name Ghidra made from an address (`FUN_00101160`), so the address in it
+/// is Ghidra's rather than ours.
+fn is_ghidra_name(function: &str) -> bool {
+    let s = function.trim();
+    ["FUN_", "SUB_", "sub_", "LAB_"].iter().any(|p| s.starts_with(p))
+}
+
 fn ghidra_address(function: &str) -> Option<u64> {
     let s = function.trim();
     let s = ["FUN_", "SUB_", "sub_", "LAB_"].iter().find_map(|p| s.strip_prefix(p)).unwrap_or(s);

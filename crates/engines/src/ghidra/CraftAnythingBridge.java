@@ -132,7 +132,8 @@ public class CraftAnythingBridge extends GhidraScript {
             return "{\"name\":\"CraftAnything bridge\",\"provider\":{\"id\":\"ghidra\",\"version\":\""
                 + jsonEscape(ghidra.framework.Application.getApplicationVersion())
                 + "\"},\"read_only\":true,\"analysed\":true,\"analysis_cut_short\":false,\"target\":{\"name\":\""
-                + jsonEscape(currentProgram.getName()) + "\"}}";
+                + jsonEscape(currentProgram.getName()) + "\",\"image_base\":\"0x"
+                + Long.toHexString(currentProgram.getImageBase().getOffset()) + "\"}}";
         }
         if ("native_functions_list".equals(method)) {
             StringBuilder sb = new StringBuilder("{\"functions\":[");

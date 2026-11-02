@@ -67,10 +67,59 @@ pub trait DeepDecompiler: Send + Sync {
     fn language_id(&self) -> Option<String> {
         None
     }
-    /// Decompile the function at `entry`. `Ok(None)` means the engine has no better answer.
+    /// Where the engine loaded the program (its image base), when it said. Ghidra puts a
+    /// position-independent ELF at 0x100000, not at the 0 its program headers give, so its
+    /// addresses differ from ours by that much; see [`Rebase`].
+    fn image_base(&self) -> Option<u64> {
+        None
+    }
+    /// Decompile the function at `entry` (an address in the engine's own space). `Ok(None)` means
+    /// the engine has no better answer.
     fn decompile(&self, entry: u64) -> Result<Option<DeepFunction>, GhidraError>;
     /// List the functions the engine found.
     fn list_functions(&self) -> Result<Vec<DeepFunction>, GhidraError>;
+}
+
+/// Moves addresses between our built-in engine's view of a program and the Deep engine's, which
+/// may have loaded it somewhere else: Ghidra puts a position-independent ELF (lowest segment at 0)
+/// at 0x100000. Both sides keep the same offsets from their image base, so moving an address is
+/// one subtraction and one addition. An address below the base it's moved from stays as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rebase {
+    ours: u64,
+    theirs: u64,
+}
+
+impl Rebase {
+    /// `ours`: our image base; `theirs`: the engine's, `None` when it didn't say (then no move).
+    pub fn new(ours: u64, theirs: Option<u64>) -> Rebase {
+        Rebase { ours, theirs: theirs.unwrap_or(ours) }
+    }
+
+    /// Our image base.
+    pub fn ours(&self) -> u64 {
+        self.ours
+    }
+
+    /// The engine's image base (ours when it didn't say).
+    pub fn theirs(&self) -> u64 {
+        self.theirs
+    }
+
+    /// Whether both sides use the same addresses.
+    pub fn is_identity(&self) -> bool {
+        self.ours == self.theirs
+    }
+
+    /// Our address as the engine knows it.
+    pub fn to_engine(&self, a: u64) -> u64 {
+        a.checked_sub(self.ours).and_then(|o| o.checked_add(self.theirs)).unwrap_or(a)
+    }
+
+    /// The engine's address as we know it.
+    pub fn from_engine(&self, a: u64) -> u64 {
+        a.checked_sub(self.theirs).and_then(|o| o.checked_add(self.ours)).unwrap_or(a)
+    }
 }
 
 /// Where Ghidra and its JDK live, and how long to wait.
@@ -245,6 +294,8 @@ pub struct Session {
     version: Option<String>,
     /// The forced language id, when Deep mode was pinned to a processor.
     language_id: Option<String>,
+    /// Where Ghidra loaded the program, from the bridge's handshake.
+    image_base: Option<u64>,
 }
 
 impl std::fmt::Debug for Session {
@@ -558,6 +609,7 @@ impl Session {
         // First ping proves the token and that analysis finished.
         let info = client.ping(cancel, deadline)?;
         let version = info.get("provider").and_then(|p| p.get("version")).and_then(Value::as_str).map(String::from);
+        let image_base = image_base_of(&info);
         if info.get("analysis_cut_short").and_then(Value::as_bool) == Some(true) {
             return Err(GhidraError::Timeout("Ghidra reported that analysis timed out".into()));
         }
@@ -569,6 +621,7 @@ impl Session {
             runtime_root: scratch.keep(),
             version,
             language_id: cfg.language_id.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(String::from),
+            image_base,
         })
     }
 
@@ -593,6 +646,10 @@ impl DeepDecompiler for Session {
 
     fn language_id(&self) -> Option<String> {
         self.language_id.clone()
+    }
+
+    fn image_base(&self) -> Option<u64> {
+        self.image_base
     }
 
     fn decompile(&self, entry: u64) -> Result<Option<DeepFunction>, GhidraError> {
@@ -636,6 +693,11 @@ fn decompiled(entry: u64, v: &Value) -> Option<DeepFunction> {
         pseudocode: v.get("pseudocode").and_then(Value::as_str).map(String::from),
         created: v.get("created").and_then(Value::as_bool).unwrap_or(false),
     })
+}
+
+/// Where the bridge's handshake says Ghidra loaded the program (`None` when it didn't say).
+fn image_base_of(ping: &Value) -> Option<u64> {
+    ping.get("target").and_then(|t| t.get("image_base")).and_then(Value::as_str).and_then(parse_hex)
 }
 
 fn parse_hex(s: &str) -> Option<u64> {
