@@ -156,7 +156,7 @@ Owner: open · Status: done (branch chore/r0.5-cleanups)
       of the Agent / Jobs / Log tabs (`chat::conversation`)
 - [ ] `yaxpeax-arm` 0.5.0 panics ("register number out of range") on an A32 `STRD`/`LDRD` with
       Rt = 15 (e.g. the word `0xc0c7fef3`), so one such word fails the whole analysis of a 32-bit
-      ARM program; decode it as invalid instead
+      ARM program; decode it as invalid instead — claimed: rech4210, branch bugfix/arm-a32-ldrd-rt15-panic
 - [x] Unchecked `o + 4`/`o + 8` on section and program header offsets in `formats/src/dart.rs`
       (`Elf::parse`): a header table near `usize::MAX` panicked in debug builds (in release the
       wrapped reads were thrown away, since the entry's first field was already out of range); an
