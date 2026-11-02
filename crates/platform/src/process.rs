@@ -1054,6 +1054,100 @@ fn windows_form(p: &str) -> String {
 mod launch_tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "stand-in invoked by launch_does_not_hold_callers_output_pipes"]
+    fn pipe_launcher_stand_in() {
+        if std::env::var_os("PIPE_TEST_DIR").is_none() {
+            return;
+        }
+        let exe = std::env::current_exe().unwrap();
+        let launch = Launch::new(exe).args(["--ignored", "--exact", "process::launch_tests::pipe_sleeper_stand_in"]).hide_console();
+        let launch = if std::env::var_os("PIPE_TEST_LOG").is_some() { launch.log_to("run.log") } else { launch };
+        launch.start_watched().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "stand-in invoked by pipe_launcher_stand_in"]
+    fn pipe_sleeper_stand_in() {
+        if std::env::var_os("PIPE_TEST_DIR").is_none() {
+            return;
+        }
+        std::fs::write("started", b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(6));
+        std::fs::write("finished", b"done").unwrap();
+    }
+
+    // Documents a known gap (#207): a started program inherits the caller's output pipes, so the
+    // caller's command doesn't return until the program exits. Run it with `--ignored` to see it fail.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "known gap, see #207: started programs inherit the caller's output pipes"]
+    fn launch_does_not_hold_callers_output_pipes() {
+        use std::os::windows::process::CommandExt;
+
+        let mut held_open = false;
+        for log_to_file in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            // This process is the CLI stand-in: its real standard handles are pipes.
+            let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+            cmd.args(["--ignored", "--exact", "process::launch_tests::pipe_launcher_stand_in"])
+                .current_dir(dir.path())
+                .env("PIPE_TEST_DIR", dir.path())
+                .env_remove("PIPE_TEST_LOG")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .creation_flags(0x0800_0000);
+            if log_to_file {
+                cmd.env("PIPE_TEST_LOG", "1");
+            }
+            let started = Instant::now();
+            let mut launcher = cmd.spawn().unwrap();
+            let stdout = launcher.stdout.take().unwrap();
+            let stderr = launcher.stderr.take().unwrap();
+            let mut receivers = Vec::new();
+            for (name, mut pipe) in [("stdout", Box::new(stdout) as Box<dyn Read + Send>), ("stderr", Box::new(stderr) as Box<dyn Read + Send>)] {
+                let (tx, rx) = std::sync::mpsc::channel();
+                receivers.push((name, rx));
+                std::thread::spawn(move || {
+                    let mut bytes = Vec::new();
+                    pipe.read_to_end(&mut bytes).unwrap();
+                    let _ = tx.send(started.elapsed());
+                });
+            }
+            let status = launcher.wait().unwrap();
+            let launcher_after = started.elapsed();
+            println!("log_to_file={log_to_file}: launcher returned after {launcher_after:?}");
+            let eof: Vec<_> = receivers.iter().map(|(name, rx)| (*name, rx.recv_timeout(Duration::from_secs(3)))).collect();
+            let child_still_running = !dir.path().join("finished").exists();
+            // Let the stand-in finish even on assertion failure; no detached test is left behind.
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while !dir.path().join("finished").exists() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            assert!(status.success(), "launcher failed: {status}");
+            assert!(launcher_after < Duration::from_secs(3), "launcher itself did not return promptly");
+            assert!(dir.path().join("started").exists(), "stand-in never started");
+            assert!(dir.path().join("finished").exists(), "stand-in did not finish");
+            for (name, result) in eof {
+                match result {
+                    Ok(elapsed) => {
+                        println!("log_to_file={log_to_file}: {name} EOF after {elapsed:?}");
+                        held_open |= elapsed >= Duration::from_secs(3);
+                    }
+                    Err(error) => {
+                        println!("log_to_file={log_to_file}: {name} pipe held open after launcher returned: {error:?}");
+                        held_open = true;
+                    }
+                }
+            }
+            held_open |= !child_still_running;
+        }
+        assert!(!held_open, "caller pipe held open after launcher returned");
+    }
+
     #[test]
     fn a_missing_program_is_a_tool_error_with_remediation() {
         let e = Launch::new("craft-anything-no-such-program-xyz").remediation("Install it.").start().unwrap_err();
