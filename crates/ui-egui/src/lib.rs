@@ -1734,7 +1734,12 @@ impl eframe::App for CraftApp {
         }
         // A change not written yet (or one being written as the window closed) is written now.
         if self.persist && (self.settings_dirty || self.save_due.is_some() || self.saving.is_some()) {
-            let _ = self.settings.save();
+            let mut session = self.engine.session();
+            session.label("Save settings on exit");
+            // AI changes belong to the session; keep the app's other pending edits.
+            self.settings.ai = session.settings.ai.clone();
+            session.settings = self.settings.clone();
+            let _ = session.settings.save();
         }
     }
 }

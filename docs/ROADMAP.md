@@ -322,7 +322,8 @@ Owner: open · Status: in progress
       a newer model selection; reverify the existing terminal-event regression for validation failures.
 - [x] Label the settings-save guard so filesystem I/O is identifiable as a running job by the lock tracker.
 - [x] Finish a failed CLI worker-thread start with a terminal event after its error so headless chat stops polling.
-- [ ] Synchronize the UI exit-time settings save with the session's latest AI table and other writers.
+- [x] Synchronize the UI exit-time settings save with the session's latest AI table and other writers;
+      an isolated exit-save regression preserves the latest model/depth and pending app settings.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 
