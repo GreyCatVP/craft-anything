@@ -43,7 +43,7 @@ pub const QUICK_EXIT: Duration = Duration::from_secs(2);
 /// Most pins one project keeps.
 const MAX_PINS: u32 = 999;
 /// How much of the end of a run's log is read back.
-const MAX_LOG_BYTES: u64 = 1024 * 1024; // 1 MiB: a run's log is capped here so a chatty program can't grow it without bound.
+const TAIL_BYTES: u64 = 8 * 1024;
 const TAIL_LINES: usize = 20;
 /// Inside a folder a copy leaves out, the folders where a start needs only the files beside its
 /// program (a Rust build's `target/release/`); in any other (`node_modules` for Electron) it needs
@@ -440,19 +440,12 @@ pub fn tail(log: &Path) -> String {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut f) = std::fs::File::open(log) else { return String::new() };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-    // Cap the on-disk log: keep only the last MAX_LOG_BYTES so a chatty run can't grow it
-    // without bound. The display below already keeps only the last few lines.
-    let start = len.saturating_sub(MAX_LOG_BYTES);
-    if f.seek(SeekFrom::Start(start)).is_err() {
+    if f.seek(SeekFrom::Start(len.saturating_sub(TAIL_BYTES))).is_err() {
         return String::new();
     }
     let mut buf = Vec::new();
-    if f.read_to_end(&mut buf).is_err() {
+    if f.take(TAIL_BYTES).read_to_end(&mut buf).is_err() {
         return String::new();
-    }
-    if start > 0 {
-        drop(f);
-        let _ = std::fs::write(log, &buf);
     }
     let text = String::from_utf8_lossy(&buf);
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();

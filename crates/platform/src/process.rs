@@ -868,15 +868,12 @@ impl Launch {
         let mut cmd = std::process::Command::new(&self.program);
         cmd.args(&self.args).stdin(Stdio::null());
         use_search_path(&mut cmd);
-        match &self.log {
-            Some(path) => {
-                let out = std::fs::File::create(path).map_err(|e| ToolError::io(path.display(), e))?;
-                let err = out.try_clone().map_err(|e| ToolError::io(path.display(), e))?;
-                cmd.stdout(out).stderr(err);
-            }
-            None => {
-                cmd.stdout(Stdio::null()).stderr(Stdio::null());
-            }
+        let log_path = self.log.clone();
+
+        if log_path.is_some() {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        } else {
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
         }
         if let Some(dir) = &self.cwd {
             cmd.current_dir(dir);
@@ -887,7 +884,52 @@ impl Launch {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, e, self.remediation.as_deref()))?;
+        let mut child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, e, self.remediation.as_deref()))?;
+
+        // Write what the program prints to the log file, capped at 1 MiB so a chatty run can't
+        // grow it without bound. The file is truncated at the start of the run.
+        const MAX_LOG_BYTES: u64 = 1024 * 1024;
+        if let Some(path) = &log_path {
+            let _ = std::fs::File::create(path);
+            let file = Arc::new(Mutex::new(
+                std::fs::OpenOptions::new().append(true).open(path)
+                    .map_err(|e| ToolError::io(path.display(), e))?,
+            ));
+            let bytes_written = Arc::new(AtomicU64::new(0));
+
+            let spawn_reader = |pipe: std::process::ChildStdout, file: Arc<Mutex<std::fs::File>>, bytes: Arc<AtomicU64>, label: String| {
+                let _ = std::thread::Builder::new().name(format!("log-{label}")).spawn(move || {
+                    use std::io::Read;
+                    let mut buf = [0u8; 4096];
+                    let mut reader = pipe;
+                    loop {
+                        match reader.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                let current = bytes.load(Ordering::Relaxed);
+                                if current < MAX_LOG_BYTES {
+                                    let to_write = (n as u64).min(MAX_LOG_BYTES - current) as usize;
+                                    if to_write > 0 {
+                                        let mut f = file.lock().unwrap_or_else(PoisonError::into_inner);
+                                        let _ = f.write_all(&buf[..to_write]);
+                                        bytes.fetch_add(to_write as u64, Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                });
+            };
+
+            if let Some(stdout) = child.stdout.take() {
+                spawn_reader(stdout, file.clone(), bytes_written.clone(), format!("{name}-out"));
+            }
+            if let Some(stderr) = child.stderr.take() {
+                spawn_reader(stderr, file.clone(), bytes_written.clone(), format!("{name}-err"));
+            }
+        }
+
         let launched = Launched { pid: child.id(), started: Instant::now(), state: Arc::new(Mutex::new(LaunchState { child: Some(child), ended: None })) };
         // Reap it when it closes. If no thread can be made the child still runs (and `ended`
         // stays unknown); on Unix it stays a zombie until we exit, which is harmless.
