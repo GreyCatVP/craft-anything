@@ -7,6 +7,7 @@ version up to the current one, then turn the document into Rust types. The step 
 
 | File | Owner | Current version | Older files | Newer files |
 |---|---|---|---|---|
+| `<project>/goal.json` | `engine::goal` (`Goal`) | `VERSION` = 1 (`version`; missing = 0) | migrated by `versioned::upgrade`; fresh verification required on resume | refused and never overwritten |
 | `<project>/craft.json` | `engine::workspace` (`Manifest`) | `MANIFEST_VERSION` = 1 (`version`; missing = 0) | brought forward, saved as current | opened read-only: saving is refused |
 | `config.toml` (`settings::config_dir()`) | `engine::settings` (`Settings`) | `SETTINGS_VERSION` = 2 (`version`; missing = 0; 2 moved `[engines.ghidra] enabled` to `deep_mode`) | brought forward | loaded, never saved over |
 | `<name>.cany/project.toml` | `engine::project` (`ProjectMeta`) | `FORMAT_VERSION` = 1 (`format_version`, required) | brought forward | refused, with "update Craft Anything" |
@@ -45,5 +46,5 @@ out of the project list.
    list and the constant disagree.
 3. Add a test that reads a literal sample of the old file (keep the existing samples; old files
    must keep loading forever).
-4. For `craft.json`, `mechanics.json` and `self-test.json`, run `cargo xtask schemas` and commit `docs/schemas/`.
+4. For `craft.json`, `goal.json`, `mechanics.json` and `self-test.json`, run `cargo xtask schemas` and commit `docs/schemas/`.
    `cargo xtask schemas --check` (and an engine test) fail when the published schema is stale.

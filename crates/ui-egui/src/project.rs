@@ -27,7 +27,7 @@ impl CraftApp {
 
     /// The open project is building or waiting its turn.
     fn running(&self) -> bool {
-        self.workspace.as_ref().is_some_and(|ws| self.runs.is_busy(&ws.root))
+        self.workspace.as_ref().is_some_and(|ws| self.runs.is_busy(&ws.root) || (self.facts.root == ws.root && self.facts.goal_running))
     }
 
     /// The open project's run, working or finished.
@@ -203,6 +203,10 @@ impl CraftApp {
             return;
         }
         let Some(ws) = self.workspace.clone() else { return };
+        if self.facts.root == ws.root && self.facts.goal.is_some() {
+            self.act("project_goal_resume", serde_json::json!({"project":ws.root}), tr("Resume goal"));
+            return;
+        }
         let Some(backend) = self.builder_backend(ws.manifest.builder.as_deref()) else { return self.need_builder(false) };
         let ws = Workspace::open(&ws.root).unwrap_or(ws);
         let opts = RunOptions { continuing: true, ..self.run_options(Some(backend), None, None) };
@@ -211,6 +215,9 @@ impl CraftApp {
 
     pub fn pause(&mut self) {
         let Some(root) = self.workspace.as_ref().map(|w| w.root.clone()) else { return };
+        if self.facts.root == root && self.facts.goal.is_some() {
+            self.act("project_goal_pause", serde_json::json!({"project":root}), tr("Pause goal"));
+        }
         if self.runs.stop(&root) == Stopped::Unqueued {
             apply(&mut self.state.feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
         }
@@ -483,13 +490,29 @@ pub struct Facts {
     pub assets: (usize, f64),
     /// The builder's open questions, most important first.
     pub open_questions: Vec<String>,
+    pub goal: Option<std::sync::Arc<craft_anything_engine::goal::Goal>>,
+    pub goal_error: Option<String>,
+    pub goal_running: bool,
+    pub goal_manifest: Option<Box<craft_anything_engine::workspace::Manifest>>,
+    pub goal_feed: Option<Vec<FeedItem>>,
 }
 
 impl Facts {
     pub fn read(ws: &Workspace, godot: Option<&Path>) -> Facts {
         let dir = ws.app_dir();
         let a = ws.assets();
+        let (goal, goal_error) = match craft_anything_engine::goal::load(&ws.root) {
+            Ok(g) => (g.map(std::sync::Arc::new), None),
+            Err(e) => (None, Some(e.for_people())),
+        };
+        let goal_running = craft_anything_engine::goal::BuildLease::busy(&ws.root).unwrap_or(true);
+        let fresh = goal.as_ref().and_then(|_| Workspace::open(&ws.root).ok());
         Facts {
+            goal,
+            goal_error,
+            goal_running,
+            goal_feed: fresh.as_ref().map(feed::load),
+            goal_manifest: fresh.map(|w| Box::new(w.manifest)),
             root: ws.root.clone(),
             site: rebuild::site_dir(&dir).is_some(),
             program: rebuild::launch(&dir, godot).is_some(),
@@ -535,6 +558,18 @@ impl CraftApp {
             self.facts_reader.job = None;
         }
         if let Some(f) = facts.filter(|f| self.workspace.as_ref().is_some_and(|w| w.root == f.root)) {
+            let mut f = f;
+            if !self.runs.is_busy(&f.root) {
+                if let Some(m) = f.goal_manifest.take()
+                    && let Some(ws) = &mut self.workspace
+                {
+                    ws.manifest = *m;
+                }
+                if let Some(feed) = f.goal_feed.take() {
+                    self.state.feed = feed;
+                }
+            }
+            self.facts_reader.wanted |= f.goal_running || f.goal.as_ref().is_some_and(|g| g.status == craft_anything_engine::goal::GoalStatus::Active);
             self.facts = f;
         }
     }
@@ -689,6 +724,10 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         }
     });
     ui.add_space(14.0);
+    let has_goal = crate::goal_ui::configured(app, ws);
+    if has_goal {
+        crate::goal_ui::show(app, ui, ws);
+    }
     steps(app, ui, ws);
     ui.add_space(14.0);
     open_questions(app, ui);
@@ -726,6 +765,9 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
             app.state.screen = Screen::Workbench;
         }
     });
+    if !has_goal {
+        crate::goal_ui::show(app, ui, ws);
+    }
 }
 
 /// How to see what was made: open the built site, or start the built program.
@@ -1456,6 +1498,15 @@ fn check_card(app: &mut CraftApp, ui: &mut Ui, ctx: &egui::Context, ws: &Workspa
 }
 
 fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
+    if app.facts.goal.as_ref().is_some_and(|g| g.status == craft_anything_engine::goal::GoalStatus::Active)
+        || (app.facts.goal.is_some() && app.facts.goal_running)
+    {
+        ui.label(RichText::new(tr("The goal is working. Pause it to change the request.")).color(t.text_dim));
+        if widgets::secondary(ui, Some("pause"), "Pause goal").clicked() {
+            app.pause();
+        }
+        return;
+    }
     let running = app.running();
     if let Some(steps) = plan(&app.state.feed).filter(|p| running || p.iter().any(|s| s.status != PlanStatus::Done)) {
         let began = app.open_run().filter(|_| running).map(RebuildRun::started);
@@ -1698,6 +1749,18 @@ impl CraftApp {
 mod tests {
     use super::*;
     use craft_anything_ai::AgentEvent;
+
+    #[test]
+    fn a_refresh_requested_during_a_read_is_not_lost_when_the_old_snapshot_arrives() {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        crate::demo::fill_project(&mut app);
+        let root = app.workspace.as_ref().unwrap().root.clone();
+        app.facts_reader.job = Some(10);
+        app.refresh_side_panel();
+        app.facts_read(10, Some(Facts { root, ..Default::default() }));
+        assert!(app.facts_reader.wanted, "a save must still cause another read");
+        assert!(app.facts_reader.job.is_none());
+    }
 
     #[test]
     fn the_app_starts_with_the_persons_settings_while_the_engine_is_busy() {

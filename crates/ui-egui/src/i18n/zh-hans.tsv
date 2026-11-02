@@ -1360,3 +1360,54 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 … {} older	… 还有 {} 条较早内容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 选择 · Enter 运行 · Esc 关闭
+
+# Project goals
+Long-term goal	长期目标
+Set a goal	设置目标
+Edit goal	编辑目标
+Save goal	保存目标
+Resume goal	继续目标
+Pause goal	暂停目标
+Objective	目标描述
+Constraints	约束条件
+Milestones	里程碑
+Add constraint	添加约束
+Add milestone	添加里程碑
+Remove milestone	移除里程碑
+Complete the goal	完成目标
+What should this milestone achieve?	这个里程碑需要达成什么？
+Acceptance requirements	验收条件
+Latest acceptance results	最新验收结果
+All project checks must pass	所有项目检查都必须通过
+Minimum similarity (%)	最低相似度（%）
+Required check id	必需的检查 ID
+Require a similarity score	要求相似度得分
+Evidence-backed unknown id	需要证据解决的未知项 ID
+Add required check	添加必需检查
+Add evidence requirement	添加证据要求
+Maximum cycles	最大循环次数
+Active time (minutes)	执行时间（分钟）
+Cycles without progress	允许无进展的循环次数
+Limit reported tokens	限制已报告的 token 数
+Reported token limit	已报告的 token 上限
+No token limit	未设 token 上限
+Reported tokens: {used} · {limit}	已报告 token：{used} · {limit}
+{done} of {total} milestones	里程碑 {done}/{total}
+Cycles {used}/{limit} · active minutes {minutes}/{max}	循环 {used}/{limit} · 执行分钟 {minutes}/{max}
+Waiting to start, or interrupted. Resume after reopening.	等待开始或已中断，重新打开后可继续。
+The goal is working. Pause it to change the request.	正在执行目标。暂停后可修改需求。
+Work through milestones, verify each result, and keep progress across restarts.	分里程碑执行并逐项验收，重启后保留进度。
+Checks measure what they test. A successful build alone does not prove a faithful reconstruction.	检查只能验证所覆盖的内容。构建成功本身不能证明还原准确。
+Needs attention	需要处理
+Budget reached	预算已用尽
+Save a project goal	保存项目目标
+Show a project goal	查看项目目标
+Pause a project goal	暂停项目目标
+Resume a project goal	继续项目目标
+Sets a long-term goal and how to check it.	设置长期目标及其验收方式。
+Shows the goal and its progress.	显示目标及其进度。
+Pauses the goal and keeps its work.	暂停目标并保留已有工作。
+Works toward the goal until its checks pass or it needs you.	持续推进目标，直到验收通过或需要你处理。
+Constraint	约束条件
+Milestone title	里程碑名称
+Remove requirement	移除验收条件

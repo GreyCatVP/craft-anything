@@ -604,6 +604,9 @@ impl Workspace {
     /// questions or usage. An app edited in place is copied into the copy's app/. What a build
     /// makes again (dependencies, compiler output) is left out.
     pub fn duplicate(&self, name: &str) -> Result<Workspace, ToolError> {
+        if crate::goal::BuildLease::busy(&self.root)? {
+            return Err(ToolError::invalid("Pause the build before duplicating this project."));
+        }
         let parent = self.root.parent().ok_or_else(|| ToolError::invalid(format!("{} has no parent folder to copy it into.", self.root.display())))?;
         let m = &self.manifest;
         let mut copy = Workspace::create(parent, name, &m.request, m.target.clone())?;
@@ -640,6 +643,9 @@ impl Workspace {
     /// what was built in app/). The person's own files stay: an app edited in place, and the
     /// files a project started from. A folder left empty is removed. This can't be undone.
     pub fn delete(self) -> Result<(), ToolError> {
+        if crate::goal::BuildLease::busy(&self.root)? {
+            return Err(ToolError::invalid("Pause the build and wait for it to stop before deleting this project."));
+        }
         if !self.root.join(MANIFEST).is_file() {
             return Err(ToolError::invalid(format!("{} isn't a project folder.", self.root.display())));
         }
@@ -884,6 +890,9 @@ impl Workspace {
 /// The names Craft Anything keeps in a project folder beside app/. A folder the person picks
 /// mustn't already have any of them.
 pub const OWN_NAMES: &[&str] = &[
+    crate::goal::FILE,
+    crate::goal::STATE_LOCK,
+    crate::goal::BUILD_LOCK,
     MANIFEST,
     crate::feed::FEED_FILE,
     crate::questions::QUESTIONS_FILE,

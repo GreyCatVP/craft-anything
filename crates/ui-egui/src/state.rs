@@ -383,6 +383,14 @@ pub enum Modal {
     PinDelete(PathBuf, u32),
 }
 
+/// A project goal being edited, separate from the last saved contract.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GoalDraft {
+    pub root: PathBuf,
+    pub expected_revision: Option<u64>,
+    pub spec: craft_anything_engine::goal::GoalSpec,
+}
+
 /// The command palette.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PaletteState {
@@ -397,6 +405,8 @@ pub struct PaletteState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
+    #[serde(default)]
+    pub goal_draft: Option<GoalDraft>,
     pub screen: Screen,
     pub first_run: FirstRunStep,
     pub purpose: Purpose,
@@ -558,6 +568,7 @@ impl Default for UiState {
             sidebar_folded: false,
             pins_collapsed: false,
             just_ask: false,
+            goal_draft: None,
             pin_draft: Default::default(),
             answers: BTreeMap::new(),
             plugin_form: PluginForm::default(),

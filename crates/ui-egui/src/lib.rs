@@ -16,6 +16,7 @@ pub mod first_run;
 pub mod folders;
 pub mod game_files;
 pub mod glossary;
+pub mod goal_ui;
 pub mod home;
 pub mod i18n;
 mod icon_data;
@@ -804,6 +805,15 @@ impl CraftApp {
 
     fn acted(&mut self, tool: &str, result: Result<Value, ToolError>) {
         match (tool, result) {
+            ("project_goal_set" | "project_goal_resume" | "project_goal_pause", Ok(v)) => {
+                if tool == "project_goal_set"
+                    && self.state.goal_draft.as_ref().is_some_and(|d| v["project"].as_str().is_some_and(|p| d.root == std::path::Path::new(p)))
+                {
+                    self.state.goal_draft = None;
+                }
+                self.refresh_side_panel();
+                self.refresh_projects();
+            }
             ("project_preview", Ok(v)) => {
                 let url = v.get("url").and_then(Value::as_str).map(str::to_string);
                 self.preview.clone_from(&url);
@@ -1705,6 +1715,7 @@ impl eframe::App for CraftApp {
             c.stop();
         }
         self.runs.stop_all();
+        craft_anything_ai::rebuild::tools::stop_all(&self.engine);
         for j in self.jobs.running() {
             j.cancel.cancel();
         }

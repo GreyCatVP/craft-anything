@@ -294,6 +294,8 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         decompiled: false,
         usage: None,
         self_check: None,
+        goal: None,
+        _lease: None,
     };
     assert!(w.added(&mut ws).is_none(), "nothing added, nothing to say");
     let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into() };
@@ -597,6 +599,8 @@ fn an_api_backend_builds_with_the_build_tools() {
         decompiled: false,
         usage: None,
         self_check: None,
+        goal: None,
+        _lease: None,
     };
     w.attach(&ws).unwrap();
     // The model writes a file with the Build tools, then answers.
@@ -713,6 +717,8 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         decompiled: false,
         usage: None,
         self_check: None,
+        goal: None,
+        _lease: None,
     };
     let check = |round| w.run_checks(&ws, &SheetKind, round).unwrap().remove(0);
 
@@ -899,6 +905,96 @@ mod picking_up_a_build {
         ws
     }
 
+    fn run_goal(b: &Bench, ws: &Workspace, limits: craft_anything_engine::goal::Limits, missing_check: bool) -> (bool, craft_anything_engine::goal::Goal) {
+        use craft_anything_engine::goal::{self, Goal, GoalSpec, Milestone, Requirement};
+        let acceptance = vec![Requirement::Check { id: if missing_check { "missing" } else { "flaky" }.into(), minimum_similarity: None }];
+        goal::set(
+            &ws.root,
+            GoalSpec {
+                objective: "Rebuild the sample faithfully".into(),
+                constraints: vec!["Keep earlier behaviour working".into()],
+                limits,
+                milestones: ["Core behaviour", "Interaction polish"]
+                    .into_iter()
+                    .map(|title| Milestone { title: title.into(), instructions: title.into(), acceptance: acceptance.clone() })
+                    .collect(),
+            },
+            None,
+        )
+        .unwrap();
+        goal::update(&ws.root, Goal::activate).unwrap();
+        let mut kinds = KindRegistry::built_in();
+        kinds.register(Arc::new(FlakyKind));
+        let run = RebuildRun::start(
+            &b.hub,
+            ws.clone(),
+            RunOptions { goal: true, continuing: true, max_rounds: 0, kinds, backend: Some("Stand-in".into()), ..Default::default() },
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let ok = loop {
+            assert!(Instant::now() < deadline, "goal didn't terminate");
+            if let Ok(RunEvent::Finished { ok, .. }) = run.rx.recv_timeout(Duration::from_millis(100)) {
+                break ok;
+            }
+        };
+        // Finished is emitted just before the writer lease and watcher are dropped.
+        while goal::BuildLease::busy(&ws.root).unwrap() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!goal::BuildLease::busy(&ws.root).unwrap());
+        (ok, goal::load(&ws.root).unwrap().unwrap())
+    }
+
+    #[test]
+    fn goal_resume_uses_fresh_checks_then_advances_each_milestone_beyond_the_ordinary_round_limit() {
+        use craft_anything_engine::goal::{GoalStatus, Limits};
+        let b = bench();
+        let mut ws = worked_on(&b);
+        ws.manifest.checks.push(CheckResult::new("flaky", 12, true, "Old saved check"));
+        ws.save().unwrap();
+        let (ok, g) = run_goal(&b, &ws, Limits::default(), false);
+        assert!(ok);
+        assert_eq!(g.status, GoalStatus::Complete);
+        assert_eq!(g.cycles, 2);
+        assert_eq!(g.checkpoints.iter().map(|c| c.round).collect::<Vec<_>>(), [13, 14, 15]);
+        assert!(g.checkpoints.first().unwrap().verification_only);
+        assert_eq!(prompts_given(&b), 2, "resume verified first, then worked on both new milestones");
+        let prompt = std::fs::read_to_string(&b.prompts).unwrap();
+        assert!(prompt.contains("Interaction polish") && prompt.contains("Rebuild the sample faithfully"));
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.status, Status::Ready);
+        // Ordinary edits invalidate completion while keeping the goal's verification history.
+        assert!(try_it(&b, &Workspace::open(&ws.root).unwrap()).0);
+        let after = craft_anything_engine::goal::load(&ws.root).unwrap().unwrap();
+        assert_eq!(after.status, GoalStatus::Paused);
+        assert_eq!(after.cycles, 2);
+        assert!(!after.checkpoints.is_empty());
+    }
+
+    #[test]
+    fn goal_missing_acceptance_blocks_even_when_the_build_check_passes() {
+        use craft_anything_engine::goal::{GoalStatus, Limits};
+        let b = bench();
+        let ws = worked_on(&b);
+        let (ok, g) = run_goal(&b, &ws, Limits { stalled_cycles: 2, ..Default::default() }, true);
+        assert!(!ok);
+        assert_eq!(g.status, GoalStatus::Blocked);
+        assert_eq!(g.cycles, 2);
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.status, Status::NeedsYou);
+    }
+
+    #[test]
+    fn goal_cycle_limit_is_not_completion_even_with_a_usable_build() {
+        use craft_anything_engine::goal::{GoalStatus, Limits};
+        let b = bench();
+        let ws = worked_on(&b);
+        let (ok, g) = run_goal(&b, &ws, Limits { max_cycles: 1, ..Default::default() }, true);
+        assert!(!ok);
+        assert_eq!(g.status, GoalStatus::BudgetLimited);
+        assert_eq!(prompts_given(&b), 1);
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.status, Status::NeedsYou);
+    }
+
     /// #91: with the helper missing, the build stops before studying or asking the agent, and
     /// says why.
     #[test]
@@ -1026,6 +1122,8 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         decompiled: false,
         usage: None,
         self_check: None,
+        goal: None,
+        _lease: None,
     }
 }
 
@@ -1412,6 +1510,8 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         decompiled: false,
         usage: None,
         self_check: None,
+        goal: None,
+        _lease: None,
     };
     let entry = crate::BackendEntry {
         config: crate::BackendConfig {
@@ -1452,6 +1552,8 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         decompiled: false,
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
+        goal: None,
+        _lease: None,
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
     let reply = w.turn(&mut ws, &mut builder, "Build it.").unwrap();
@@ -1645,6 +1747,8 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
         decompiled: false,
         usage: None,
         self_check: None,
+        goal: None,
+        _lease: None,
     };
     let dir = notes::notes_dir(&ws.inbox_dir());
     notes::hand_over(&dir, 1, "make the header blue").unwrap();

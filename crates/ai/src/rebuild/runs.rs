@@ -80,6 +80,11 @@ impl RunSet {
             self.runs.insert(root, run);
             return Ok(Started::Running);
         }
+        // A goal needs a live writer lease. Do not leave an unreserved goal in a queue
+        // where a second process could resume it too. Ordinary builds keep their queue.
+        if opts.goal {
+            return Err(ToolError::new(ErrorCode::OverLimit, "All build slots are busy. Resume the goal when one is free."));
+        }
         // Fail now, not when its turn comes, when no coding agent is set up.
         let cfg = hub.config();
         builder_backend(&cfg, opts.backend.as_deref().or_else(|| super::project_builder(&cfg, &ws)))?;
@@ -225,6 +230,22 @@ mod tests {
     use super::*;
     use crate::rebuild::StandIns;
 
+    #[test]
+    fn a_goal_requires_a_free_slot_instead_of_leaving_a_resumable_unreserved_queue_entry() {
+        let d = tempfile::tempdir().unwrap();
+        let a = Workspace::create(d.path(), "First", "A website", TargetRef::None).unwrap();
+        let b = Workspace::create(d.path(), "Goal", "A website", TargetRef::None).unwrap();
+        let fake = StandIns::new();
+        let hub = hub();
+        let mut set = RunSet::new(1).with_starter(fake.starter());
+        set.start(&hub, a.clone(), RunOptions::default()).unwrap();
+        assert_eq!(set.start(&hub, b.clone(), RunOptions { goal: true, ..Default::default() }).unwrap_err().code, ErrorCode::OverLimit);
+        assert_eq!(set.position(&b.root), None);
+        assert_eq!(fake.started().len(), 1);
+        fake.finish(&a.root);
+        set.poll(&hub);
+        assert_eq!(set.start(&hub, b, RunOptions { goal: true, ..Default::default() }).unwrap(), Started::Running);
+    }
     /// A hub whose Builder is an agent app, so queued runs pass the up-front check.
     fn hub() -> AiHub {
         let mut s = craft_anything_engine::testing::session();

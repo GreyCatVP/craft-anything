@@ -1360,3 +1360,54 @@ your files there are the app, edited in place	該位置的檔案就是應用程�
 … {} older	… 還有 {} 則較早內容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 選擇 · Enter 執行 · Esc 關閉
+
+# Project goals
+Long-term goal	長期目標
+Set a goal	設定目標
+Edit goal	編輯目標
+Save goal	儲存目標
+Resume goal	繼續目標
+Pause goal	暫停目標
+Objective	目標描述
+Constraints	約束條件
+Milestones	里程碑
+Add constraint	新增約束
+Add milestone	新增里程碑
+Remove milestone	移除里程碑
+Complete the goal	完成目標
+What should this milestone achieve?	這個里程碑需要達成什麼？
+Acceptance requirements	驗收條件
+Latest acceptance results	最新驗收結果
+All project checks must pass	所有專案檢查都必須通過
+Minimum similarity (%)	最低相似度（%）
+Required check id	必需的檢查 ID
+Require a similarity score	要求相似度得分
+Evidence-backed unknown id	需要證據解決的未知項 ID
+Add required check	新增必需檢查
+Add evidence requirement	新增證據要求
+Maximum cycles	最大循環次數
+Active time (minutes)	執行時間（分鐘）
+Cycles without progress	允許無進展的循環次數
+Limit reported tokens	限制已回報的 token 數
+Reported token limit	已回報的 token 上限
+No token limit	未設 token 上限
+Reported tokens: {used} · {limit}	已回報 token：{used} · {limit}
+{done} of {total} milestones	里程碑 {done}/{total}
+Cycles {used}/{limit} · active minutes {minutes}/{max}	循環 {used}/{limit} · 執行分鐘 {minutes}/{max}
+Waiting to start, or interrupted. Resume after reopening.	等待開始或已中斷，重新開啟後可繼續。
+The goal is working. Pause it to change the request.	正在執行目標。暫停後可修改需求。
+Work through milestones, verify each result, and keep progress across restarts.	分里程碑執行並逐項驗收，重新啟動後保留進度。
+Checks measure what they test. A successful build alone does not prove a faithful reconstruction.	檢查只能驗證所涵蓋的內容。建置成功本身不能證明還原準確。
+Needs attention	需要處理
+Budget reached	預算已用盡
+Save a project goal	儲存專案目標
+Show a project goal	檢視專案目標
+Pause a project goal	暫停專案目標
+Resume a project goal	繼續專案目標
+Sets a long-term goal and how to check it.	設定長期目標及其驗收方式。
+Shows the goal and its progress.	顯示目標及其進度。
+Pauses the goal and keeps its work.	暫停目標並保留已有工作。
+Works toward the goal until its checks pass or it needs you.	持續推進目標，直到驗收通過或需要你處理。
+Constraint	約束條件
+Milestone title	里程碑名稱
+Remove requirement	移除驗收條件

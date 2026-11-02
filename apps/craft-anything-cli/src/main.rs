@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod ai_cmd;
+mod goal_cmd;
 mod output;
 mod rebuild_cmd;
 mod setup_cmd;
@@ -93,6 +94,8 @@ pub enum Command {
     Chat(ai_cmd::ChatArgs),
     /// Study a website, app or game and have a coding agent rebuild it in a new project folder.
     Rebuild(rebuild_cmd::RebuildArgs),
+    /// Resume a saved long-term project goal; keep working until its checks pass or it pauses.
+    Goal(goal_cmd::GoalArgs),
     /// Manage AI backends.
     Ai {
         #[command(subcommand)]
@@ -282,6 +285,7 @@ fn run(cli: Cli) -> u8 {
         }
         Command::Chat(a) => ai_cmd::chat(&cli, a),
         Command::Rebuild(a) => rebuild_cmd::rebuild(&cli, a),
+        Command::Goal(a) => goal_cmd::goal(&cli, a),
         Command::Ai { command } => ai_cmd::ai(&cli, command, f),
         Command::Tool(args) => tool(&cli, args, f),
     }

@@ -71,6 +71,7 @@ pub mod standin_tools;
 pub mod window_tools;
 // Asking the person a question, and approving a coding agent's actions, through the inbox.
 pub mod asset_tools;
+pub mod goal_tools;
 pub mod interaction_tools;
 pub mod project_tools;
 // Pinned builds: kept copies of a project's build, and what they started.
@@ -124,6 +125,7 @@ pub fn all() -> Vec<crate::ToolSpec> {
     v.extend(standin_tools::specs());
     v.extend(interaction_tools::specs());
     v.extend(project_tools::specs());
+    v.extend(goal_tools::specs());
     v.extend(pin_tools::specs());
     v.extend(setup_tools::specs());
     v.extend(build_tools::specs());

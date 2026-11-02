@@ -1,5 +1,12 @@
 # Pitfalls
 
+**A baseline is not work on a new goal.** A restart's successful build check must not skip an
+unattempted milestone from a newly saved contract. Record the goal's finished turn separately,
+revalidate earlier milestones on resume, and accept the current one only after its own work
+and fresh checks. Keep the goal controller in a separate engine session so a long build command
+cannot hold the lock needed to pause it; carry the loaded plugin routes and checks into that
+session too.
+
 Mistakes made while building this project, what they cost, and the rule that prevents each one.
 Read this before your first change; add to it when you make a new mistake worth not repeating.
 Keep entries short: what happened, then the rule.

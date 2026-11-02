@@ -7,6 +7,7 @@
 
 pub mod clean_room;
 pub mod feed;
+pub mod goal;
 pub mod inbox;
 pub mod journal;
 pub mod mechanics;
@@ -138,6 +139,16 @@ impl Engine {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// The same registered capabilities with an independent session. Long project work must
+    /// not hold the controller's session while it runs commands or waits for approvals.
+    pub fn with_session(&self, session: Session) -> std::sync::Arc<Engine> {
+        std::sync::Arc::new_cyclic(|me| {
+            let mut session = session;
+            session.ext.insert(std::sync::Arc::new(EngineRef(me.clone())));
+            Engine { registry: self.registry.clone(), session: Mutex::new(session) }
+        })
     }
 
     /// Lock the session (recovering from a poisoned lock rather than cascading a panic).

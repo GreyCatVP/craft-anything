@@ -43,6 +43,7 @@ const fn a(ui: &'static str, does: &'static str, headless: Headless) -> Action {
 
 #[rustfmt::skip]
 const ACTIONS: &[Action] = &[
+    a("Project › Long-term goal", "save, inspect, pause and resume a persistent goal", Tool(&["project_goal_set", "project_goal_show", "project_goal_pause", "project_goal_resume"])),
     // ---- Projects: making something --------------------------------------------------------
     a("start_make",          "start a new project from the Home prompt",       Cli("rebuild <target> <request> --build-with --backend --generate-assets")),
     a("set_backend_enabled", "turn an AI on or off",                           Cli("ai on <name> / ai off <name>")),

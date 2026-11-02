@@ -1,0 +1,321 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Goal",
+  "type": "object",
+  "properties": {
+    "awaiting_check": {
+      "description": "A builder turn for this contract finished; resume may verify it without rebuilding.",
+      "type": "boolean",
+      "default": false
+    },
+    "best_progress": {
+      "type": "number",
+      "format": "double"
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Checkpoint"
+      }
+    },
+    "current_milestone": {
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "cycles": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "note": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "spec": {
+      "$ref": "#/$defs/GoalSpec"
+    },
+    "stalled": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "status": {
+      "$ref": "#/$defs/GoalStatus"
+    },
+    "tokens": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "updated_ms": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "work_ms": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "version",
+    "revision",
+    "spec",
+    "status",
+    "current_milestone",
+    "cycles",
+    "work_ms",
+    "tokens",
+    "stalled",
+    "best_progress",
+    "note",
+    "updated_ms",
+    "checkpoints"
+  ],
+  "$defs": {
+    "Checkpoint": {
+      "type": "object",
+      "properties": {
+        "at_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "cycle": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "milestone": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/GateResult"
+            }
+          }
+        },
+        "round": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "verification_only": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "cycle",
+        "round",
+        "milestone",
+        "at_ms",
+        "results"
+      ]
+    },
+    "GateResult": {
+      "type": "object",
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "passed",
+        "detail"
+      ]
+    },
+    "GoalSpec": {
+      "type": "object",
+      "properties": {
+        "constraints": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits",
+          "default": {
+            "max_cycles": 24,
+            "max_minutes": 240,
+            "max_tokens": null,
+            "stalled_cycles": 5
+          }
+        },
+        "milestones": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Milestone"
+          }
+        },
+        "objective": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "objective"
+      ]
+    },
+    "GoalStatus": {
+      "type": "string",
+      "enum": [
+        "paused",
+        "active",
+        "complete",
+        "blocked",
+        "budget_limited"
+      ]
+    },
+    "Limits": {
+      "type": "object",
+      "properties": {
+        "max_cycles": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_minutes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "stalled_cycles": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "max_cycles",
+        "max_minutes",
+        "stalled_cycles"
+      ]
+    },
+    "Milestone": {
+      "type": "object",
+      "properties": {
+        "acceptance": {
+          "type": "array",
+          "default": [
+            {
+              "kind": "project_checks",
+              "minimum_similarity": 90.0
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/Requirement"
+          }
+        },
+        "instructions": {
+          "type": "string",
+          "default": ""
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ]
+    },
+    "Requirement": {
+      "description": "Machine check ids are stable identifiers, never parsed from a check's prose.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "project_checks"
+            },
+            "minimum_similarity": {
+              "type": "number",
+              "format": "double",
+              "default": 90.0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "check"
+            },
+            "minimum_similarity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double",
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "resolved_unknown"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ]
+        }
+      ]
+    }
+  }
+}

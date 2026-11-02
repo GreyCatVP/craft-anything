@@ -14,6 +14,17 @@ use serde::Deserialize;
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
+            id: "project_goal_resume",
+            title: "Resume a project goal",
+            summary: "Start or resume a saved project goal in the background with the project's builder. Rechecks the current build, then studies, builds and verifies each milestone until all acceptance requirements pass, a budget is reached, progress stalls, or the person pauses. Keeps checkpoints across restarts. Requires a free build slot; if all are busy, resume later. The host must stay running (CLI: use `goal <project>`). No unattended daemon; approvals still apply.",
+            beginner: "Works toward the goal until its checks pass or it needs you.",
+            toolset: Toolset::Projects,
+            effects: Effects::LAUNCHES_PROCESS.union(Effects::EXECUTES_FOREIGN_CODE).union(Effects::WRITES_FILESYSTEM).union(Effects::ACCESSES_NETWORK),
+            requires: Requires::Nothing,
+            input_schema: schema_of::<ProjectParams>,
+            run: project_goal_resume,
+        },
+        ToolSpec {
             id: "rebuild_start",
             title: "Start a rebuild",
             summary: "Start building: a new project from a request and a target (a web address, an absolute path, or - for none), or a follow-up on an existing project. A coding agent studies, builds, checks and refines in the background; follow it with rebuild_status and project_show, answer its questions with project_inbox_answer. Up to `build.parallel` projects build at once (2 by default); more are queued and start on their own as others finish. It runs a coding agent that writes and builds code, so it needs consent.",
@@ -238,6 +249,14 @@ fn engine(ctx: &Ctx<'_>) -> Option<Arc<Engine>> {
     ctx.session.ext.get::<EngineRef>().and_then(|r| r.0.upgrade())
 }
 
+/// Cancel tool-owned builds when a host closes, without waiting on a busy session.
+pub fn stop_all(engine: &Engine) {
+    let runs = engine.try_session().and_then(|s| s.ext.get::<Runs>());
+    if let Some(runs) = runs {
+        runs.0.lock().unwrap_or_else(PoisonError::into_inner).stop_all();
+    }
+}
+
 /// Bring every run up to date and start queued ones in free places. Events are kept in each
 /// project's feed by the run itself, so they're dropped here.
 fn refresh(ctx: &Ctx<'_>, set: &mut RunSet) {
@@ -376,6 +395,49 @@ fn rebuild_status(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolEr
         "last_check": m.checks.last(),
         "waiting": Inbox::new(ws.inbox_dir()).pending().len(),
     })))
+}
+
+fn project_goal_resume(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    use craft_anything_engine::goal::{self, Goal, GoalStatus};
+    let p: ProjectParams = parse_params(params)?;
+    let ws = open(&p.project)?;
+    let engine = engine(ctx).ok_or_else(|| ToolError::unsupported("Building isn't available in this engine."))?;
+    let runs = runs(ctx);
+    let mut set = runs.0.lock().unwrap_or_else(PoisonError::into_inner);
+    set.set_limit(ctx.session.settings.build.parallel);
+    if set.is_busy(&ws.root) || goal::BuildLease::busy(&ws.root)? {
+        return Err(ToolError::invalid("This project is already building or queued. Pause it and wait before resuming."));
+    }
+    let activated = goal::update(&ws.root, Goal::activate)?;
+    let root = ws.root.clone();
+    let hub = AiHub::new(engine);
+    let session = ctx.session.for_worker();
+    let builder = hub.engine.with_session(session);
+    let good_enough = ctx.session.settings.build.good_enough;
+    let builder_hub = AiHub::new(builder);
+    let result = set.start(&builder_hub, ws, RunOptions { goal: true, continuing: true, beginner: false, good_enough, ..RunOptions::default() });
+    let started = match result {
+        Ok(started) => started,
+        Err(e) => {
+            let _ = goal::update(&root, |g| {
+                if g.status == GoalStatus::Active && g.revision == activated.revision && !goal::BuildLease::busy(&root)? {
+                    g.status = GoalStatus::Paused;
+                    g.note = e.for_people();
+                }
+                Ok(())
+            });
+            return Err(e);
+        }
+    };
+    let queued = match started {
+        Started::Running => None,
+        Started::Queued { position } => {
+            drop(set);
+            runs::keep_queue_moving(&runs.0, &hub.engine, QUEUE_TICK);
+            Some(position)
+        }
+    };
+    Ok(ToolOutput::Value(json!({ "project":root,"goal": goal::load(&root)?, "started": queued.is_none(), "queued": queued })))
 }
 
 fn rebuild_activity_show(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
@@ -548,5 +610,44 @@ mod tests {
         let _here = self_check::BuildingHere::new(&ws.root);
         let err = e.call("rebuild_check", json!({"project": ws.root}), ok()).err().unwrap();
         assert_eq!(err.code, ErrorCode::FeatureMissing);
+    }
+    #[test]
+    fn a_goal_build_uses_an_independent_session_so_its_controller_can_pause() {
+        use craft_anything_engine::goal::{self, GoalStatus};
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Sample", "A notes app", TargetRef::None).unwrap();
+        let e = Engine::shared(craft_anything_engine::testing::session(), specs());
+        let fake = StandIns::new();
+        let mut start = fake.starter();
+        let child: Arc<Mutex<Option<Arc<Engine>>>> = Arc::default();
+        let child2 = child.clone();
+        let set = RunSet::new(1).with_starter(Box::new(move |hub, ws, opts| {
+            assert!(opts.goal && opts.continuing);
+            *child2.lock().unwrap() = Some(hub.engine.clone());
+            start(hub, ws, opts)
+        }));
+        e.session().ext.insert(Arc::new(Runs(Arc::new(Mutex::new(set)))));
+        let opts = || CallOptions::new(Caller::Cli).with_consent(Consent::Granted);
+        e.call("project_goal_set", json!({"project":ws.root,"goal":{"objective":"Rebuild sample"}}), opts()).unwrap();
+        assert!(e.call("project_goal_resume", json!({"project":ws.root}), CallOptions::new(Caller::Cli)).is_err(), "resume needs consent");
+        e.call("project_goal_resume", json!({"project":ws.root}), opts()).unwrap();
+        let child = child.lock().unwrap().clone().unwrap();
+        assert!(!Arc::ptr_eq(&e, &child));
+        let (held, wait) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let _guard = child.session();
+            held.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(3)).unwrap();
+        });
+        wait.recv_timeout(Duration::from_secs(3)).unwrap();
+        let began = Instant::now();
+        e.call("project_goal_pause", json!({"project":ws.root}), opts()).unwrap();
+        assert!(began.elapsed() < Duration::from_secs(1), "the builder's lock blocked control");
+        release.send(()).unwrap();
+        thread.join().unwrap();
+        assert_eq!(goal::load(&ws.root).unwrap().unwrap().status, GoalStatus::Paused);
+        fake.finish(&ws.root);
+        stop_all(&e);
     }
 }

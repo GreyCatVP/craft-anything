@@ -95,6 +95,14 @@ pub fn checks(session: &Session) -> Vec<std::sync::Arc<PluginCheck>> {
     session.ext.get::<PluginChecks>().map(|c| c.0.clone()).unwrap_or_default()
 }
 
+/// Keep loaded capabilities when a project gets an independent engine session.
+pub(crate) fn share(from: &Session, to: &mut Session) {
+    if let Some(checks) = from.ext.get::<PluginChecks>() {
+        to.ext.insert(checks);
+    }
+    imp::share(from, to);
+}
+
 /// Load the enabled WASM plugins into `session` and add their tools to `tools` (and keep their
 /// checks for [`checks`]). A plugin that can't be loaded, or a tool or check whose id is invalid
 /// or taken, is skipped and logged.
@@ -109,6 +117,8 @@ pub fn install(session: &mut Session, tools: &mut Vec<RuntimeTool>) {
 #[cfg(not(feature = "wasm-plugins"))]
 mod imp {
     use super::*;
+
+    pub(super) fn share(_from: &Session, _to: &mut Session) {}
 
     pub fn install(_session: &mut Session, configs: Vec<WasmPluginConfig>, _tools: &mut Vec<RuntimeTool>) {
         for p in configs {
@@ -134,6 +144,12 @@ mod imp {
     /// Which plugin and tool name serve each tool id.
     #[derive(Default)]
     struct WasmRoutes(HashMap<&'static str, (Arc<WasmPlugin>, String)>);
+
+    pub(super) fn share(from: &Session, to: &mut Session) {
+        if let Some(routes) = from.ext.get::<WasmRoutes>() {
+            to.ext.insert(routes);
+        }
+    }
 
     pub fn install(session: &mut Session, configs: Vec<WasmPluginConfig>, tools: &mut Vec<RuntimeTool>) {
         let mut routes = WasmRoutes::default();
@@ -234,7 +250,9 @@ mod tests {
         ];
         let tools = crate::plugins::install(&mut s);
         assert_eq!(tools.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["wordtools_echo"], "the missing plugin is skipped");
+        let worker = s.for_worker();
         let e = Engine::shared_with(s, Vec::new(), tools);
+        let e = e.with_session(worker);
         let out = e.call("wordtools_echo", json!({"text": "hi"}), CallOptions::new(Caller::Mcp)).unwrap();
         assert!(matches!(out, ToolOutput::Value(v) if v == json!({"text": "hi"})));
     }
@@ -251,5 +269,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].id, found[0].kinds.as_slice()), ("judge_looks_fine", &["game".to_string()][..]));
         assert_eq!(found[0].run(&json!({"files": []})).unwrap()["passed"], true);
+        let worker = s.for_worker();
+        assert_eq!(checks(&worker).first().unwrap().run(&json!({"files":[]})).unwrap()["passed"], true);
     }
 }

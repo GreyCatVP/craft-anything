@@ -40,6 +40,7 @@ pub mod activity;
 mod brief;
 mod check;
 pub mod feed;
+mod goals;
 pub mod kinds;
 mod locate;
 pub mod notes;
@@ -129,6 +130,8 @@ pub struct RunOptions {
     /// told to carry on rather than given the brief again. A run with no message on a project
     /// whose builder has already worked does the same, so "Try again" never starts over.
     pub continuing: bool,
+    /// Advance the project's persistent goal, rather than the ordinary bounded follow-up.
+    pub goal: bool,
     /// Refinement rounds after the first build (each fixes what the last check found).
     pub max_rounds: u32,
     /// Stop refining once the build looks at least this alike (percent).
@@ -149,6 +152,7 @@ impl Default for RunOptions {
             message: None,
             shown: None,
             continuing: false,
+            goal: false,
             max_rounds: 6,
             good_enough: 90.0,
             beginner: true,
@@ -189,6 +193,15 @@ pub struct RebuildRun {
 impl RebuildRun {
     /// Start a run on a worker thread. Fails fast (before any work) when no coding agent is set up.
     pub fn start(hub: &AiHub, ws: Workspace, opts: RunOptions) -> Result<RebuildRun, ToolError> {
+        // Acquired before clearing transcripts or notes: other clients must never write here.
+        let lease = craft_anything_engine::goal::BuildLease::acquire(&ws.root)?;
+        let saved_goal = craft_anything_engine::goal::load(&ws.root)?;
+        if opts.goal && saved_goal.as_ref().is_none_or(|g| g.status != craft_anything_engine::goal::GoalStatus::Active) {
+            return Err(ToolError::invalid("The goal was paused before its build could start."));
+        }
+        if !opts.goal && saved_goal.is_some_and(|g| g.status == craft_anything_engine::goal::GoalStatus::Active) {
+            return Err(ToolError::invalid("This project has an active goal. Pause it before starting an ordinary build."));
+        }
         let cfg = hub.config();
         let entry = builder_backend(&cfg, opts.backend.as_deref().or_else(|| project_builder(&cfg, &ws)))?;
         // An API backend builds with our own agent loop and the Build tools; its conversation is
@@ -196,7 +209,7 @@ impl RebuildRun {
         let api = match entry.config.kind {
             BackendKind::AgentCli => None,
             _ => {
-                if opts.message.is_none() || !ws.capture_dir().exists() {
+                if (!opts.continuing && opts.message.is_none()) || !ws.capture_dir().exists() {
                     let _ = std::fs::remove_file(ws.transcript_path());
                 }
                 Some(hub.start_builder(&entry, opts.beginner, Some(ws.transcript_path()))?)
@@ -204,7 +217,7 @@ impl RebuildRun {
         };
         // A chosen extractor (an API backend, e.g. Kimi K3) takes a game's files out after a fresh
         // study; the run only uses it in Deep mode on a game (see Worker::extract).
-        let fresh = opts.message.is_none() || !ws.capture_dir().exists();
+        let fresh = (!opts.continuing && opts.message.is_none()) || !ws.capture_dir().exists();
         let extractor = match hub.chosen(Role::Extractor).and_then(|n| hub.config().get(&n).cloned()) {
             Some(e) if fresh && e.config.kind != BackendKind::AgentCli => {
                 let _ = std::fs::remove_file(ws.root.join(EXTRACT_TRANSCRIPT));
@@ -214,6 +227,7 @@ impl RebuildRun {
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let stop = CancelToken::default();
+        let goal = if opts.goal { Some(goals::GoalRuntime::start(&ws.root, stop.clone())?) } else { None };
         let running = Arc::new(AtomicBool::new(true));
         let preview: Arc<Mutex<Option<StaticServer>>> = Arc::default();
         let notes: Arc<Mutex<Vec<Note>>> = Arc::default();
@@ -242,6 +256,8 @@ impl RebuildRun {
             decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
+            goal,
+            _lease: Some(lease),
         };
         let r2 = running.clone();
         std::thread::Builder::new()
@@ -254,10 +270,22 @@ impl RebuildRun {
                 let _here = self_check::BuildingHere::new(&ws.root);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ctx.run(&mut ws, entry, api, extractor, &opts)));
                 let (ok, message, paused) = match result {
-                    Ok(Ok(m)) => (true, m, false),
+                    Ok(Ok(m)) => {
+                        let goal = ctx.goal.as_ref().and_then(|_| craft_anything_engine::goal::load(&ws.root).ok().flatten());
+                        let ok = !opts.goal || goal.as_ref().is_some_and(|g| g.status == craft_anything_engine::goal::GoalStatus::Complete);
+                        let paused = goal.as_ref().is_some_and(|g| g.status == craft_anything_engine::goal::GoalStatus::Paused);
+                        (ok, m, paused)
+                    }
                     Ok(Err(e)) if e.code == ErrorCode::Cancelled => {
-                        let _ = ws.set_status(Status::Stopped, "Paused. Send a message to continue.");
-                        (false, "Paused.".to_string(), true)
+                        let limit = ctx
+                            .goal
+                            .as_ref()
+                            .and_then(|_| craft_anything_engine::goal::load(&ws.root).ok().flatten())
+                            .filter(|g| g.status == craft_anything_engine::goal::GoalStatus::BudgetLimited);
+                        let paused = limit.is_none();
+                        let message = limit.map(|g| g.note).unwrap_or_else(|| "Paused. Resume to continue.".into());
+                        let _ = ws.set_status(if paused { Status::Stopped } else { Status::NeedsYou }, message.clone());
+                        (false, message, paused)
                     }
                     Ok(Err(e)) => {
                         let msg = e.for_people();
@@ -266,6 +294,9 @@ impl RebuildRun {
                     }
                     Err(_) => (false, "The workflow hit a bug and stopped safely. Your files are untouched.".to_string(), false),
                 };
+                if let Some(goal) = &ctx.goal {
+                    goal.finish(!ok && !paused, &message);
+                }
                 ctx.record_usage(None);
                 ctx.emit(RunEvent::Finished { ok, message, paused });
                 r2.store(false, Ordering::SeqCst);
@@ -418,6 +449,9 @@ struct Worker {
     usage: Option<UsageClock>,
     /// The kind and bar the builder's own checks (`rebuild_check`) are judged by, once known.
     self_check: Option<(Arc<dyn kinds::TargetKind>, f64)>,
+    goal: Option<goals::GoalRuntime>,
+    // Goal control is dropped (and its watcher joined) before releasing the writer lease.
+    _lease: Option<craft_anything_engine::goal::BuildLease>,
 }
 
 /// The project a run records its usage in, and when it last did.
@@ -587,6 +621,16 @@ impl Worker {
             }
         }
         self.attach(ws)?;
+        if self.goal.is_none() && craft_anything_engine::goal::load(&ws.root)?.is_some() {
+            craft_anything_engine::goal::update(&ws.root, |g| {
+                if g.status == craft_anything_engine::goal::GoalStatus::Complete {
+                    g.status = craft_anything_engine::goal::GoalStatus::Paused;
+                }
+                g.awaiting_check = false;
+                g.note = "An ordinary follow-up is changing this build. Saved goal results are historical; resume the goal to verify them again.".into();
+                Ok(())
+            })?;
+        }
         std::fs::create_dir_all(ws.app_dir()).map_err(|e| ToolError::io(ws.app_dir().display(), e))?;
         let no_kind = || {
             ToolError::new(ErrorCode::BadSettings, "No kind of project matches this request.")
@@ -640,17 +684,20 @@ impl Worker {
                 if api_loop { format!("{API_BUILDER}\n\n{b}") } else { b }
             }
         };
+        if let Some(goal) = &self.goal {
+            prompt.push_str(&format!("\n\n{}", goal.prompt()?));
+        }
         // The extraction step left the original's files in app/Original/: the builder starts from them.
         if first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() {
             prompt.push_str(ORIGINALS_READY);
         }
-        let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
+        let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0).max(self.goal.as_ref().map_or(0, |g| g.last_round()));
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
         let must_decompile = !self.engine.session().clean_room() && matches!(ws.manifest.target, TargetRef::Local { .. });
         let mut reminded = false;
         // The builder finished and only the check didn't: the build is there to check.
-        let mut only_check = carrying_on && !first && opts.message.is_none() && ws.manifest.awaiting_check;
+        let mut only_check = carrying_on && !first && opts.message.is_none() && (ws.manifest.awaiting_check || self.goal.is_some());
         loop {
             if !std::mem::take(&mut only_check) {
                 let doing = match (round, carrying_on) {
@@ -674,6 +721,9 @@ impl Worker {
                 }
                 ws.manifest.awaiting_check = true;
                 ws.save()?;
+                if let Some(goal) = &self.goal {
+                    goal.built()?;
+                }
                 // What the person added while the agent worked goes in before anything else.
                 if let Some(p) = self.added(ws) {
                     prompt = p;
@@ -685,7 +735,7 @@ impl Worker {
                     continue;
                 }
             }
-            round += 1;
+            round = round.checked_add(1).ok_or_else(|| ToolError::new(ErrorCode::OverLimit, "This project's check-round limit was reached."))?;
             self.step(ws, Step::Check, Status::Checking, "Checking the build against the original…")?;
             let checks = self.checks_with_a_retry(ws, kind, round)?;
             ws.manifest.checks.extend(checks.iter().cloned());
@@ -695,6 +745,33 @@ impl Worker {
                 self.emit(RunEvent::Checked(c.clone()));
             }
             let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
+            if let Some(goal) = &self.goal {
+                let g = goal.verify(ws, round, &checks)?;
+                self.emit(RunEvent::Agent(AgentEvent::Status { text: format!("Goal: {}. {}", g.status.label(), g.note) }));
+                use craft_anything_engine::goal::GoalStatus;
+                match g.status {
+                    GoalStatus::Complete => break,
+                    GoalStatus::Active => {
+                        prompt = g.prompt() + &pictures_reminder(ws);
+                        if let Some(check) = not_good {
+                            prompt.push_str(&format!("\n\n{}", kind.refine(check)));
+                        }
+                        if let Some(added) = self.added(ws) {
+                            prompt.push_str(&format!("\n\n{added}"));
+                        }
+                        if !api_loop {
+                            prompt.push_str(CHECK_BEFORE_REPLYING);
+                        }
+                        continue;
+                    }
+                    status => {
+                        let state = if status == GoalStatus::Paused { Status::Stopped } else { Status::NeedsYou };
+                        ws.set_status(state, g.note.clone())?;
+                        self.emit(RunEvent::Step { step: Step::Check, text: g.note.clone() });
+                        return Ok(g.note);
+                    }
+                }
+            }
             if let Some(p) = self.added(ws) {
                 prompt = p;
                 continue;
@@ -825,6 +902,7 @@ impl Worker {
         loop {
             if self.stop.is_cancelled() {
                 agent.stop();
+                self.stop.check()?;
             }
             for e in agent.poll() {
                 match &e {
@@ -846,6 +924,9 @@ impl Worker {
                 }
                 if let AgentEvent::TurnDone { input_tokens, output_tokens, cost_usd, cost_is_estimate, .. } = &e {
                     self.record_usage(Some((*input_tokens, *output_tokens, *cost_usd, *cost_is_estimate)));
+                    if let Some(goal) = &self.goal {
+                        goal.account(input_tokens.saturating_add(*output_tokens))?;
+                    }
                 }
                 let done = matches!(e, AgentEvent::TurnDone { .. });
                 self.emit(RunEvent::Agent(e));

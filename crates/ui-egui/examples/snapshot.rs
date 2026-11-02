@@ -181,6 +181,43 @@ fn main() {
             a
         });
     }
+    for (name, status) in
+        [("project-goal", craft_anything_engine::goal::GoalStatus::Paused), ("project-goal-budget", craft_anything_engine::goal::GoalStatus::BudgetLimited)]
+    {
+        if want(name) {
+            render(&out, name, w, h, scale, move || {
+                use craft_anything_engine::goal::{Goal, GoalSpec, Limits, Milestone, default_requirements};
+                let mut app = demo::app(demo::engine(Mode::Beginner, true));
+                demo::fill_project(&mut app);
+                if let Ok(mut g) = Goal::new(GoalSpec {
+                    objective: "Rebuild the calculator's interactions and appearance".into(),
+                    constraints: vec!["Keep the keyboard shortcuts working".into()],
+                    milestones: ["Keyboard and arithmetic", "Visual comparison"]
+                        .into_iter()
+                        .map(|title| Milestone { title: title.into(), instructions: String::new(), acceptance: default_requirements() })
+                        .collect(),
+                    limits: Limits::default(),
+                }) {
+                    g.status = status;
+                    g.current_milestone = 1;
+                    g.cycles = 8;
+                    g.work_ms = 7_200_000;
+                    if status == craft_anything_engine::goal::GoalStatus::BudgetLimited {
+                        g.work_ms = g.spec.limits.max_minutes * 60_000;
+                    }
+                    g.tokens = 82_400;
+                    g.note = if status == craft_anything_engine::goal::GoalStatus::BudgetLimited {
+                        "The active-time budget was reached. Review limits before resuming."
+                    } else {
+                        "Keyboard behaviour passed. Visual comparison is next."
+                    }
+                    .into();
+                    app.facts.goal = Some(std::sync::Arc::new(g));
+                }
+                app
+            });
+        }
+    }
     // Notes sent while it builds, waiting under the conversation until the builder reads them.
     if want("project-notes") {
         render(&out, "project-notes", w, h, scale, || {

@@ -6,6 +6,21 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 
 ## What works, and how it was checked
 
+Project Goal mode (R2.11) is available on an existing project: versioned objective/constraints,
+ordered milestones with typed check or evidence requirements, cycle/time/reported-token budgets,
+pause/resume and retained checkpoints. All four lifecycle tools work headlessly; `goal <folder>`
+keeps a CLI worker attached, and the desktop reads progress off the UI thread. Fresh checks
+revalidate earlier milestones and cannot skip an unattempted one. A project lease prevents
+concurrent builders; an independent engine session keeps control responsive. See
+[goal-mode.md](goal-mode.md) for usage and acceptance limits. This version does not keep working
+after its host exits and does not claim that build success proves behavioural fidelity.
+Validation on macOS with Rust 1.98.1: 763 tests passed across engine/AI/UI/CLI, including the
+cross-process pause/resume test with synthetic programs; 5 were ignored. The two pre-existing
+macOS fixture failures remain (`auto_mode_keeps_going_but_never_does_the_dangerous_things`,
+temporary-path aliases; `real_binary_end_to_end_if_present`, assumes a Linux `/bin/ls`).
+The two optional WASM plugin tests also passed, including worker-session inheritance.
+No paid AI service or live reconstruction target was used for Goal verification.
+
 | Area | State | Verified by |
 |---|---|---|
 | Mach-O Objective-C pointers | Chained offsets mapped only into file-empty `__PAGEZERO` reach the image-base fallback; pointer candidates must be backed by file bytes | Synthetic thin and fat Mach-O regression, plain-pointer and authenticated-rebase controls, null and unmapped-pointer checks. Real binaries were not checked for this correction |

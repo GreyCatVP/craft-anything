@@ -95,6 +95,20 @@ impl Session {
         Session { settings, ..Default::default() }
     }
 
+    /// Independent project state with the same configured services. Controller run sets,
+    /// open targets and inbox routes are not inherited by long-running workers.
+    pub fn for_worker(&self) -> Self {
+        let mut worker = Self { settings: self.settings.clone(), config_dir: self.config_dir.clone(), deep_for_run: self.deep_for_run, ..Default::default() };
+        if let Some(keys) = self.ext.get::<crate::tools::asset_tools::AssetKeys>() {
+            worker.ext.insert(keys);
+        }
+        if let Some(plugins) = self.ext.get::<crate::plugins::Plugins>() {
+            worker.ext.insert(plugins);
+        }
+        crate::wasm_plugins::share(self, &mut worker);
+        worker
+    }
+
     /// A session that keeps everything under `dir` (config.toml, plugin caches, the engine store,
     /// new projects) instead of this computer's own folders: for tests, and anything that must not
     /// touch the person's setup.

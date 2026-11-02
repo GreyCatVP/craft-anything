@@ -89,6 +89,7 @@ M3 is an open lane that can run at any time.
 | 3 | R2.8 Clean room means clean room | — | Clean room still read the original's code and files |
 | 3 | R2.9 Everyday use: typing, projects, settings | — | Found by live use of the app |
 | 3 | R2.10 Pinned builds | — | Keep a build to open while the project changes |
+| 3 | R2.11 Persistent project goals | R1.2, R1.6, R1.9 | Resume bounded work toward explicit checks |
 | 4 Depth | R2.4 Runtime study for apps and games | R1.2, R1.6 | |
 | 4 | R2.5 Behaviour checks for non-web builds | R1.2 | |
 | 4 | R1.7 Dynamic tool registry | R1.6 | |
@@ -895,6 +896,18 @@ to the project next. Pins are the engine's (tools), kept in the project's `pinne
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't blocked
 
 ## M3 Engine depth
+
+### R2.11 Persistent project goals
+Owner: maintainers · Status: in progress
+Keep a project's objective, milestones, acceptance checks and budgets across bounded rebuild
+turns and restarts. A usable build and a completed goal are separate states.
+- [x] Versioned goal records, check-driven milestones, resource limits and resumable checkpoints;
+      one writer per project, lifecycle tools, CLI execution and project controls
+      — claimed: Codex, branch feature/r2.11-project-goals
+- [ ] Cross-process goal queuing with durable reservations (V1 requires a free build slot)
+- [ ] Background service execution after the desktop app exits
+- [ ] Independent behavioural evaluators beyond the existing project and plugin checks
+
 
 ### R3.1 More tools (all 22 built)
 Owner: open · Status: in progress (a live Cutter test is left)

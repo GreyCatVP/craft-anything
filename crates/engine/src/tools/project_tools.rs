@@ -317,6 +317,9 @@ fn project_build_finish(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     use crate::workspace::{Status, Step};
     let p: FinishParams = parse_params(params)?;
     let mut ws = open(&p.project)?;
+    if crate::goal::BuildLease::busy(&ws.root)? {
+        return Err(ToolError::invalid("Pause the build before calling it done."));
+    }
     ws.set_status(Status::Ready, CALLED_DONE)?;
     let mut items = feed::load(&ws);
     items.push(feed::FeedItem::Step { step: Step::Done, text: CALLED_DONE.into() });
