@@ -311,6 +311,7 @@ impl CraftApp {
             self.drafts.retain(|_, d| d.root != root);
             // Notes the builder didn't get to (it finished, or "Send now" stopped it) go next.
             let left = self.runs.get(&root).map(RebuildRun::take_notes).unwrap_or_default();
+            let carried: Vec<u64> = left.iter().map(|n| n.id).collect();
             let join = |part: fn(&Note) -> &str| left.iter().map(part).collect::<Vec<_>>().join("\n\n");
             let (message, shown) = (join(|n| &n.text), join(|n| &n.shown));
             let pictures: Vec<PathBuf> = left.iter().flat_map(|n| n.pictures.clone()).collect();
@@ -325,15 +326,32 @@ impl CraftApp {
                     self.state.feed.push(FeedItem::User(UserItem::new(shown.clone(), pictures.clone())));
                     self.resume(Some(message), Some(shown), pictures);
                 }
-            } else if !left.is_empty() {
+            } else if !left.is_empty()
+                && let Ok(ws) = Workspace::open(&root)
+                && let Some(backend) = self.builder_backend(ws.manifest.builder.as_deref())
+            {
                 // Another project's notes start its next run in the background.
-                let Ok(ws) = Workspace::open(&root) else { continue };
-                let Some(backend) = self.builder_backend(ws.manifest.builder.as_deref()) else { continue };
                 let opts = self.run_options(Some(backend), Some(message), Some(shown), pictures);
                 if let Err(e) = self.launch(ws, opts) {
                     self.toast(e.message, true);
                 }
             }
+            self.answers_ended(&root, &carried);
+        }
+    }
+
+    /// A run on `root` ended: its answers are done, except notes it hadn't read (`carried`) that
+    /// went on to the next run, if one started.
+    fn answers_ended(&mut self, root: &Path, carried: &[u64]) {
+        let still = self.runs.is_busy(root);
+        let now = std::time::Instant::now();
+        for s in self.answered.get_mut(root).into_iter().flatten() {
+            let goes_on = still && s.note.is_some_and(|id| carried.contains(&id));
+            if !goes_on && s.ended.is_none() {
+                s.ended = Some(now);
+            }
+            // Read or carried on, it can't be taken back any more.
+            s.note = None;
         }
     }
 
@@ -672,7 +690,30 @@ pub struct Facts {
     /// Generated assets: how many, what they cost.
     pub assets: (usize, f64),
     /// The builder's open questions, most important first.
-    pub open_questions: Vec<String>,
+    pub open_questions: Vec<OpenQuestion>,
+}
+
+/// One of the builder's open questions, with the answers it suggests (best first; none in
+/// projects from before it suggested any).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OpenQuestion {
+    /// The unknown's id (`unk_…`), which the answer names so the builder can close it.
+    pub id: String,
+    pub question: String,
+    pub answers: Vec<String>,
+}
+
+/// An open question answered from the side panel. It shows as sent until the project is read
+/// again after the run that had the answer ended (so a question that run closed never offers its
+/// answers in between).
+#[derive(Debug, Clone)]
+pub struct SentAnswer {
+    /// The unknown answered.
+    pub unknown: String,
+    /// The note it went as, while that can still be taken back.
+    pub note: Option<u64>,
+    /// When the run that had it ended (`None` while it works).
+    pub ended: Option<std::time::Instant>,
 }
 
 impl Facts {
@@ -686,7 +727,10 @@ impl Facts {
             references: ws.references().len(),
             // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
             assets: (a.len(), a.iter().fold(0.0, |s, x| s + x.cost_usd)),
-            open_questions: craft_anything_ai::rebuild::self_check::open_questions(ws).into_iter().map(|u| u.question).collect(),
+            open_questions: craft_anything_ai::rebuild::self_check::open_questions(ws)
+                .into_iter()
+                .map(|u| OpenQuestion { id: u.id, question: u.question, answers: u.suggested_answers })
+                .collect(),
         }
     }
 }
@@ -721,10 +765,21 @@ impl CraftApp {
     }
 
     pub(crate) fn facts_read(&mut self, job: u64, facts: Option<Facts>) {
-        if self.facts_reader.job == Some(job) {
+        let ours = self.facts_reader.job == Some(job);
+        if ours {
             self.facts_reader.job = None;
         }
         if let Some(f) = facts.filter(|f| self.workspace.as_ref().is_some_and(|w| w.root == f.root)) {
+            // This read began after the run that had these answers ended, so it shows what that
+            // run left open: those questions offer their answers again.
+            if let Some(began) = self.facts_reader.at.filter(|_| ours)
+                && let Some(sent) = self.answered.get_mut(&f.root)
+            {
+                sent.retain(|s| s.ended.is_none_or(|ended| ended >= began));
+                if sent.is_empty() {
+                    self.answered.remove(&f.root);
+                }
+            }
             self.facts = f;
         }
     }
@@ -956,32 +1011,88 @@ fn open_folder(app: &mut CraftApp, ws: &Workspace) {
     app.act("project_open_folder", serde_json::json!({"project": ws.root}), tr("Open the folder"));
 }
 
-/// What the builder couldn't find out about the original, so the person can answer it in a
-/// follow-up; nothing when it has no open questions.
-fn open_questions(app: &CraftApp, ui: &mut Ui) {
+/// What the person picked under one of the builder's open questions.
+enum Reply {
+    /// One of the suggested answers, or the builder's own choice ([`decide_answer`]).
+    Answer(OpenQuestion, String),
+    /// They'll write their own: the prompt box gets the question to start from.
+    Own(String),
+}
+
+/// The answer sent when the person lets the builder decide.
+fn decide_answer() -> String {
+    tr("you decide. Choose what makes it closest to what I asked for, and tell me what you chose.")
+}
+
+/// What the builder couldn't find out about the original, each with the answers it suggests,
+/// the builder's own choice and a way to write another, so the person can answer with a click
+/// (sent like a message typed below); nothing when it has no open questions.
+fn open_questions(app: &mut CraftApp, ui: &mut Ui) {
     if app.facts.open_questions.is_empty() {
         return;
     }
     let t = Tokens::get(ui.ctx());
+    let sent: &[SentAnswer] = app.workspace.as_ref().and_then(|w| app.answered.get(&w.root)).map_or(&[], Vec::as_slice);
+    let mut reply = None;
     widgets::card(&t).inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::caption(ui, "Open questions");
         ui.add_space(6.0);
         const SHOWN: usize = 5;
-        for q in app.facts.open_questions.iter().take(SHOWN) {
-            ui.horizontal_wrapped(|ui| {
-                icons::show(ui, "info", 14.0, t.text_dim);
-                ui.add(egui::Label::new(RichText::new(q).size(theme::SMALL).color(t.text)).wrap());
+        for (i, q) in app.facts.open_questions.iter().take(SHOWN).enumerate() {
+            if i > 0 {
+                ui.add_space(10.0);
+            }
+            ui.push_id(("open-question", i), |ui| {
+                let done = sent.iter().any(|s| s.unknown == q.id);
+                ui.horizontal_top(|ui| {
+                    icons::show(ui, if done { "check" } else { "info" }, 14.0, t.text_dim);
+                    let colour = if done { t.text_dim } else { t.text };
+                    ui.add(egui::Label::new(RichText::new(&q.question).size(theme::SMALL).color(colour)).wrap());
+                });
+                if done {
+                    ui.label(RichText::new(tr("Answer sent. The builder reads it next.")).size(theme::CAPTION).color(t.text_faint));
+                    return;
+                }
+                ui.add_space(4.0);
+                if !q.answers.is_empty() {
+                    // One answer per row, full width, so long ones wrap inside their box.
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        for a in &q.answers {
+                            if widgets::suggestion_as_given(ui, a).clicked() {
+                                reply = Some(Reply::Answer(q.clone(), a.clone()));
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+                // The quiet ways: its own choice, or one's own words (one per line in the
+                // narrow panel, so neither is cut off or left hanging).
+                ui.spacing_mut().item_spacing.y = 2.0;
+                if widgets::small_link(ui, "Let the builder decide")
+                    .on_hover_text(tr("It picks what fits your request best and tells you what it chose."))
+                    .clicked()
+                {
+                    reply = Some(Reply::Answer(q.clone(), decide_answer()));
+                }
+                if widgets::small_link(ui, "Write my own answer").clicked() {
+                    reply = Some(Reply::Own(q.question.clone()));
+                }
             });
         }
         if app.facts.open_questions.len() > SHOWN {
+            ui.add_space(6.0);
             let more = trf("and {n} more", &[("n", &(app.facts.open_questions.len() - SHOWN).to_string())]);
             ui.label(RichText::new(more).size(theme::SMALL).color(t.text_dim));
         }
-        ui.add_space(4.0);
-        ui.label(RichText::new(tr("Answer any of them in a message below.")).size(theme::SMALL).color(t.text_dim));
     });
     ui.add_space(14.0);
+    match reply {
+        Some(Reply::Answer(q, a)) => app.answer_open_question(&q.id, &q.question, &a),
+        Some(Reply::Own(q)) => app.write_own_answer(ui.ctx(), &q),
+        None => {}
+    }
 }
 
 fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
@@ -1738,7 +1849,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
             &mut app.state.project_input,
             &app.state.project_attachments,
             prompt_box::PromptBox {
-                name: "Ask for a change",
+                name: PROMPT_NAME,
                 hint,
                 rows: (1, 8),
                 attach: Some("Attach pictures (or drop or paste them here)"),
@@ -1851,6 +1962,9 @@ fn oversized_picture_name(files: &[PathBuf]) -> Option<String> {
         .find(|f| craft_anything_engine::workspace::picture_too_large(f))
         .map(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string()))
 }
+
+/// The project's prompt box (its name for screen readers and tests, and for [`prompt_box::focus`]).
+const PROMPT_NAME: &str = "Ask for a change";
 
 /// What was typed for a note while its project's builder worked.
 pub struct Draft {
@@ -1991,7 +2105,8 @@ impl CraftApp {
         self.state.project_input.clear();
         let attachments = std::mem::take(&mut self.state.project_attachments);
         if attachments.is_empty() {
-            return self.deliver(ws.root, text, attachments, Ok(Vec::new()));
+            self.deliver(ws.root, text, attachments, Ok(Vec::new()));
+            return;
         }
         // Pictures are copied into the project on a worker, then the message goes.
         self.jobs.spawn(tr("Attach pictures"), false, move |_| {
@@ -2001,17 +2116,20 @@ impl CraftApp {
     }
 
     /// Send a message once its pictures are in the project (`files`: their copies there); if they
-    /// couldn't be copied, it goes back in the box.
-    pub(crate) fn deliver(&mut self, root: PathBuf, text: String, attachments: Vec<PathBuf>, files: Result<Vec<PathBuf>, String>) {
+    /// couldn't be copied, it goes back in the box. The note's id when it waits for a run that's
+    /// working, `None` when it started one (or wasn't sent).
+    pub(crate) fn deliver(&mut self, root: PathBuf, text: String, attachments: Vec<PathBuf>, files: Result<Vec<PathBuf>, String>) -> Option<u64> {
         let Some(ws) = self.workspace.clone().filter(|w| w.root == root) else {
-            return self.toast(tr("Your message wasn't sent: another project was opened while its pictures were copied."), true);
+            self.toast(tr("Your message wasn't sent: another project was opened while its pictures were copied."), true);
+            return None;
         };
         let files = match files {
             Ok(f) => f,
             Err(e) => {
                 self.state.project_input = text;
                 self.state.project_attachments = attachments;
-                return self.toast(format!("{} {}", tr("Couldn't attach the pictures:"), e), true);
+                self.toast(format!("{} {}", tr("Couldn't attach the pictures:"), e), true);
+                return None;
             }
         };
         let message = prompt_box::with_attachments(&text, &files, &ws.root);
@@ -2021,18 +2139,60 @@ impl CraftApp {
                 // It joins the feed when the builder reads it; until then it can be taken back.
                 let id = run.add_note(message, shown, files.clone());
                 self.drafts.insert(id, Draft { root: ws.root.clone(), text, attachments });
+                Some(id)
             }
             _ => {
                 self.state.feed.push(FeedItem::User(UserItem::new(shown.clone(), files.clone())));
                 self.resume(Some(message), Some(shown), files);
+                None
             }
         }
+    }
+
+    /// Answer one of the builder's open questions: the answer goes like a message typed in the
+    /// prompt box (a note while it builds, else a follow-up), quoting the question, and what's
+    /// typed in the box stays there.
+    pub fn answer_open_question(&mut self, id: &str, question: &str, answer: &str) {
+        let Some(ws) = self.workspace.clone() else { return };
+        if self.queue_position().is_some() {
+            return self.toast(tr("This project is waiting its turn. Send your message once it starts."), true);
+        }
+        let text = trf("Answer to your open question {id} \"{q}\": {a}", &[("id", id), ("q", question), ("a", answer)]);
+        let note = self.deliver(ws.root.clone(), text, Vec::new(), Ok(Vec::new()));
+        // Shown as sent only once it went: to the run working, or to the one it started.
+        if self.runs.is_busy(&ws.root) {
+            self.answered.entry(ws.root).or_default().push(SentAnswer { unknown: id.to_string(), note, ended: None });
+        }
+    }
+
+    /// Start a typed answer to an open question: the prompt box gets the question to write after
+    /// (below what's already typed) and the keyboard, set to ask for a change.
+    pub fn write_own_answer(&mut self, ctx: &egui::Context, question: &str) {
+        let start = format!("{} ", trf("About \"{q}\":", &[("q", question)]));
+        let input = &mut self.state.project_input;
+        if input.trim().is_empty() {
+            *input = start;
+        } else {
+            input.push('\n');
+            input.push_str(&start);
+        }
+        self.state.just_ask = false;
+        prompt_box::focus(ctx, PROMPT_NAME);
     }
 
     /// Take back a note the builder hasn't read yet: what was typed (and its pictures) goes back
     /// in the prompt box, before anything typed since.
     pub fn unsend(&mut self, id: u64) {
         let Some(note) = self.open_run().and_then(|r| r.unsend(id)) else { return };
+        // An open question answered by this note asks again.
+        if let Some(root) = self.workspace.as_ref().map(|w| w.root.clone())
+            && let Some(sent) = self.answered.get_mut(&root)
+        {
+            sent.retain(|s| s.note != Some(id));
+            if sent.is_empty() {
+                self.answered.remove(&root);
+            }
+        }
         let (text, attachments) = self.drafts.remove(&id).map_or((note.shown, Vec::new()), |d| (d.text, d.attachments));
         let input = &mut self.state.project_input;
         *input = if input.trim().is_empty() { text } else { format!("{text}\n{input}") };

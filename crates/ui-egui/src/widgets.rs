@@ -80,9 +80,15 @@ pub fn named(resp: Response, name: &str) -> Response {
 /// A suggestion: a sentence in a hairline box that fills in a field when clicked. Wraps when
 /// it's wider than the space it has; fills the width in a justified layout (a tidy list).
 pub fn suggestion(ui: &mut Ui, text: &str) -> Response {
+    suggestion_as_given(ui, &tr(text))
+}
+
+/// [`suggestion`] for text that isn't ours to translate (a builder's or a person's words): shown
+/// exactly as given.
+pub fn suggestion_as_given(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let max_w = ui.available_width().max(60.0);
-    let g = ui.painter().layout(tr(text), egui::FontId::proportional(theme::SMALL), t.text, max_w - 26.0);
+    let g = ui.painter().layout(text.to_string(), egui::FontId::proportional(theme::SMALL), t.text, max_w - 26.0);
     let w = if ui.layout().horizontal_justify() { max_w } else { (g.size().x + 26.0).min(max_w) };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, (g.size().y + 14.0).max(32.0)), Sense::click());
     let h = hover_t(ui, &resp);
@@ -96,7 +102,7 @@ pub fn suggestion(ui: &mut Ui, text: &str) -> Response {
     let pos = egui::pos2(rect.left() + 13.0, rect.center().y - g.size().y / 2.0);
     ui.painter().galley_with_override_text_color(pos, g, theme::mix(t.text_dim, t.text, h));
     focus_ring(ui, &resp, rect);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr(text)));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -218,8 +224,17 @@ const BUTTON_ICON_W: f32 = 22.0;
 
 /// A borderless text button in the accent colour.
 pub fn link(ui: &mut Ui, label: &str) -> Response {
+    link_text(ui, RichText::new(tr(label)))
+}
+
+/// [`link`] at the small text size, for a link among small text.
+pub fn small_link(ui: &mut Ui, label: &str) -> Response {
+    link_text(ui, RichText::new(tr(label)).size(theme::SMALL))
+}
+
+fn link_text(ui: &mut Ui, text: RichText) -> Response {
     let t = Tokens::get(ui.ctx());
-    let r = ui.add(egui::Label::new(RichText::new(tr(label)).color(t.accent_ink)).sense(Sense::click()));
+    let r = ui.add(egui::Label::new(text.color(t.accent_ink)).sense(Sense::click()));
     let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
     if r.hovered() {
         let y = r.rect.bottom();

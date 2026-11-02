@@ -554,7 +554,13 @@ The full toolset, evidence and logs.	Tous les outils, les preuves et les journau
 Open the folder	Ouvrir le dossier
 Open questions	Questions ouvertes
 and {n} more	et {n} de plus
-Answer any of them in a message below.	Répondez à l'une d'elles dans un message ci-dessous.
+Answer sent. The builder reads it next.	Réponse envoyée. Le constructeur la lira ensuite.
+Let the builder decide	Laisser le constructeur décider
+It picks what fits your request best and tells you what it chose.	Il choisit ce qui correspond le mieux à votre demande et vous dit ce qu'il a choisi.
+Write my own answer	Écrire ma propre réponse
+you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	décide toi-même. Choisis ce qui se rapproche le plus de ce que j'ai demandé, et dis-moi ce que tu as choisi.
+Answer to your open question {id} "{q}": {a}	Réponse à ta question ouverte {id} « {q} » : {a}
+About "{q}":	À propos de « {q} » :
 Progress	Progression
 Now	Maintenant
 Stopped here	Arrêté ici

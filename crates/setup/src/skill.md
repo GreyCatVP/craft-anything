@@ -56,7 +56,8 @@ findings and a handoff note; use them every time.
 - **Cite evidence ids** (`ev_…`) for every claim. A claim with no evidence id is a hypothesis.
 - **Absence is not proof.** "No string found" or "no caller found" only covers what was searched.
   State the search boundary and the coverage the tool reported, and record an unknown
-  (`core_unknown_add`) for anything that matters but is still open.
+  (`core_unknown_add`, with three short suggested answers the person can pick from, best first)
+  for anything that matters but is still open.
 - **Predict, then verify.** Before running a tool to test a hypothesis, write down what you expect to
   see. If the result disagrees, update the hypothesis instead of explaining the result away.
 - **Summary first, then page.** Large results come back as a summary plus an evidence id. Ask for

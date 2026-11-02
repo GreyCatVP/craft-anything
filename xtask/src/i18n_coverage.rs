@@ -42,7 +42,7 @@ impl<'ast> Visit<'ast> for Lookups {
             let positions: &[usize] = match (owner.as_str(), name.as_str()) {
                 (_, "tr" | "trf") => &[0],
                 ("widgets", "primary" | "link" | "suggestion" | "caption" | "pill" | "working" | "working_since" | "segmented" | "segmented_sized") => &[1],
-                ("widgets", "named") => &[1],
+                ("widgets", "named" | "small_link") => &[1],
                 ("widgets", "primary_icon" | "primary_sized" | "secondary") => &[2],
                 ("widgets", "toggle") => &[2],
                 ("widgets", "choice_tile" | "big_card") => &[3, 4],

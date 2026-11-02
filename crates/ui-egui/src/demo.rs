@@ -311,7 +311,18 @@ pub fn fill_project(app: &mut CraftApp) {
     ];
     app.facts = crate::project::Facts {
         root: ws.root.clone(),
-        open_questions: vec!["May the original's logo and text be reused, or must they be placeholders?".into()],
+        open_questions: vec![
+            crate::project::OpenQuestion {
+                id: "unk_5d1c2a7e9b3f4061".into(),
+                question: "May the original's logo and text be reused, or must they be placeholders?".into(),
+                answers: vec!["Use placeholders".into(), "Keep the text, replace the logo".into(), "It's mine: reuse both".into()],
+            },
+            crate::project::OpenQuestion {
+                id: "unk_83e0b6f2c4d9a175".into(),
+                question: "Should the contact link open an email or a form?".into(),
+                answers: Vec::new(),
+            },
+        ],
         ..Default::default()
     };
     app.workspace = Some(ws);

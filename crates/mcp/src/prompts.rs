@@ -34,7 +34,7 @@ const DISCIPLINE: &[&str] = &[
     "Absence is not proof: if a search finds nothing, say what was searched and how much was covered.",
     "Predict before you look, then check the prediction against the evidence.",
     "Ask for summaries first and page for detail (offset/limit) instead of pulling everything at once.",
-    "Record open questions with core_unknown_add rather than guessing.",
+    "Record open questions with core_unknown_add rather than guessing, with three short suggested answers the person can pick from (best first).",
 ];
 
 pub const PROMPTS: &[PromptDef] = &[

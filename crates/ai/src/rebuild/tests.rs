@@ -2376,7 +2376,14 @@ fn every_kind_leads_tests_its_own_build_and_keeps_its_unknowns() {
         ws.manifest.stack = stack.into();
         let b = brief(&ws, k, false, false, None, false, None);
         assert!(b.contains("you lead the investigation") && b.contains("Don't repeat a call that already answered"), "{k}: {b}");
-        assert!(b.contains("core_unknown_add") && b.contains("core_unknown_edit") && b.contains("Missing evidence is never proof"), "{k}");
+        assert!(
+            b.contains("core_unknown_add")
+                && b.contains("three short suggested answers")
+                && b.contains("resolved_by person")
+                && b.contains("core_unknown_edit")
+                && b.contains("Missing evidence is never proof"),
+            "{k}"
+        );
         assert!(b.contains("go through your checklist and core_unknowns_show"), "{k}");
         assert!(b.contains("Test it against the original with rebuild_check") && b.contains("Before you reply, go through your checklist"), "{k}");
         if k == "website" {
