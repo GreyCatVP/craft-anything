@@ -272,6 +272,9 @@ impl AgentAdapter for ClaudeCode {
         a
     }
 
+    /// Claude Code's stream-json: text and tool calls as they come, the session id from any line,
+    /// and from the final `result` its usage and cost, a failure in plain words, or a session to
+    /// resume that isn't on this computer (`session_missing`, with its own message).
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
         let mut out = Vec::new();
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -353,14 +356,18 @@ impl AgentAdapter for ClaudeCode {
         sign_in_hint("login")
     }
 
+    /// The session under Claude Code's own folder (see [`claude_session_file`]).
     fn session_file(&self, id: &str) -> Option<std::path::PathBuf> {
         claude_session_file(&claude_config_dir()?, id)
     }
 
+    /// The kept session's requests and replies (see [`claude_handoff`]).
     fn handoff(&self, saved: &str, max: usize) -> Option<String> {
         claude_handoff(saved, max)
     }
 
+    /// Back under Claude Code's own folder (see [`claude_restore`]); without one there's nowhere
+    /// to put it, which is said.
     fn restore_session(&self, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
         let config = claude_config_dir().ok_or_else(|| ToolError::new(ErrorCode::BadSettings, "Couldn't find Claude Code's folder on this computer."))?;
         claude_restore(&config, id, saved, cwd)

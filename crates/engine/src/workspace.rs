@@ -860,13 +860,13 @@ impl Workspace {
     pub fn inbox_dir(&self) -> PathBuf {
         self.root.join("inbox")
     }
-    /// The API builder's conversation, kept so a follow-up continues it (`ai::context`).
     /// A builder has worked on this project and its conversation was kept, so a later run carries
     /// it on instead of starting over.
     pub fn builder_started(&self) -> bool {
         self.manifest.agent_session.is_some() || self.transcript_path().is_file()
     }
 
+    /// The API builder's conversation, kept so a follow-up continues it (`ai::context`).
     pub fn transcript_path(&self) -> PathBuf {
         self.root.join("transcript.json")
     }
@@ -1387,6 +1387,8 @@ mod tests {
         }
     }
 
+    /// A rename survives a stale save, a copy takes the build but not the conversation (nor its
+    /// kept session), and a delete leaves the person's own files.
     #[test]
     fn a_project_is_renamed_duplicated_and_deleted_without_touching_the_persons_files() {
         let d = tempfile::tempdir().unwrap();

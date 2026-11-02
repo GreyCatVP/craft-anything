@@ -279,6 +279,7 @@ fn summary_of(s: &str) -> String {
 }
 
 impl StreamParser {
+    /// A parser for one run, reading lines the way `adapter` says.
     pub fn new(adapter: Arc<dyn AgentAdapter>) -> Self {
         StreamParser {
             adapter,
@@ -439,6 +440,8 @@ pub struct CliConversation {
 }
 
 impl CliConversation {
+    /// A conversation run as `spec` says; with `spec.resume`, its first message continues that
+    /// saved session.
     pub fn new(spec: CliSpec) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let session = Arc::new(Mutex::new(spec.resume.clone()));
@@ -488,6 +491,10 @@ struct RunState {
     lost: Arc<AtomicBool>,
 }
 
+/// One message as one run of the agent's program (here or over SSH), its events sent on `tx`
+/// as they come and a `TurnDone` at the end, whatever happened. The session it reports is kept for
+/// the next message; one it was asked to continue but doesn't have is forgotten and flagged in
+/// `state.lost` before the error that says so is sent.
 fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, state: &RunState) {
     let RunState { session, verified, lost } = state;
     let name = spec.config.name.clone();
@@ -741,10 +748,13 @@ impl Conversation for CliConversation {
         CliConversation::session_id(self)
     }
 
+    /// Set by the last run (see `run_cli`) and cleared when the next message is sent.
     fn session_lost(&self) -> bool {
         self.lost.load(Ordering::SeqCst)
     }
 
+    /// Runs the message on a thread of its own; a message while one is running is refused with an
+    /// error event, and a runner that panics still ends its turn.
     fn send(&mut self, text: &str) {
         if self.busy.swap(true, Ordering::SeqCst) {
             let _ = self.tx.send(AgentEvent::Error {

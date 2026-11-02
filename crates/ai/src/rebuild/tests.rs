@@ -573,6 +573,7 @@ fn a_picked_game_is_rebuilt_with_its_own_engine_when_we_can() {
     assert_eq!(choose("Recreate this game", &TargetRef::Local { path: empty.path().to_path_buf() }).1, "Unity", "no engine found: Unity");
 }
 
+/// A scripted API model builds with the Build tools in one turn, and leaves no session to resume.
 #[test]
 fn an_api_backend_builds_with_the_build_tools() {
     use crate::agent::tests::{Scripted, turn};
@@ -1432,6 +1433,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
     assert!(logs.is_some());
 }
 
+/// The builder's own `rebuild_check`, asked mid-turn, is answered by the run and isn't a round.
 #[test]
 fn the_run_answers_the_builders_own_check_during_its_turn() {
     let d = tempfile::tempdir().unwrap();
@@ -1864,12 +1866,15 @@ fn the_builders_conversation_travels_with_the_project() {
         fn args(&self, _cx: &crate::cli_agents::ArgsCx) -> Vec<String> {
             Vec::new()
         }
+        /// Sessions sit flat in the stand-in store, named by id.
         fn session_file(&self, id: &str) -> Option<PathBuf> {
             Some(self.0.join(format!("{id}.jsonl"))).filter(|p| p.is_file())
         }
+        /// Read back as Claude Code's are.
         fn handoff(&self, saved: &str, max: usize) -> Option<String> {
             crate::cli_agents::adapters::claude_handoff(saved, max)
         }
+        /// Put back into the stand-in store, never over one that's there.
         fn restore_session(&self, id: &str, saved: &[u8], _cwd: &Path) -> Result<bool, ToolError> {
             let path = self.0.join(format!("{id}.jsonl"));
             if path.is_file() {

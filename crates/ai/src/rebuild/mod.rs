@@ -566,6 +566,11 @@ impl Worker {
         }
     }
 
+    /// The whole run: checks the builder can start, studies a new project, then builds and checks
+    /// in rounds until it's good enough or the rounds run out. A coding agent's saved session is
+    /// put back from the project first when this computer doesn't have it, and the project keeps
+    /// a copy after every turn; when it can't be resumed, a new one starts from the brief and what
+    /// the project kept. Returns the summary shown when it's ready.
     fn run(
         &mut self,
         ws: &mut Workspace,
@@ -975,6 +980,7 @@ fn kept_session_bytes(ws: &Workspace) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
+/// The kept session as text, for a handoff (a broken byte doesn't lose the rest).
 fn kept_session(ws: &Workspace) -> Option<String> {
     kept_session_bytes(ws).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
