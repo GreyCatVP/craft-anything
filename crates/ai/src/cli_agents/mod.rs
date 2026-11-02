@@ -405,6 +405,7 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
     let mut args = spec.options.args.clone();
     args.extend(acp_args.iter().map(|a| a.to_string()));
+    args.extend(acp::model_args(&agent, spec.options.cli_model.as_deref()));
     let cwd = spec.project.clone().or_else(|| std::env::current_dir().ok()).unwrap_or_else(std::env::temp_dir);
     let mcp = mcp_for(spec, false);
     let preamble = spec.preamble.clone().unwrap_or_else(|| crate::prompt::cli_preamble(spec.beginner));

@@ -22,8 +22,28 @@ use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 /// Agents known to speak ACP, and the arguments that start them in that mode.
-pub const ACP_AGENTS: &[(&str, &[&str])] =
-    &[("gemini-cli", &["--experimental-acp"]), ("qwen-code", &["--experimental-acp"]), ("opencode", &["acp"]), ("goose", &["acp"]), ("hermes", &["acp"])];
+pub const ACP_AGENTS: &[(&str, &[&str])] = &[
+    ("gemini-cli", &["--experimental-acp"]),
+    ("qwen-code", &["--experimental-acp"]),
+    ("opencode", &["acp"]),
+    ("goose", &["acp"]),
+    ("hermes", &["acp"]),
+    ("maki", &["acp"]),
+];
+
+/// Agents whose ACP mode takes the backend's model (`cli_model`), and the flag after the ACP
+/// arguments that picks it. Others keep the model they're set to.
+pub const ACP_MODEL_FLAGS: &[(&str, &str)] = &[("maki", "-m")];
+
+/// The arguments after `agent`'s ACP ones that pick `model`; none when its ACP mode isn't known
+/// to take one.
+pub fn model_args(agent: &str, model: Option<&str>) -> Vec<String> {
+    let flag = ACP_MODEL_FLAGS.iter().find(|(id, _)| *id == agent).map(|(_, f)| *f);
+    match (flag, model.map(str::trim).filter(|m| !m.is_empty())) {
+        (Some(flag), Some(model)) => vec![flag.to_string(), model.to_string()],
+        _ => Vec::new(),
+    }
+}
 
 /// The ACP version we speak.
 const PROTOCOL_VERSION: u64 = 1;
@@ -751,6 +771,36 @@ mod tests {
         assert_eq!(run("read", json!({"path": "/a"})).0, "Read");
         assert_eq!(run("fetch", json!({"url": "https://x"})).0, "WebFetch");
         assert_eq!(run("other", json!({})).0, "t", "unknown kinds are asked about by title");
+    }
+
+    #[test]
+    fn maki_starts_in_acp_mode_with_the_backends_model() {
+        assert_eq!(acp_args("maki"), Some(&["acp"][..]));
+        assert_eq!(model_args("maki", Some(" anthropic/claude-sonnet-4-6 ")), ["-m", "anthropic/claude-sonnet-4-6"]);
+        assert!(model_args("maki", None).is_empty() && model_args("maki", Some(" ")).is_empty());
+        // An agent whose ACP mode isn't known to take a model keeps its own, as before.
+        assert!(model_args("opencode", Some("x/y")).is_empty());
+    }
+
+    /// `maki -m <model> acp` starts with Maki's default model: the flag only counts after `acp`.
+    #[test]
+    fn a_maki_backend_runs_acp_then_its_model_after_its_own_args() {
+        let config = crate::BackendConfig {
+            name: "Maki".into(),
+            kind: crate::BackendKind::AgentCli,
+            model: "maki".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        let options = crate::BackendOptions {
+            acp: Some(true),
+            cli_model: Some("anthropic/claude-sonnet-4-6".into()),
+            args: vec!["--no-plugins".into()],
+            ..Default::default()
+        };
+        let Some(c) = super::super::acp_for(&super::super::CliSpec::new(config, options, false, None)) else { panic!("Maki speaks ACP") };
+        assert_eq!((c.program.as_str(), c.args.as_slice()), ("maki", &["--no-plugins", "acp", "-m", "anthropic/claude-sonnet-4-6"].map(String::from)[..]));
     }
 
     #[test]
