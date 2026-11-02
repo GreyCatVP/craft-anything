@@ -244,6 +244,9 @@ pub struct StreamParser {
     pub output_tokens: u64,
     pub cost_usd: Option<f64>,
     pub saw_result: bool,
+    /// The run was asked to continue a saved session the agent doesn't have (it lives on another
+    /// computer, or under another folder), so it did nothing.
+    pub session_missing: bool,
 }
 
 fn short_tool(name: &str) -> String {
@@ -277,7 +280,16 @@ fn summary_of(s: &str) -> String {
 
 impl StreamParser {
     pub fn new(adapter: Arc<dyn AgentAdapter>) -> Self {
-        StreamParser { adapter, session_id: None, tool_names: HashMap::new(), input_tokens: 0, output_tokens: 0, cost_usd: None, saw_result: false }
+        StreamParser {
+            adapter,
+            session_id: None,
+            tool_names: HashMap::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: None,
+            saw_result: false,
+            session_missing: false,
+        }
     }
 
     /// Events for one output line.
@@ -422,13 +434,15 @@ pub struct CliConversation {
     stop: Stop,
     session: Arc<Mutex<Option<String>>>,
     verified: Arc<Mutex<Option<bool>>>,
+    /// The last run's saved session wasn't there (see [`Conversation::session_lost`]).
+    lost: Arc<AtomicBool>,
 }
 
 impl CliConversation {
     pub fn new(spec: CliSpec) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let session = Arc::new(Mutex::new(spec.resume.clone()));
-        CliConversation { spec, tx, rx, busy: Arc::default(), stop: Stop::default(), session, verified: Arc::default() }
+        CliConversation { spec, tx, rx, busy: Arc::default(), stop: Stop::default(), session, verified: Arc::default(), lost: Arc::default() }
     }
 
     /// The agent's session id once a run has reported it (to continue later).
@@ -466,7 +480,16 @@ fn remote_command(program: &str, args: Vec<String>, env: &[(&'static str, String
     cmd
 }
 
-fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, session: &Mutex<Option<String>>, verified: &Mutex<Option<bool>>) {
+/// The run's shared state: the session it continues and reports, whether the agent's flags were
+/// checked, and whether the session it was to continue was missing.
+struct RunState {
+    session: Arc<Mutex<Option<String>>>,
+    verified: Arc<Mutex<Option<bool>>>,
+    lost: Arc<AtomicBool>,
+}
+
+fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, state: &RunState) {
+    let RunState { session, verified, lost } = state;
     let name = spec.config.name.clone();
     let agent = spec.config.model.clone();
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
@@ -525,7 +548,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, ses
     let _ =
         tx.send(AgentEvent::Status { text: format!("Asking {}{}…", display_for(&agent), remote.as_ref().map(|h| format!(" on {h}")).unwrap_or_default()) });
     let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
-    let (p2, tx2, tx_err) = (parser.clone(), tx.clone(), tx.clone());
+    let (p2, tx2, tx_err, lost2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone());
     let stop2 = stop.clone();
     let mut proc = (if remote.is_none() { adapter.process(&prog) } else { Process::new(&prog) })
         .args(&argv)
@@ -538,7 +561,13 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, ses
         .stdout_cap(4 * 1024 * 1024)
         .cancel_when(move || stop2.is_stopped())
         .on_stdout_line(move |l| {
-            for e in p2.lock().unwrap_or_else(PoisonError::into_inner).line(l) {
+            let mut p = p2.lock().unwrap_or_else(PoisonError::into_inner);
+            let events = p.line(l);
+            // Said before the error that follows it, so whoever reads the error can tell.
+            if p.session_missing {
+                lost2.store(true, Ordering::SeqCst);
+            }
+            for e in events {
                 let _ = tx2.send(e);
             }
         })
@@ -556,10 +585,15 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, ses
     }
     let result = proc.run();
     let p = parser.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(id) = &p.session_id {
+    if p.session_missing {
+        // The id it reported is the one it couldn't find: the next message starts a new session.
+        *session.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    } else if let Some(id) = &p.session_id {
         *session.lock().unwrap_or_else(PoisonError::into_inner) = Some(id.clone());
     }
     match result {
+        // It said why already, and there's nothing more in its output to keep.
+        Ok(_) if p.session_missing => {}
         Ok(out) if !out.success && !p.saw_result => {
             let _ = tx.send(shown.exit_event(&agent, &out));
         }
@@ -707,6 +741,10 @@ impl Conversation for CliConversation {
         CliConversation::session_id(self)
     }
 
+    fn session_lost(&self) -> bool {
+        self.lost.load(Ordering::SeqCst)
+    }
+
     fn send(&mut self, text: &str) {
         if self.busy.swap(true, Ordering::SeqCst) {
             let _ = self.tx.send(AgentEvent::Error {
@@ -717,11 +755,12 @@ impl Conversation for CliConversation {
             return;
         }
         self.stop.reset();
-        let (spec, tx, stop, busy, session, verified) =
-            (self.spec.clone(), self.tx.clone(), self.stop.clone(), self.busy.clone(), self.session.clone(), self.verified.clone());
+        self.lost.store(false, Ordering::SeqCst);
+        let (spec, tx, stop, busy) = (self.spec.clone(), self.tx.clone(), self.stop.clone(), self.busy.clone());
+        let state = RunState { session: self.session.clone(), verified: self.verified.clone(), lost: self.lost.clone() };
         let text = text.to_string();
         let spawned = std::thread::Builder::new().name("ai-cli".into()).spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_cli(&spec, &text, &tx, &stop, &session, &verified)));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_cli(&spec, &text, &tx, &stop, &state)));
             if r.is_err() {
                 let _ = tx.send(AgentEvent::Error { message: "The agent runner hit a bug and stopped safely.".into(), remediation: None, log: None });
                 let _ = tx.send(AgentEvent::TurnDone {
@@ -1029,6 +1068,24 @@ mod tests {
         assert!(matches!(&events[2], AgentEvent::ToolFinished { tool, ok: true, evidence_id: Some(id), .. } if tool == "core_session_show" && *id == ev));
         assert!(matches!(&events[3], AgentEvent::Status { .. }));
         assert_eq!((p.input_tokens, p.output_tokens, p.cost_usd), (10, 7, Some(0.12)));
+    }
+
+    /// #446: a project copied from another computer names a session this one doesn't have. The
+    /// result line is Claude Code 2.1's own.
+    #[test]
+    fn a_session_that_is_not_on_this_computer_is_told_apart() {
+        let missing = json!({"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"39b5b312-5678-1234-961c-32112666ffab","total_cost_usd":0,"errors":["No conversation found with session ID: 39b5b312-5678-1234-961c-32112666ffab"]});
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let events = p.line(&missing.to_string());
+        assert!(p.session_missing);
+        let [AgentEvent::Error { message, remediation: Some(fix), .. }] = events.as_slice() else { panic!("{events:?}") };
+        assert!(message.contains("isn't on this computer") && fix.contains("Ask again"), "{message} / {fix}");
+        // Any other failure is still that failure.
+        let other = json!({"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":3,"errors":["Something else"]});
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let events = p.line(&other.to_string());
+        assert!(!p.session_missing);
+        assert!(matches!(events.as_slice(), [AgentEvent::Error { message, .. }] if message.contains("error_during_execution")), "{events:?}");
     }
 
     #[test]

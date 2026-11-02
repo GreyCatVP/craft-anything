@@ -611,7 +611,7 @@ fn an_api_backend_builds_with_the_build_tools() {
     let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10 };
     let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
     let mut api = ApiConversation::start_with(Arc::new(EngineHost(engine)), vec![slot], LoopConfig::default(), enabled).unwrap();
-    let reply = w.turn(&mut ws, &mut api, "Build it.").unwrap();
+    let reply = w.turn(&mut ws, &mut api, "Build it.", None).unwrap();
     assert_eq!(reply.trim(), "Built the notes app.");
     assert_eq!(std::fs::read_to_string(ws.app_dir().join("README.md")).unwrap(), "# Notes\n");
     assert!(ws.manifest.agent_session.is_none(), "an API loop has no session to resume");
@@ -1454,7 +1454,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         self_check: Some((Arc::new(SheetKind), 90.0)),
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
-    let reply = w.turn(&mut ws, &mut builder, "Build it.").unwrap();
+    let reply = w.turn(&mut ws, &mut builder, "Build it.", None).unwrap();
     // The same check the run makes after a turn, as round 0, with what to do next.
     assert!(reply.starts_with("mechanics: failed") && reply.contains("no app/mechanics.json") && reply.contains("check again with rebuild_check"), "{reply}");
     assert!(ws.manifest.checks.is_empty(), "the builder's own check isn't a round");
@@ -1743,4 +1743,111 @@ fn a_project_is_built_by_the_ai_it_was_started_with_while_that_one_is_on() {
     cfg.backends.iter_mut().for_each(|b| b.config.enabled = b.config.name != "Codex");
     assert_eq!(super::project_builder(&cfg, &ws), None);
     assert_eq!(builder_backend(&cfg, super::project_builder(&cfg, &ws)).unwrap().config.name, "Claude Code");
+}
+
+/// #446: a project copied from another computer keeps the id of a Claude Code session that lives
+/// only there. The builder (a stand-in that answers like Claude Code 2.1) can't resume it, so the
+/// turn starts a new session from the brief and what's in app/, and keeps the new id.
+#[cfg(unix)]
+#[test]
+fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    ws.manifest.agent_session = Some("39b5b312-5678-1234-961c-32112666ffab".into());
+    ws.manifest.last_reply = "Built a notes app with a sidebar.".into();
+    ws.save().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let program = bin.path().join("claude");
+    let missing = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"39b5b312-5678-1234-961c-32112666ffab","errors":["No conversation found with session ID: 39b5b312-5678-1234-961c-32112666ffab"]}"#;
+    let fresh = r#"{"type":"system","subtype":"init","session_id":"new-1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Carried on: %s"}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"new-1"}
+"#;
+    // Like Claude Code: `--resume` of a session it doesn't have fails at once; otherwise it starts
+    // one. It keeps what it was sent, so the test can read the new session's first message.
+    let script = format!(
+        "#!/bin/sh\ncase \" $* \" in *\" --resume \"*) cat >/dev/null; echo '{missing}'; echo 'No conversation found' >&2; exit 1;; esac\ncat > \"$0.last\"\nprintf '{fresh}' yes\n"
+    );
+    std::fs::write(&program, script).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let config =
+        crate::BackendConfig { name: "Claude".into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled: true };
+    let options = crate::config::BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+    let spec = crate::cli_agents::CliSpec { resume: ws.manifest.agent_session.clone(), ..crate::cli_agents::CliSpec::new(config, options, false, None) };
+    let mut agent = crate::cli_agents::CliConversation::new(spec);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut w = Worker {
+        wake: Default::default(),
+        engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        tx,
+        stop: CancelToken::default(),
+        preview: Arc::default(),
+        seen: HashSet::new(),
+        inbox: Inbox::new(ws.inbox_dir()),
+        editor: None,
+        notes: Arc::default(),
+        feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        assets: false,
+        decompiled: false,
+        usage: None,
+        self_check: None,
+    };
+    let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply);
+    let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
+    assert_eq!(reply.trim(), "Carried on: yes");
+    let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
+    assert!(
+        sent.starts_with("THE BRIEF") && sent.contains("already under way") && sent.contains("app/") && sent.contains("notes app with a sidebar"),
+        "{sent}"
+    );
+    assert_eq!(ws.manifest.agent_session.as_deref(), Some("new-1"), "the new session is the one kept");
+    assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("new-1"));
+    let events: Vec<RunEvent> = rx.try_iter().collect();
+    assert!(!events.iter().any(|e| matches!(e, RunEvent::Agent(AgentEvent::Error { .. }))), "nothing failed, as far as the person can see: {events:?}");
+    assert!(
+        events.iter().any(|e| matches!(e, RunEvent::Step { text, .. } if text.contains("isn't on this computer"))),
+        "but they're told why it starts afresh"
+    );
+}
+
+/// Without anything to start a new session from, the run stops and says why, and the id it
+/// couldn't find is forgotten so the next run starts afresh.
+#[cfg(unix)]
+#[test]
+fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    ws.manifest.agent_session = Some("gone".into());
+    let bin = tempfile::tempdir().unwrap();
+    let program = bin.path().join("claude");
+    let missing = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"gone","errors":["No conversation found with session ID: gone"]}"#;
+    std::fs::write(&program, format!("#!/bin/sh\ncat >/dev/null\necho '{missing}'\nexit 1\n")).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let config =
+        crate::BackendConfig { name: "Claude".into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled: true };
+    let options = crate::config::BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+    let spec = crate::cli_agents::CliSpec { resume: Some("gone".into()), ..crate::cli_agents::CliSpec::new(config, options, false, None) };
+    let mut agent = crate::cli_agents::CliConversation::new(spec);
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut w = Worker {
+        wake: Default::default(),
+        engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        tx,
+        stop: CancelToken::default(),
+        preview: Arc::default(),
+        seen: HashSet::new(),
+        inbox: Inbox::new(ws.inbox_dir()),
+        editor: None,
+        notes: Arc::default(),
+        feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        assets: false,
+        decompiled: false,
+        usage: None,
+        self_check: None,
+    };
+    let e = w.turn(&mut ws, &mut agent, "Carry on.", None).unwrap_err();
+    assert!(e.message.contains("isn't on this computer"), "{e:?}");
+    assert!(ws.manifest.agent_session.is_none());
 }

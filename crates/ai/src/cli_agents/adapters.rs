@@ -193,6 +193,18 @@ fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
     a
 }
 
+/// How Claude Code's result names a `--resume` session it doesn't have (2.1: `errors`, with no
+/// turn taken). Its sessions are kept per computer and per folder, so a project copied elsewhere
+/// has an id it can't find.
+const NO_SUCH_SESSION: &str = "No conversation found with session ID";
+
+/// A failed result that only says the session to resume isn't there.
+fn no_such_session(v: &Value) -> bool {
+    let named = |e: &Value| e.as_str().is_some_and(|e| e.contains(NO_SUCH_SESSION));
+    let turns = v.get("num_turns").and_then(Value::as_u64).unwrap_or(0);
+    turns == 0 && (v.get("errors").and_then(Value::as_array).is_some_and(|a| a.iter().any(named)) || v.get("result").is_some_and(named))
+}
+
 /// Claude Code in headless mode (flags checked against `claude --help`).
 pub struct ClaudeCode;
 
@@ -284,7 +296,17 @@ impl AgentAdapter for ClaudeCode {
                         .saturating_add(u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0));
                     p.output_tokens = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
                 }
-                if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+                if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) && no_such_session(v) {
+                    p.session_missing = true;
+                    out.push(AgentEvent::Error {
+                        message: "Claude Code's earlier conversation about this project isn't on this computer.".into(),
+                        remediation: Some(
+                            "It was started on another computer or in another folder. Ask again: a new conversation starts from what the project already has."
+                                .into(),
+                        ),
+                        log: None,
+                    });
+                } else if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
                     let (message, remediation) = claude_code_failure(&why);
                     out.push(AgentEvent::Error { message, remediation, log: None });

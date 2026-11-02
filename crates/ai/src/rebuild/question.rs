@@ -71,19 +71,22 @@ pub fn ask(
     let cfg = crate::AiConfig::from_settings(settings);
     let entry = builder_backend(&cfg, project_builder(&cfg, ws))?;
     let deep = settings.deep_mode;
-    let (mut conv, from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
+    let cli = |resume: Option<String>| -> Box<dyn Conversation> {
+        let spec = CliSpec {
+            question: true,
+            deep,
+            logs: logs.clone(),
+            resume,
+            preamble: Some(PREAMBLE.into()),
+            ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
+        };
+        Box::new(CliConversation::new(spec))
+    };
+    let (mut conv, mut from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
         BackendKind::AgentCli => {
             let session = ws.manifest.agent_session.clone();
             let from = if session.is_some() { AnsweredFrom::BuildersSession } else { AnsweredFrom::TheFiles };
-            let spec = CliSpec {
-                question: true,
-                deep,
-                logs,
-                resume: session,
-                preamble: Some(PREAMBLE.into()),
-                ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
-            };
-            (Box::new(CliConversation::new(spec)), from)
+            (cli(session), from)
         }
         _ => {
             // An engine of its own, pointed at this project, so a build running meanwhile keeps its.
@@ -97,12 +100,21 @@ pub fn ask(
             (Box::new(conv), AnsweredFrom::TheFiles)
         }
     };
-    let prompt = match from {
+    let prompt = |from| match from {
         AnsweredFrom::BuildersSession => format!("{}\n\nQuestion: {question}", context(ws)),
         AnsweredFrom::TheFiles => format!("{PREAMBLE}{}\n\nQuestion: {question}", context(ws)),
     };
-    conv.send(&prompt);
-    let (answer, cost_usd) = collect(conv.as_mut(), cancel, WAIT)?;
+    conv.send(&prompt(from));
+    let mut answered = collect(conv.as_mut(), cancel, WAIT);
+    // The builder's session isn't on this computer (the project was copied here): the question
+    // is answered from the files instead.
+    if answered.is_err() && from == AnsweredFrom::BuildersSession && conv.session_lost() {
+        from = AnsweredFrom::TheFiles;
+        conv = cli(None);
+        conv.send(&prompt(from));
+        answered = collect(conv.as_mut(), cancel, WAIT);
+    }
+    let (answer, cost_usd) = answered?;
     // A copy of a session reports the whole session's running cost, not this question's (a
     // live run said $22.67 for a few cents of cache reads): say nothing rather than that.
     let cost_usd = cost_usd.filter(|_| from != AnsweredFrom::BuildersSession);

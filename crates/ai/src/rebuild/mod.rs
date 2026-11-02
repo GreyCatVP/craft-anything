@@ -644,6 +644,10 @@ impl Worker {
         if first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() {
             prompt.push_str(ORIGINALS_READY);
         }
+        // A saved session may not be on this computer (the project was copied here): then a new
+        // one starts from the brief and what the project already has.
+        let mut fresh =
+            (!api_loop && ws.manifest.agent_session.is_some()).then(|| resumed_elsewhere(&brief(kind, &cx, opts.message.as_deref()), &ws.manifest.last_reply));
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
@@ -660,7 +664,7 @@ impl Worker {
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
                 ws.manifest.awaiting_check = false;
-                let reply = self.turn(ws, agent.as_mut(), &prompt)?;
+                let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take())?;
                 if !reply.trim().is_empty() {
                     ws.manifest.last_reply = reply.trim().to_string();
                 }
@@ -777,16 +781,32 @@ impl Worker {
         })
     }
 
-    fn turn(&mut self, ws: &mut Workspace, agent: &mut dyn Conversation, prompt: &str) -> Result<String, ToolError> {
+    /// `fresh`: what to send instead when the agent's saved session turns out not to be on this
+    /// computer.
+    fn turn(&mut self, ws: &mut Workspace, agent: &mut dyn Conversation, prompt: &str, mut fresh: Option<String>) -> Result<String, ToolError> {
         let mut prompt = prompt.to_string();
         let mut tries = 0u64;
         loop {
             let result = self.converse(ws, agent, &prompt);
-            if let Some(id) = agent.session_id() {
+            let lost = result.is_err() && agent.session_lost();
+            if lost {
+                // The id is for a session this computer doesn't have: never ask for it again.
+                ws.manifest.agent_session = None;
+                ws.save()?;
+            } else if let Some(id) = agent.session_id() {
                 ws.manifest.agent_session = Some(id);
                 ws.save()?;
             }
             match result {
+                Err(_) if lost && let Some(f) = fresh.take() => {
+                    self.step(
+                        ws,
+                        Step::Build,
+                        Status::Building,
+                        "The builder's earlier conversation isn't on this computer. Starting a new one from what the project already has…",
+                    )?;
+                    prompt = f;
+                }
                 Err(e) if e.code != ErrorCode::Cancelled && tries < 3 && agent.session_id().is_some() && worth_retrying(&e.message) => {
                     tries += 1;
                     let why = e.message.chars().take(160).collect::<String>();
@@ -848,7 +868,11 @@ impl Worker {
                     self.record_usage(Some((*input_tokens, *output_tokens, *cost_usd, *cost_is_estimate)));
                 }
                 let done = matches!(e, AgentEvent::TurnDone { .. });
-                self.emit(RunEvent::Agent(e));
+                // A saved session that isn't on this computer isn't the build failing: the turn
+                // starts a new one (or, with nothing to start it from, the run's error says why).
+                if !(matches!(e, AgentEvent::Error { .. }) && agent.session_lost()) {
+                    self.emit(RunEvent::Agent(e));
+                }
                 if done {
                     self.stop.check()?;
                     // An agent-level error (sign-in, crash, limits) ends the run: checking a
