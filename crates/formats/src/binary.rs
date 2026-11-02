@@ -637,7 +637,9 @@ fn parse_object(data: &[u8], slice_offset: u64) -> Result<Binary, FormatError> {
         Format::MachO => crate::macho::enrich(data, &mut b),
         _ => {}
     }
-    let local_syms = b.symbols.iter().filter(|s| !s.dynamic && s.defined).count();
+    // Mach-O strip keeps the linker's `__mh_*_header`; it is not an internal name.
+    let linker_header = |s: &Symbol| format == Format::MachO && s.name.starts_with("__mh_") && s.name.ends_with("_header");
+    let local_syms = b.symbols.iter().filter(|s| !s.dynamic && s.defined && !linker_header(s)).count();
     b.mitigations.stripped = local_syms == 0;
     // Import slots also name the imports.
     let mut slot_of: BTreeMap<&str, u64> = BTreeMap::new();

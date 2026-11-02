@@ -585,6 +585,47 @@ mod tests {
     use super::*;
     use craft_anything_testkit as tk;
 
+    fn executable_with_header_symbol(helper: Option<u8>) -> Vec<u8> {
+        let mut symtab = vec![0u8; 24];
+        symtab[0..4].copy_from_slice(&2u32.to_le_bytes());
+        symtab[4..8].copy_from_slice(&24u32.to_le_bytes());
+        let mut m = tk::apple::macho_min(tk::apple::CPU_ARM64, 2, &[symtab], &[("__text", &[0; 4])]);
+        let symoff = m.len() as u32;
+        let names = b"\0__mh_execute_header\0_internal_helper\0";
+        let count = 1 + u32::from(helper.is_some());
+        for (name, kind, desc) in [(1u32, 0x0fu8, 0x10u16), (21, helper.unwrap_or(0x0e), 0)].into_iter().take(count as usize) {
+            m.extend_from_slice(&name.to_le_bytes());
+            m.extend_from_slice(&[kind, 1]);
+            m.extend_from_slice(&desc.to_le_bytes());
+            m.extend_from_slice(&0x1_0000_0000u64.to_le_bytes());
+        }
+        let stroff = m.len() as u32;
+        m.extend_from_slice(names);
+        let cmd = 32 + 72 + 80;
+        for (off, value) in [(8, symoff), (12, count), (16, stroff), (20, names.len() as u32)] {
+            m[cmd + off..cmd + off + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        m.resize(0x4000, 0);
+        m
+    }
+
+    #[test]
+    fn an_executable_with_only_its_linker_header_is_stripped() {
+        let control = crate::parse_binary(&executable_with_header_symbol(Some(0x0e))).unwrap();
+        assert!(control.symbols.iter().any(|s| s.name == "_internal_helper" && !s.global && s.defined));
+        assert!(!control.mitigations.stripped);
+        // An unstripped executable whose own functions are all external keeps their names.
+        let global = crate::parse_binary(&executable_with_header_symbol(Some(0x0f))).unwrap();
+        assert!(global.symbols.iter().any(|s| s.name == "_internal_helper" && s.global && s.defined));
+        assert!(!global.mitigations.stripped);
+        let b = crate::parse_binary(&executable_with_header_symbol(None)).unwrap();
+        assert_eq!(b.symbols.len(), 1);
+        let s = &b.symbols[0];
+        assert_eq!(s.name, "__mh_execute_header");
+        assert!(s.global && s.defined && !s.dynamic);
+        assert!(b.mitigations.stripped);
+    }
+
     #[test]
     fn thin_macho_facts() {
         let m = tk::macho64();
