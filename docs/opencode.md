@@ -14,7 +14,7 @@ and enable ACP, or use another AI. Native MCP integration remains pending in roa
    Remote suggestions come from SSH aliases; they do not confirm that OpenCode is installed.
 2. If needed, choose the local program, or enter its full path in **Remote program**.
 3. Under the backend, click **Change…** to load the models from that OpenCode installation.
-4. Choose a model and a **Thinking depth**, then **Apply**.
+4. Choose a model and, if available, a **Thinking depth**, then **Apply**.
 
 The model picker lists only enabled chat models returned by OpenCode. Provider/model ids
 distinguish similarly named models and preserve custom aliases. The five thinking depths are
