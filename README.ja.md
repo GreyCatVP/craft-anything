@@ -240,7 +240,29 @@ GitHub の [最新リリース](https://github.com/storytold/craft-anything/rele
 | ビルド | ファイル | 備考 |
 |---|---|---|
 | アプリ、ユニバーサル (Apple silicon + Intel) | `craft-anything-<ver>-macos-universal.dmg` | 署名・公証済み |
-| コマンドラインツール、ユニバーサル | `craft-anything-cli-<ver>-macos-universal.zip` | 署名・公証済み |
+| コマンドラインツール、ユニバーサル | `craft-anything-cli-<ver>-macos-universal.zip` | 署名・公証済み。macOS がブロックする場合は下記を参照 |
+
+0.2.0 以降のバージョンではコマンドラインツールがアプリに同梱されるため、ビルドに別の zip は
+不要です。必要なのは、アプリなしでコマンドラインだけを使う場合です。
+
+ブラウザから zip をダウンロードすると「Apple could not verify craft-anything-cli」で止まることが
+あります(単体のプログラムは公証を自分に添付できないため、macOS がオンラインで確認します)。
+ターミナルからのダウンロードはこの検査を受けないので、代わりに次を使ってください:
+
+```sh
+ver=0.2.0   # change this to the version you want
+curl -fLO "https://github.com/storytold/craft-anything/releases/download/v$ver/craft-anything-cli-$ver-macos-universal.zip"
+ditto -x -k "craft-anything-cli-$ver-macos-universal.zip" .
+mkdir -p ~/.local/bin
+mv "craft-anything-cli-$ver-macos-universal/craft-anything-cli" ~/.local/bin/
+~/.local/bin/craft-anything-cli --version
+```
+
+`craft-anything-cli` だけで実行したい場合は、`~/.local/bin` を `PATH` に追加してください。
+
+すでにブロックされたコピーがある場合は、Done(「ゴミ箱に入れる」ではなく)を押してから
+`xattr -d com.apple.quarantine <craft-anything-cli のパス>` を実行するか、システム設定 →
+プライバシーとセキュリティ → このまま開く で許可してください。
 
 ### Linux
 
@@ -290,6 +312,27 @@ RISC-V (riscv64): `craft-anything-<ver>-linux-riscv64.tar.gz`、tarball のみ�
 </p>
 
 ---
+
+## The Craft App Suite
+
+| | アプリ | 用途 | コード | 詳細 |
+|:-:|---|---|---|---|
+| <img src="https://raw.githubusercontent.com/storytold/photocraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.photocraft.png" alt="" width="32" height="32"> | **PhotoCraft** | 画像編集:レイヤー、マスク、文字、本物の PSD ファイル | [GitHub](https://github.com/storytold/photocraft) | [ウェブサイト](https://getartcraft.com/apps/photocraft) |
+| <img src="https://raw.githubusercontent.com/storytold/vectorcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.vectorcraft.png" alt="" width="32" height="32"> | **VectorCraft** | ベクターイラスト | [GitHub](https://github.com/storytold/vectorcraft) | [ウェブサイト](https://getartcraft.com/apps/vectorcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/filmcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.filmcraft.png" alt="" width="32" height="32"> | **FilmCraft** | 動画編集、カラー、サウンド | [GitHub](https://github.com/storytold/filmcraft) | [ウェブサイト](https://getartcraft.com/apps/filmcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/lightcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.lightcraft.png" alt="" width="32" height="32"> | **LightCraft** | 写真ライブラリと RAW 現像 | [GitHub](https://github.com/storytold/lightcraft) | [ウェブサイト](https://getartcraft.com/apps/lightcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/pdfcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.pdfcraft.png" alt="" width="32" height="32"> | **PdfCraft** | PDF の閲覧、整理、保護 | [GitHub](https://github.com/storytold/pdfcraft) | [ウェブサイト](https://getartcraft.com/apps/pdfcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/effectcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.effectcraft.png" alt="" width="32" height="32"> | **EffectCraft** | モーショングラフィックスと視覚効果 | [GitHub](https://github.com/storytold/effectcraft) | [ウェブサイト](https://getartcraft.com/apps/effectcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/designcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.designcraft.png" alt="" width="32" height="32"> | **DesignCraft** | ページレイアウトと出版 | [GitHub](https://github.com/storytold/designcraft) | [ウェブサイト](https://getartcraft.com/apps/designcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/figcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.figcraft.png" alt="" width="32" height="32"> | **FigCraft** | インターフェースデザインとプロトタイピング | [GitHub](https://github.com/storytold/figcraft) | [ウェブサイト](https://getartcraft.com/apps/figcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/wordcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.wordcraft.png" alt="" width="32" height="32"> | **WordCraft** | ワープロと文書 | [GitHub](https://github.com/storytold/wordcraft) | [ウェブサイト](https://getartcraft.com/apps/wordcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/soundcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.soundcraft.png" alt="" width="32" height="32"> | **SoundCraft** | 音声の録音と編集 | [GitHub](https://github.com/storytold/soundcraft) | [ウェブサイト](https://getartcraft.com/apps/soundcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/deckcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.deckcraft.png" alt="" width="32" height="32"> | **DeckCraft** | プレゼンテーションとスライド | [GitHub](https://github.com/storytold/deckcraft) | [ウェブサイト](https://getartcraft.com/apps/deckcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/cadcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.cadcraft.png" alt="" width="32" height="32"> | **CADCraft** | コンピューター支援設計 | [GitHub](https://github.com/storytold/cadcraft) | [ウェブサイト](https://getartcraft.com/apps/cadcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/gridcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.gridcraft.png" alt="" width="32" height="32"> | **GridCraft** | 表計算とデータ | [GitHub](https://github.com/storytold/gridcraft) | [ウェブサイト](https://getartcraft.com/apps/gridcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/texturecraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.texturecraft.png" alt="" width="32" height="32"> | **TextureCraft** | 3D テクスチャ描画 | [GitHub](https://github.com/storytold/texturecraft) | [ウェブサイト](https://getartcraft.com/apps/texturecraft) |
+| <img src="https://raw.githubusercontent.com/storytold/craft-anything/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.craft-anything.png" alt="" width="32" height="32"> | **Craft Anything** | あらゆるソフトの仕組みを知り、自分の版を作る | [GitHub](https://github.com/storytold/craft-anything) | [ウェブサイト](https://getartcraft.com/apps/craft-anything) |
+| <img src="https://raw.githubusercontent.com/tangency-labs/solidcraft/main/assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png" alt="" width="32" height="32"> | **SolidCraft** | Tangency Labs によるパラメトリック 3D CAD(コミュニティ製アプリ) | [GitHub](https://github.com/tangency-labs/solidcraft) | |
 
 ## ライセンスとクレジット
 
