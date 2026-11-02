@@ -503,6 +503,14 @@ fn non_native_triage(t: &Target) -> (String, Vec<&'static str>, Vec<(&'static st
             (format!("{n} is a WebAssembly module."), vec!["core", "formats"], vec![("formats_wasm_module_show", "exports, imports and sections")])
         }
         TargetKind::Jar => (format!("{n} is a Java archive."), vec!["core", "artifacts"], vec![("core_archive_show", "list what's inside")]),
+        TargetKind::JavaClass => (
+            format!("{n} is compiled Java code (one class)."),
+            vec!["core", "java"],
+            vec![
+                ("java_class_show", "its fields and methods, and a pseudo-Java outline with decompile=true"),
+                ("java_method_show", "a method's bytecode and pseudo-Java"),
+            ],
+        ),
         TargetKind::Zip => (format!("{n} is a ZIP archive."), vec!["core"], vec![("core_archive_show", "list what's inside")]),
         TargetKind::Directory => (
             format!("{n} is a folder (an app bundle, an unpacked app or a project)."),
@@ -931,5 +939,22 @@ mod tests {
         assert!(r["result"]["counts"]["sections"].as_u64().unwrap() > 10);
         let r = call(&e, "native_function_study", json!({"function": "entry"}));
         assert!(r["result"]["pseudocode"].as_str().is_some());
+    }
+
+    /// #348: a bare .class was triaged as a format we don't recognise, with no Java tools.
+    #[test]
+    fn triage_points_a_java_class_at_the_java_tools() {
+        let e = engine_with("Hello.class", &tk::java::hello_class());
+        let r = call(&e, "core_target_triage", json!({}));
+        assert_eq!(r["result"]["kind"], "java-class");
+        assert!(!r["summary"].as_str().unwrap().contains("recognise"), "{r}");
+        assert!(r["result"]["recommended_toolsets"].as_array().unwrap().iter().any(|t| t == "java"), "{r}");
+        let next = r["result"]["next_steps"].as_array().unwrap();
+        assert!(next.iter().any(|s| s["tool"] == "java_class_show"), "{r}");
+        for step in next {
+            let tool = step["tool"].as_str().unwrap();
+            assert!(e.registry().get(tool).is_some(), "{tool} is a tool");
+        }
+        call(&e, "java_class_show", json!({}));
     }
 }
