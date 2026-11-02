@@ -198,6 +198,8 @@ or download into them.
       and projects in a temp folder; `settings_set` and plugins follow `Session::config_dir()`
 - [x] Every test uses it (41 files); `cargo xtask layers` fails on `Session::default()` anywhere
 - [ ] Main maintainers: protect `main` (PRs required, squash only)
+- [ ] macOS engine test fixtures: use canonical temporary paths for the approval test, and stop
+      assuming that `/bin/ls` is a Linux executable in `real_binary_end_to_end_if_present`.
 
 ### R0.6 Tool naming
 Owner: maintainers · Status: done
@@ -763,6 +765,9 @@ Deep mode is its own switch, not tied to Ghidra.
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
 Gaps found while using the app for real projects.
+- [x] Keep builds and analysis responsive: cull offscreen messages, finish stale streaming indicators,
+      bound UI event batches, avoid copying large results, and animate smoothly while focused
+      — claimed: Codex, branch bugfix/r2.9-ui-responsiveness
 - [x] Up at the start of the prompt box takes back the last note still waiting for the builder,
       to edit it (as the x beside it does)
 - [x] With nothing waiting, Up and Down in the prompt box cycle through previous prompts, as in a
@@ -816,7 +821,7 @@ Gaps found while using the app for real projects.
 - [x] Making a project and copying pictures (of the original, or attached to a message) run on
       a worker, not on the click
 - [x] A build repaints the window when it has news instead of a 10-a-second timer; animations
-      run at 15 frames a second, and once a second while the window is in the background
+      request a frame every 16 ms while visible and focused, and once a second in the background
 - [x] The feed isn't copied every frame and a paragraph is one label, not one per word;
       screenshot thumbnails are scaled down and dropped when another project opens
 - [x] The "Working" row's clock counts from the build's start instead of restarting whenever

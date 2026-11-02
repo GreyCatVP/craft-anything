@@ -234,6 +234,39 @@ mod tests {
     }
 
     #[test]
+    fn event_batches_keep_order_and_drain_a_finished_run_before_starting_the_next() {
+        let d = tempfile::tempdir().unwrap();
+        let a = Workspace::create(d.path(), "A", "A game", TargetRef::None).unwrap();
+        let b = Workspace::create(d.path(), "B", "A game", TargetRef::None).unwrap();
+        let fake = StandIns::new();
+        let hub = hub();
+        let mut set = RunSet::new(1).with_starter(fake.starter());
+        set.start(&hub, a.clone(), RunOptions::default()).unwrap();
+        set.start(&hub, b.clone(), RunOptions::default()).unwrap();
+        for i in 0..(crate::EVENT_BATCH * 2) {
+            fake.send(&a.root, RunEvent::Agent(AgentEvent::TextDelta { text: i.to_string() }));
+        }
+        fake.finish(&a.root);
+        let first = set.poll(&hub);
+        assert_eq!(first.len(), crate::EVENT_BATCH);
+        assert_eq!(fake.started().as_slice(), std::slice::from_ref(&a.root));
+        let second = set.poll(&hub);
+        assert_eq!(second.len(), crate::EVENT_BATCH);
+        let text = |events: &[(PathBuf, RunEvent)]| {
+            events
+                .iter()
+                .filter_map(|(_, e)| match e {
+                    RunEvent::Agent(AgentEvent::TextDelta { text }) => Some(text.parse::<usize>().unwrap()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!([text(&first), text(&second)].concat(), (0..crate::EVENT_BATCH * 2).collect::<Vec<_>>());
+        assert!(matches!(set.poll(&hub).as_slice(), [(_, RunEvent::Finished { .. })]));
+        assert_eq!(fake.started(), [a.root, b.root]);
+    }
+
+    #[test]
     fn runs_past_the_limit_wait_and_start_in_order() {
         let d = tempfile::tempdir().unwrap();
         let ws = |n: &str| Workspace::create(d.path(), n, "A game", TargetRef::None).unwrap();

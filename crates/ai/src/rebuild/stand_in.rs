@@ -57,6 +57,7 @@ impl StandIns {
             Ok(RebuildRun {
                 activity,
                 rx,
+                pending_events: false,
                 stop: CancelToken::default(),
                 inbox: Inbox::new(ws.inbox_dir()),
                 running,

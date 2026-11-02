@@ -9,8 +9,11 @@ use super::*;
 /// Fold one workflow event into the feed.
 pub fn apply(feed: &mut Vec<FeedItem>, e: &RunEvent) {
     let end_stream = |feed: &mut Vec<FeedItem>| {
-        if let Some(FeedItem::Agent { streaming, .. }) = feed.last_mut() {
-            *streaming = false;
+        // Plans and questions may follow a reply, including replies saved by an older run.
+        for item in feed.iter_mut() {
+            if let FeedItem::Agent { streaming, .. } = item {
+                *streaming = false;
+            }
         }
     };
     match e {
@@ -25,6 +28,7 @@ pub fn apply(feed: &mut Vec<FeedItem>, e: &RunEvent) {
         // The builder's checklist: one list, updated in place.
         // Claude Code's TodoWrite, or our build_checklist (same shape) for API builders.
         RunEvent::Agent(AgentEvent::ToolStarted { tool, input, .. }) if tool == "TodoWrite" || tool == "build_checklist" => {
+            end_stream(feed);
             if let Some(steps) = plan_from(input) {
                 match feed.iter_mut().find_map(|i| if let FeedItem::Plan(p) = i { Some(p) } else { None }) {
                     Some(p) => *p = steps,
@@ -49,10 +53,13 @@ pub fn apply(feed: &mut Vec<FeedItem>, e: &RunEvent) {
                 }
             }
         }
-        RunEvent::Agent(AgentEvent::Status { text }) => match feed.last_mut() {
-            Some(FeedItem::Work { notes, .. }) => notes.push(text.clone()),
-            _ => feed.push(FeedItem::Work { tools: Vec::new(), notes: vec![text.clone()] }),
-        },
+        RunEvent::Agent(AgentEvent::Status { text }) => {
+            end_stream(feed);
+            match feed.last_mut() {
+                Some(FeedItem::Work { notes, .. }) => notes.push(text.clone()),
+                _ => feed.push(FeedItem::Work { tools: Vec::new(), notes: vec![text.clone()] }),
+            }
+        }
         // For the activity log; it doesn't interrupt what the builder is saying.
         RunEvent::Agent(AgentEvent::Output { .. }) => {}
         RunEvent::Agent(AgentEvent::Error { message, remediation, log }) => {
@@ -64,8 +71,14 @@ pub fn apply(feed: &mut Vec<FeedItem>, e: &RunEvent) {
             end_stream(feed);
             feed.push(FeedItem::User(shown.clone()));
         }
-        RunEvent::Ask(r) => feed.push(FeedItem::Ask { request: r.clone(), answer: None }),
-        RunEvent::Checked(c) => feed.push(FeedItem::Check(c.clone())),
+        RunEvent::Ask(r) => {
+            end_stream(feed);
+            feed.push(FeedItem::Ask { request: r.clone(), answer: None });
+        }
+        RunEvent::Checked(c) => {
+            end_stream(feed);
+            feed.push(FeedItem::Check(c.clone()));
+        }
         RunEvent::Preview(_) => {}
         RunEvent::Finished { ok, message, paused } => {
             end_stream(feed);
@@ -163,6 +176,37 @@ impl FeedLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turn_finishes_replies_before_status_plan_and_question_items() {
+        let question = Request {
+            id: "question".into(),
+            kind: craft_anything_engine::inbox::RequestKind::Question,
+            title: "Which colour?".into(),
+            detail: String::new(),
+            choices: vec![],
+            allow_text: true,
+            action: None,
+            created_ms: 0,
+        };
+        let interruptions = [
+            RunEvent::Agent(AgentEvent::Status { text: "Checking".into() }),
+            RunEvent::Agent(AgentEvent::ToolStarted {
+                call_id: "plan".into(),
+                tool: "TodoWrite".into(),
+                input: json!({"todos": [{"content": "Check", "status": "in_progress"}]}),
+            }),
+            RunEvent::Ask(question),
+        ];
+        for interruption in interruptions {
+            let mut feed = Vec::new();
+            apply(&mut feed, &RunEvent::Agent(AgentEvent::TextDelta { text: "First reply".into() }));
+            apply(&mut feed, &interruption);
+            apply(&mut feed, &RunEvent::Agent(AgentEvent::TextDelta { text: "Second reply".into() }));
+            apply(&mut feed, &RunEvent::Finished { ok: true, message: String::new(), paused: false });
+            assert!(!feed.iter().any(|i| matches!(i, FeedItem::Agent { streaming: true, .. })), "{feed:?}");
+        }
+    }
 
     #[test]
     fn every_event_counts_as_activity() {

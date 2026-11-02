@@ -96,6 +96,22 @@ pub fn segments(text: &str) -> Vec<(String, Option<&'static str>)> {
     out
 }
 
+type Segments = std::sync::Arc<[(String, Option<&'static str>)]>;
+
+#[derive(Default)]
+struct SegmentComputer;
+
+impl egui::cache::ComputerMut<&str, Segments> for SegmentComputer {
+    fn compute(&mut self, text: &str) -> Segments {
+        segments(text).into()
+    }
+}
+
+/// Reuse unchanged visible prose; egui drops entries no longer used by the next frame.
+pub(crate) fn cached_segments(ctx: &egui::Context, text: &str) -> Segments {
+    ctx.memory_mut(|m| m.caches.cache::<egui::cache::FrameCache<Segments, SegmentComputer>>().get(text).clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

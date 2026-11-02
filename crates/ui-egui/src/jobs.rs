@@ -7,6 +7,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, PoisonError};
 use std::time::Instant;
 
+const FINISHED_BATCH: usize = 32;
+
 /// What a worker hands back. `T` is the app's result type.
 pub struct Finished<T> {
     pub job: u64,
@@ -124,15 +126,20 @@ impl<T: Send + 'static> Jobs<T> {
         id
     }
 
-    /// Drain finished jobs (non-blocking).
+    /// Drain a bounded batch of finished jobs; leave time for input and painting.
     pub fn poll(&mut self) -> Vec<Finished<T>> {
         let mut out = Vec::new();
-        while let Ok(f) = self.rx.try_recv() {
+        for f in self.rx.try_iter().take(FINISHED_BATCH) {
             if let Some(j) = self.list.iter_mut().find(|j| j.id == f.job) {
                 j.outcome = Some(f.result.as_ref().map(|_| ()).map_err(Clone::clone));
                 j.finished_at = Some(Instant::now());
             }
             out.push(f);
+        }
+        if out.len() == FINISHED_BATCH
+            && let Some(ctx) = &self.repaint
+        {
+            ctx.request_repaint();
         }
         // Keep the last few finished jobs for the panel; drop older ones.
         let finished = self.list.iter().filter(|j| j.outcome.is_some()).count();
@@ -174,6 +181,21 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    #[test]
+    fn completion_bursts_are_delivered_in_order_over_multiple_polls() {
+        let mut jobs = Jobs::<u64>::default();
+        for i in 0..(FINISHED_BATCH as u64 * 2 + 1) {
+            jobs.tx.send(Finished { job: i, result: Ok(i) }).unwrap();
+        }
+        let first = jobs.poll();
+        let second = jobs.poll();
+        let third = jobs.poll();
+        assert_eq!((first.len(), second.len(), third.len()), (FINISHED_BATCH, FINISHED_BATCH, 1));
+        assert_eq!(
+            first.into_iter().chain(second).chain(third).map(|f| f.result.unwrap()).collect::<Vec<_>>(),
+            (0..FINISHED_BATCH as u64 * 2 + 1).collect::<Vec<_>>()
+        );
+    }
     fn wait<T: Send>(jobs: &mut Jobs<T>) -> Vec<Finished<T>> {
         for _ in 0..500 {
             let got = jobs.poll();

@@ -24,6 +24,7 @@ pub mod jobs;
 pub mod just_ask;
 pub mod make;
 pub mod manage;
+mod message;
 pub mod palette;
 pub mod pins;
 pub mod project;
@@ -280,7 +281,7 @@ pub struct SessionView {
     pub active: Option<String>,
     pub clean_room: bool,
     /// Newest first, capped.
-    pub ledger: Vec<Evidence>,
+    pub ledger: Vec<Arc<Evidence>>,
     pub ledger_len: usize,
     pub unknowns: Vec<Unknown>,
     pub project: Option<String>,
@@ -707,7 +708,7 @@ impl CraftApp {
             active: s.active_id().cloned(),
             clean_room: s.clean_room(),
             ledger: if self.view_dirty || self.view.ledger_len != s.ledger_len() {
-                s.ledger().take(LEDGER_VIEW_CAP).cloned().collect()
+                s.shared_ledger().take(LEDGER_VIEW_CAP).cloned().collect()
             } else {
                 std::mem::take(&mut self.view.ledger)
             },
@@ -729,7 +730,7 @@ impl CraftApp {
             if let ChatItem::Tool { evidence_id: Some(id), evidence: ev @ None, .. } = item
                 && let Some(e) = self.view.ledger.iter().find(|e| &e.id == id)
             {
-                *ev = Some(Box::new(e.clone()));
+                *ev = Some(e.clone());
             }
         }
     }
@@ -1131,6 +1132,11 @@ impl CraftApp {
     fn poll_conversation(&mut self) {
         let Some(c) = self.conversation.as_mut() else { return };
         let events = c.poll();
+        if events.len() >= craft_anything_ai::EVENT_BATCH
+            && let Some(ctx) = self.jobs.repaint_ctx()
+        {
+            ctx.request_repaint();
+        }
         if events.is_empty() {
             return;
         }
@@ -1382,12 +1388,12 @@ impl CraftApp {
 
     fn tool_done(&mut self, tool: String, params: Value, route: Route, result: Result<ToolOutput, ToolError>) {
         self.view_dirty = true;
-        let fill = match &result {
-            Ok(ToolOutput::Evidence(e)) => Fill::Ready(e.clone()),
-            Ok(ToolOutput::Value(v)) => Fill::Value(v.clone()),
-            Err(e) if e.code == ErrorCode::ConsentRequired => Fill::Blocked(e.message.clone(), e.remediation.clone()),
-            Err(e) if clean_room::is_refusal(e) => Fill::DeepNeeded,
-            Err(e) => Fill::Error(e.message.clone(), e.remediation.clone()),
+        let fill = |result: Result<ToolOutput, ToolError>| match result {
+            Ok(ToolOutput::Evidence(e)) => Fill::Ready(e),
+            Ok(ToolOutput::Value(v)) => Fill::Value(v),
+            Err(e) if e.code == ErrorCode::ConsentRequired => Fill::Blocked(e.message, e.remediation),
+            Err(e) if clean_room::is_refusal(&e) => Fill::DeepNeeded,
+            Err(e) => Fill::Error(e.message, e.remediation),
         };
         match &result {
             Ok(_) => self.log(false, format!("{tool} finished")),
@@ -1395,12 +1401,13 @@ impl CraftApp {
         }
         match route {
             Route::Rail(k) => {
-                self.state.lists.insert(k, fill);
+                self.state.lists.insert(k, fill(result));
             }
             Route::View(t) => {
-                self.state.views.insert(t, fill);
+                self.state.views.insert(t, fill(result));
             }
             Route::Palette => {
+                let fill = fill(result);
                 if let Fill::Ready(e) = &fill {
                     self.state.selected_evidence = Some(e.id.clone());
                 }
@@ -1747,5 +1754,20 @@ pub fn kind_icon(k: TargetKind) -> &'static str {
         TargetKind::Evm => "zap",
         TargetKind::Sqlite => "database",
         TargetKind::Unknown => "file",
+    }
+}
+
+#[cfg(test)]
+mod responsiveness_tests {
+    use super::*;
+
+    #[test]
+    fn a_completed_tool_moves_its_evidence_into_the_view_without_copying_it() {
+        let mut app = demo::app(demo::engine(Mode::Beginner, true));
+        let evidence = Box::new(demo::percent_evidence().unwrap());
+        let original = std::ptr::from_ref(evidence.as_ref());
+        app.tool_done("native_function_study".into(), Value::Null, Route::View(CenterTab::Result), Ok(ToolOutput::Evidence(evidence)));
+        let Some(Fill::Ready(evidence)) = app.state.views.get(&CenterTab::Result) else { panic!("the result is displayed") };
+        assert!(std::ptr::eq(original, evidence.as_ref()));
     }
 }

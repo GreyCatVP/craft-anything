@@ -145,7 +145,7 @@ pub enum ChatItem {
         summary: String,
         evidence_id: Option<String>,
         /// The evidence record, once resolved from the session.
-        evidence: Option<Box<Evidence>>,
+        evidence: Option<std::sync::Arc<Evidence>>,
     },
     /// A proof card on its own (no-AI mode, or shared from the workbench).
     Proof {

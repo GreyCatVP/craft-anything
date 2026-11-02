@@ -27,6 +27,7 @@ pub fn apply_event(chat: &mut Vec<ChatItem>, e: AgentEvent) {
         // For logs, not the conversation.
         AgentEvent::Output { .. } => {}
         AgentEvent::Status { text } => {
+            end_streaming(chat);
             if let Some(ChatItem::Status(s)) = chat.last_mut() {
                 *s = text;
             } else {
@@ -83,8 +84,10 @@ pub fn apply_event(chat: &mut Vec<ChatItem>, e: AgentEvent) {
 }
 
 fn end_streaming(chat: &mut [ChatItem]) {
-    if let Some(ChatItem::Assistant { streaming, .. }) = chat.last_mut() {
-        *streaming = false;
+    for item in chat {
+        if let ChatItem::Assistant { streaming, .. } = item {
+            *streaming = false;
+        }
     }
 }
 
@@ -519,6 +522,10 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
 
 /// Light Markdown (headings, bullets, code fences, **bold**) with glossary hovers when `glossary`.
 pub fn rich_text(ui: &mut Ui, text: &str, with_glossary: bool) {
+    crate::message::show(ui, text, with_glossary, |ui| rich_text_body(ui, text, with_glossary));
+}
+
+fn rich_text_body(ui: &mut Ui, text: &str, with_glossary: bool) {
     let t = Tokens::get(ui.ctx());
     let body = ui.style().text_styles.get(&egui::TextStyle::Body).cloned().unwrap_or_else(|| egui::FontId::proportional(theme::SMALL));
     let mut in_code = false;
@@ -581,12 +588,12 @@ fn inline(ui: &mut Ui, text: &str, with_glossary: bool, body: &egui::FontId, t: 
             }
             let font = if bold { theme::semibold(body.size) } else { body.clone() };
             if with_glossary {
-                for (run, meaning) in glossary::segments(piece) {
+                for (run, meaning) in glossary::cached_segments(ui.ctx(), piece).iter() {
                     match meaning {
                         Some(m) => {
-                            widgets::glossary_word(ui, &run, m, font.clone());
+                            widgets::glossary_word(ui, run, m, font.clone());
                         }
-                        None => words(ui, &run, &font, t),
+                        None => words(ui, run, &font, t),
                     }
                 }
             } else {

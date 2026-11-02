@@ -173,6 +173,8 @@ pub struct Note {
 /// A running (or finished) rebuild.
 pub struct RebuildRun {
     rx: Receiver<RunEvent>,
+    /// A bounded poll left events to show, even if the worker already finished.
+    pending_events: bool,
     stop: CancelToken,
     inbox: Inbox,
     running: Arc<AtomicBool>,
@@ -272,7 +274,7 @@ impl RebuildRun {
             })
             .map_err(|e| ToolError::internal(e.to_string()))?;
         let activity = feed.lock().unwrap_or_else(PoisonError::into_inner).activity();
-        Ok(RebuildRun { rx, stop, inbox, running, preview, notes, feed, root, started: Instant::now(), activity })
+        Ok(RebuildRun { rx, pending_events: false, stop, inbox, running, preview, notes, feed, root, started: Instant::now(), activity })
     }
 
     /// Add something while it works; the agent reads it at its next step, and only then does it
@@ -316,7 +318,9 @@ impl RebuildRun {
     }
 
     pub fn poll(&mut self) -> Vec<RunEvent> {
-        self.rx.try_iter().collect()
+        let events: Vec<_> = self.rx.try_iter().take(crate::EVENT_BATCH).collect();
+        self.pending_events = events.len() == crate::EVENT_BATCH;
+        events
     }
 
     /// The project's conversation as the run has it now, for showing a project that is already
@@ -324,6 +328,7 @@ impl RebuildRun {
     pub fn feed_now(&mut self) -> Vec<feed::FeedItem> {
         let feed = self.feed.lock().unwrap_or_else(PoisonError::into_inner);
         while self.rx.try_recv().is_ok() {}
+        self.pending_events = false;
         feed.items().to_vec()
     }
 
@@ -344,7 +349,7 @@ impl RebuildRun {
     }
 
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
+        self.pending_events || self.running.load(Ordering::SeqCst)
     }
 
     /// When it began working (a queued run begins when its turn comes).

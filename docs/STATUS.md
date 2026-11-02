@@ -46,6 +46,24 @@ bytes. Reading or unpacking preserves those bytes. Synthetic graphs cover UTF-16
 surrogate pair), Latin1 and binary members across both supported module-record and offsets-block
 sizes. A freshly compiled Bun program and the CLI/MCP transport were not run for this correction.
 
+### UI responsiveness
+
+Messages retain their measured height outside the viewport; changing the text, width, font or
+display scale remeasures them. Visible glossary text uses egui's frame cache. Completed replies
+stop streaming even when a status, plan or question follows them. Visible foreground indicators
+request a frame every 16 ms; background indicators keep the one-second interval. Conversations
+and rebuilds drain 128 events per poll, completed UI jobs 32; a full batch schedules another frame,
+including when the worker has stopped. Evidence snapshots share immutable records, and completed
+tool results move into their view without another deep copy.
+
+Checked by regression tests for message culling and invalidation, streaming boundaries, queued
+event order and completion, and shared/moved evidence. An isolated release-mode CPU benchmark
+with 5,000 synthetic messages improved from 62–68 ms to about 5.8 ms per warm frame; it excludes
+GPU rendering and the first measurement of a cold history. No live build or GPU frame-rate
+measurement was repeated for this change. The macOS engine suite still has two fixture failures
+(approval-path canonicalisation and a Linux-only `/bin/ls` expectation), reproduced without these
+changes; see R0.8 in the roadmap.
+
 ### Linux Unreal setup
 
 Unreal installations registered in `~/.config/Epic/UnrealEngine/Install.ini` are found on Linux.

@@ -732,8 +732,8 @@ impl Conversation for ApiConversation {
     }
 
     fn poll(&mut self) -> Vec<AgentEvent> {
-        let mut v = std::mem::take(&mut self.queued);
-        v.extend(self.events.try_iter());
+        let mut v: Vec<_> = self.queued.drain(..self.queued.len().min(crate::EVENT_BATCH)).collect();
+        v.extend(self.events.try_iter().take(crate::EVENT_BATCH.saturating_sub(v.len())));
         v
     }
 

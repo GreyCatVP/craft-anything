@@ -73,7 +73,7 @@ pub struct Session {
     pub project: Option<Project>,
     targets: BTreeMap<TargetId, OpenTarget>,
     active: Option<TargetId>,
-    ledger: BTreeMap<String, Evidence>,
+    ledger: BTreeMap<String, Arc<Evidence>>,
     /// Insertion order of the ledger, for "latest first" views.
     order: Vec<String>,
     unknowns: BTreeMap<String, Unknown>,
@@ -199,18 +199,18 @@ impl Session {
         if !self.ledger.contains_key(&ev.id) {
             self.order.push(ev.id.clone());
         }
-        self.ledger.insert(ev.id.clone(), ev);
+        self.ledger.insert(ev.id.clone(), Arc::new(ev));
         Ok(())
     }
 
     pub fn evidence(&self, id: &str) -> Option<&Evidence> {
-        self.ledger.get(id).or(None)
+        self.ledger.get(id).map(Arc::as_ref)
     }
 
     /// Look up evidence in memory, then in the project store.
     pub fn resolve_evidence(&self, id: &str) -> Result<Evidence, ToolError> {
         if let Some(e) = self.ledger.get(id) {
-            return Ok(e.clone());
+            return Ok(e.as_ref().clone());
         }
         if let Some(project) = &self.project
             && let Ok(e) = project.load_evidence(id)
@@ -222,6 +222,11 @@ impl Session {
 
     /// Evidence, newest first.
     pub fn ledger(&self) -> impl Iterator<Item = &Evidence> {
+        self.shared_ledger().map(Arc::as_ref)
+    }
+
+    /// Immutable records for clients that retain a snapshot without copying large results.
+    pub fn shared_ledger(&self) -> impl Iterator<Item = &Arc<Evidence>> {
         self.order.iter().rev().filter_map(|id| self.ledger.get(id))
     }
 
@@ -295,9 +300,36 @@ impl Session {
             if !self.ledger.contains_key(&ev.id) {
                 self.order.push(ev.id.clone());
             }
-            self.ledger.insert(ev.id.clone(), ev);
+            self.ledger.insert(ev.id.clone(), Arc::new(ev));
         }
         self.project = Some(project);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use craft_anything_evidence::{Environment, EvidenceBuilder, Subject};
+
+    #[test]
+    fn snapshots_share_records_and_keep_their_content_when_a_record_is_replaced() {
+        let mut session = crate::testing::session();
+        let evidence = EvidenceBuilder::new("core_target_triage", Subject::default(), Environment::builtin(true))
+            .result(serde_json::json!({"text": "x".repeat(100_000)}))
+            .summary("Original")
+            .build()
+            .unwrap();
+        let id = evidence.id.clone();
+        session.record(evidence).unwrap();
+        let first = session.shared_ledger().next().unwrap().clone();
+        let second = session.shared_ledger().next().unwrap().clone();
+        assert!(Arc::ptr_eq(&first, &second));
+        let mut replaced = first.as_ref().clone();
+        replaced.summary = "Updated".into();
+        session.record(replaced).unwrap();
+        assert_eq!(first.summary, "Original");
+        assert_eq!(session.evidence(&id).unwrap().summary, "Updated");
+        assert_eq!(session.resolve_evidence(&id).unwrap().id, id);
     }
 }

@@ -155,6 +155,10 @@ pub struct Detected {
     pub needs_key: bool,
 }
 
+/// Most events drained at once by the built-in conversations and rebuild runs.
+/// Consumers keep polling until the turn's completion event, including after the worker stops.
+pub const EVENT_BATCH: usize = 128;
+
 /// Events the UI renders, in order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

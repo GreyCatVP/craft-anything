@@ -373,16 +373,16 @@ pub fn glossary_word(ui: &mut Ui, word: &str, meaning: &str, font: egui::FontId)
     })
 }
 
-/// Draw an animation's next frame in `every` (about 15 a second is smooth enough for a spinner),
+/// Draw an animation's next frame in `every`,
 /// or once a second while the window is in the background: a build can run for an hour, and
-/// redrawing the whole window 30 times a second for it costs the battery.
+/// background work should not redraw an unfocused window at the animation rate.
 pub fn animate(ui: &Ui, every: std::time::Duration) {
     let focused = ui.input(|i| i.viewport().focused.unwrap_or(true));
     ui.ctx().request_repaint_after(if focused { every } else { std::time::Duration::from_secs(1) });
 }
 
 /// One frame of an animation at the usual pace.
-pub const FRAME: std::time::Duration = std::time::Duration::from_millis(66);
+pub const FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// A spinner-ish dot row for "thinking".
 pub fn thinking(ui: &mut Ui) {
@@ -394,7 +394,9 @@ pub fn thinking(ui: &mut Ui) {
         let c = t.accent.gamma_multiply(0.35 + 0.65 * phase);
         ui.painter().circle_filled(egui::pos2(rect.left() + 6.0 + i as f32 * 12.0, rect.center().y), 3.5, c);
     }
-    animate(ui, FRAME);
+    if ui.is_rect_visible(rect) {
+        animate(ui, FRAME);
+    }
 }
 
 /// How long a run may say nothing before the note points it out.
@@ -438,7 +440,7 @@ pub fn working_since(ui: &mut Ui, title: &str, detail: Option<&str>, began: Opti
     let secs = began.map_or((now - since) as u64, |b| b.elapsed().as_secs());
     let note = wait_note(secs, quiet);
     let sub = [detail.map(str::to_string), note].into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
-    card(&t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
+    let response = card(&t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
@@ -469,7 +471,9 @@ pub fn working_since(ui: &mut Ui, title: &str, detail: Option<&str>, began: Opti
         let lit = egui::Rect::from_x_y_ranges(x.max(bar.left())..=(x + seg).min(bar.right()), bar.y_range());
         ui.painter().rect_filled(lit, 1.0, t.accent);
     });
-    animate(ui, FRAME);
+    if ui.is_rect_visible(response.response.rect) {
+        animate(ui, FRAME);
+    }
 }
 
 /// The button that opens a failure's log; hovering shows where the log is. True when clicked.

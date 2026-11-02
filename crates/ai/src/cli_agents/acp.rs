@@ -590,12 +590,18 @@ impl Conversation for AcpConversation {
     }
 
     fn poll(&mut self) -> Vec<AgentEvent> {
-        let mut events: Vec<AgentEvent> = self.rx.try_iter().collect();
+        let mut events: Vec<AgentEvent> = self.rx.try_iter().take(crate::EVENT_BATCH).collect();
+        if events.len() == crate::EVENT_BATCH {
+            return events;
+        }
         // An agent that exits mid-message would otherwise leave the conversation busy forever.
         if self.busy.load(Ordering::SeqCst) && self.proc.as_mut().is_some_and(RunningProcess::is_finished) {
-            self.busy.store(false, Ordering::SeqCst);
             let tail = self.lock().as_ref().map(|s| s.stderr.iter().cloned().collect::<Vec<_>>().join("\n")).unwrap_or_default();
-            events.extend(self.rx.try_iter());
+            events.extend(self.rx.try_iter().take(crate::EVENT_BATCH.saturating_sub(events.len())));
+            if events.len() == crate::EVENT_BATCH {
+                return events;
+            }
+            self.busy.store(false, Ordering::SeqCst);
             let command = craft_anything_platform::process::printable_command(std::ffi::OsStr::new(&self.program), &self.args);
             let check = format!("{} --version", crate::ssh::shell_quote(&self.program));
             let log = self.logs.as_ref().and_then(|dir| {

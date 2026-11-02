@@ -797,7 +797,7 @@ impl Conversation for CliConversation {
     }
 
     fn poll(&mut self) -> Vec<AgentEvent> {
-        self.rx.try_iter().collect()
+        self.rx.try_iter().take(crate::EVENT_BATCH).collect()
     }
 
     /// Agent CLIs ask for approval through their own UI; our MCP server refuses consent-gated

@@ -49,6 +49,10 @@ Don't close or rewrite other people's work without asking.
 
 ## Tests
 
+**A CPU-only egui test dropped texture updates.** Raw `Context::run_ui` output owns texture
+updates even when the test only measures layout. A debug build panics if they are abandoned;
+explicitly clear `output.textures_delta` when no renderer will apply them.
+
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
 created folders in the real config directory (`Session::default()` uses it).

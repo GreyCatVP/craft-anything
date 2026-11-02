@@ -246,6 +246,11 @@ impl CraftApp {
     pub fn poll_run(&mut self) {
         self.runs.set_limit(self.settings.build.parallel);
         let events = self.runs.poll(&self.hub);
+        if events.len() >= craft_anything_ai::EVENT_BATCH
+            && let Some(ctx) = self.jobs.repaint_ctx()
+        {
+            ctx.request_repaint();
+        }
         if events.is_empty() {
             return;
         }
