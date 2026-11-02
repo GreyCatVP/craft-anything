@@ -1,0 +1,1367 @@
+# cs: original Czech UI translations. Licensed MIT OR Apache-2.0.
+# UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
+ GB	 GB
+ and {n} more	 a další: {n}
+ {ascii}	 {ascii}
+ · ${c:.2}	 · ${c:.2}
+ · ssh {h}	 · ssh {h}
+(1 picture attached)	(přiložen 1 obrázek)
+({n} pictures attached)	(přiložené obrázky: {n})
+, ${c:.4}	, ${c:.4}
+.NET application graph	Graf aplikace .NET
+.NET apps	Aplikace .NET
+.NET assembly overview	Přehled assembly .NET
+.NET native calls	Nativní volání .NET
+.NET types and methods	Typy a metody .NET
+/btw {}	/btw {}
+0x… or number	0x… nebo číslo
+A .NET program (C#, F# or VB)	Program .NET (C#, F# nebo VB)
+A DOS program	Program pro DOS
+A Java program	Program v Javě
+A Linux (or Unix) program	Program pro Linux (nebo Unix)
+A Mac or iPhone program	Program pro Mac nebo iPhone
+A SQLite database (how an app stores its data)	Databáze SQLite (jak aplikace ukládá data)
+A WebAssembly module (code that runs in a browser)	Modul WebAssembly (kód běžící v prohlížeči)
+A Windows program	Program pro Windows
+A ZIP archive	Archiv ZIP
+A bundle of ready-made code that many programs share.	Balík hotového kódu, který sdílí více programů.
+A coding agent such as Claude Code builds it, and an AI answers your questions in plain words. Change this any time in Settings → AI.	Programovací agent, například Claude Code, provádí sestavení a AI odpovídá na vaše otázky srozumitelnými slovy. Kdykoli to můžete změnit v Nastavení → AI.
+A command's output shows here when it finishes.	Po dokončení příkazu se zde zobrazí jeho výstup.
+A copy to try something else from here.	Kopie, ve které můžete od tohoto bodu zkusit jiný postup.
+A file of machine code that a computer can run directly, like an .exe or an app.	Soubor strojového kódu, který počítač může přímo spustit, například .exe nebo aplikace.
+A file that a computer can run as a program.	Soubor, který počítač může spustit jako program.
+A file that links packed web code back to the original, readable source files.	Soubor, který propojuje zabalený webový kód s původními čitelnými zdrojovými soubory.
+A file we don't recognise yet	Soubor, který zatím nerozpoznáme
+A first look at a file you're unsure about, without running it.	První pohled na soubor, kterým si nejste jistí, bez jeho spuštění.
+A folder	Složka
+A folder has no bytes of its own	Složka sama o sobě nemá žádné bajty
+A free reverse-engineering tool from the NSA. Deep mode uses it for extra detail; Clean room mode never does.	Bezplatný nástroj pro reverzní inženýrství od NSA. Hloubkový režim jej využívá pro další podrobnosti; režim Čistá místnost jej nikdy nepoužívá.
+A frozen copy (recommended)	Zmrazená kopie (doporučeno)
+A frozen copy takes {size}. That's a lot of space: a light copy takes {light}.	Zmrazená kopie zabere {size}. To je hodně místa: odlehčená kopie zabere {light}.
+A frozen copy takes {size}; a light copy takes {light}.	Zmrazená kopie zabere {size}; odlehčená kopie zabere {light}.
+A game	Hra
+A game's files	Soubory hry
+A light copy	Odlehčená kopie
+A locked room for running a program so it can't touch the rest of your computer.	Izolované prostředí pro spuštění programu, ve kterém nemůže zasahovat do zbytku počítače.
+A map of which functions call which other functions.	Mapa znázorňující, které funkce volají jiné funkce.
+A name the program's author gave to a function or variable that survived in the file.	Název, který autor programu dal funkci nebo proměnné a který se v souboru zachoval.
+A named piece of a program that does one job, like "add two numbers" or "save the file".	Pojmenovaná část programu, která plní jeden úkol, například „sečíst dvě čísla“ nebo „uložit soubor“.
+A number that says where something is in a program's memory, like a house number.	Číslo určující umístění v paměti programu, podobně jako číslo domu.
+A piece of text stored inside a program, like a message, a web address or a file name.	Text uložený uvnitř programu, například zpráva, webová adresa nebo název souboru.
+A program, an app bundle, an APK, a JavaScript bundle, a folder… or drop it on the window.	Program, balíček aplikace, APK, balík kódu JavaScript, složka… nebo ho přetáhněte do okna.
+A recording of network traffic	Záznam síťového provozu
+A region of a program as it sits in memory while running.	Oblast programu v paměti za běhu.
+A region of a program file with one purpose: code, text, pictures, settings.	Oblast souboru programu s jedním účelem: kód, text, obrázky, nastavení.
+A rule of thumb. Usually right, sometimes wrong, so we label the result as a best guess.	Odhad podle zkušenosti. Obvykle správný, někdy chybný, proto výsledek označujeme jako nejlepší odhad.
+A saved, checkable record of something we found, with how sure we are and where we found it.	Uložený, ověřitelný záznam zjištění včetně míry jistoty a místa nálezu.
+A script or web page	Skript nebo webová stránka
+A set of commands a program offers to other programs.	Sada příkazů, které program nabízí jiným programům.
+A simple snake game	Jednoduchá hra Had
+A small download (under 200 MB). Free, no account needed.	Malá velikost ke stažení (méně než 200 MB). Zdarma, bez účtu.
+A small file that lists what an app is called, what it needs and what it's allowed to do.	Malý soubor s názvem aplikace, jejími požadavky a oprávněními.
+A smart contract (EVM bytecode)	Chytrý kontrakt (bajtkód EVM)
+A way of writing bytes as two-character codes (00 to FF). The rawest view of a file.	Zápis bajtů pomocí dvouznakových kódů (00 až FF). Nejzákladnější pohled na obsah souboru.
+A way to build desktop apps out of web pages. The app is basically a website with its own browser.	Způsob vytváření desktopových aplikací z webových stránek. Aplikace je v podstatě web s vlastním prohlížečem.
+A website	Web
+A website for my bakery	Web pro mou pekárnu
+AI	AI
+AI cost	Náklady na AI
+AI cost (estimate)	Náklady na AI (odhad)
+AI cost (part estimate)	Náklady na AI (částečný odhad)
+AI model file	Soubor modelu AI
+AI name	Název AI
+AI use this session	Využití AI v této relaci
+API boundary	Hranice API
+API key	Klíč API
+API key (stored in your system keychain)	Klíč API (uložený v systémové klíčence)
+API key, if it needs one	Klíč API, pokud je potřeba
+About 10 GB. Free for personal use with a Unity account.	Přibližně 10 GB. Zdarma pro osobní použití s účtem Unity.
+About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Přibližně 60 GB, účet Epic Games a nástroje C++ pro Visual Studio.
+Add	Přidat
+Add Visual Studio's C++ tools	Přidat nástroje C++ pro Visual Studio
+Add a brain	Přidat AI asistenta
+Add a fal.ai key	Přidat klíč fal.ai
+Add a folder…	Přidat složku…
+Add a plugin	Přidat plugin
+Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Přidejte AI asistenta a já pro vás tyto důkazy přečtu, odpovím na doplňující otázky a odkážu na doklady.
+Add an AI by its address	Přidat AI podle adresy
+Add more info. The builder reads it at its next step.	Doplňte informace. Sestavovací agent je přečte v dalším kroku.
+Add pictures	Přidat obrázky
+Add pictures of the original	Přidat obrázky originálu
+Add pictures of the original (optional: screenshots help it look right)	Přidat obrázky originálu (volitelné: snímky obrazovky pomohou zachovat vzhled)
+Add to a running build	Doplnit probíhající sestavení
+Added	Přidáno
+Added {n} picture(s). The builder uses them from your next change.	Přidané obrázky: {n}. Sestavovací agent je použije od vaší příští změny.
+Address to file offset	Převést adresu na offset v souboru
+Adds its decompiler to Deep mode. Craft Anything can download and set it up for you.	Přidá dekompilátor do Hloubkového režimu. Craft Anything jej může stáhnout a nastavit za vás.
+Advanced	Pokročilý
+After installing one, look for it again.	Po instalaci jej znovu vyhledejte.
+Agent	AI agent
+Allow generated assets	Povolit generované podklady
+Allow once	Povolit jednou
+Allowed for this project	Povoleno pro tento projekt
+Allowed for this project.	Povoleno pro tento projekt.
+Allowed in	Povoleno v
+Allowed once	Jednorázově povoleno
+Allowed once.	Jednorázově povoleno.
+Also list projects from	Vypsat také projekty z
+Always for this project	Vždy pro tento projekt
+An Android app	Aplikace pro Android
+An Android app package: the file you install on a phone.	Balíček aplikace pro Android: soubor, který instalujete do telefonu.
+An Apple settings file (plist)	Soubor nastavení Apple (plist)
+An app	Aplikace
+An app or a file	Aplikace nebo soubor
+Analyse a JavaScript app	Analyzovat aplikaci v jazyce JavaScript
+Analyse a page's JavaScript	Analyzovat JavaScript stránky
+Android app code (DEX)	Kód aplikace pro Android (DEX)
+Android app components	Komponenty aplikace pro Android
+Android app package	Balíček aplikace pro Android
+Android apps	Aplikace pro Android
+Android class	Androidová třída
+Android method bytecode	Bajtkód androidové metody
+Android resources	Zdroje aplikace pro Android
+Annotate function	Přidat poznámku k funkci
+Another build is working, so this one waits its turn.	Probíhá jiné sestavení, takže toto čeká, až na ně přijde řada.
+Answer a project's question	Odpovědět na otázku projektu
+Answer any of them in a message below.	Na kteroukoli můžete odpovědět zprávou níže.
+Answered by {name}	Odpověď od {name}
+Answers come from {brain}. To build, set up a coding agent in Settings → AI.	Na otázky odpovídá {brain}. Pro sestavení nastavte programovacího agenta v Nastavení → AI.
+App	Aplikace
+App details on device	Podrobnosti aplikace v zařízení
+Apple apps	Aplikace Apple
+Approve an agent action	Schválit akci agenta
+Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Aplikace a hry: vylepšovat, dokud nedosáhnou této podobnosti s vašimi obrázky. Při vypnutí se podobnost pouze hlásí.
+Architectures	Architektury
+Archive	Archiv
+Archives	Archivy
+Ask a question	Položit otázku
+Ask about a build	Zeptat se na sestavení
+Ask about the build	Zeptat se na toto sestavení
+Ask about the build, e.g. "where are the latest files?" Nothing changes and no build starts.	Zeptejte se na sestavení, například „kde jsou nejnovější soubory?“ Nic se nezmění a žádné sestavení se nespustí.
+Ask about this game	Zeptat se na tuto hru
+Ask anything, e.g. "What does this program do?"	Zeptejte se na cokoli, například „Co tento program dělá?“
+Ask before running anything	Před každým spuštěním se zeptat
+Ask each time	Pokaždé se zeptat
+Ask first	Nejprve se zeptat
+Ask for a change	Požádat o změnu
+Ask for a change, e.g. "bigger buttons" or "add a dark mode"	Požádejte o změnu, například „větší tlačítka“ nebo „přidat tmavý režim“
+Ask for a change, e.g. "make it faster" or "add a high-score table"	Požádejte o změnu, například „zrychlit“ nebo „přidat tabulku nejlepších skóre“
+Ask for a change, e.g. "make the header blue" or "add a contact form"	Požádejte o změnu, například „změnit záhlaví na modré“ nebo „přidat kontaktní formulář“
+Ask in your own words. Every answer shows how sure we are, and the proof.	Ptejte se vlastními slovy. Každá odpověď uvádí míru jistoty a důkazy.
+Ask me	Ptát se mě
+Ask the agent about this	Zeptat se na to agenta
+Ask the agent about this target. It cites evidence for every claim.	Zeptejte se agenta na tento cíl. Každé tvrzení podloží odkazem na důkazy.
+Ask the agent…	Zeptat se agenta…
+Ask the person	Zeptat se uživatele
+Ask: "How does the % key work?"	Zkuste otázku: „Jak funguje klávesa %?“
+Ask: "Is it safe to run?"	Zkuste otázku: „Je bezpečné to spustit?“
+Ask: "What does it send over the internet?"	Zkuste otázku: „Co to odesílá přes internet?“
+Asking for its models…	Zjišťování dostupných modelů…
+Asset catalog	Katalog podkladů
+At most this many rounds of fixes after the first build.	Nejvyšší počet kol oprav po prvním sestavení.
+Attach pictures	Přiložit obrázky
+Attach pictures (or drop them here)	Přiložit obrázky (nebo je přetáhněte sem)
+Auto mode	Automatický režim
+Automatic	Automaticky
+Automatic ({name})	Automaticky ({name})
+Back	Zpět
+Best guess	Nejlepší odhad
+Best guess: a reasonable reading, but not proven.	Nejlepší odhad: rozumný výklad, ale bez důkazu.
+Binary layout	Rozložení binárního souboru
+Blocked	Blokováno
+Bookmark	Přidat záložku
+Budget for a new project	Rozpočet nového projektu
+Bug report	Hlášení chyby
+Build	Sestavení
+Build a rebuild ledger	Vytvořit evidenci rekonstrukce
+Build a stand-in backend	Sestavit náhradní backend
+Build with	Sestavit pomocí
+Build with this	Používat pro sestavení
+Build with {name}	Sestavit pomocí {name}
+Build with {name} instead	Místo toho sestavit pomocí {name}
+Build without it	Sestavit bez něj
+Builder's questions:	Otázky sestavovacího agenta:
+Building	Probíhá sestavení
+Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	Sestavení vyžaduje programovacího agenta v tomto počítači (Claude Code, Codex nebo Gemini CLI: nainstalujte jej a jednou se přihlaste v jeho vlastním okně), nebo AI s klíčem API. Craft Anything nikdy nemá přístup k vašemu účtu.
+Building needs a coding agent such as Claude Code, or an AI with an API key.	Sestavení vyžaduje programovacího agenta, například Claude Code, nebo AI s klíčem API.
+Builds	Sestavení
+Builds and answers may use it again.	Při sestavování a odpovídání může být znovu použit.
+Builds at once	Souběžná sestavení
+Builds keep going without stopping to ask you before an action. The builder still never deletes outside its project, changes system settings or publishes anything, and stays within each project's asset budget.	Sestavování pokračuje bez dotazů před jednotlivými akcemi. Sestavovací agent stále nesmí mazat mimo svůj projekt, měnit nastavení systému ani cokoli publikovat a dodržuje rozpočet podkladů každého projektu.
+Builds use this one. Click to choose automatically again.	Pro sestavování se používá tento agent. Kliknutím obnovíte automatický výběr.
+Built by	Sestavovací agent
+Built with	Sestaveno pomocí
+Built with {stack}, as you asked, so no game engine is needed.	Podle vašeho zadání se sestavení provádí pomocí {stack}, takže není potřeba herní engine.
+Call graph	Graf volání
+Call path	Cesta volání
+Call the build done	Označit sestavení za hotové
+Called done. A new message carries on from here.	Označeno za hotové. Nová zpráva naváže na tento stav.
+Cancel	Zrušit
+Cancel: don't use this folder	Zrušit: nepoužívat tuto složku
+Capture a website for rebuilding	Zachytit web pro rekonstrukci
+Capture inventories	Inventáře záznamu paketů
+Capture menus, dialogs and tabs	Zachytit nabídky, dialogy a karty
+Change	Změnit
+Change a setting	Změnit nastavení
+Change an AI's model	Změnit model AI
+Change how hard an AI thinks	Změnit míru přemýšlení AI
+Change it	Požádat o změnu
+Change…	Změnit…
+Check	Kontrola
+Check .NET native calls	Zkontrolovat nativní volání .NET
+Check a rebuild claim	Zkontrolovat tvrzení o rekonstrukci
+Check a scripted web session	Zkontrolovat skriptovanou webovou relaci
+Check an answer	Zkontrolovat odpověď
+Check decompiled C#	Zkontrolovat dekompilovaný kód C#
+Check my build	Zkontrolovat mé sestavení
+Check the JEB connection	Zkontrolovat připojení k JEB
+Check the asset keys	Zkontrolovat klíče pro podklady
+Check the setup	Zkontrolovat nastavení
+Check {n}	Kontrola {n}
+Check {n}: about {s}% like the original	Kontrola {n}: podobnost s originálem asi {s} %
+Checked against Godot's official checksums before it's used.	Před použitím se ověří podle oficiálních kontrolních součtů Godot.
+Checking	Probíhá kontrola
+Choose a file	Vybrat soubor
+Choose a folder…	Vybrat složku…
+Choose a function, string or section to see it here.	Vyberte funkci, řetězec nebo sekci a zobrazí se zde.
+Choose an AI's job	Nastavit roli AI
+Choose the folder Ghidra is installed in.	Vyberte složku s instalací Ghidra.
+Choose what the builder's questions get	Vybrat způsob odpovídání na otázky sestavovacího agenta
+Choose what to recreate, say what you want, then press Start.	Vyberte, co chcete znovu vytvořit, popište své přání a stiskněte Spustit.
+Choose…	Vybrat…
+Classes	Třídy
+Clean room	Čistá místnost
+Clean room / Deep	Čistá místnost / Hloubkový režim
+Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Režim Čistá místnost nikdy nečte kód, soubory ani zdrojový kód stránek originálu. Hloubkový režim je čte všemi nástroji, které Craft Anything nabízí.
+Clean room never reads the original's code, files or page source: it works from what you can see. Deep reads them with every tool, and with Ghidra when it's installed. Every finding records which was used.	Režim Čistá místnost nikdy nečte kód, soubory ani zdrojový kód stránek originálu: vychází z toho, co vidíte. Hloubkový režim je čte všemi nástroji a také pomocí Ghidra, pokud je nainstalována. Každé zjištění zaznamenává použitý režim.
+Clean room on	Režim Čistá místnost zapnutý
+Clean room or Deep	Čistá místnost nebo Hloubkový režim
+Clean room: nothing inside the original is read. We work from what you can see: pictures, the page as a visitor sees it, and watching it run.	Čistá místnost: nic uvnitř originálu nečteme. Vycházíme z toho, co vidíte: obrázky, stránka z pohledu návštěvníka a pozorování běhu.
+Clear finished	Vymazat dokončené
+Close	Zavřít
+Close a Frida session	Ukončit relaci Frida
+Close a GDB session	Ukončit relaci GDB
+Close a Rizin debug session	Ukončit ladicí relaci Rizin
+Close a pinned build	Zavřít připnuté sestavení
+Close it	Zavřít to
+Close it first.	Nejprve to zavřete.
+Close the website	Zavřít web
+Code reconstructed from a program that looks like the C language. Close to what the program does, but not its original source.	Kód připomínající jazyk C, rekonstruovaný z programu. Blíží se tomu, co program dělá, ale není to původní zdrojový kód.
+Code signature	Podpis kódu
+Coding agent app	Aplikace programovacího agenta
+Command palette (Ctrl/⌘ K)	Paleta příkazů (Ctrl/⌘ K)
+Commands:	Příkazy:
+Compare WebAssembly interfaces	Porovnat rozhraní WebAssembly
+Compare module exports	Porovnat exporty modulů
+Compare two .NET builds	Porovnat dvě sestavení .NET
+Compare two app versions	Porovnat dvě verze aplikace
+Compare two artifacts	Porovnat dva artefakty
+Compare two evidence bundles	Porovnat dva balíky důkazů
+Compare two functions	Porovnat dvě funkce
+Compare two page captures	Porovnat dva záznamy stránky
+Compare two runs	Porovnat dva běhy
+Compare two screenshots	Porovnat dva snímky obrazovky
+Comparing and rebuilding	Porovnávání a rekonstrukce
+Compiled Python file	Zkompilovaný soubor jazyka Python
+Connect	Připojit
+Connect agent apps	Připojit aplikace agentů
+Connect to a browser	Připojit k prohlížeči
+Connect {name}	Připojit {name}
+Connected devices	Připojená zařízení
+Connected phone	Připojený telefon
+Continue	Pokračovat
+Contradicted	Vyvráceno
+Control-flow graph: a map of every path a function can take, like a flowchart.	Graf toku řízení: mapa všech cest, kterými může funkce projít, podobná vývojovému diagramu.
+Copies share the files it saves beside itself.	Kopie sdílejí soubory, které program ukládá vedle sebe.
+Copy a file off the phone	Zkopírovat soubor z telefonu
+Copy a file to the phone	Zkopírovat soubor do telefonu
+Copy an app off the phone	Zkopírovat aplikaci z telefonu
+Copy the command	Zkopírovat příkaz
+Copy the evidence id	Zkopírovat ID důkazu
+Couldn't add the pictures:	Obrázky se nepodařilo přidat:
+Couldn't answer:	Nepodařilo se odpovědět:
+Couldn't attach the pictures:	Obrázky se nepodařilo přiložit:
+Couldn't look through that folder.	Složku se nepodařilo prohledat.
+Couldn't open it.	Nepodařilo se otevřít.
+Couldn't open the folder.	Složku se nepodařilo otevřít.
+Couldn't open {}: {}	Nepodařilo se otevřít {}: {}
+Couldn't start a worker thread: {e}	Nepodařilo se spustit pracovní vlákno: {e}
+Couldn't start it.	Nepodařilo se spustit.
+Coverage unknown	Pokrytí neznámé
+Craft Anything	Craft Anything
+Craft Anything can't build with {engine}, so Unity is the closest match.	Craft Anything neumí sestavovat pomocí {engine}, proto je nejbližší volbou Unity.
+Craft Anything or the computer closed while it was working. Everything so far is kept; Continue picks up where it stopped.	Craft Anything nebo počítač se během práce vypnul. Dosavadní práce je zachována; tlačítko Pokračovat naváže tam, kde skončila.
+Craft Anything reads its code and files with every tool it has. For your private use.	Craft Anything čte kód a soubory všemi svými nástroji. Pro vaše soukromé použití.
+Craft Anything reads the original's code, files and page source with every tool it has, and with Ghidra when it's installed.	Craft Anything čte kód, soubory a zdrojový kód stránek originálu všemi svými nástroji a také pomocí Ghidra, pokud je nainstalována.
+Craft Anything report.md	Zpráva Craft Anything.md
+Craft Anything's records, checks and anything it built in app/ are deleted. Your own files in the folder stay as they are.	Záznamy Craft Anything, kontroly a vše sestavené v app/ budou smazány. Vaše vlastní soubory ve složce zůstanou beze změny.
+Crash dump	Výpis pádu
+Create the project	Vytvořit projekt
+Critical	Kritická
+Cross-reference: a place in the program that uses or calls the thing you're looking at.	Křížový odkaz: místo v programu, které používá nebo volá právě prohlíženou položku.
+Cross-references	Křížové odkazy
+Cross-references: the places in the program that use or call the thing you're looking at.	Křížové odkazy: místa v programu, která používají nebo volají právě prohlíženou položku.
+Current document	Aktuální dokument
+Cursor address	Adresa kurzoru
+Cursor function	Funkce pod kurzorem
+Custom	Vlastní
+Cutter command	Příkaz Cutter
+DOS load image	Zaváděcí obraz programu DOS
+Databases	Databáze
+Decide yourself	Rozhodovat samostatně
+Decode a radio recording	Dekódovat rádiový záznam
+Decompile	Dekompilovat
+Decompile Java with Vineflower	Dekompilovat kód Java pomocí Vineflower
+Decompile many	Dekompilovat více funkcí
+Decompile with JEB	Dekompilovat pomocí JEB
+Deep	Hloubkový
+Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	Hloubkový režim nyní dekompiluje pomocí Ghidra. První průzkum velkého programu může trvat několik minut.
+Deep mode on	Hloubkový režim zapnutý
+Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Hloubkový režim: čteme kód, soubory i zdrojový kód stránek všemi svými nástroji a také pomocí Ghidra, pokud je nainstalována. Kliknutím přepnete režim.
+Delete a project	Smazat projekt
+Delete it	Smazat to
+Delete the project	Smazat tento projekt
+Delete {name}?	Smazat {name}?
+Deleted.	Smazáno.
+Deleted. Your own files are still in the folder.	Smazáno. Vaše vlastní soubory jsou stále ve složce.
+Delete…	Smazat…
+Deliberately scrambled to make it hard to read, without changing what it does.	Záměrně znepřehledněný kód, který se obtížně čte, ale chová se stejně.
+Demangle Swift symbols	Obnovit čitelné názvy symbolů Swift
+Details	Podrobnosti
+Details about the selected item appear here.	Zde se zobrazí podrobnosti vybrané položky.
+Detect	Rozpoznat
+Device details	Podrobnosti zařízení
+Device features	Funkce zařízení
+Device folder	Složka v zařízení
+Device log	Protokol zařízení
+Disassemble sBPF code	Provést disassembly kódu sBPF
+Disassembly	Disassembly
+Disconnect agent apps	Odpojit aplikace agentů
+Dismiss	Zavřít upozornění
+Dispatch metadata	Metadata dispatchingu
+Display info	Informace o displeji
+Do you have permission?	Máte oprávnění?
+Does it talk to the internet?	Komunikuje s internetem?
+Does it track me?	Sleduje mě?
+Don't allow	Nepovolit
+Don't ask again (you can change this in Settings)	Příště se neptat (lze změnit v Nastavení)
+Done	Hotovo
+Download	Stáhnout
+Download Godot {v}	Stáhnout Godot {v}
+Download Unity Hub	Stáhnout Unity Hub
+Download and use Ghidra	Stáhnout a použít Ghidra
+Download it from unity.com and install it.	Stáhněte jej z unity.com a nainstalujte.
+Download it from unrealengine.com and install it.	Stáhněte jej z unrealengine.com a nainstalujte.
+Download the Epic Games Launcher	Stáhnout Epic Games Launcher
+Downloads keep going in the background.	Stahování pokračuje na pozadí.
+Drive an app's screen	Ovládat obrazovku aplikace
+Drop a calculator app (or any small program) on the window.	Přetáhněte do okna aplikaci kalkulačky (nebo jiný malý program).
+Drop a file or app anywhere in this window.	Přetáhněte soubor nebo aplikaci kamkoli do tohoto okna.
+Drop the file on the window. We only read it; nothing runs.	Přetáhněte soubor do okna. Pouze jej čteme; nic se nespouští.
+Drop to attach	Pusťte pro přiložení
+Drop to open it	Pusťte pro otevření
+Duplicate	Duplikovat
+Duplicate a project	Duplikovat projekt
+Duplicate the project	Duplikovat tento projekt
+Each answer says how sure we are: Seen it, Worked it out or Best guess.	Každá odpověď uvádí míru jistoty: Pozorováno, Odvozeno nebo Nejlepší odhad.
+Edit a project file	Upravit soubor projektu
+Edit them in place	Upravit na místě
+Effort:	Úsilí:
+Electron and JavaScript	Electron a JavaScript
+Electron fuses	Pojistky Electronu
+Engines	Enginy
+Engines and settings	Enginy a nastavení
+Enter a full web address, like example.com or https://example.com/page.	Zadejte úplnou webovou adresu, například example.com nebo https://example.com/page.
+Enter to send · Shift+Enter for a new line	Enter odešle · Shift+Enter vloží nový řádek
+Epic's own installer. It only opens if Epic's signature checks out.	Oficiální instalátor od Epic Games. Otevře se pouze po úspěšném ověření podpisu Epic Games.
+Essentials	Základní nástroje
+Every build of this project.	Každé sestavení tohoto projektu.
+Every finding is saved here with how sure we are.	Každé zjištění se zde ukládá spolu s mírou jistoty.
+Every tool as well: a workbench with functions, bytes, references and evidence.	Také všechny nástroje: pracovní plocha s funkcemi, bajty, odkazy a důkazy.
+Everything found so far, as a Markdown file.	Vše dosud zjištěné jako soubor Markdown.
+Everything so far is kept. Continue picks up where it stopped.	Dosavadní práce je zachována. Tlačítko Pokračovat naváže tam, kde skončila.
+Evidence	Důkazy
+Evidence ledger	Evidence důkazů
+Evidence so far	Dosavadní důkazy
+Explain a function	Vysvětlit funkci
+Explain like I'm new	Vysvětlit pro začátečníka
+Export a report	Exportovat zprávu
+Export a report (Markdown)	Exportovat zprávu (Markdown)
+Export captured scripts	Exportovat zachycené skripty
+Export evidence	Exportovat důkazy
+Export report	Exportovat zprávu
+Extract an archive	Rozbalit archiv
+Extract firmware	Extrahovat firmware
+Extract with this	Používat pro extrakci
+Extracts	Provádí extrakci
+File formats	Formáty souborů
+Files packed inside a file	Soubory zabalené v souboru
+Filter	Filtr
+Filter by name	Filtrovat podle názvu
+Filter the files	Filtrovat soubory
+Filter…	Filtrovat…
+Find Android classes	Najít androidové třídy
+Find Java classes	Najít třídy v Javě
+Find a call path	Najít cestu volání
+Find a game's files	Najít soubory hry
+Find an app	Najít aplikaci
+Find in-page MCP tools	Najít nástroje MCP na stránce
+Find it automatically	Najít automaticky
+Find out how any software works, then craft your own.	Zjistěte, jak funguje libovolný software, a vytvořte si vlastní.
+Find the original source line	Najít původní řádek zdrojového kódu
+Firmware regions	Oblasti firmwaru
+Fold the sidebar	Sbalit postranní panel
+Folders of projects, and projects started in a folder you picked. Removing one only takes it off the list.	Složky projektů a projekty založené ve vámi vybrané složce. Odebráním položku pouze odstraníte ze seznamu.
+Follow the installer that opened. Come back here when it's done.	Postupujte podle otevřeného instalátoru. Po dokončení se sem vraťte.
+Follow the steps on rustup.rs, then come back here.	Postupujte podle pokynů na rustup.rs a pak se sem vraťte.
+For everything you make, like the switch in the title bar.	Pro vše, co vytváříte, stejně jako přepínač v záhlaví okna.
+For example: a website for my bakery	Například: web pro mou pekárnu
+For example: recreate this website	Například: znovu vytvořit tento web
+For example: the same app, but simpler	Například: stejná aplikace, ale jednodušší
+For example: the same game, with a high-score table	Například: stejná hra s tabulkou nejlepších skóre
+Force-stop an app	Vynutit ukončení aplikace
+Forget the key	Zapomenout klíč
+Found on this computer	Nalezeno v tomto počítači
+Found {} AI option(s) on this computer	Nalezené možnosti AI v tomto počítači: {}
+Frida devices	Zařízení Frida
+Frida instrumentation	Instrumentace Frida
+Frida processes	Procesy Frida
+Frida session status	Stav relace Frida
+From	Zdroj
+Frozen copy	Zmrazená kopie
+Function address	Adresa funkce
+Function assembly	Kód funkce v assembleru
+Function dossier	Přehled funkce
+Function info	Informace o funkci
+Function instructions	Instrukce funkce
+Function references	Odkazy na funkci
+Functions	Funkce
+GDB command	Příkaz GDB
+GDB session status	Stav relace GDB
+Game assets	Herní podklady
+Game engines	Herní enginy
+Game files	Soubory hry
+General	Obecné
+Generate a 3D model	Vygenerovat 3D model
+Generate a picture	Vygenerovat obrázek
+Generate custom pictures and models	Generovat vlastní obrázky a modely
+Generated art (games)	Generovaná grafika (hry)
+Generated assets	Generované podklady
+Generated pictures and 3D models are made with fal.ai.	Generované obrázky a 3D modely vytváří fal.ai.
+Get Ghidra	Získat Ghidra
+Get Ghidra for Deep mode	Získat Ghidra pro Hloubkový režim
+Get Unity Hub	Získat Unity Hub
+Get a key at {name}	Získat klíč u {name}
+Get the Epic Games Launcher	Získat Epic Games Launcher
+Get {name}	Získat {name}
+Getting Ghidra	Získává se Ghidra
+Getting Godot	Získává se Godot
+Getting Unity Hub	Získává se Unity Hub
+Getting the Epic Games Launcher	Získává se Epic Games Launcher
+Ghidra	Ghidra
+Ghidra folder	Složka Ghidra
+Ghidra is ready	Ghidra je připravena
+Ghidra is ready. Deep mode uses it from now on.	Ghidra je připravena. Hloubkový režim ji odteď používá.
+Ghidra isn't installed, so the built-in decompiler stands in. Get it in Settings → Engines.	Ghidra není nainstalována, proto ji zastupuje vestavěný dekompilátor. Získáte ji v Nastavení → Enginy.
+Ghidra isn't on this computer yet, so the built-in decompiler stands in.	Ghidra v tomto počítači zatím není, proto ji zastupuje vestavěný dekompilátor.
+Ghidra will use half of this computer's memory (up to {gb} GB).	Ghidra použije polovinu paměti tohoto počítače (nejvýše {gb} GB).
+Ghidra will use up to {gb} GB of memory.	Ghidra použije nejvýše {gb} GB paměti.
+Ghidra, a free reverse-engineering tool from the NSA, gives Deep mode richer decompiled code and types.	Ghidra, bezplatný nástroj pro reverzní inženýrství od NSA, poskytuje Hloubkovému režimu podrobnější dekompilovaný kód a typové informace.
+Go home	Přejít na úvod
+Go program details	Podrobnosti programu v Go
+Go to address	Přejít na adresu
+Go to offset (0x…)	Přejít na offset (0x…)
+Go to the project	Přejít k projektu
+Good enough	Dostatečná podobnost
+Got it	Rozumím
+Graph	Graf
+Half of this computer's memory, up to {gb} GB.	Polovina paměti tohoto počítače, nejvýše {gb} GB.
+Here's a first look:	První pohled:
+Here's what I found on that page:	Na této stránce jsem zjistil:
+Hex	Hex
+Hide pinned builds	Skrýt připnutá sestavení
+Hide the answer	Skrýt odpověď
+Hide the console	Skrýt konzoli
+High	Vysoká
+Home	Úvod
+How alike a rebuild must look to the original before refining stops.	Požadovaná podobnost rekonstrukce s originálem, při které se vylepšování zastaví.
+How closely may Craft Anything look at it?	Jak podrobně jej smí Craft Anything zkoumat?
+How complete is the rebuild	Úplnost rekonstrukce
+How do I open an app?	Jak otevřu aplikaci?
+How do the window and the page talk to each other?	Jak spolu komunikují okno a stránka?
+How does the % key work?	Jak funguje klávesa %?
+How is this app built?	Jak je tato aplikace sestavena?
+How is this app put together?	Z jakých částí se tato aplikace skládá?
+How many projects may build at the same time. More wait their turn.	Kolik projektů se může sestavovat současně. Další čekají, až na ně přijde řada.
+How should the builder use them?	Jak je má sestavovací agent použít?
+I have Ghidra	Mám Ghidra
+I have permission	Mám oprávnění
+I want to make things work together	Chci propojit různé programy
+I'm checking whether it's safe	Ověřuji, zda je to bezpečné
+I'm keeping old software alive	Udržuji starý software v provozu
+I'm learning how things work	Učím se, jak věci fungují
+I'm new to this	Začínám s tím
+ILSpy decompile	Dekompilace pomocí ILSpy
+Ideas:	Nápady:
+Identify a Flutter build	Rozpoznat sestavení Flutter
+Import a source folder	Importovat složku se zdrojovým kódem
+Import evidence	Importovat důkazy
+Imports / Exports	Importy / exporty
+In Deep mode this one takes a game's own files out after the study. Click to stop.	V Hloubkovém režimu tento asistent po průzkumu extrahuje vlastní soubory hry. Kliknutím to vypnete.
+In Unity Hub: sign in (or make a free account) and accept the free Personal licence. Then open Installs, press Install Editor and choose the recommended version. About 10 GB.	V Unity Hub se přihlaste (nebo si vytvořte bezplatný účet) a přijměte bezplatnou licenci Personal. Pak otevřete Installs, stiskněte Install Editor a vyberte doporučenou verzi. Přibližně 10 GB.
+In the launcher: sign in, open Unreal Engine, then Library, and press + next to Engine Versions to install one. About 60 GB.	V launcheru se přihlaste, otevřete Unreal Engine, pak Library a tlačítkem + vedle Engine Versions nainstalujte verzi. Přibližně 60 GB.
+In use	Používá se
+Inside	Uvnitř
+Inspect a Dart AOT snapshot	Prozkoumat snímek Dart AOT
+Inspect a network recording	Prozkoumat síťový záznam
+Inspect a web page	Prozkoumat webovou stránku
+Inspect an Electron page	Prozkoumat stránku Electron
+Inspect data	Prozkoumat data
+Inspect instruction	Prozkoumat instrukci
+Inspector	Inspektor
+Install Rust	Nainstalovat Rust
+Install Unity Hub	Nainstalovat Unity Hub
+Install Visual Studio Community (free) and tick "Game development with C++".	Nainstalujte Visual Studio Community (zdarma) a zaškrtněte „Game development with C++“.
+Install Xcode	Nainstalovat Xcode
+Install an app	Nainstalovat aplikaci
+Install an engine	Nainstalovat engine
+Install the launcher	Nainstalovat launcher
+Installed	Nainstalováno
+Installed apps	Nainstalované aplikace
+Inter-process communication: how two parts of an app (or two apps) send messages to each other.	Meziprocesová komunikace: jak si dvě části aplikace (nebo dvě aplikace) posílají zprávy.
+Interface Builder documents	Dokumenty Interface Builder
+Interrupted	Přerušeno
+Inventory an archive or app bundle	Vytvořit inventář archivu nebo balíčku aplikace
+Investigating	Probíhá průzkum
+Investigation so far	Dosavadní průzkum
+Is Apktool available?	Je Apktool dostupný?
+Is adb available?	Je adb dostupné?
+Is an asset key set up?	Je nastaven klíč pro podklady?
+Is anything in here a program?	Je zde nějaký program?
+Is anything sensitive saved in plain text?	Jsou citlivé údaje uloženy jako prostý text?
+Is it safe to look inside programs?	Je bezpečné nahlížet do programů?
+Is it safe to run?	Je bezpečné to spustit?
+Is there any readable text inside?	Je uvnitř nějaký čitelný text?
+Is this file safe to open?	Je bezpečné tento soubor otevřít?
+It closed straight away.	Ihned se ukončil.
+It closed straight away. It said:	Ihned se ukončil. Vypsal:
+It isn't on this computer yet. Craft Anything can download Ghidra {version} and the Java runtime it needs (about {mb} MB), check both against their publishers' checksums, and set them up in its own folder. Nothing else on your computer changes.	V tomto počítači zatím není. Craft Anything může stáhnout Ghidra {version} a potřebné běhové prostředí Java (asi {mb} MB), ověřit obojí podle kontrolních součtů vydavatelů a nastavit je ve vlastní složce. Nic dalšího v počítači se nezmění.
+It isn't on this computer yet. Install Ghidra {version} from its release page, then choose its folder.	V tomto počítači zatím není. Nainstalujte Ghidra {version} ze stránky vydání a pak vyberte její složku.
+It's already open.	Již je otevřený.
+It's already open. Right-click it to open another copy.	Již je otevřený. Pravým tlačítkem můžete otevřít další kopii.
+It's done	Je hotovo
+It's mine, or I'm allowed to look	Patří mi nebo mám oprávnění jej zkoumat
+Its copy is deleted, with anything it saved there. The project itself stays as it is.	Jeho kopie bude smazána včetně všeho, co se do ní uložilo. Samotný projekt zůstane beze změny.
+Its folder is deleted with everything in it: what was built, the checks and the conversation.	Jeho složka bude smazána se vším, co obsahuje: výsledkem sestavení, kontrolami i konverzací.
+Its own code	Vlastní kód
+Java archive overview	Přehled archivu Java
+Java class	Třída v Javě
+Java method bytecode and pseudo-Java	Bajtkód metody v Javě a pseudokód Javy
+Java program code (one class)	Kód programu v Javě (jedna třída)
+Java programs	Programy v Javě
+Java runtime	Běhové prostředí Java
+Jobs	Úlohy
+Jobs ({n_jobs})	Úlohy ({n_jobs})
+Jobs ({n})	Úlohy ({n})
+Just a question: nothing was changed. Answered by	Pouze otázka: nic se nezměnilo. Odpověď od
+Just ask	Jen se zeptat
+Just look inside	Jen nahlédnout dovnitř
+Keep going without asking	Pokračovat bez dotazů
+Keep it	Ponechat
+Keep it in the sidebar to open any time, whatever later builds change.	Ponechat v postranním panelu, odkud jej lze kdykoli otevřít bez ohledu na změny v dalších sestaveních.
+Keep the build as it is and stop offering to carry on.	Ponechat sestavení v tomto stavu a přestat nabízet pokračování.
+Keep this version in the sidebar to open any time.	Ponechat tuto verzi v postranním panelu pro pozdější otevření.
+Keeps this version exactly as it is now. Later builds can't change or break it, and anything it saves stays with the copy.	Zachová tuto verzi přesně v aktuálním stavu. Další sestavení ji nemohou změnit ani rozbít a vše uložené zůstane u kopie.
+Key saved	Klíč uložen
+Keyed archive	Klíčovaný archiv
+Kind	Druh
+Language	Jazyk
+Last: {what}	Naposledy: {what}
+Launch an app	Spustit aplikaci
+Leave a few GB for the rest of your computer.	Ponechte několik GB pro zbytek počítače.
+Leave a path empty to use the managed install. We never need environment variables.	Prázdná cesta použije spravovanou instalaci. Proměnné prostředí nejsou potřeba.
+Leave empty to use the one Craft Anything sets up.	Ponechte prázdné pro použití instalace, kterou nastaví Craft Anything.
+Let a project generate assets	Povolit projektu generovat podklady
+Let's go	Začít
+Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Umožní sestavovacímu agentovi vytvářet realistické 3D modely a textury pro hry, {model} za model, s rozpočtem {budget} na projekt.
+Library resolution	Vyhledání knihoven
+Light copy: shares big files with the project	Odlehčená kopie: sdílí velké soubory s projektem
+Likeness	Podobnost
+Line up code and behaviour	Propojit kód s chováním
+Line up source with the bundle	Propojit zdrojový kód s balíkem
+List Electron pages	Vypsat stránky Electron
+List JEB units	Vypsat jednotky JEB
+List JS runtime targets	Vypsat cíle běhového prostředí JS
+List a Unity assets file	Vypsat obsah souboru podkladů Unity
+List a Unity bundle	Vypsat obsah balíku Unity
+List a game's archives	Vypsat archivy hry
+List a node's event listeners	Vypsat posluchače událostí uzlu
+List an AI's models	Vypsat modely AI
+List an Unreal IoStore container	Vypsat obsah kontejneru Unreal IoStore
+List an Unreal pak	Vypsat obsah archivu Unreal .pak
+List bookmarks	Vypsat záložky
+List browser pages	Vypsat stránky prohlížeče
+List documents	Vypsat dokumenty
+List engines	Vypsat enginy
+List functions	Vypsat funkce
+List names	Vypsat názvy
+List open targets	Vypsat otevřené cíle
+List pinned builds	Vypsat připnutá sestavení
+List plugins	Vypsat pluginy
+List project files	Vypsat soubory projektu
+List projects	Vypsat projekty
+List questions about a build	Vypsat otázky k sestavení
+List radio decoders	Vypsat rádiové dekodéry
+List segments	Vypsat segmenty
+List shared Cutter sessions	Vypsat sdílené relace Cutter
+List strings	Vypsat řetězce
+Live: the project's latest build	Průběžné: nejnovější sestavení projektu
+Load a screenshot	Načíst snímek obrazovky
+Loading…	Načítání…
+Log	Protokol
+Look again	Hledat znovu
+Look at a game	Prozkoumat hru
+Look at a website	Prozkoumat web
+Look at the game	Prozkoumat tuto hru
+Look for AI on this computer	Vyhledat AI v tomto počítači
+Look for game engines	Vyhledat herní enginy
+Look for projects again	Znovu vyhledat projekty
+Looked at everything	Prozkoumáno vše
+Looked at part of it	Prozkoumána část
+Looked at {a} of {b}	Prozkoumáno {a} z {b}
+Looking for AI on this computer…	Vyhledávání AI v tomto počítači…
+Looking for game engines on this computer…	Vyhledávání herních enginů v tomto počítači…
+Looking for the game's files…	Vyhledávání souborů hry…
+Looking inside needs Deep mode	Nahlédnutí dovnitř vyžaduje Hloubkový režim
+Looking inside software you own or are allowed to examine is normal and often protected (learning, compatibility, security). Saying why helps you keep to it; it stays on this computer.	Zkoumání softwaru, který vlastníte nebo máte oprávnění zkoumat, je běžné a často právně chráněné (vzdělávání, kompatibilita, bezpečnost). Uvedení účelu vám pomůže se jej držet; zůstane v tomto počítači.
+Looking on this computer…	Vyhledávání v tomto počítači…
+Low	Nízká
+Mach-O structure	Struktura Mach-O
+Made a copy: {name}	Vytvořena kopie: {name}
+Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Vytváří fal.ai a platí se z vašeho účtu: {model} za 3D model, {picture} za obrázek. Při vypnutí se hra sestaví bez nich.
+Made with {engine}	Vytvořeno pomocí {engine}
+Made without looking inside the original.	Vytvořeno bez nahlížení dovnitř originálu.
+Make a game that plays like this	Vytvořit hru s podobnou hratelností
+Make a simpler version of this game	Vytvořit jednodušší verzi této hry
+Make my own version	Vytvořit vlastní verzi
+Make my own version of this app	Vytvořit vlastní verzi této aplikace
+Making my own thing talk to something else.	Chci, aby můj výtvor komunikoval s něčím dalším.
+Many source files packed into one big file so an app or web page loads faster.	Mnoho zdrojových souborů zabalených do jednoho velkého souboru pro rychlejší načítání aplikace nebo webové stránky.
+Map a HarmonyOS app	Zmapovat aplikaci HarmonyOS
+Map a page's module graph	Zmapovat graf modulů stránky
+Map an Android app	Zmapovat aplikaci pro Android
+Map an Apple app	Zmapovat aplikaci Apple
+Markdown	Markdown
+Match functions between two builds	Spárovat funkce dvou sestavení
+Match my pictures	Přiblížit vzhled mým obrázkům
+Match static code to what ran	Propojit statický kód se skutečně spuštěným
+Maximise	Maximalizovat
+May I run "{title}"?	Smím spustit „{title}“?
+May I {action}?	Smím provést akci: {action}?
+Measure which code ran	Změřit, který kód se spustil
+Medium	Střední
+Memory for Ghidra	Paměť pro Ghidra
+Minimise	Minimalizovat
+Mode	Režim
+Model	Model AI
+Model: {model}	Model AI: {model}
+Modules	Moduly
+More detail	Více podrobností
+More makes a big program's first look faster.	Více paměti urychlí první průzkum velkého programu.
+More memory makes Ghidra's first look at a big program faster; leave some for the rest of the computer. Used from the next time Ghidra starts.	Více paměti urychlí první průzkum velkého programu pomocí Ghidra; část ponechte pro zbytek počítače. Použije se při příštím spuštění Ghidra.
+Name (optional)	Název (volitelný)
+Name an address	Pojmenovat adresu
+Name at address	Název na adrese
+Name many addresses	Pojmenovat více adres
+Names the program's author gave to functions or variables that survived in the file.	Názvy, které autor programu dal funkcím nebo proměnným a které se v souboru zachovaly.
+Needs a fal.ai key. Until then the game is built without them.	Vyžaduje klíč fal.ai. Do té doby se hra sestavuje bez nich.
+Needs you	Vyžaduje vaši reakci
+Network	Síť
+New	Nový
+New project	Nový projekt
+New projects go in	Nové projekty ukládat do
+Next address	Další adresa
+No AI (built-in engines only)	Bez AI (jen vestavěné enginy)
+No AI brain is set up, so answers come straight from the built-in engines. Add one any time for plain-words explanations.	Není nastaven žádný AI asistent, proto odpovědi pocházejí přímo z vestavěných enginů. Kdykoli přidejte asistenta pro srozumitelná vysvětlení.
+No AI for now	Zatím bez AI
+No AI is set up yet. The built-in engines still work; an AI adds plain-words answers.	Zatím není nastavena žádná AI. Vestavěné enginy přesto fungují; AI přidá srozumitelné odpovědi.
+No Unreal or Unity archives were found. Pick the folder the game is installed in.	Nebyly nalezeny žádné archivy Unreal ani Unity. Vyberte složku s instalací hry.
+No coding agent was found on this computer yet.	V tomto počítači zatím nebyl nalezen žádný programovací agent.
+No evidence yet	Zatím žádné důkazy
+No game files here	Zde nejsou soubory hry
+No jobs yet. Long tasks show their progress here, and you can cancel them.	Zatím žádné úlohy. Zde uvidíte průběh dlouhých úloh a můžete je zrušit.
+No matches	Žádné shody
+No open questions	Žádné otevřené otázky
+No plugins yet.	Zatím žádné pluginy.
+No result yet	Zatím žádný výsledek
+No targets	Žádné cíle
+No tool named {tool}	Nástroj s názvem {tool} neexistuje
+None	Žádná
+None yet. Screenshots help it look right.	Zatím žádné. Snímky obrazovky pomohou dosáhnout správného vzhledu.
+Not allowed	Nepovoleno
+Not allowed.	Nepovoleno.
+Not available yet	Zatím nedostupné
+Not compared yet: {what}	Zatím neporovnáno: {what}
+Not installed	Nenainstalováno
+Not now	Teď ne
+Nothing allowed yet.	Zatím není nic povoleno.
+Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below.	Zatím nelze sestavovat: nainstalujte Claude Code (a jednou se v něm přihlaste), nebo níže přidejte AI s klíčem API.
+Nothing found	Nic nenalezeno
+Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have.	Zatím nic nenalezeno. Hledáme klíče API, místní servery modelů (Ollama, LM Studio) a aplikace agentů, které už máte.
+Nothing inside it is read.	Nic uvnitř se nečte.
+Nothing inside it is read; Craft Anything works from what you can see. Your version gets its own art.	Nic uvnitř se nečte; Craft Anything vychází z toho, co vidíte. Vaše verze dostane vlastní grafiku.
+Nothing inside the original is read: not its code, files or page source. Craft Anything works from what you can see: pictures, the page as a visitor sees it, and watching it run.	Nic uvnitř originálu se nečte: ani jeho kód, ani soubory, ani zdrojový kód stránek. Craft Anything vychází z toho, co vidíte: obrázky, stránka z pohledu návštěvníka a pozorování běhu.
+Nothing made yet. What you make shows up here.	Zatím jste nic nevytvořili. Zde se zobrazí vaše výtvory.
+Nothing matches the filter.	Filtru nic neodpovídá.
+Nothing matches.	Žádná shoda.
+Nothing new for {time}. Long steps can be quiet; if it stays like this, press Pause.	Už {time} nic nového. Dlouhé kroky mohou být bez odezvy; pokud to trvá, stiskněte Pozastavit.
+Nothing open	Nic není otevřeno
+Nothing open yet	Zatím není nic otevřeno
+Nothing selected	Nic není vybráno
+Nothing to show	Není co zobrazit
+Nothing uses it until it's on again; it keeps its key.	Do opětovného zapnutí se nepoužívá; klíč zůstane uložen.
+Nothing — start fresh	Nic — začít od nuly
+Now	Nyní
+Now: {what} ({time})	Nyní: {what} ({time})
+Objective-C classes	Třídy Objective-C
+Objective-C protocols	Protokoly Objective-C
+Observe a JS runtime	Pozorovat běhové prostředí JS
+Of this, {cost} was charged to an API key.	Z toho bylo {cost} účtováno přes klíč API.
+Off	Vypnuto
+Ollama or LM Studio on another computer, or any service that speaks the OpenAI API.	Ollama nebo LM Studio na jiném počítači či jakákoli služba podporující OpenAI API.
+On	Zapnuto
+One line, in plain words. It stays on this computer and is never sent anywhere.	Jeden řádek, srozumitelně. Zůstane v tomto počítači a nikam se neodesílá.
+One-shot instrumentation	Jednorázová instrumentace
+Only for Ghidra. Empty = managed.	Pouze pro Ghidra. Prázdné = spravovaná instalace.
+Only its name changes; its folder stays where it is.	Změní se pouze název; složka zůstane na svém místě.
+Only take pictures out of games you made, or whose owner allows it. A game's art is usually protected by copyright and by the game's licence.	Obrázky extrahujte jen z her, které jste vytvořili nebo jejichž vlastník to dovoluje. Grafiku hry obvykle chrání autorské právo i licence hry.
+Only the pin goes; the project and its app stay as they are.	Odstraní se pouze připnutí; projekt i jeho aplikace zůstanou beze změny.
+Open	Otevřít
+Open "Show me the proof" to see the exact code we found, and how sure we are.	Otevřete „Ukázat důkazy“ a zobrazte přesný nalezený kód i míru jistoty.
+Open Ghidra's release page	Otevřít stránku vydání Ghidra
+Open Unity Hub	Otevřít Unity Hub
+Open a calculator app and find the code behind one button.	Otevřete aplikaci kalkulačky a najděte kód jednoho tlačítka.
+Open a file in JEB	Otevřít soubor v JEB
+Open a file or drop one here.	Otevřete soubor nebo jej sem přetáhněte.
+Open a file…	Otevřít soubor…
+Open a folder or app bundle	Otevřít složku nebo balíček aplikace
+Open a folder or app bundle…	Otevřít složku nebo balíček aplikace…
+Open a folder…	Otevřít složku…
+Open a pinned build	Otevřít připnuté sestavení
+Open a project's folder	Otevřít složku projektu
+Open a website	Otevřít web
+Open an app or file	Otevřít aplikaci nebo soubor
+Open an engine's app	Otevřít aplikaci enginu
+Open another copy	Otevřít další kopii
+Open another target	Otevřít další cíl
+Open files, folders or apps; you can have several open at once.	Otevřete soubory, složky nebo aplikace; můžete jich mít otevřeno více najednou.
+Open folder	Otevřít složku
+Open in the workbench	Otevřít na pracovní ploše
+Open it	Otevřít
+Open log	Otevřít protokol
+Open one of the files inside it to see its bytes.	Otevřete některý ze souborů uvnitř a zobrazte jeho bajty.
+Open questions	Otevřené otázky
+Open something	Něco otevřít
+Open something first: drop a file or app here, or choose "Just look inside" on New project. Then I can look inside it.	Nejprve něco otevřete: přetáhněte sem soubor nebo aplikaci, nebo u nového projektu vyberte „Jen nahlédnout dovnitř“. Pak mohu prozkoumat obsah.
+Open something to start	Začněte otevřením cíle
+Open the Epic Games Launcher	Otevřít Epic Games Launcher
+Open the app	Otevřít aplikaci
+Open the app you're curious about.	Otevřete aplikaci, která vás zajímá.
+Open the download page	Otevřít stránku stahování
+Open the folder	Otevřít tuto složku
+Open the installer app	Otevřít instalátor
+Open the website	Otevřít tento web
+Open {name}	Otevřít {name}
+Opened {name}	Otevřeno: {name}
+Opened {name}. Taking a first look…	Otevřeno: {name}. Probíhá první průzkum…
+Opened {}	Otevřeno: {}
+Opening {name}…	Otevírá se {name}…
+Open…	Otevřít…
+Or type your answer…	Nebo napište odpověď…
+Original	Originál
+Other pages of a website studied and compared besides the one you gave.	Další stránky webu zkoumané a porovnávané kromě té, kterou jste zadali.
+Overview	Přehled
+Packet capture overview	Přehled záznamu paketů
+Packet fields	Pole paketů
+Page through evidence	Procházet stránky důkazů
+Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	Část aplikace se zasekla, proto byla zastavena a zbytek pokračuje. Vaše práce je zachována.
+Part of the app is stuck. Restarting clears it, and your work is kept.	Část aplikace se zasekla. Restart ji uvolní a vaše práce zůstane zachována.
+Part of this screen hit a bug and was skipped. Your work is safe.	Část této obrazovky narazila na chybu a byla přeskočena. Vaše práce je v bezpečí.
+Paste your API key (kept in your system keychain)	Vložte klíč API (uloží se do systémové klíčenky)
+Paste your {name} key	Vložte klíč {name}
+Path	Cesta
+Pause	Pozastavit
+Pause the build first, then delete the project.	Nejprve pozastavte sestavování a pak smažte projekt.
+Pause the build first.	Nejprve pozastavte sestavování.
+Paused	Pozastaveno
+Paused.	Pozastaveno.
+Pick a folder with projects in it	Vybrat složku s projekty
+Pick a game's folder	Vybrat složku hry
+Pick another folder…	Vybrat jinou složku…
+Pick another game	Vybrat jinou hru
+Pick something on the left	Vyberte něco vlevo
+Pick the app or game folder	Vybrat složku aplikace nebo hry
+Pick the app, game or file to rebuild	Vybrat aplikaci, hru nebo soubor pro rekonstrukci
+Pick the folder for this project	Vybrat složku pro tento projekt
+Pick the game's folder	Vybrat složku této hry
+Picture a program's window	Pořídit snímek okna programu
+Picture model	Model pro obrázky
+Pictures	Obrázky
+Pictures can't be saved from IoStore containers yet; you can see what's inside.	Obrázky z kontejnerů IoStore zatím nelze uložit; jejich obsah si můžete prohlédnout.
+Pictures of the original	Obrázky originálu
+Pieces of text stored inside a program, like messages, web addresses or file names.	Texty uložené uvnitř programu, například zprávy, webové adresy nebo názvy souborů.
+Pin a build	Připnout sestavení
+Pin a project's build	Připnout sestavení projektu
+Pin it	Připnout
+Pin name	Název připnutí
+Pin removed.	Připnutí odebráno.
+Pin this build	Připnout toto sestavení
+Pinned	Připnuto
+Pinned builds	Připnutá sestavení
+Pinned: {name}. Open it from the sidebar any time.	Připnuto: {name}. Kdykoli ho otevřete z postranního panelu.
+Plain words, big buttons, and I'll explain everything.	Srozumitelná slova, velká tlačítka a vše vám vysvětlím.
+Plain words, short sentences, and every technical word explained.	Srozumitelná slova, krátké věty a vysvětlení každého technického pojmu.
+Plan	Plán
+Plan connecting agent apps	Naplánovat připojení aplikací agentů
+Play a project's result	Spustit výsledek projektu
+Play the game	Hrát hru
+Plugin added. Read its tools to start using them.	Plugin přidán. Načtěte jeho nástroje, abyste je mohli používat.
+Plugin arguments	Argumenty pluginu
+Plugin command or address	Příkaz nebo adresa pluginu
+Plugin id	ID pluginu
+Plugin removed.	Plugin odebrán.
+Plugins	Pluginy
+Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	Pluginy přidávají nástroje, které Craft Anything nabízí jako vlastní: servery MCP (příkaz nebo adresa; po přidání načtěte jejich nástroje) nebo komponenty WebAssembly (soubor .wasm, který nemá přístup k vašim souborům ani síti).
+Plugins added here always ask before each call.	Zde přidané pluginy vždy před každým voláním žádají o schválení.
+Plugins read. Their new tools are offered from the next start.	Pluginy načteny. Jejich nové nástroje budou k dispozici od příštího spuštění.
+Preserving software that's no longer supported.	Zachování softwaru, který už není podporován.
+Preview a project's website	Zobrazit náhled webu projektu
+Preview the website	Zobrazit náhled webu
+Previous address	Předchozí adresa
+Program: found automatically	Program: nalezen automaticky
+Program: {path}	Cesta k programu: {path}
+Programs (native code)	Programy (nativní kód)
+Progress	Průběh
+Project details	Podrobnosti projektu
+Project name	Název projektu
+Projects	Projekty
+Projects and builds	Projekty a sestavení
+Property list	Seznam vlastností
+Pseudo-C	Pseudokód C
+Purpose	Účel
+Raise the asset budget	Navýšit rozpočet podkladů
+Raise the budget by {amount}	Navýšit rozpočet o {amount}
+Raw machine code	Surový strojový kód
+Read AI settings	Načíst nastavení AI
+Read a Unity game's IL2CPP metadata	Přečíst metadata IL2CPP hry Unity
+Read a game's files	Přečíst soubory hry
+Read a project file	Přečíst soubor projektu
+Read a setting	Přečíst nastavení
+Read an app's screen	Přečíst obrazovku aplikace
+Read bytes	Přečíst bajty
+Read comment	Přečíst komentář
+Read inline comment	Přečíst řádkový komentář
+Read its tools	Načíst jeho nástroje
+Read pinned builds	Načíst připnutá sestavení
+Read projects	Načíst projekty
+Read the journal	Přečíst deník
+Read the plugin's tools	Načíst nástroje pluginu
+Read the project	Načíst projekt
+Reading what's inside…	Čtení obsahu…
+Ready	Hotovo
+Ready: {what} is on this computer.	Připraveno: {what} je v tomto počítači.
+Rebuild status	Stav rekonstrukce
+Record a finding	Zaznamenat zjištění
+Record a hypothesis	Zaznamenat hypotézu
+Record an open question	Zaznamenat otevřenou otázku
+Recover readable sources	Obnovit čitelný zdrojový kód
+Recreate it with darker colours	Znovu vytvořit s tmavšími barvami
+Recreate just its main feature	Znovu vytvořit jen hlavní funkci
+Recreate this website	Znovu vytvořit tento web
+Recreated games are built with the original's own engine when it's here (Unity, Unreal or Godot), else Unity, and Rust as the last resort.	Rekonstruované hry se sestavují pomocí původního herního enginu, pokud je dostupný (Unity, Unreal nebo Godot), jinak pomocí Unity a v krajním případě v jazyce Rust.
+References to a name	Odkazy na název
+Refining rounds	Kola vylepšování
+Refresh plugins	Obnovit pluginy
+Regions of a program file, each with one purpose: code, text, pictures, settings.	Oblasti souboru programu, každá s jedním účelem: kód, text, obrázky, nastavení.
+Reload	Znovu načíst
+Remember permission	Zapamatovat oprávnění
+Remove	Odebrat
+Remove a pin	Odebrat připnutí
+Remove a pinned build	Odebrat připnuté sestavení
+Remove a plugin	Odebrat plugin
+Remove an AI	Odebrat AI
+Remove an app	Odinstalovat aplikaci
+Remove an asset key	Odebrat klíč pro podklady
+Remove bookmark	Odebrat záložku
+Remove it	Odebrat jej
+Remove it and its key	Odebrat i s klíčem
+Remove {name}	Odebrat {name}
+Remove {name}?	Odebrat {name}?
+Remove…	Odebrat…
+Rename	Přejmenovat
+Rename a pinned build	Přejmenovat připnuté sestavení
+Rename a project	Přejmenovat projekt
+Rename the pin	Přejmenovat připnutí
+Rename the project	Přejmenovat tento projekt
+Rename…	Přejmenovat…
+Reset	Obnovit průvodce
+Resolve a call	Vyřešit cíl volání
+Resolved	Vyřešeno
+Resources	Prostředky
+Restart	Restartovat
+Restore	Obnovit velikost
+Result	Výsledek
+Resume a Frida session	Obnovit běh relace Frida
+Rizin command	Příkaz Rizin
+Rizin debug command	Ladicí příkaz Rizin
+Rizin debug session status	Stav ladicí relace Rizin
+Rough guide:	Orientační vodítko:
+Run	Spustit
+Run a Frida script	Spustit skript Frida
+Run a build command	Spustit příkaz sestavení
+Run a scripted Electron session	Spustit skriptovanou relaci Electron
+Run a scripted web session	Spustit skriptovanou webovou relaci
+Run a tool from the command palette (Ctrl/⌘ K), or pick a finding in the Evidence panel.	Spusťte nástroj z palety příkazů (Ctrl/⌘ K) nebo vyberte zjištění v panelu Důkazy.
+Run and watch a program	Spustit a pozorovat program
+Run to study	Spouštět při průzkumu
+Running	Běží
+Running processes	Běžící procesy
+Running programs	Běžící programy
+Running {id}	Spouštění {id}
+Runs its tools without asking	Spouští své nástroje bez dotazů
+Runs the first-run steps next time.	Při příštím spuštění zobrazí úvodního průvodce.
+Rust program details	Podrobnosti programu v jazyce Rust
+SHA-256	SHA-256
+SQLite database contents	Obsah databáze SQLite
+Safety	Bezpečnost
+Save	Uložit
+Save a picture	Uložit obrázek
+Save a report	Uložit zprávu
+Save an asset key	Uložit klíč pro podklady
+Save picture	Uložit obrázek
+Save settings	Uložit nastavení
+Save the key	Uložit klíč
+Save the picture	Uložit tento obrázek
+Save the report	Uložit tuto zprávu
+Saved	Uloženo
+Saved in	Uloženo v
+Saves space: copies the program and code, and shares dependencies and media with the project. A shared file rewritten in place changes here too.	Šetří místo: kopíruje program a kód, závislosti a média sdílí s projektem. Přepsání sdíleného souboru na místě jej změní i zde.
+Say what you want	Popište, co chcete
+Say what you want first.	Nejprve popište, co chcete.
+Say what you want to make, or drop an app or file on the window to look inside it. Everything runs in Clean room mode unless you switch on Deep.	Popište, co chcete vytvořit, nebo do okna přetáhněte aplikaci či soubor a prozkoumejte je. Vše běží v režimu Čistá místnost, dokud nezapnete Hloubkový režim.
+Screenshot	Snímek obrazovky
+Screenshot a page	Pořídit snímek stránky
+Screenshots of how it should look. The builder opens each one and matches it.	Snímky obrazovky požadovaného vzhledu. Sestavovací agent každý otevře a přizpůsobí mu výsledek.
+Search for bytes	Hledat bajty
+Search functions	Hledat funkce
+Search strings	Hledat řetězce
+Sections	Sekce
+Security research on software I'm allowed to examine.	Bezpečnostní výzkum softwaru, který mám oprávnění zkoumat.
+See how a page is built: its layout, styles, scripts and the requests it makes.	Zjistěte, jak je stránka vytvořena: rozložení, styly, skripty a odesílané požadavky.
+See how a program works: what it does, what it talks to, what's inside.	Zjistěte, jak program funguje: co dělá, s čím komunikuje a co obsahuje.
+See what a game packs and save its pictures as PNG files. Only for games you made, or whose owner lets you.	Prohlédněte obsah hry a uložte její obrázky jako soubory PNG. Jen u her, které jste vytvořili nebo jejichž vlastník vám to dovoluje.
+See what a game packs, and save its pictures as PNG files.	Prohlédněte obsah hry a uložte její obrázky jako soubory PNG.
+See what a stand-in was asked	Zobrazit požadavky na náhradní backend
+See which servers an app talks to, and what it says.	Zjistěte, se kterými servery aplikace komunikuje a co jim sděluje.
+Seen it	Pozorováno
+Seen it: read directly from the file, page or capture.	Pozorováno: přečteno přímo ze souboru, stránky nebo záznamu.
+Selected	Vybráno
+Selection	Výběr
+Send	Odeslat
+Send (Enter)	Odeslat (Enter)
+Send now	Odeslat nyní
+Server address	Adresa serveru
+Session status	Stav relace
+Set a project's asset budget	Nastavit rozpočet podkladů projektu
+Set an AI's program	Nastavit program AI
+Set one up	Nastavit
+Set up a brain…	Nastavit AI asistenta…
+Set up a builder	Nastavit sestavovacího agenta
+Settings	Nastavení
+Show a build's activity	Zobrazit aktivitu sestavení
+Show a project	Zobrazit projekt
+Show folder	Zobrazit složku
+Show me everything	Ukázat vše
+Show me the proof	Ukázat důkazy
+Show pinned builds	Zobrazit připnutá sestavení
+Show settings	Zobrazit nastavení
+Show the answer	Zobrazit odpověď
+Show the console	Zobrazit konzoli
+Show the folder	Zobrazit tuto složku
+Show the ones that are met	Zobrazit splněné požadavky
+Show the sidebar	Zobrazit postranní panel
+Show the welcome again	Znovu zobrazit uvítání
+Showing	Zobrazeno
+Sign in and add the Unity Editor	Přihlásit se a přidat Unity Editor
+Sign in and install Unreal Engine	Přihlásit se a nainstalovat Unreal Engine
+Simple	Jednoduchý
+Simple: say what you want and it's handled for you. Advanced: every tool, the evidence and the logs.	Jednoduchý: řekněte, co chcete, a aplikace vše zařídí. Pokročilý: všechny nástroje, důkazy i protokoly.
+Since Craft Anything opened.	Od spuštění Craft Anything.
+Size	Velikost
+Skip setup	Přeskočit nastavení
+Smart contract interface	Rozhraní chytrého kontraktu
+Software I made, bought, or have permission to examine.	Vlastní nebo zakoupený software, případně software, který smím zkoumat.
+Solana program (sBPF)	Program Solana (sBPF)
+Some plugins couldn't be read:	Některé pluginy se nepodařilo načíst:
+Something a program borrows from the operating system or a library, like "open a file".	Operace, kterou program přebírá z operačního systému nebo knihovny, například „otevřít soubor“.
+Something a program or library offers for other programs to use.	Funkce, kterou program nebo knihovna nabízí jiným programům.
+Source	Zdrojový kód
+Start	Spustit
+Start a Frida session	Zahájit relaci Frida
+Start a GDB session	Zahájit relaci GDB
+Start a Rizin debug session	Zahájit ladicí relaci Rizin
+Start a rebuild	Zahájit rekonstrukci
+Start a stand-in backend	Spustit náhradní backend
+Start an activity	Spustit aktivitu
+Start building	Zahájit sestavení
+Start from them	Vycházet z nich
+Start it	Spustit jej
+Start with Simple mode; you can set up AI later in Settings.	Začněte v jednoduchém režimu; AI můžete později nastavit v Nastavení.
+Starting…	Spouštění…
+Starting… it opens in its own window.	Spouštění… otevře se ve vlastním okně.
+Still working. Bigger jobs can take a few minutes.	Stále pracuji. Větší úlohy mohou trvat několik minut.
+Stop	Zastavit
+Stop a pinned build	Zastavit připnuté sestavení
+Stop a rebuild	Zastavit rekonstrukci
+Stop a stand-in backend	Zastavit náhradní backend
+Stop generated assets	Zakázat generované podklady
+Stop listing {folder}	Přestat zobrazovat {folder}
+Stopped here	Zastaveno zde
+Stops the current step and sends your notes straight away.	Zastaví aktuální krok a ihned odešle vaše poznámky.
+Strings	Řetězce
+Studio	Studio
+Studio (dark)	Studio (tmavé)
+Studio Light	Studio světlé
+Study	Průzkum
+Study apps by running them	Zkoumat aplikace jejich spouštěním
+Studying	Probíhá průzkum
+Studying software to understand it.	Zkoumání softwaru za účelem jeho pochopení.
+Summarise what changed	Shrnout změny
+Swift types	Typy Swift
+Switch Beginner / Experienced	Přepnout Začátečník / Zkušený
+Switch Clean room / Deep	Přepnout Čistá místnost / Hloubkový režim
+Switch light / dark theme	Přepnout světlý / tmavý motiv
+Switch target	Přepnout cíl
+System	Systém
+System services	Systémové služby
+Take a texture out of an Unreal game	Extrahovat texturu ze hry Unreal
+Take an asset out of a Unity game	Extrahovat podklad ze hry Unity
+Take back a note	Vzít poznámku zpět
+Take back: puts it in the box again	Vzít zpět: vrátí ji do pole zadání
+Take files out of an Unreal pak	Extrahovat soubory z archivu Unreal .pak
+Take out packed files	Extrahovat zabalené soubory
+Target	Cíl
+Targets	Cíle
+That folder already has {names}, where Craft Anything keeps its own files. Pick another folder, or move those out first.	Složka již obsahuje {names}, kde Craft Anything ukládá vlastní soubory. Vyberte jinou složku nebo je nejprve přesuňte jinam.
+That folder is already a project, so it's open now.	Tato složka již je projektem, proto se nyní otevřela.
+The Rust toolchain (rustup.rs).	Sada nástrojů Rust (rustup.rs).
+The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	Sestavovací agent si odpovídá sám a sdělí svou volbu („Rozhodl jsem: …“), abyste ji mohli změnit.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Sestavovací agent vytváří 3D modely a textury hry podle popisů originálních návrhů; platí se z vašeho účtu fal.ai. Modely mají málo polygonů, aby hra běžela rychle. Model s texturou stojí {model} a obrázek {picture}. Každý projekt má rozpočet {budget} a před jeho překročením se vás aplikace zeptá. Klíč je uložen v systémové klíčence.
+The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	Sestavovací agent je přečte (kód, poznámky, obrázky) a sestaví aplikaci v nové sousední složce app. Vaše soubory zůstanou beze změny.
+The builder will decide its questions and tell you what it chose.	Sestavovací agent své otázky rozhodne sám a sdělí vám svou volbu.
+The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	Sestavovací agent pracuje přímo s těmito soubory a zachová funkční části. Craft Anything k nim přidá několik vlastních záznamů.
+The builder's questions	Otázky sestavovacího agenta
+The builder's questions come to you as cards, and it waits for your answer.	Otázky sestavovacího agenta se zobrazí jako karty a agent počká na vaši odpověď.
+The builder's questions will come to you.	Otázky sestavovacího agenta budete dostávat vy.
+The built-in engines still show you everything they find.	Vestavěné enginy nadále zobrazují vše, co zjistí.
+The code	Kód
+The code format Android apps use.	Formát kódu používaný aplikacemi pro Android.
+The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	Odhad programovacího agenta podle cen API, nikoli vaše vyúčtování. V rámci předplatného se tato částka neúčtuje.
+The download keeps going in the background.	Stahování pokračuje na pozadí.
+The first instruction a program runs when it starts.	První instrukce, kterou program provede při spuštění.
+The full toolset, evidence and logs.	Úplná sada nástrojů, důkazy a protokoly.
+The installer is open. Follow its steps, then come back here.	Instalátor je otevřený. Postupujte podle jeho pokynů a pak se sem vraťte.
+The lowest-level human-readable form of machine code: one small instruction per line.	Nejnižší člověkem čitelná podoba strojového kódu: jedna drobná instrukce na řádek.
+The names were removed from the program before it was shipped, so we have to work them out.	Názvy byly z programu před distribucí odstraněny, proto je musíme odvodit.
+The packed contents of an Electron app (a website inside a desktop app)	Zabalený obsah aplikace Electron (web uvnitř desktopové aplikace)
+The program's machine code written out as one tiny instruction per line.	Strojový kód programu rozepsaný po jednotlivých drobných instrukcích na řádky.
+The project's name and round	Název projektu a kolo
+The raw result	Surový výsledek
+The smallest unit of data in a file: a number from 0 to 255.	Nejmenší jednotka dat v souboru: číslo od 0 do 255.
+The smallest units of data in a file: numbers from 0 to 255.	Nejmenší jednotky dat v souboru: čísla od 0 do 255.
+The {name} view isn't available yet in this build.	Zobrazení {name} v tomto sestavení zatím není dostupné.
+The {} view isn't available yet in this build.	Zobrazení {} v tomto sestavení zatím není dostupné.
+Theme	Motiv
+There's no /{name} command. You can use {commands}.	Příkaz /{name} neexistuje. Můžete použít {commands}.
+There's no AI brain set up yet, so here's what the built-in engines found:	Zatím není nastaven žádný AI asistent, proto uvádím zjištění vestavěných enginů:
+They're my app: edit them in place	Je to moje aplikace: upravit ji na místě
+Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	Operace, které program přebírá z operačního systému nebo knihoven, například „otevřít soubor“ nebo „vykreslit okno“.
+Things a program or library offers for other programs to use.	Funkce, které program nebo knihovna nabízí jiným programům.
+Things we couldn't establish yet are listed here, with what would settle them.	Zde jsou uvedeny dosud nezjištěné skutečnosti a podklady potřebné k jejich objasnění.
+This answer won't be there after a restart:	Tato odpověď po restartu nezůstane zachována:
+This build stopped part-way	Toto sestavení se zastavilo v průběhu
+This can't be undone.	Tuto akci nelze vrátit zpět.
+This folder already has files	Tato složka již obsahuje soubory
+This is a big one. You can leave this open and come back later.	Tohle je velká úloha. Můžete okno nechat otevřené a vrátit se později.
+This is outside what the builder may do on its own. Nothing happens until you say so.	Toto sestavovací agent nesmí udělat samostatně. Nic se nestane, dokud to nepovolíte.
+This keeps going in the background, and each download is checked against its publisher's checksum before it's used.	Pokračuje to na pozadí a každý stažený soubor se před použitím ověří podle kontrolního součtu vydavatele.
+This project is waiting its turn. Send your message once it starts.	Tento projekt čeká, až na něj přijde řada. Zprávu odešlete, jakmile se spustí.
+This runs code from the target or changes a device. Clicking Run is your OK.	Tím se spustí kód cíle nebo změní zařízení. Kliknutím na Spustit udělujete souhlas.
+This runs code from the target or changes a device. Nothing runs until you say so.	Tím se spustí kód cíle nebo změní zařízení. Nic se nespustí, dokud to nepovolíte.
+This tool takes no settings.	Tento nástroj nemá žádná nastavení.
+This updates by itself when it's done.	Po dokončení se zobrazení samo aktualizuje.
+This view arrives with the next engines. The Hex and Result views work today.	Toto zobrazení přibude s dalšími enginy. Zobrazení Hex a Výsledek již fungují.
+Those aren't pictures we can use (PNG, JPEG, WebP or GIF, up to 20 MB).	Tyto soubory nelze použít jako obrázky (podporováno: PNG, JPEG, WebP nebo GIF, nejvýše 20 MB).
+Time spent	Strávený čas
+Tip: press Ctrl/⌘ K to run any tool.	Tip: stisknutím Ctrl/⌘ K spustíte libovolný nástroj.
+Tokens	Tokeny
+Tools may now run code from what you open without asking. Turn this back on unless you're sure.	Nástroje nyní mohou bez dotazů spouštět kód z otevřených cílů. Pokud si nejste jistí, tuto ochranu znovu zapněte.
+Tools that run code from a target or change a phone always ask first, unless you allowed them for a project.	Nástroje, které spouštějí kód cíle nebo mění telefon, se vždy nejprve ptají, pokud jste je již pro projekt nepovolili.
+Trace a UI action	Trasovat akci UI
+Trace a feature	Trasovat funkčnost
+Try again	Zkusit znovu
+Try asking	Zkuste se zeptat
+Try it out, then ask below for any changes.	Vyzkoušejte výsledek a níže požádejte o případné změny.
+Turn a program's machine code back into something that reads like source code. It's a reconstruction, not the original.	Převést strojový kód programu zpět do podoby připomínající zdrojový kód. Jde o rekonstrukci, nikoli originál.
+Turn off	Vypnout
+Turn off an AI	Vypnout AI
+Turn on	Zapnout
+Turn on Deep mode	Zapnout Hloubkový režim
+Turn on an AI	Zapnout AI
+Turning a plugin on or off takes effect from the next start.	Zapnutí nebo vypnutí pluginu se projeví při příštím spuštění.
+Type a command or tool…	Napište příkaz nebo nástroj…
+Type the website's address:	Zadejte adresu webu:
+Type your question after /btw.	Napište otázku za /btw.
+Unity assets	Podklady Unity
+Unity bundle	Balík Unity
+Unity's own installer. It only opens if Unity's signature checks out.	Oficiální instalátor Unity. Otevře se pouze po úspěšném ověření podpisu Unity.
+Unknown	Neznámé
+Unknown: we couldn't establish this yet.	Neznámé: toto jsme zatím nedokázali zjistit.
+Unknowns	Neznámé
+Unload a Frida script	Uvolnit skript Frida
+Unreal IoStore	Unreal IoStore
+Unreal builds games with Apple's Xcode, free in the App Store.	Unreal sestavuje hry pomocí Apple Xcode, které je zdarma v App Store.
+Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal je dostupný, ale potřebuje také nástroje C++ pro Visual Studio.
+Unreal pak	Unreal pak
+Update a hypothesis	Aktualizovat hypotézu
+Update an open question	Aktualizovat otevřenou otázku
+Update the checklist	Aktualizovat kontrolní seznam
+Update the plan	Aktualizovat plán
+Use	Použít
+Use an API key…	Použít klíč API…
+Use as a goal	Použít jako cílovou hodnotu
+Use the projects folder	Použít složku projektů
+Use this	Použít toto
+Use {name}	Použít {name}
+Value flow	Tok hodnot
+Version	Verze
+Waiting	Čeká
+Waiting for another build to finish: this one starts next.	Čeká na dokončení jiného sestavení: toto je další na řadě.
+Waiting for other builds to finish: {n} in line.	Čeká na dokončení jiných sestavení; pořadí ve frontě: {n}.
+Waiting: the builder reads it at its next step. Up arrow to edit.	Čeká: sestavovací agent si to přečte v dalším kroku. Šipkou nahoru upravíte.
+Waiting: the builder reads these at its next step. Up arrow to edit the last.	Čeká: sestavovací agent si je přečte v dalším kroku. Šipkou nahoru upravíte poslední.
+Want answers in plain words?	Chcete srozumitelné odpovědi?
+Watch a Mac app's calls	Sledovat volání aplikace pro Mac
+Watch a page over time	Sledovat stránku v čase
+We didn't find an AI on this computer yet	V tomto počítači jsme zatím nenašli AI
+We list the web addresses and messages we can see inside it. Watching it live needs your OK first.	Vypisujeme webové adresy a zprávy, které uvnitř najdeme. Živé sledování nejprve vyžaduje váš souhlas.
+We only read it; nothing runs. Every answer shows how sure we are.	Pouze čteme; nic se nespouští. Každá odpověď uvádí míru jistoty.
+WebAssembly module	Modul WebAssembly
+WebAssembly: fast compiled code that runs inside web browsers.	WebAssembly: rychlý zkompilovaný kód běžící ve webových prohlížečích.
+Website address	Adresa webu
+Website pages	Stránky webu
+Websites	Weby
+Welcome	Vítejte
+What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Kolik může nová hra utratit za generované obrázky a 3D modely, než se vás aplikace zeptá. Každý projekt má vlastní limit.
+What a program exports	Co program exportuje
+What a program imports	Co program importuje
+What are its main parts?	Jaké jsou hlavní části?
+What brings you here?	Co vás sem přivádí?
+What can Craft Anything do?	Co umí Craft Anything?
+What data was sent?	Jaká data byla odeslána?
+What do you want to look inside?	Do čeho chcete nahlédnout?
+What do you want to make?	Co chcete vytvořit?
+What do you want to recreate?	Co chcete znovu vytvořit?
+What does it need from the page?	Co to potřebuje od stránky?
+What does it send over the internet?	Co to odesílá přes internet?
+What does this app do?	Co tato aplikace dělá?
+What does this app store?	Co tato aplikace ukládá?
+What does this contract do?	Co tento kontrakt dělá?
+What does this module do?	Co tento modul dělá?
+What does this program do?	Co tento program dělá?
+What does {what} do?	Co dělá {what}?
+What happened in this build	Co se stalo během tohoto sestavení
+What is it	Co to je
+What is this?	Co je tohle?
+What it calls	Co to volá
+What kind of file is this?	O jaký druh souboru jde?
+What permissions does it ask for?	Jaká oprávnění požaduje?
+What pictures and textures are made with.	Čím se vytvářejí obrázky a textury.
+What settings are in here?	Jaká nastavení jsou uvnitř?
+What tables are in here?	Jaké tabulky jsou uvnitř?
+What we couldn't check	Co jsme nemohli zkontrolovat
+What would you like to find out?	Co byste chtěli zjistit?
+What would you like to know about {name}?	Co byste chtěli vědět o cíli {name}?
+What's at this address	Co je na této adrese
+What's in this folder?	Co je v této složce?
+What's inside this archive?	Co je uvnitř tohoto archivu?
+Whatever Settings → AI builds with.	Ten, který je pro sestavování zvolen v Nastavení → AI.
+When a folder you pick has files	Když vybraná složka obsahuje soubory
+When the builder needs a choice made: show it to you and wait, or let it decide and say what it chose. Each project can choose for itself under its prompt box.	Když se sestavovací agent potřebuje rozhodnout: zeptat se vás a počkat, nebo rozhodnout samostatně a sdělit svou volbu. Každý projekt to může nastavit zvlášť pod polem zadání.
+When you rebuild an app or game, start it once to picture its window and compare the rebuild with it. It runs that program.	Při rekonstrukci aplikace nebo hry ji jednou spustí, pořídí snímek okna a porovná s ním rekonstrukci. Skutečně spustí daný program.
+Where am I	Kde jsem
+Where is Ghidra installed?	Kde je nainstalována Ghidra?
+Where is the program?	Kde je program?
+Where should new projects go?	Kam ukládat nové projekty?
+Where we found it	Kde jsme to našli
+Whether they're the app to edit in place, or material the app starts from beside them.	Zda jde o aplikaci k přímé úpravě, nebo o podklady, ze kterých vedle nich vznikne nová aplikace.
+Which AI answers your questions	Která AI odpovídá na vaše otázky
+Which file is the main program?	Který soubor je hlavní program?
+Which files does it read or write?	Které soubory čte nebo zapisuje?
+Which function is this in	Ve které funkci se to nachází
+Which servers does it talk to?	Se kterými servery komunikuje?
+Which servers were contacted?	Které servery byly kontaktovány?
+Which websites does it load?	Které weby načítá?
+Who builds what you make	Kdo sestavuje vaše výtvory
+Who calls it	Kdo to volá
+Who can move funds?	Kdo může převádět prostředky?
+Who signed this Windows program	Kdo podepsal tento program pro Windows
+Who uses this Android class?	Kdo používá tuto třídu v aplikaci pro Android?
+Who uses this Java class?	Kdo používá tuto třídu v Javě?
+Why we ask	Proč se ptáme
+Window / focus info	Informace o okně / fokusu
+Windows resources	Prostředky Windows
+Wireshark tools check	Kontrola nástrojů Wireshark
+Without it, Deep mode uses Craft Anything's own decompiler, which is rougher.	Bez ní Hloubkový režim používá vlastní dekompilátor Craft Anything, který poskytuje hrubší výsledek.
+Work out a copy's size	Vypočítat velikost kopie
+Work out what an installed app is built on	Zjistit, na čem je založena nainstalovaná aplikace
+Workbench	Pracovní plocha
+Worked it out	Odvozeno
+Worked it out: computed step by step from things we saw.	Odvozeno: vypočteno krok za krokem z pozorovaných skutečností.
+Worked through {n} steps	Provedené kroky: {n}
+Working on it	Pracuji na tom
+Working on your answer	Připravuji odpověď
+Working out how much space a copy takes…	Výpočet místa potřebného pro kopii…
+Working…	Pracuji…
+Working… ({n} steps so far)	Pracuji… (dosavadní kroky: {n})
+Write a project file	Zapsat soubor projektu
+Write a readable report	Napsat srozumitelnou zprávu
+Write comment	Zapsat komentář
+Write inline comment	Zapsat řádkový komentář
+Write pseudo-C to a folder	Zapsat pseudokód C do složky
+Write the brief	Napsat zadání
+Write the handoff	Napsat předávací zprávu
+Wrote {what} to {}	Zapsáno {what} do {}
+You answered: {a}	Vaše odpověď: {a}
+You can add a Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studio) or an agent you already use, later in Settings → AI.	Klíč Claude, ChatGPT nebo OpenRouter, místní model (Ollama, LM Studio) či agenta, kterého již používáte, můžete později přidat v Nastavení → AI.
+You chose:	Vaše volba:
+You're all set	Vše je připraveno
+Your app is ready	Vaše aplikace je hotová
+Your brains	Vaši AI asistenti
+Your fal.ai key	Váš klíč fal.ai
+Your game is ready	Vaše hra je hotová
+Your message wasn't sent: another project was opened while its pictures were copied.	Zpráva nebyla odeslána: během kopírování obrázků se otevřel jiný projekt.
+Your own tool installs (optional)	Vlastní instalace nástrojů (volitelné)
+Your project starts as soon as it's done.	Váš projekt začne hned po dokončení instalace.
+Your version	Vaše verze
+Your website is ready	Váš web je hotový
+a new folder in {dir}	nová složka v {dir}
+a picture	obrázek
+about ${n}	asi ${n}
+address, e.g. http://192.168.1.20:11434/v1	adresa, např. http://192.168.1.20:11434/v1
+and {n} more	a další: {n}
+arguments (optional)	argumenty (volitelné)
+call graph	graf volání
+clean room	režim Čistá místnost
+command, https:// address or .wasm file	příkaz, adresa https:// nebo soubor .wasm
+deep mode	Hloubkový režim
+entry point	vstupní bod
+files	soub.
+findings	zjištění
+first run	první spuštění
+found on this computer; set up when you start	nalezeno v tomto počítači; nastaví se při spuštění
+from the builder's own memory of the build	z vlastní paměti sestavovacího agenta o sestavení
+from the project's files	ze souborů projektu
+id, e.g. docs	ID, např. docs
+is required	je povinný údaj
+isn't available yet	zatím není dostupné
+job result	výsledek úlohy
+job {title} panicked: {what}	úloha {title} vyvolala paniku: {what}
+just now	právě teď
+managed	spravováno
+model (optional)	model (volitelný)
+must be a number	musí být číslo
+must be a whole number	musí být celé číslo
+name, e.g. Studio box	název, např. Počítač ve studiu
+number	číslo
+objdump output	výstup objdump
+or start with /btw to just ask	nebo začněte /btw, pokud se chcete jen zeptat
+pinned builds couldn't be read: {}	připnutá sestavení se nepodařilo načíst: {}
+say how to use the files there	popište, jak použít soubory ve složce
+scene	scéna
+scenes	sc.
+source map	mapa zdrojového kódu
+start page	úvodní stránka
+the app is built beside your files, starting from them	aplikace vznikne vedle vašich souborů a bude z nich vycházet
+the built-in engines	vestavěné enginy
+the prompt box changed height	pole zadání změnilo výšku
+title bar	záhlaví okna
+under $0.01	méně než $0.01
+yesterday	včera
+your files there are the app, edited in place	vaše soubory ve složce jsou aplikace, která se upraví přímo
+{:.1} GB	{:.1} GB
+{:.1}M	{:.1}M
+{backend}: {input_tokens} in / {output_tokens} out{cost}	{backend}: vstup {input_tokens} / výstup {output_tokens}{cost}
+{cost} (estimate)	{cost} (odhad)
+{c} · {size}	{c} · {size}
+{done} of {all} done	dokončeno {done} z {all}
+{gb} GB for bigger ones	{gb} GB pro větší programy
+{gb} GB for programs up to {size}	{gb} GB pro programy do {size}
+{gb} GB up to {size}	{gb} GB do {size}
+{held} of {n} requirements met	splněné požadavky: {held} z {n}
+{id} · {summary}	{id} · {summary}
+{in} in, {out} out.	vstup {in}, výstup {out}.
+{k}: {s}	{k}: {s}
+{lbl}  {}	{lbl}  {}
+{line}, and {n} more	{line} a další: {n}
+{mb} MB	{mb} MB
+{name} builds what you make.	{name} sestavuje vaše výtvory.
+{name} builds what you make; answers come from {brain}.	{name} sestavuje vaše výtvory; odpovědi poskytuje {brain}.
+{name} is ready	Připraveno: {name}
+{name} is ready.	Připraveno: {name}.
+{name} isn't available yet in this build.	V tomto sestavení zatím chybí: {name}.
+{name} isn't on this computer yet.	{name} v tomto počítači zatím chybí.
+{name} key	Klíč {name}
+{n} actions done so far	dosud provedené akce: {n}
+{n} days ago	před {n} dny
+{n} h ago	před {n} h
+{n} item(s)	položky: {n}
+{n} job(s) running	běžící úlohy: {n}
+{n} min ago	před {n} min
+{n} picture(s) to match.	Referenční obrázky: {n}.
+{n} step(s) didn't work and were retried or skipped.	Neúspěšné kroky (opakovány nebo přeskočeny): {n}.
+{n} tokens	tokeny: {n}
+{n} · ${spent:.2} of ${budget:.2}	{n} · ${spent:.2} z ${budget:.2}
+{n} · ${spent} of ${budget}	{n} · ${spent} z ${budget}
+{scenes} {}	{scenes} {}
+{text}, {}	{text}, {}
+{title} hit a bug and stopped safely. ({what})	{title}: chyba způsobila bezpečné zastavení. ({what})
+{title} {id}	{title} {id}
+{title} · {:.0}%	{title} · {:.0} %
+{tool} finished	{tool}: dokončeno
+{tool}: {}	{tool}: {}
+{what} panicked: {msg}	Panika: {what}: {msg}
+{} GB	{} GB
+{} isn't available yet in this build.	V tomto sestavení zatím chybí: {}.
+{} item(s)	položky: {}
+{} key	Klíč {}
+{} report.md	{} zpráva.md
+{} {name}	{} {name}
+{} {said}	{} {said}
+{} {then}	{} {then}
+{} {v}	{} {v}
+{} {why}	{} {why}
+{} {} · {}{cost}	{} {} · {}{cost}
+{} · {mode}	{} · {mode}
+{}: {e}	{}: {e}
+{}: {some}{more}.	{}: {some}{more}.
+{}: {state}	{}: {state}
+{}h {:02}m	{} h {:02} min
+{}m {:02}s	{} min {:02} s
+— use the filter to find the rest.	— zbývající najdete pomocí filtru.
+… {n} more	… další: {n}
+… {n} older	… starší: {n}
+… {} more	… další: {}
+… {} older	… starší: {}
+← Back	← Zpět
+↑↓ to move · Enter to run · Esc to close	↑↓ pro pohyb · Enter pro spuštění · Esc pro zavření

@@ -1,7 +1,7 @@
 # Chinese UI localisation
 
 The desktop app offers **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
-alongside English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
+alongside English, French, Japanese and Czech, in **Settings → General → Language**. The choice is saved in the
 existing `language` setting. **System** uses the operating system's preferred
 supported language; if none matches, it uses English. An explicit choice takes
 precedence over the system language.
@@ -12,6 +12,8 @@ An explicit `Hans` or `Hant` script takes precedence over the region. Locale
 matching accepts underscores, case differences and Unix encoding suffixes.
 
 ## Scope and format
+
+`i18n/cs.tsv` is a complete Czech catalog with the same keys as the Chinese catalogs: original translations under the same MIT OR Apache-2.0 licence.
 
 `crates/ui-egui/src/i18n/zh-hans.tsv` and `zh-hant.tsv` contain original
 translations under the repository's MIT OR Apache-2.0 licence. Each UTF-8 line
