@@ -472,11 +472,11 @@ fn method_list(data: &[u8], b: &Binary, list: u64, kind: &'static str, out: &mut
         return;
     }
     for i in 0..u64::from(count).min(MAX_METHODS as u64) {
-        let e = list + 8 + i * entsize;
+        let Some(e) = i.checked_mul(entsize).and_then(|offset| list.checked_add(8)?.checked_add(offset)) else { break };
         if relative {
             let Some(raw) = b.read(data, e, 12) else { break };
             let rr = Reader::new(raw);
-            let rel = |o: usize| rr.u32_le(o).map(|v| (e + o as u64).wrapping_add(i64::from(v as i32) as u64));
+            let rel = |o: usize| rr.u32_le(o).and_then(|v| e.checked_add(o as u64).map(|a| a.wrapping_add(i64::from(v as i32) as u64)));
             let name_field = rel(0);
             // The name offset points at a selector reference unless selectors are direct.
             let selector = if ent_flags & 0x4000_0000 != 0 {
@@ -488,8 +488,9 @@ fn method_list(data: &[u8], b: &Binary, list: u64, kind: &'static str, out: &mut
             out.push(ObjcMethod { selector, kind, imp: rel(8).filter(|a| b.is_mapped(*a)), types: rel(4).and_then(|a| cstr_at(data, b, a)) });
         } else {
             let Some(selector) = ptr_at(data, b, e).and_then(|a| cstr_at(data, b, a)) else { continue };
-            let types = ptr_at(data, b, e + 8).and_then(|a| cstr_at(data, b, a));
-            out.push(ObjcMethod { selector, kind, imp: ptr_at(data, b, e + 16), types });
+            let (Some(types_field), Some(imp_field)) = (e.checked_add(8), e.checked_add(16)) else { continue };
+            let types = ptr_at(data, b, types_field).and_then(|a| cstr_at(data, b, a));
+            out.push(ObjcMethod { selector, kind, imp: ptr_at(data, b, imp_field), types });
         }
     }
 }
@@ -607,6 +608,29 @@ mod tests {
         assert_eq!(c.methods[0].selector, tk::OBJC_SELECTOR);
         assert_eq!(c.methods[0].imp, Some(tk::MACHO_BASE + tk::MACHO_TEXT_OFF + tk::x64::HIDDEN));
         assert_eq!(meta.protocols[0].name, tk::OBJC_PROTOCOL);
+    }
+
+    #[test]
+    fn objc_method_list_address_overflow_never_panics() {
+        let mut m = tk::macho64();
+        let list = u64::MAX - 8;
+        let fileoff = m.len() as u64;
+        // Reuse the sectionless __PAGEZERO command for an eight-byte, file-backed segment.
+        m[32 + 24..32 + 32].copy_from_slice(&list.to_le_bytes());
+        m[32 + 32..32 + 40].copy_from_slice(&8u64.to_le_bytes());
+        m[32 + 40..32 + 48].copy_from_slice(&fileoff.to_le_bytes());
+        m[32 + 48..32 + 56].copy_from_slice(&8u64.to_le_bytes());
+        m.extend_from_slice(&24u32.to_le_bytes());
+        m.extend_from_slice(&2u32.to_le_bytes());
+        m[0x1060..0x1068].copy_from_slice(&list.to_le_bytes()); // class_ro.baseMethods
+
+        let b = crate::parse_binary(&m).unwrap();
+        assert!(b.is_mapped(list));
+        assert_eq!(ptr_at(&m, &b, tk::MACHO_BASE + 0x1060), Some(list));
+        assert_eq!(b.read(&m, list, 8).unwrap().len(), 8);
+        let meta = objc_metadata(&m, &b);
+        assert_eq!(meta.classes.len(), 1);
+        assert!(meta.classes[0].methods.is_empty());
     }
 
     #[test]
