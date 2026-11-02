@@ -373,6 +373,10 @@ pub trait AssetProvider: Send + Sync {
     fn key_hint(&self) -> &'static str {
         "API key"
     }
+    /// An additional masked field, stored with the key as `key:secret` when present.
+    fn key_secret_label(&self) -> Option<&'static str> {
+        None
+    }
     /// Validate the credential locally before a workflow spends on any precursor assets.
     fn validate_key(&self, key: &str) -> Result<(), ToolError> {
         http::key(key).map(|_| ())

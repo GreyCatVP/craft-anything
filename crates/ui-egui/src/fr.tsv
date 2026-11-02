@@ -149,9 +149,8 @@ Paid from your provider accounts: estimates of {model} a 3D model and {picture} 
 Add a provider key	Ajouter une clé de fournisseur
 Your asset provider keys	Vos clés de fournisseurs de ressources
 Use fal.ai, Scenario or ElevenLabs for generated assets.	Utilisez fal.ai, Scenario ou ElevenLabs pour générer des ressources.
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys are kept in your system keychain. Choose picture and 3D providers in Settings → Builds.	Générez des images et modèles originaux, des voix, des effets sonores et de la musique avec vos comptes fournisseurs. Coûts visuels estimés : {model} par modèle et {picture} par image. Chaque projet dispose d'un budget de {budget}. Les clés sont conservées dans le trousseau du système. Choisissez les fournisseurs d'images et de 3D dans Réglages → Créations.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Générez des images et modèles originaux, des voix, des effets sonores et de la musique avec vos comptes fournisseurs. Coûts visuels estimés : {model} par modèle et {picture} par image. Chaque projet dispose d'un budget de {budget}. Les clés utilisent le trousseau du système s'il est disponible, sinon un fichier local privé. Choisissez les fournisseurs d'images et de 3D dans Réglages → Créations.
 Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Images et modèles 3D via fal.ai ou Scenario ; voix, effets sonores et musique via ElevenLabs. Environ {model} par modèle, avec un budget de {budget} par projet. Choisissez les modèles visuels dans Réglages → Créations.
-API key:API secret	Clé API:Secret API
 3D model generator	Générateur de modèles 3D
 What pictures are turned into 3D models with.	Le service qui transforme les images en modèles 3D.
 What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Ce qu'un nouveau jeu peut dépenser en images, modèles 3D et sons générés avant de vous demander. Chaque projet conserve son propre budget.
@@ -845,3 +844,7 @@ Log	Journal
 Hide the console	Masquer la console
 No jobs yet. Long tasks show their progress here, and you can cancel them.	Aucune tâche pour l'instant. Les longues tâches affichent ici leur progression, et vous pouvez les annuler.
 Clear finished	Effacer les terminées
+API key	Clé API
+API secret	Secret API
+{name} API secret	Secret API {name}
+Paste your {name} API secret	Collez votre secret API {name}

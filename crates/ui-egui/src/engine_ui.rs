@@ -435,25 +435,33 @@ impl CraftApp {
 /// A provider's key field and its Save button; returns the key when Save is pressed.
 fn key_field(app: &mut CraftApp, ui: &mut Ui, provider: &dyn AssetProvider, save: &str) -> Option<String> {
     let t = Tokens::get(ui.ctx());
-    let mut out = None;
-    ui.label(RichText::new(tr(provider.key_hint())).size(theme::CAPTION).color(t.text_dim));
-    ui.horizontal(|ui| {
-        let key = app.key_inputs.entry(provider.id().into()).or_default();
+    let secret_id = format!("{}:secret", provider.id());
+    let secret_label = provider.key_secret_label();
+    let fields = std::iter::once((provider.id(), provider.key_hint(), "{name} key", "Paste your {name} key"))
+        .chain(secret_label.map(|label| (secret_id.as_str(), label, "{name} API secret", "Paste your {name} API secret")));
+    for (id, label, name, hint) in fields {
+        ui.label(RichText::new(tr(label)).size(theme::CAPTION).color(t.text_dim));
         let r = ui.add(
-            egui::TextEdit::singleline(key)
+            egui::TextEdit::singleline(app.key_inputs.entry(id.into()).or_default())
+                .id_salt(id)
                 .password(true)
-                .hint_text(trf("Paste your {name} key", &[("name", provider.name())]))
+                .hint_text(trf(hint, &[("name", provider.name())]))
                 .desired_width(320.0)
                 .frame(widgets::text_field_frame_compact(&t)),
         );
-        widgets::named(r, &trf("{name} key", &[("name", provider.name())]));
-        let k = key.trim().to_string();
-        if widgets::primary_icon(ui, None, save, !k.is_empty()).clicked() && !k.is_empty() {
-            key.clear();
-            out = Some(k);
-        }
-    });
-    out
+        widgets::named(r, &trf(name, &[("name", provider.name())]));
+    }
+    let key = app.key_inputs.get(provider.id()).map(|s| s.trim()).unwrap_or_default();
+    let secret = app.key_inputs.get(&secret_id).map(|s| s.trim()).unwrap_or_default();
+    let ready = !key.is_empty() && (secret_label.is_none() || !secret.is_empty());
+    if widgets::primary_icon(ui, None, save, ready).clicked() && ready {
+        let credential = if secret_label.is_some() { format!("{key}:{secret}") } else { key.to_string() };
+        app.key_inputs.remove(provider.id());
+        app.key_inputs.remove(&secret_id);
+        Some(credential)
+    } else {
+        None
+    }
 }
 
 /// The game's "Generate custom pictures and models" switch and what they cost. It works while the
@@ -500,7 +508,7 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
             RichText::new({
                 let p = AssetPrices::of(app);
                 trf(
-                    "Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys are kept in your system keychain. Choose picture and 3D providers in Settings → Builds.",
+                    "Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.",
                     &[("model", &p.model), ("picture", &p.picture), ("budget", &p.budget)],
                 )
             })

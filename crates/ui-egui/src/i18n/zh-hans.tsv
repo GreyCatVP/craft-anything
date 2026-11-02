@@ -1375,9 +1375,11 @@ Paid from your provider accounts: estimates of {model} a 3D model and {picture} 
 Add a provider key	添加服务密钥
 Your asset provider keys	你的素材服务密钥
 Use fal.ai, Scenario or ElevenLabs for generated assets.	使用 fal.ai、Scenario 或 ElevenLabs 生成素材。
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys are kept in your system keychain. Choose picture and 3D providers in Settings → Builds.	使用你自己的服务账户生成原创图片、模型、语音、音效和音乐。视觉素材估算费用：每个模型 {model}，每张图片 {picture}。每个项目预算为 {budget}。密钥存储在系统钥匙串中。在设置 → 构建中选择图片和 3D 服务。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	使用你自己的服务账户生成原创图片、模型、语音、音效和音乐。视觉素材估算费用：每个模型 {model}，每张图片 {picture}。每个项目预算为 {budget}。密钥在系统钥匙串可用时存储于其中，否则保存在私有本地密钥文件中。在设置 → 构建中选择图片和 3D 服务。
 Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	通过 fal.ai 或 Scenario 生成图片和 3D 模型；通过 ElevenLabs 生成语音、音效和音乐。每个模型估算 {model}，每个项目预算为 {budget}。在设置 → 构建中选择视觉模型。
-API key:API secret	API 密钥:API 密钥机密
 3D model generator	3D 模型生成器
 What pictures are turned into 3D models with.	用于将图片转换为 3D 模型的服务。
 What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	新游戏在请求你批准之前可用于生成图片、3D 模型和音频的金额。每个项目保留自己的预算。
+API secret	API 密钥机密
+{name} API secret	{name} API 密钥机密
+Paste your {name} API secret	粘贴你的 {name} API 密钥机密

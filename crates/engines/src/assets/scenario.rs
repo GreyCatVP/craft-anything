@@ -92,13 +92,13 @@ impl AssetProvider for Scenario {
     fn keys_page(&self) -> Option<&'static str> {
         Some("https://app.scenario.com")
     }
-    fn key_hint(&self) -> &'static str {
-        "API key:API secret"
+    fn key_secret_label(&self) -> Option<&'static str> {
+        Some("API secret")
     }
     fn validate_key(&self, key: &str) -> Result<(), ToolError> {
         let key = http::key(key)?;
         if !key.split_once(':').is_some_and(|(k, s)| !k.is_empty() && !s.is_empty()) {
-            return Err(http::bad("Enter the Scenario credential as API key:API secret."));
+            return Err(http::bad("Enter both the Scenario API key and API secret in Settings → AI."));
         }
         Ok(())
     }

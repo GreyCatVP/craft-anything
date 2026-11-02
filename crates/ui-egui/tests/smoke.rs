@@ -157,6 +157,9 @@ fn turning_on_generated_assets_offers_all_providers_and_accepts_a_scenario_key()
     h.get_by_label("Your asset provider keys");
     h.get_by_label("fal.ai key");
     h.get_by_label("Scenario key");
+    h.get_by_label("Scenario API secret");
+    assert!(h.query_by_label("fal.ai API secret").is_none());
+    assert!(h.query_by_label("ElevenLabs API secret").is_none());
     h.get_by_label("ElevenLabs key");
     h.get_by_label("Not now").click();
     h.run_steps(3);
@@ -184,6 +187,59 @@ fn turning_on_generated_assets_offers_all_providers_and_accepts_a_scenario_key()
     h.get_by_label("Scenario").click();
     h.run_steps(3);
     h.get_by_label("Scenario key");
+    h.get_by_label("Scenario API secret");
+}
+
+#[test]
+fn scenario_settings_require_both_masked_fields_and_clear_them_after_save() {
+    use egui_kittest::kittest::NodeT;
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.asset_keys = Some(Default::default());
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Scenario").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Scenario").click();
+    h.run_steps(3);
+    for label in ["Scenario key", "Scenario API secret"] {
+        assert_eq!(h.get_by_label(label).accesskit_node().role(), egui::accesskit::Role::PasswordInput);
+    }
+    assert!(h.get_by_label("Save").accesskit_node().is_disabled());
+    h.get_by_label("Scenario API secret").scroll_to_me();
+    h.get_by_label("Scenario API secret").focus();
+    h.run_steps(3);
+    h.get_by_label("Scenario API secret").type_text("  ");
+    h.run_steps(2);
+    h.get_by_label("Scenario key").scroll_to_me();
+    h.get_by_label("Scenario key").focus();
+    h.run_steps(3);
+    h.get_by_label("Scenario key").type_text("  sk-test-key  ");
+    h.run_steps(2);
+    assert!(h.get_by_label("Save").accesskit_node().is_disabled(), "whitespace is not a secret");
+    assert_eq!(h.state().key_inputs.get("scenario").unwrap(), "  sk-test-key  ");
+    h.get_by_label("Scenario API secret").focus();
+    h.run_steps(2);
+    h.get_by_label("Scenario API secret").type_text("sk-test-secret  ");
+    h.run_steps(2);
+    assert!(!h.get_by_label("Save").accesskit_node().is_disabled());
+    h.state_mut().key_inputs.insert("scenario".into(), "  ".into());
+    h.run_steps(2);
+    assert!(h.get_by_label("Save").accesskit_node().is_disabled(), "a secret alone is not enough");
+    h.get_by_label("Scenario key").focus();
+    h.run_steps(2);
+    h.get_by_label("Scenario key").type_text("sk-test-key  ");
+    h.run_steps(2);
+    h.get_by_label("Save").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    assert!(wait(&mut h, |a| a.asset_keys.as_ref().and_then(|keys| keys.get("scenario")) == Some(&true)));
+    assert!(!h.state().key_inputs.contains_key("scenario"));
+    assert!(!h.state().key_inputs.contains_key("scenario:secret"));
+    h.get_by_label("Key saved");
 }
 
 #[test]
