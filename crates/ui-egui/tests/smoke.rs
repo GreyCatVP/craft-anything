@@ -322,34 +322,103 @@ fn a_long_prompt_wraps_inside_the_window_in_the_project_and_the_chat() {
 }
 
 #[test]
-fn a_game_project_shows_its_asset_spending_and_can_raise_the_budget() {
+fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     use craft_anything_engine::workspace::{AssetRecord, TargetRef, Workspace};
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
-    ws.manifest.stack = "Unity".into();
+    // A game's request can have an app stack recorded; asset controls must not depend on it.
+    ws.manifest.stack = "Rust + egui".into();
     ws.save().unwrap();
     ws.record_asset(AssetRecord { file: "Assets/Generated/crate.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.51, at_ms: 0 })
         .unwrap();
     let root = ws.root.clone();
     let mut h = harness(move || {
         let mut a = demo::app(demo::engine(Mode::Beginner, true));
-        a.asset_keys = Some(fal_key(true));
+        a.asset_keys = Some([("scenario".into(), false), ("elevenlabs".into(), false), ("fal".into(), false)].into());
         a.open_workspace(ws);
         a
     });
     assert!(wait(&mut h, |a| a.facts.assets.0 == 1));
-    h.get_by_label("1 · $0.51 of $5.00");
-    // Generated assets are the person's choice, saved with the project through project_assets_allow.
-    h.get_by_label("Generate pictures, models and audio").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.generate_assets)));
-    assert!(Workspace::open(&root).unwrap().manifest.generate_assets);
-    assert!(h.state().state.modal.is_none(), "a key is set up");
+    h.get_by_label("Assets: 1 · estimated spent $0.51");
+    h.get_by_label("Budget $5.00 · remaining $4.49");
+    h.get_by_label("Scenario").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_provider_allowed("scenario"))));
+    let saved = Workspace::open(&root).unwrap().manifest;
+    assert!(saved.asset_provider_allowed("scenario"));
+    assert!(!saved.asset_provider_allowed("elevenlabs"));
+    assert!(!saved.asset_provider_allowed("fal"));
+    assert!(h.state().state.modal.is_none(), "missing keys don't block choosing provider permissions");
+    h.run_steps(2);
+    h.get_by_label("Manage provider keys").click();
+    h.run_steps(2);
+    h.get_by_label("Not now").scroll_to_me();
+    h.run_steps(2);
+    h.get_by_label("Not now").click();
+    h.run_steps(2);
+    assert!(h.state().state.modal.is_none());
+    assert!(Workspace::open(&root).unwrap().manifest.asset_provider_allowed("scenario"), "closing key setup preserves provider choices");
+    h.run_steps(2);
+    h.get_by_label("ElevenLabs").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_provider_allowed("elevenlabs"))));
+    h.run_steps(2);
+    h.get_by_label("Scenario").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.asset_provider_allowed("scenario"))));
+    assert!(Workspace::open(&root).unwrap().manifest.asset_provider_allowed("elevenlabs"));
     // Through the project_assets_budget tool, by the default budget from Settings.
     h.get_by_label("Raise the budget by $5.00").click();
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == 10.0)));
     assert_eq!(Workspace::open(&root).unwrap().manifest.asset_budget_usd, 10.0);
     h.run_steps(2);
-    h.get_by_label("1 · $0.51 of $10.00");
+    h.get_by_label("Budget $10.00 · remaining $9.49");
+    // The explicit Save supports an exact amount and lowering it below the previous budget.
+    for (amount, remaining) in [("2.25", "1.74"), ("0.25", "0.00")] {
+        h.get_by_label("Asset budget in USD").click();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_label("Asset budget in USD").type_text(amount);
+        h.run_steps(2);
+        h.get_by_label("Save budget").click();
+        let expected = amount.parse::<f64>().unwrap();
+        assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == expected)));
+        h.run_steps(2);
+        h.get_by_label(&format!("Budget ${amount} · remaining ${remaining}"));
+    }
+    h.get_by_label("ElevenLabs").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.generate_assets)));
+    h.run_steps(2);
+    h.get_by_label("Assets: 1 · estimated spent $0.51");
+    let reopened = Workspace::open(&root).unwrap();
+    assert_eq!(reopened.manifest.asset_budget_usd, 0.25);
+    assert!(!reopened.manifest.asset_provider_allowed("scenario"));
+    assert!(!reopened.manifest.asset_provider_allowed("elevenlabs"));
+    drop(h);
+    let mut reopened_ui = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(reopened);
+        a
+    });
+    assert!(wait(&mut reopened_ui, |a| a.facts.assets.0 == 1));
+    reopened_ui.get_by_label("Scenario");
+    reopened_ui.get_by_label("ElevenLabs");
+    reopened_ui.get_by_label("Assets: 1 · estimated spent $0.51");
+    reopened_ui.get_by_label("Budget $0.25 · remaining $0.00");
+}
+
+#[test]
+fn a_project_with_assets_off_and_none_recorded_still_shows_the_budget() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Scenario");
+    h.get_by_label("ElevenLabs");
+    h.get_by_label("Assets: 0 · estimated spent $0.00");
+    h.get_by_label("Budget $5.00 · remaining $5.00");
+    h.get_by_label("Save budget");
 }
 
 #[test]
@@ -618,6 +687,9 @@ fn a_finished_build_can_be_pinned_and_opened_from_the_sidebar() {
     assert!(wait(&mut h, |a| a.facts.program));
     h.run_steps(2);
     assert!(h.query_by_label("Pinned builds").is_none(), "no Pinned section before anything is pinned");
+    h.get_by_label("Pin this build").scroll_to_me();
+    h.run();
+    assert!(h.get_by_label("Pin this build").rect().bottom() < 820.0, "the project sidebar scrolls to its actions");
     h.get_by_label("Pin this build").click();
     // The dialog works out what a frozen copy takes; frozen is picked.
     assert!(wait(&mut h, |a| matches!(a.state.pin_draft.size, Some(Ok(_)))));
@@ -2211,6 +2283,9 @@ fn a_project_is_renamed_duplicated_and_deleted_from_its_page() {
         a
     });
     h.run_steps(3);
+    h.get_by_label("Rename").scroll_to_me();
+    h.run();
+    assert!(h.get_by_label("Rename").rect().bottom() < 820.0, "the project sidebar scrolls to its actions");
     h.get_by_label("Rename").click();
     h.run_steps(2);
     assert_eq!(h.state().state.modal, Some(Modal::Rename(root.clone())));
@@ -2221,9 +2296,13 @@ fn a_project_is_renamed_duplicated_and_deleted_from_its_page() {
 
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.name == "Snake II")), "renamed through project_rename");
 
+    h.get_by_label("Duplicate").scroll_to_me();
+    h.run();
     h.get_by_label("Duplicate").click();
     assert!(wait(&mut h, |a| a.projects.iter().any(|w| w.manifest.name == "Snake II copy")), "the copy is listed");
 
+    h.get_by_label("Delete the project").scroll_to_me();
+    h.run();
     h.get_by_label("Delete the project").click();
     h.run_steps(2);
     h.get_by_label("Delete Snake II?");

@@ -234,6 +234,7 @@ fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: S
             last_reply: String::new(),
             asset_budget_usd: craft_anything_engine::workspace::ASSET_BUDGET_USD,
             generate_assets: false,
+            asset_providers: None,
             app_in_root: false,
             start_files: Vec::new(),
             builder: None,

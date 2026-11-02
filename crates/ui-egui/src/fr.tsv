@@ -848,3 +848,13 @@ API key	Clé API
 API secret	Secret API
 {name} API secret	Secret API {name}
 Paste your {name} API secret	Collez votre secret API {name}
+Save asset settings	Enregistrer les réglages des ressources
+Key needed	Clé requise
+Manage provider keys	Gérer les clés des fournisseurs
+Assets: {n} · estimated spent ${spent}	Ressources : {n} · dépense estimée ${spent}
+Budget ${budget} · remaining ${remaining}	Budget ${budget} · reste ${remaining}
+Shared asset budget (USD)	Budget partagé des ressources (USD)
+Asset budget in USD	Budget des ressources en USD
+Save budget	Enregistrer le budget
+Saving asset settings…	Enregistrement des réglages des ressources…
+Enter an amount from 0 to 10000 USD.	Saisissez un montant entre 0 et 10000 USD.

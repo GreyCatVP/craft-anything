@@ -532,7 +532,11 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
     ui.add_space(14.0);
     if widgets::secondary(ui, None, "Not now").clicked() {
         *close = true;
-        app.set_generate_assets(false);
+        // On a project this dialog manages credentials; closing it must preserve the
+        // person's independent provider choices. Make still cancels its initial opt-in.
+        if app.state.screen != Screen::Project {
+            app.set_generate_assets(false);
+        }
     }
 }
 

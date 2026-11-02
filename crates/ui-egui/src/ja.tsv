@@ -850,3 +850,13 @@ API key	API キー
 API secret	API シークレット
 {name} API secret	{name} の API シークレット
 Paste your {name} API secret	{name} の API シークレットを貼り付け
+Save asset settings	素材設定を保存
+Key needed	キーが必要
+Manage provider keys	プロバイダーのキーを管理
+Assets: {n} · estimated spent ${spent}	素材：{n} · 推定支出 ${spent}
+Budget ${budget} · remaining ${remaining}	予算 ${budget} · 残額 ${remaining}
+Shared asset budget (USD)	素材の共有予算（USD）
+Asset budget in USD	素材の予算（USD）
+Save budget	予算を保存
+Saving asset settings…	素材設定を保存中…
+Enter an amount from 0 to 10000 USD.	0〜10000 USD の金額を入力してください。

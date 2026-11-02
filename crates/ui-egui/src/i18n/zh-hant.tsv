@@ -1383,3 +1383,13 @@ What a new game may spend on generated pictures, 3D models and audio before you'
 API secret	API 金鑰機密
 {name} API secret	{name} API 金鑰機密
 Paste your {name} API secret	貼上你的 {name} API 金鑰機密
+Save asset settings	儲存素材設定
+Key needed	需要金鑰
+Manage provider keys	管理服務商金鑰
+Assets: {n} · estimated spent ${spent}	素材：{n} · 預估已花費 ${spent}
+Budget ${budget} · remaining ${remaining}	預算 ${budget} · 剩餘 ${remaining}
+Shared asset budget (USD)	共用素材預算（美元）
+Asset budget in USD	素材預算（美元）
+Save budget	儲存預算
+Saving asset settings…	正在儲存素材設定…
+Enter an amount from 0 to 10000 USD.	請輸入 0 到 10000 美元之間的金額。
