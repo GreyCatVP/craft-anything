@@ -607,6 +607,7 @@ Owner: maintainers · Status: in progress
 
 ### R2.5 Behaviour checks for non-web builds
 Owner: open · Status: in progress
+- [ ] Keep mechanics behavior unverified when only the sheet has been read (claimed: contributor, branch bugfix/verification-gates)
 - [x] Standard `--screenshot <path>` contract in every app and game brief, enforced by
       `ScreenshotCheck` after the build check (no picture, an unreadable or blank picture fails);
       checks run in order and a failed one stops the rest
