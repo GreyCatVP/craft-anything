@@ -23,7 +23,16 @@ use std::time::Duration;
 
 /// Agents known to speak ACP, and the arguments that start them in that mode.
 pub const ACP_AGENTS: &[(&str, &[&str])] =
-    &[("gemini-cli", &["--experimental-acp"]), ("qwen-code", &["--experimental-acp"]), ("opencode", &["acp"]), ("goose", &["acp"])];
+    &[("gemini-cli", &["--experimental-acp"]), ("qwen-code", &["--experimental-acp"]), ("opencode", &["acp"]), ("goose", &["acp"]), ("omp", &["acp"])];
+
+/// Agents whose plain command starts an interactive session, so ACP is how they are run when a
+/// backend is added without options. The others stay opt-in until verified live.
+pub const ACP_BY_DEFAULT: &[&str] = &["omp"];
+
+/// Whether adding `agent` without options should turn ACP on.
+pub fn acp_by_default(agent: &str) -> bool {
+    ACP_BY_DEFAULT.contains(&agent)
+}
 
 /// The ACP version we speak.
 const PROTOCOL_VERSION: u64 = 1;
@@ -629,6 +638,15 @@ mod tests {
 
     fn events(outs: Vec<Out>) -> Vec<AgentEvent> {
         outs.into_iter().filter_map(|o| if let Out::Event(e) = o { Some(e) } else { None }).collect()
+    }
+
+    #[test]
+    fn omp_is_known_and_starts_in_acp_mode() {
+        assert_eq!(acp_args("omp"), Some(&["acp"][..]));
+        assert!(acp_by_default("omp"), "its plain command opens the interactive TUI");
+        assert!(!acp_by_default("claude-code"), "native adapters stay opt-in");
+        assert_eq!(crate::cli_agents::program_for("omp"), "omp");
+        assert_eq!(crate::cli_agents::display_for("omp"), "OMP");
     }
 
     #[test]

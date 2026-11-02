@@ -42,6 +42,7 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("qwen-code", "qwen", "Qwen Code"),
     ("goose", "goose", "Goose"),
     ("aider", "aider", "Aider"),
+    ("omp", "omp", "OMP"),
 ];
 
 pub fn program_for(agent: &str) -> String {
@@ -709,6 +710,15 @@ mod tests {
 
     fn mcp() -> McpCommand {
         McpCommand { command: "/opt/ca/craft-anything-cli".into(), args: vec!["mcp".into(), "--project".into(), "/p/x.cany".into()], notes: None }
+    }
+
+    #[test]
+    fn an_omp_backend_with_acp_uses_the_acp_conversation() {
+        let config = BackendConfig { name: "OMP".into(), kind: BackendKind::AgentCli, model: "omp".into(), base_url: None, ssh_host: None, enabled: true };
+        let mut spec = CliSpec::new(config, BackendOptions { acp: Some(true), ..Default::default() }, false, Some(std::env::temp_dir()));
+        assert!(acp_for(&spec).is_some(), "omp acp starts one agent process for the conversation");
+        spec.options.acp = None;
+        assert!(acp_for(&spec).is_none(), "turning ACP off keeps the plain adapter");
     }
 
     #[test]

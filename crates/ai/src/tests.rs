@@ -97,6 +97,23 @@ fn a_coding_agent_test_says_it_only_checked_the_version() {
     assert_eq!(serde_json::to_value(&r).unwrap()["version_only"], true, "the CLI's ai test prints it");
 }
 
+#[test]
+fn omp_is_added_with_acp_on() {
+    let (h, _d) = hub();
+    let cfg = |name: &str, model: &str| BackendConfig {
+        name: name.into(),
+        kind: BackendKind::AgentCli,
+        model: model.into(),
+        base_url: None,
+        ssh_host: None,
+        enabled: true,
+    };
+    h.add_backend(cfg("OMP", "omp"), None).unwrap();
+    assert_eq!(h.options().get("OMP").and_then(|o| o.acp), Some(true), "its plain command would open a TUI");
+    h.add_backend(cfg("Claude Code", "claude-code"), None).unwrap();
+    assert_eq!(h.options().get("Claude Code").and_then(|o| o.acp), None, "native agents stay as they were");
+}
+
 /// #37: doctor asks a local server for its models instead of trusting an open port.
 #[test]
 fn a_local_server_is_reachable_only_when_it_lists_models() {

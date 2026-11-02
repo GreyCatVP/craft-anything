@@ -503,7 +503,7 @@ Owner: maintainers · Status: in progress (built; live runs need keys)
 ### R2.2 More coding agents
 Owner: open · Status: in progress
 - [x] `AcpConversation`: chat with agents that speak ACP (`cli_agents::acp`; agents and their ACP
-      arguments in `ACP_AGENTS`: Gemini CLI, Qwen Code, opencode, goose). Opt-in per backend
+      arguments in `ACP_AGENTS`: Gemini CLI, Qwen Code, opencode, goose and OMP). Opt-in per backend
       (`acp = true` in its options); one agent process per chat, permission requests become
       consent questions, sessions continue with `session/load`
 - [x] Builder runs over ACP: with `acp = true`, rebuild runs use `AcpConversation`; the agent's
@@ -511,6 +511,8 @@ Owner: open · Status: in progress
       allowed, refused, or asked through the project's inbox; Auto mode honoured)
 - [ ] Gemini CLI, opencode, goose via ACP or native adapters; each verified live, then turn ACP on
       by default for the ones that pass
+- [ ] Oh My Pi (`omp`): ACP support added (agent row, detection, ACP on by default when added);
+      handshake and session creation checked against omp 18.15.0, one full chat/build turn still to run
 
 ### R2.3 Website coverage and a better visual metric
 Owner: open · Status: done
@@ -771,6 +773,8 @@ Gaps found while using the app for real projects.
 - [x] Simplified and Traditional Chinese UI catalogs, system-locale selection and translated
       tool-title search; catalog integrity, coverage checks and isolated language-switch tests
       ([localisation](localization.md))
+- [x] Spanish (Mexico) UI catalog (`es-mx.tsv`); every Spanish locale selects it, its key set
+      matches the Chinese catalogs, and the snapshot example accepts `--lang es-mx`
 - [x] First run sets up who builds, not only who answers, and no longer says the purpose is saved
       with projects (it stays on the computer); its Back has a name for screen readers
 - [x] An error whose fix quotes a command (`claude auth login`, `codex login`) offers to copy it,

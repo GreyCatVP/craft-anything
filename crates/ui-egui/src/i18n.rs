@@ -24,6 +24,7 @@ pub static LANGUAGES: &[LangInfo] = &[
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv") },
     LangInfo { code: "zh-hans", name: "简体中文", source: include_str!("i18n/zh-hans.tsv") },
     LangInfo { code: "zh-hant", name: "繁體中文", source: include_str!("i18n/zh-hant.tsv") },
+    LangInfo { code: "es-mx", name: "Español (México)", source: include_str!("i18n/es-mx.tsv") },
 ];
 
 /// Match a locale to a registered UI language. An explicit script wins over the region.
@@ -47,6 +48,8 @@ pub fn language_from_tag(tag: &str) -> Option<&'static str> {
                 Some("zh-hans")
             }
         }
+        // The only Spanish catalog so far: every Spanish locale uses it.
+        "es" => Some("es-mx"),
         _ => LANGUAGES.iter().find(|l| l.code == primary).map(|l| l.code),
     }
 }
@@ -145,14 +148,23 @@ mod tests {
     }
 
     #[test]
-    fn chinese_catalogs_are_valid_and_have_matching_keys() {
+    fn spanish_locales_use_the_mexican_catalog() {
+        for tag in ["es", "es-MX", "es_MX.UTF-8", "es-419", "es-ES", "ES-mx"] {
+            assert_eq!(language_from_tag(tag), Some("es-mx"), "{tag}");
+        }
+        assert_eq!(preferred_language(["en-US", "es-MX"]), "en");
+        assert_eq!(preferred_language(["de-DE", "es-MX"]), "es-mx");
+    }
+
+    #[test]
+    fn translated_catalogs_are_valid_and_have_matching_keys() {
         fn placeholders(s: &str) -> Vec<&str> {
             let mut out: Vec<_> = s.split('{').skip(1).filter_map(|s| s.split_once('}').map(|(p, _)| p)).collect();
             out.sort_unstable();
             out
         }
         let mut catalogs = Vec::new();
-        for lang in LANGUAGES.iter().filter(|l| matches!(l.code, "zh-hans" | "zh-hant")) {
+        for lang in LANGUAGES.iter().filter(|l| matches!(l.code, "zh-hans" | "zh-hant" | "es-mx")) {
             let mut keys = std::collections::BTreeSet::new();
             for (i, line) in lang.source.lines().enumerate() {
                 if line.trim().is_empty() || line.starts_with('#') {
@@ -170,7 +182,7 @@ mod tests {
             assert!(keys.len() > 500, "{}: incomplete catalog", lang.code);
             catalogs.push(keys);
         }
-        assert_eq!(catalogs.len(), 2);
+        assert_eq!(catalogs.len(), 3);
         assert_eq!(catalogs.first(), catalogs.last());
     }
 
