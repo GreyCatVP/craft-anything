@@ -2,9 +2,13 @@
 //! by a paid provider. Each provider is an [`AssetProvider`]; an [`AssetProviders`] registry holds
 //! them (built in: [`fal::Fal`]). The models and their prices come from the `assets.toml` table
 //! ([`Catalogue`]), so a cost is known before anything is spent, and every generation reports
-//! what it cost. Audio would be one more [`AssetRequest`] variant and table.
+//! its estimated cost. Scenario uses a live CU quote within a table spending ceiling;
+//! ElevenLabs supplies speech, sound effects and music.
 
+pub mod elevenlabs;
 pub mod fal;
+mod http;
+pub mod scenario;
 
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde::Deserialize;
@@ -12,11 +16,35 @@ use std::ops::RangeInclusive;
 use std::sync::{Arc, OnceLock};
 
 /// What kind of asset a request makes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AssetKind {
     Image,
     Model3d,
+    Speech,
+    SoundEffect,
+    Music,
+}
+
+/// How an audio model's published rate is measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioBilling {
+    Character,
+    Second,
+}
+
+/// An audio model and its estimated USD rate.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct AudioModel {
+    pub id: String,
+    pub provider: String,
+    pub name: String,
+    pub endpoint: String,
+    pub kind: AssetKind,
+    pub billing: AudioBilling,
+    pub usd_per_unit: f64,
 }
 
 /// Picture shapes, with their pixel size.
@@ -131,6 +159,8 @@ pub struct Catalogue {
     image: Vec<ImageModel>,
     #[serde(default)]
     model_3d: Vec<Model3d>,
+    #[serde(default)]
+    audio: Vec<AudioModel>,
 }
 
 fn price_ok(usd: f64) -> bool {
@@ -161,6 +191,15 @@ impl Catalogue {
                 low <= high
             }
         });
+        c.audio.retain(|m| {
+            m.usd_per_unit.is_finite()
+                && m.usd_per_unit > 0.0
+                && !m.endpoint.trim().is_empty()
+                && matches!(
+                    (m.kind, m.billing),
+                    (AssetKind::Speech, AudioBilling::Character) | (AssetKind::SoundEffect | AssetKind::Music, AudioBilling::Second)
+                )
+        });
         Ok(c)
     }
 
@@ -188,6 +227,7 @@ impl Catalogue {
                 faces: [48, 20_000],
                 licence: String::new(),
             }],
+            audio: Vec::new(),
         }
     }
 
@@ -197,6 +237,19 @@ impl Catalogue {
 
     pub fn models_3d(&self) -> &[Model3d] {
         &self.model_3d
+    }
+
+    pub fn audio_models(&self) -> &[AudioModel] {
+        &self.audio
+    }
+
+    /// Select a model of this modality; the first table entry is its default.
+    pub fn audio_model(&self, kind: AssetKind, id: Option<&str>) -> Result<&AudioModel, ToolError> {
+        let id = id.map(str::trim).filter(|s| !s.is_empty());
+        self.audio.iter().find(|m| m.kind == kind && id.is_none_or(|id| m.id == id)).ok_or_else(|| {
+            let known: Vec<&str> = self.audio.iter().filter(|m| m.kind == kind).map(|m| m.id.as_str()).collect();
+            missing("audio model", id.unwrap_or("default"), &known)
+        })
     }
 
     /// The picture model `id` names, or the default one when `id` is `None` or empty.
@@ -232,9 +285,34 @@ fn missing(what: &str, id: &str, known: &[&str]) -> ToolError {
 #[non_exhaustive]
 pub enum AssetRequest<'a> {
     /// A picture (PNG) from a description.
-    Image { model: &'a ImageModel, prompt: &'a str, shape: Shape },
+    Image {
+        model: &'a ImageModel,
+        prompt: &'a str,
+        shape: Shape,
+    },
     /// A 3D model (GLB) of at most `faces` faces from a picture: a web address, or a `data:` URI.
-    Model3d { model: &'a Model3d, image_url: &'a str, textured: bool, faces: u32 },
+    Model3d {
+        model: &'a Model3d,
+        image_url: &'a str,
+        textured: bool,
+        faces: u32,
+    },
+    Speech {
+        model: &'a AudioModel,
+        text: &'a str,
+        voice_id: &'a str,
+    },
+    SoundEffect {
+        model: &'a AudioModel,
+        prompt: &'a str,
+        duration_seconds: f64,
+    },
+    Music {
+        model: &'a AudioModel,
+        prompt: &'a str,
+        duration_seconds: f64,
+        instrumental: bool,
+    },
 }
 
 impl AssetRequest<'_> {
@@ -242,6 +320,9 @@ impl AssetRequest<'_> {
         match self {
             AssetRequest::Image { .. } => AssetKind::Image,
             AssetRequest::Model3d { .. } => AssetKind::Model3d,
+            AssetRequest::Speech { .. } => AssetKind::Speech,
+            AssetRequest::SoundEffect { .. } => AssetKind::SoundEffect,
+            AssetRequest::Music { .. } => AssetKind::Music,
         }
     }
 
@@ -250,6 +331,7 @@ impl AssetRequest<'_> {
         match self {
             AssetRequest::Image { model, .. } => &model.provider,
             AssetRequest::Model3d { model, .. } => &model.provider,
+            AssetRequest::Speech { model, .. } | AssetRequest::SoundEffect { model, .. } | AssetRequest::Music { model, .. } => &model.provider,
         }
     }
 
@@ -258,11 +340,14 @@ impl AssetRequest<'_> {
         match self {
             AssetRequest::Image { model, shape, .. } => model.cost(*shape),
             AssetRequest::Model3d { model, textured, .. } => model.cost(*textured),
+            AssetRequest::Speech { model, text, .. } => text.chars().count() as f64 * model.usd_per_unit,
+            AssetRequest::SoundEffect { model, duration_seconds, .. } => duration_seconds * model.usd_per_unit,
+            AssetRequest::Music { model, duration_seconds, .. } => (duration_seconds * 1000.0).ceil() / 1000.0 * model.usd_per_unit,
         }
     }
 }
 
-/// A generated file: where the provider keeps it, its bytes, and what it cost.
+/// A generated file: its remote address (empty for direct audio), bytes and estimated USD cost.
 #[derive(Debug, Clone)]
 pub struct Generated {
     pub url: String,
@@ -285,11 +370,14 @@ pub trait AssetProvider: Send + Sync {
     fn keys_page(&self) -> Option<&'static str> {
         None
     }
+    fn key_hint(&self) -> &'static str {
+        "API key"
+    }
     /// What `req` will cost, before anything is spent (the budget is checked against it).
     fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
         Ok(req.listed_cost())
     }
-    /// Make it with the person's `key`; the result carries what it actually cost.
+    /// Make it with the person's `key`; the result carries the provider's estimated USD cost.
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError>;
 }
 
@@ -314,7 +402,7 @@ impl Default for AssetProviders {
 impl AssetProviders {
     /// fal.ai.
     pub fn built_in() -> AssetProviders {
-        AssetProviders { providers: vec![Arc::new(fal::Fal::default())] }
+        AssetProviders { providers: vec![Arc::new(fal::Fal::default()), Arc::new(scenario::Scenario::default()), Arc::new(elevenlabs::ElevenLabs::default())] }
     }
 
     /// Add a provider, or replace the one with the same id.
@@ -439,7 +527,7 @@ mod tests {
             }
         }
         let mut r = AssetProviders::built_in();
-        assert_eq!(r.ids(), vec!["fal"]);
+        assert_eq!(r.ids(), vec!["fal", "scenario", "elevenlabs"]);
         let mut m = Catalogue::fallback().image_model(None).unwrap().clone();
         m.provider = "stub".into();
         let req = AssetRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };

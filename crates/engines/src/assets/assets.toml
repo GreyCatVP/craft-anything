@@ -50,3 +50,56 @@ endpoint = "tripo3d/p1/image-to-3d"
 usd = 0.40
 textured_usd = 0.50
 faces = [48, 20000]
+
+# Scenario prices below are conservative per-request SPENDING CEILINGS, not quoted prices.
+# Every generation first uses dryRun=true and refuses quotes above the ceiling.
+# Quoted CU are converted at Starter's $15/1500CU ($0.01/CU); actual invoices vary by plan.
+# https://www.scenario.com/pricing (checked 2026-11-02)
+# https://docs.scenario.com/api/resources/generate/methods/run_model
+[[image]]
+id = "scenario-gemini-3-1"
+provider = "scenario"
+name = "Scenario Gemini 3.1 (spending ceiling)"
+endpoint = "model_google-gemini-3-1-flash"
+usd_per_image = 1.0
+size_by = "aspect_ratio"
+licence = "Paid Scenario plan required; displayed USD is a spending ceiling, checked against a live CU quote"
+
+[[model_3d]]
+id = "scenario-meshy"
+provider = "scenario"
+name = "Scenario Meshy 6 (spending ceiling)"
+endpoint = "model_meshy-img23d"
+usd = 10.0
+textured_usd = 10.0
+faces = [100, 300000]
+licence = "Paid Scenario plan required; displayed USD is a spending ceiling; polygon count is a target"
+
+# Published API rates, checked 2026-11-02 at https://elevenlabs.io/pricing/api.
+# Estimates exclude taxes; account/voice pricing may differ. Audio is MP3.
+[[audio]]
+id = "eleven-multilingual-v2"
+provider = "elevenlabs"
+name = "ElevenLabs Multilingual v2"
+endpoint = "eleven_multilingual_v2"
+kind = "speech"
+billing = "character"
+usd_per_unit = 0.00008
+
+[[audio]]
+id = "eleven-sound-effects-v2"
+provider = "elevenlabs"
+name = "ElevenLabs Sound Effects v2"
+endpoint = "eleven_text_to_sound_v2"
+kind = "sound_effect"
+billing = "second"
+usd_per_unit = 0.002
+
+[[audio]]
+id = "eleven-music-v1"
+provider = "elevenlabs"
+name = "ElevenLabs Music v1"
+endpoint = "music_v1"
+kind = "music"
+billing = "second"
+usd_per_unit = 0.0025

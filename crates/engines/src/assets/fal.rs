@@ -77,6 +77,7 @@ impl AssetProvider for Fal {
                 let url = model_url(&v).ok_or_else(|| unexpected("3D model", &v))?;
                 Ok(Generated { bytes: download(&url)?, url, cost_usd: req.listed_cost() })
             }
+            _ => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai does not support this asset request.")),
         }
     }
 }
