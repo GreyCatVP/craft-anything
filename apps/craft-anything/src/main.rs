@@ -88,9 +88,10 @@ fn main() -> eframe::Result {
     run
 }
 
-/// Windows: the adapter that draws the window. GL comes after every other one, Windows' own
-/// software renderer (WARP) included: in a VMware VM, GL is the way to the virtual GPU and draws a
-/// black window (#27). GL stays the last resort, and `WGPU_BACKEND` still narrows the choice.
+/// Windows: the adapter that draws the window. GL is the last resort, Windows' own software
+/// renderer (WARP) included: in a VMware VM, GL is the way to the virtual GPU and drew a black
+/// window (#27). The fastest device wins, and between same-class devices DX12 comes before Vulkan
+/// (#33). `WGPU_BACKEND` still narrows the choice.
 #[cfg(windows)]
 fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgpu::Surface<'_>>) -> Result<eframe::wgpu::Adapter, String> {
     let picked = adapters.iter().filter(|a| surface.is_none_or(|s| a.is_surface_supported(s))).min_by_key(|a| {
@@ -113,11 +114,12 @@ fn windows_backends(from_env: Option<eframe::wgpu::Backends>) -> eframe::wgpu::B
     from_env.unwrap_or(eframe::wgpu::Backends::PRIMARY)
 }
 
-/// Lower is better: GL last, then the fastest kind of device first (wgpu's own high-performance
-/// preference).
+/// Lower is better: GL last, fastest device first, DX12 before Vulkan only between same-class devices
+/// (#33).
 #[cfg(windows)]
-fn adapter_rank(backend: eframe::wgpu::Backend, device: eframe::wgpu::DeviceType) -> (bool, u8) {
+fn adapter_rank(backend: eframe::wgpu::Backend, device: eframe::wgpu::DeviceType) -> (bool, u8, u8) {
     use eframe::wgpu::DeviceType;
+    let is_gl = backend == eframe::wgpu::Backend::Gl;
     let speed = match device {
         DeviceType::DiscreteGpu => 0,
         DeviceType::IntegratedGpu => 1,
@@ -125,7 +127,12 @@ fn adapter_rank(backend: eframe::wgpu::Backend, device: eframe::wgpu::DeviceType
         DeviceType::Cpu => 3,
         DeviceType::Other => 4,
     };
-    (backend == eframe::wgpu::Backend::Gl, speed)
+    let dx12_before_vulkan = match backend {
+        eframe::wgpu::Backend::Dx12 => 0,
+        eframe::wgpu::Backend::Vulkan => 1,
+        _ => 2,
+    };
+    (is_gl, speed, dx12_before_vulkan)
 }
 
 #[cfg(all(test, windows))]
@@ -134,11 +141,16 @@ mod tests {
     use eframe::wgpu::{Backend as B, DeviceType as T};
 
     /// #27: a VMware VM offers its virtual GPU over GL and WARP over DX12; GL drew a black window.
+    /// #33: a start that shows nothing is looked at through `desktop.log`; between same-class
+    /// devices DX12 comes before Vulkan, and GL stays the last resort.
     #[test]
-    fn gl_comes_after_warp_and_every_gpu() {
+    fn dx12_comes_before_vulkan_and_gl_is_the_last_resort() {
         let best = |c: &[(B, T)]| c.iter().enumerate().min_by_key(|(_, (b, t))| adapter_rank(*b, *t)).map(|(i, _)| i);
         assert_eq!(best(&[(B::Gl, T::Other), (B::Dx12, T::Cpu)]), Some(1), "VMware: WARP, not GL");
         assert_eq!(best(&[(B::Gl, T::IntegratedGpu), (B::Dx12, T::Cpu)]), Some(1));
+        assert_eq!(best(&[(B::Vulkan, T::DiscreteGpu), (B::Dx12, T::IntegratedGpu)]), Some(0), "fastest GPU first");
+        assert_eq!(best(&[(B::Dx12, T::IntegratedGpu), (B::Vulkan, T::IntegratedGpu)]), Some(0), "DX12 before Vulkan between same-class devices");
+        assert_eq!(best(&[(B::Dx12, T::Cpu), (B::Vulkan, T::DiscreteGpu)]), Some(1), "WARP does not beat a real Vulkan device");
         assert_eq!(best(&[(B::Dx12, T::IntegratedGpu), (B::Vulkan, T::DiscreteGpu), (B::Dx12, T::Cpu)]), Some(1), "fastest GPU first");
         assert_eq!(best(&[(B::Gl, T::Other)]), Some(0), "GL when it's all there is");
     }
