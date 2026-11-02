@@ -452,8 +452,10 @@ fn runtime_walkthrough_record(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
 #[serde(deny_unknown_fields)]
 pub struct CompareParams {
     /// The first run: runtime_walkthrough_record evidence (inline, {"kind":"saved",…} or a bare id).
+    #[schemars(with = "serde_json::Map<String, Value>")]
     pub left: Value,
     /// The second run, in the same forms.
+    #[schemars(with = "serde_json::Map<String, Value>")]
     pub right: Value,
 }
 

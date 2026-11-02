@@ -243,4 +243,38 @@ mod tests {
         assert!(parse_address("0xZZ").is_err());
         assert!(parse_address("").is_err());
     }
+
+    /// A property's schema must be an object, never a boolean.
+    ///
+    /// Claude Code (the builder's client) discards a server's whole `tools/list` when a property
+    /// schema is a boolean — what schemars emits for a bare `serde_json::Value` — so the server
+    /// looks connected with no tools and `--permission-prompt-tool` stops working.
+    #[test]
+    fn no_tool_schema_has_boolean_properties() {
+        for spec in super::all() {
+            let schema = (spec.input_schema)();
+            let mut hits = Vec::new();
+            boolean_properties(&schema, "", &mut hits);
+            assert!(hits.is_empty(), "{} has boolean property schemas at {:?}", spec.id, hits);
+        }
+    }
+
+    fn boolean_properties(v: &serde_json::Value, path: &str, hits: &mut Vec<String>) {
+        let Some(map) = v.as_object() else { return };
+        if let Some(props) = map.get("properties").and_then(serde_json::Value::as_object) {
+            for (key, child) in props {
+                let here = format!("{path}/properties/{key}");
+                if child.is_boolean() {
+                    hits.push(here);
+                } else {
+                    boolean_properties(child, &here, hits);
+                }
+            }
+        }
+        if let Some(defs) = map.get("$defs").and_then(serde_json::Value::as_object) {
+            for (key, child) in defs {
+                boolean_properties(child, &format!("{path}/$defs/{key}"), hits);
+            }
+        }
+    }
 }
