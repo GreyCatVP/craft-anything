@@ -452,11 +452,33 @@ fn runtime_walkthrough_record(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
 #[serde(deny_unknown_fields)]
 pub struct CompareParams {
     /// The first run: runtime_walkthrough_record evidence (inline, {"kind":"saved",…} or a bare id).
-    #[schemars(with = "serde_json::Map<String, Value>")]
+    #[schemars(schema_with = "left_evidence_input_schema")]
     pub left: Value,
     /// The second run, in the same forms.
-    #[schemars(with = "serde_json::Map<String, Value>")]
+    #[schemars(schema_with = "right_evidence_input_schema")]
     pub right: Value,
+}
+
+fn left_evidence_input_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    evidence_input_schema(g, "The first run: runtime_walkthrough_record evidence (inline, {\"kind\":\"saved\",…} or a bare id).")
+}
+
+fn right_evidence_input_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    evidence_input_schema(g, "The second run, in the same forms.")
+}
+
+/// A bare evidence id or the inline evidence object, as `resolve_evidence_input` reads it.
+///
+/// The schema must be an object: schemars renders a bare `serde_json::Value` as `true`, and a
+/// JSON-schema client that meets a boolean property schema drops the whole `tools/list`.
+fn evidence_input_schema(_: &mut schemars::SchemaGenerator, description: &str) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": description,
+        "anyOf": [
+            { "type": "string" },
+            { "type": "object" }
+        ]
+    })
 }
 
 #[derive(Debug, Serialize)]
