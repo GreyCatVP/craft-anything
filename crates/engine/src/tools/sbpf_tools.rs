@@ -555,9 +555,8 @@ mod tests {
 
     #[test]
     fn truncated_text_section_reports_partial_coverage_and_limitation() {
-        fn build_elf(declared_size: u64, keep_code: bool) -> Vec<u8> {
-            let extra = usize::from(keep_code) * 8;
-            let mut b = vec![0u8; 280 + extra];
+        fn build_elf(declared_size: u64, insns: usize) -> Vec<u8> {
+            let mut b = vec![0u8; 280 + insns * 8];
             b[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
             for (o, v) in [(16, 3u16), (18, 247), (52, 64), (58, 64), (60, 3), (62, 2)] {
                 b[o..o + 2].copy_from_slice(&v.to_le_bytes());
@@ -572,16 +571,16 @@ mod tests {
                 b[o..o + 8].copy_from_slice(&v.to_le_bytes());
             }
             b[256..273].copy_from_slice(b"\0.text\0.shstrtab\0");
-            if keep_code {
-                b[280] = 0x95;
+            for i in 0..insns {
+                b[280 + i * 8] = 0x95;
             }
             b
         }
 
         let e = Engine::new(crate::testing::session());
-        let readable = temp_file("readable.so", &build_elf(8, true));
-        let truncated = temp_file("truncated.so", &build_elf(16, true));
-        let empty = temp_file("empty.so", &build_elf(0, false));
+        let readable = temp_file("readable.so", &build_elf(8, 1));
+        let truncated = temp_file("truncated.so", &build_elf(24, 2));
+        let empty = temp_file("empty.so", &build_elf(0, 0));
 
         let show_ok = call(&e, "formats_sbpf_show", json!({"path": readable.to_string_lossy()}));
         assert_eq!(show_ok["result"]["disassembly"]["total"], 1);
@@ -592,13 +591,14 @@ mod tests {
         assert_eq!(show_empty["coverage"]["status"], "complete");
         assert_eq!(show_empty["limitations"].as_array().unwrap().len(), 3);
 
-        let show_trunc = call(&e, "formats_sbpf_show", json!({"path": truncated.to_string_lossy()}));
-        assert_eq!(show_trunc["result"]["disassembly"]["total"], 1);
+        let show_trunc = call(&e, "formats_sbpf_show", json!({"path": truncated.to_string_lossy(), "limit": 1}));
+        assert_eq!(show_trunc["result"]["disassembly"]["total"], 2);
         assert_eq!(show_trunc["coverage"]["status"], "partial");
+        assert_eq!(show_trunc["coverage"]["next_offset"], 1);
         assert!(show_trunc["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "text_truncated"));
 
         let dis_trunc = call(&e, "formats_sbpf_disassemble", json!({"path": truncated.to_string_lossy()}));
-        assert_eq!(dis_trunc["result"]["count"], 1);
+        assert_eq!(dis_trunc["result"]["count"], 2);
         assert_eq!(dis_trunc["coverage"]["status"], "partial");
         assert!(dis_trunc["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "text_truncated"));
     }
