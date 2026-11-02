@@ -205,3 +205,13 @@ fn a_bare_argument_is_the_path_even_when_other_options_sort_first() {
     let model: Value = serde_json::from_slice(&cli(&["formats-ai-weights-show", "--deep", path], cfg.path()).stdout).unwrap();
     assert!(!model["error"]["message"].as_str().unwrap_or_default().contains("unknown variant"), "{model}");
 }
+
+/// #254: the top-level help must not advise `report --format`, which the parser sends to the global output format.
+#[test]
+fn help_does_not_advise_a_report_format_option() {
+    let cfg = tempfile::tempdir().unwrap();
+    let help = cli(&["--help"], cfg.path());
+    assert!(help.success);
+    assert!(!help.stdout_text().contains("(core-target-open, report"));
+    assert_eq!(cli(&["report", "--format", "html"], cfg.path()).code, Some(2));
+}
