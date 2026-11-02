@@ -78,7 +78,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_open_folder",
             title: "Open a project's folder",
-            summary: "Open the project's folder (or its app/ folder) in the file manager.",
+            summary: "Open the project's folder (or its app/ folder) in the file manager, or one of its pinned builds' folders.",
             beginner: "Opens the project's files.",
             toolset: Toolset::Projects,
             effects: Effects::LAUNCHES_PROCESS,
@@ -287,6 +287,9 @@ pub struct FolderParams {
     /// Open the app/ folder (what was built) instead of the project folder.
     #[serde(default)]
     pub app: bool,
+    /// Open a pinned build's folder.
+    #[serde(default)]
+    pub pin: Option<u32>,
 }
 
 /// Websites being previewed in this session, by project folder (kept serving until it ends).
@@ -538,9 +541,21 @@ fn project_preview(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolE
 fn project_open_folder(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: FolderParams = parse_params(params)?;
     let ws = open(&p.project)?;
-    let dir = if p.app { ws.app_dir() } else { ws.root.clone() };
+    let dir = folder_to_open(&ws, p.app, p.pin)?;
     craft_anything_platform::open_path(&dir)?;
     Ok(ToolOutput::Value(json!({"opened": dir.display().to_string()})))
+}
+
+/// The folder `project_open_folder` opens: the project, its app, or a pinned build's copy.
+fn folder_to_open(ws: &Workspace, app: bool, pin: Option<u32>) -> Result<PathBuf, ToolError> {
+    Ok(match (pin, app) {
+        (Some(id), app) => {
+            let pin = crate::pins::get(ws, id)?;
+            if app { pin.app_dir(ws) } else { pin.dir(ws) }
+        }
+        (None, true) => ws.app_dir(),
+        (None, false) => ws.root.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -641,5 +656,19 @@ mod tests {
         assert!(err.remediation.unwrap_or_default().contains("project_preview"));
         // Playing runs the builder's code: refused without consent.
         assert!(e.call("project_play", json!({"project": ws.root}), CallOptions::new(Caller::Mcp)).is_err());
+    }
+
+    #[test]
+    fn a_pinned_builds_folder_is_opened_from_its_project() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
+        let pin = ws.root.join(crate::pins::PINNED).join("7");
+        std::fs::create_dir_all(pin.join("app")).unwrap();
+        std::fs::write(pin.join(crate::pins::PIN_FILE), r#"{"version":1,"id":7,"name":"Pinned","mode":"frozen","created_ms":0}"#).unwrap();
+        assert_eq!(folder_to_open(&ws, false, Some(7)).unwrap(), pin);
+        assert_eq!(folder_to_open(&ws, true, Some(7)).unwrap(), pin.join("app"));
+        assert_eq!(folder_to_open(&ws, false, None).unwrap(), ws.root);
+        assert_eq!(folder_to_open(&ws, true, None).unwrap(), ws.app_dir());
+        assert!(folder_to_open(&ws, false, Some(8)).is_err(), "no such pin");
     }
 }

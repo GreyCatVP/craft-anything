@@ -206,6 +206,10 @@ fn menu(app: &mut CraftApp, ui: &mut Ui, row: &PinRow) {
         app.open_pin(row, false);
         ui.close();
     }
+    if ui.button(tr("Show folder")).clicked() {
+        app.act("project_open_folder", json!({"project": row.project, "pin": row.pin.id}), tr("Show the folder"));
+        ui.close();
+    }
     if ui.button(tr("Go to the project")).clicked() {
         if let Some(ws) = app.projects.iter().find(|w| w.root == row.project).cloned() {
             app.open_workspace(ws);
