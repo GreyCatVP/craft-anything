@@ -532,6 +532,9 @@ Owner: open · Status: in progress
 - [ ] Say on each adapter, as typed data, what it can be held to (asks us, its own sandbox, nothing),
       and have runs act on that, once the decision above is made
 - [ ] Check live what Hermes over ACP asks about: whether its file reads reach our approval policy
+- [ ] Maki as a coding agent: one message per `maki -p`, and over ACP (`maki acp`, with the
+      backend's model); verified live as an ACP builder — claimed: zeller-lorenz, branch
+      `feature/r2.2-maki-acp`
 
 ### R2.3 Website coverage and a better visual metric
 Owner: open · Status: done
