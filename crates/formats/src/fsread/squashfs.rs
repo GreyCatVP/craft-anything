@@ -222,15 +222,12 @@ fn symlink_target(idata: &[u8], pos: usize) -> Option<String> {
 fn file_bytes(data: &[u8], sb: &Sb, idata: &[u8], pos: usize, limits: &Limits, img: &mut FsImage) -> Option<Vec<u8>> {
     let r = Reader::new(idata);
     let itype = r.u16_le(pos)?;
-    // Basic file (2) and extended file (9) differ in field widths; support basic fully.
-    if itype == 9 {
-        img.warn("squashfs: extended file inode only partially read");
-        img.complete = false;
-    }
-    let blocks_start = u64::from(r.u32_le(pos + 16)?);
-    let fragment = r.u32_le(pos + 20)?;
-    let frag_offset = r.u32_le(pos + 24)?;
-    let file_size = u64::from(r.u32_le(pos + 28)?);
+    // Regular file inode (basic=2, extended=9).
+    let (blocks_start, fragment, frag_offset, file_size, list_off) = match itype {
+        2 => (u64::from(r.u32_le(pos + 16)?), r.u32_le(pos + 20)?, r.u32_le(pos + 24)?, u64::from(r.u32_le(pos + 28)?), pos + 32),
+        9 => (r.u64_le(pos + 16)?, r.u32_le(pos + 44)?, r.u32_le(pos + 48)?, r.u64_le(pos + 24)?, pos + 56),
+        _ => return None,
+    };
     if file_size > limits.max_file_bytes || img.bytes.saturating_add(file_size) > limits.max_total_bytes {
         img.warn("squashfs: file skipped (size budget)");
         img.complete = false;
@@ -242,7 +239,7 @@ fn file_bytes(data: &[u8], sb: &Sb, idata: &[u8], pos: usize, limits: &Limits, i
     let mut out = Vec::with_capacity(usize::try_from(file_size).unwrap_or(0));
     let mut data_pos = blocks_start;
     for i in 0..full_blocks.min(1 << 20) {
-        let bsize = r.u32_le(pos + 32 + i * 4)?;
+        let bsize = r.u32_le(list_off + i * 4)?;
         let uncompressed = bsize & 0x0100_0000 != 0;
         let len = (bsize & 0x00ff_ffff) as usize;
         if len == 0 {
@@ -271,13 +268,17 @@ fn file_bytes(data: &[u8], sb: &Sb, idata: &[u8], pos: usize, limits: &Limits, i
             Some(frag) => {
                 let tail = file_size.saturating_sub(out.len() as u64) as usize;
                 let o = frag_offset as usize;
-                if let Some(slice) = frag.get(o..o.checked_add(tail)?) {
-                    out.extend_from_slice(slice);
-                }
+                let Some(slice) = frag.get(o..o.checked_add(tail)?) else {
+                    img.warn("squashfs: fragment not read");
+                    img.complete = false;
+                    return None;
+                };
+                out.extend_from_slice(slice);
             }
             None => {
                 img.warn("squashfs: fragment not read");
                 img.complete = false;
+                return None;
             }
         }
     }
@@ -336,6 +337,30 @@ mod tests {
         assert_eq!(img.entries.iter().find(|e| e.path == "readme").unwrap().data.as_deref(), Some(craft_anything_testkit::firmware::SQUASHFS_README));
         assert!(img.entries.iter().any(|e| e.path == "etc" && e.kind == FsKind::Dir));
         assert_eq!(img.entries.iter().find(|e| e.path == "etc/motd").unwrap().data.as_deref(), Some(b"welcome\n".as_slice()));
+    }
+
+    #[test]
+    fn reads_extended_regular_file_inodes() {
+        let sb = Sb { block_size: 4096, compression: 1, inode_table: 0, dir_table: 0, frag_table: 0, id_table: 0, root_ref: 0, frag_count: 0 };
+        let body = b"extended file payload";
+        let mut data = vec![0u8; 96];
+        data.extend_from_slice(body);
+        let mut idata = Vec::new();
+        idata.extend_from_slice(&9u16.to_le_bytes());
+        idata.extend_from_slice(&0o644u16.to_le_bytes());
+        idata.resize(16, 0);
+        idata.extend_from_slice(&96u64.to_le_bytes());
+        idata.extend_from_slice(&(body.len() as u64).to_le_bytes());
+        idata.extend_from_slice(&0u64.to_le_bytes());
+        idata.extend_from_slice(&2u32.to_le_bytes());
+        idata.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        idata.extend_from_slice(&0u32.to_le_bytes());
+        idata.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        idata.extend_from_slice(&((body.len() as u32) | 0x0100_0000).to_le_bytes());
+        let mut img = FsImage::new("squashfs");
+        let got = file_bytes(&data, &sb, &idata, 0, &Limits::default(), &mut img);
+        assert_eq!(got.as_deref(), Some(body.as_slice()));
+        assert!(img.complete, "{:?}", img.warnings);
     }
 
     #[test]
