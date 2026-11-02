@@ -291,7 +291,7 @@ impl PackedFormat for PyInstaller {
             notes.push(format!("{}, so the members after it aren't listed.", capitalise(&why)));
             truncated = true;
         }
-        let key_seen = members.iter().any(|m| m.entry.path.contains("crypto_key"));
+        let key_seen = members.iter().any(|m| matches!(m.type_code, b'm' | b'M' | b's') && m.entry.path.contains("crypto_key"));
         let scripts: Vec<&str> = members.iter().filter(|m| m.type_code == b's').map(|m| m.entry.path.as_str()).collect();
         let entry_scripts: Vec<&str> = scripts.iter().copied().filter(|s| !s.starts_with("pyi_rth_") && !s.starts_with("pyiboot")).collect();
         let options: Vec<&str> = members.iter().filter(|m| m.type_code == b'o').map(|m| m.entry.path.as_str()).collect();
@@ -446,6 +446,15 @@ mod tests {
         let z = pyz(3531, &[("a", 0, &[0xee; 40])], false, false);
         let data = pyinstaller(&[("PYZ.pyz", b'z', &z, false)], true, 312);
         assert_eq!(PyInstaller.list(&data).unwrap().facts["pyz_archives"][0]["encrypted"], true);
+
+        // An ordinary data member named crypto_key.txt does not mark unencrypted PYZ modules unreadable.
+        let z = pyz(3531, &[("a", 0, &code)], false, true);
+        let data = pyinstaller(&[("crypto_key.txt", b'x', b"plain", false), ("PYZ.pyz", b'z', &z, false)], true, 312);
+        let l = PyInstaller.list(&data).unwrap();
+        assert_eq!(l.facts["encrypted_modules"], false);
+        let a = find(&l, "PYZ.pyz.modules/a.pyc");
+        assert_eq!(a.compression, Compression::Zlib);
+        assert!(pyc::read_pyc(&PyInstaller.read(&data, a, 1000).unwrap()).unwrap().code.is_some());
     }
 
     #[test]
