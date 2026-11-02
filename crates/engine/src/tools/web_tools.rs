@@ -392,8 +392,9 @@ fn default_recover_limit() -> usize {
     500
 }
 
-fn collect_scripts(ctx: &Ctx<'_>, roots: &[String], max_files: usize) -> Result<Vec<(String, PathBuf)>, ToolError> {
+fn collect_scripts(ctx: &Ctx<'_>, roots: &[String], max_files: usize) -> Result<(Vec<(String, PathBuf)>, Vec<String>), ToolError> {
     let mut out = Vec::new();
+    let mut notes = Vec::new();
     for r in roots {
         let path = abs_path(r, "path")?;
         let meta = std::fs::metadata(&path).map_err(|e| ToolError::io(path.display(), e))?;
@@ -405,6 +406,9 @@ fn collect_scripts(ctx: &Ctx<'_>, roots: &[String], max_files: usize) -> Result<
                 &WalkOptions { max_files: max_files.saturating_mul(4), max_depth: 32, skip_dir: &skip, gitignore: false, include_hidden: false },
                 &ctx.cancel,
             )?;
+            if w.truncated {
+                notes.push(format!("{base}: the folder listing was cut short by the file-count or depth limit"));
+            }
             for f in w.files.into_iter().filter(|f| craft_anything_analysis::js_app::is_script(&f.rel)) {
                 out.push((format!("{base}/{}", f.rel), f.abs));
             }
@@ -416,7 +420,7 @@ fn collect_scripts(ctx: &Ctx<'_>, roots: &[String], max_files: usize) -> Result<
             break;
         }
     }
-    Ok(out)
+    Ok((out, notes))
 }
 
 fn js_sources_restore(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
@@ -426,7 +430,7 @@ fn js_sources_restore(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, To
     }
     let mut roots = vec![p.path.clone()];
     roots.extend(p.additional_paths.iter().cloned());
-    let inputs = collect_scripts(ctx, &roots, p.max_files.max(1))?;
+    let (inputs, mut notes) = collect_scripts(ctx, &roots, p.max_files.max(1))?;
     if inputs.is_empty() {
         return Err(ToolError::invalid("no JavaScript files found in the inputs"));
     }
@@ -438,7 +442,6 @@ fn js_sources_restore(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, To
     let limits = craft_anything_js::Limits::default();
     let mut outputs: Vec<Value> = Vec::new();
     let mut provenance: Vec<Value> = Vec::new();
-    let mut notes: Vec<String> = Vec::new();
     let (mut modules_total, mut originals_total, mut printed) = (0usize, 0usize, 0usize);
     for (n, (rel, abs)) in inputs.iter().enumerate() {
         ctx.cancel.check()?;
@@ -586,6 +589,29 @@ mod tests {
         // The output folder must not exist.
         let again = call(&e, "js_sources_restore", json!({"path": src, "output_directory": out})).unwrap_err();
         assert_eq!(again.code, ErrorCode::BadInput);
+    }
+
+    #[test]
+    fn recover_records_folder_truncation_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let dist = dir.path().join("dist");
+        std::fs::create_dir(&dist).unwrap();
+        std::fs::write(dist.join("aa-app.js"), "console.log(1);\n").unwrap();
+        std::fs::write(dist.join("zz-app.js"), "console.log(2);\n").unwrap();
+        for n in 0..7 {
+            std::fs::write(dist.join(format!("asset-{n}.txt")), "x\n").unwrap();
+        }
+        let e = Engine::new(crate::testing::session());
+        let out_capped = dir.path().join("capped");
+        let r = call(&e, "js_sources_restore", json!({"path": dist, "output_directory": out_capped, "max_files": 2})).unwrap();
+        let expected = json!(["dist: the folder listing was cut short by the file-count or depth limit"]);
+        assert_eq!(r["result"]["notes"], expected);
+        let manifest: Value = serde_json::from_slice(&std::fs::read(out_capped.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest["notes"], expected);
+
+        let out_full = dir.path().join("full");
+        let r_full = call(&e, "js_sources_restore", json!({"path": dist, "output_directory": out_full, "max_files": 3})).unwrap();
+        assert_eq!(r_full["result"]["notes"], json!([]));
     }
 
     #[test]
