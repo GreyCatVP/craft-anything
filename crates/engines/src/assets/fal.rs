@@ -55,6 +55,7 @@ impl AssetProvider for Fal {
         Some("FAL_KEY")
     }
 
+    /// Validate credentials, generate a supported image or mesh, and download it with its catalogue cost.
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
         self.validate_key(key)?;
         let key = key.trim();

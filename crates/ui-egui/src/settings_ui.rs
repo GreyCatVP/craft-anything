@@ -305,6 +305,7 @@ fn engines(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
+/// Draw AI backends and servers, followed by the independent asset-provider credential controls.
 fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     widgets::caption(ui, "Your brains");
@@ -589,6 +590,7 @@ fn number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::
     ui.add(egui::DragValue::new(value).range(range).prefix(prefix).suffix(suffix)).changed()
 }
 
+/// Edit build limits and asset defaults, persisting changes to budgets and visual-model selections.
 fn builds(app: &mut CraftApp, ui: &mut Ui) {
     let mut changed = false;
     let b = &mut app.settings.build;

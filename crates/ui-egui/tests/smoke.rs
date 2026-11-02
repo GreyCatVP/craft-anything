@@ -126,6 +126,7 @@ fn fal_key(stored: bool) -> std::collections::BTreeMap<String, bool> {
     [(craft_anything_engines::assets::fal::ID.to_string(), stored)].into()
 }
 
+/// Asset opt-in offers every provider, accepts Scenario credentials and keeps key setup reachable in Settings.
 #[test]
 fn turning_on_generated_assets_offers_all_providers_and_accepts_a_scenario_key() {
     use craft_anything_engine::workspace::TargetRef;
@@ -190,6 +191,7 @@ fn turning_on_generated_assets_offers_all_providers_and_accepts_a_scenario_key()
     h.get_by_label("Scenario API secret");
 }
 
+/// Scenario requires a nonblank key and secret in password fields and clears both inputs after saving.
 #[test]
 fn scenario_settings_require_both_masked_fields_and_clear_them_after_save() {
     use egui_kittest::kittest::NodeT;
@@ -321,6 +323,7 @@ fn a_long_prompt_wraps_inside_the_window_in_the_project_and_the_chat() {
     }
 }
 
+/// Provider choices and exact budgets persist across reopening; budget increases start from the latest saved value.
 #[test]
 fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     use craft_anything_engine::workspace::{AssetRecord, TargetRef, Workspace};
@@ -406,6 +409,7 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     reopened_ui.get_by_label("Budget $0.25 · remaining $0.00");
 }
 
+/// Projects retain provider and budget controls even before generation is enabled or any assets exist.
 #[test]
 fn a_project_with_assets_off_and_none_recorded_still_shows_the_budget() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
@@ -659,6 +663,7 @@ fn a_finished_game_offers_to_play_it() {
     assert_eq!(h.get_all_by_label("Play the game").count(), 2, "in the sidebar and on the ready card");
 }
 
+/// A finished build can be pinned through scroll-accessible project actions and opened from the sidebar.
 #[test]
 fn a_finished_build_can_be_pinned_and_opened_from_the_sidebar() {
     use craft_anything_engine::workspace::{Status, TargetRef, Workspace};
@@ -2271,6 +2276,7 @@ fn the_website_dialog_is_ready_to_type_into() {
     assert!(h.get_by_label("Website address").is_focused());
 }
 
+/// Scroll-accessible project actions rename, duplicate and delete the saved workspace through engine tools.
 #[test]
 fn a_project_is_renamed_duplicated_and_deleted_from_its_page() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};

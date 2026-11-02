@@ -551,6 +551,7 @@ struct AssetPrices {
 }
 
 impl AssetPrices {
+    /// Format configured visual-model estimates and the default project budget, falling back to catalogue defaults.
     fn of(app: &CraftApp) -> AssetPrices {
         use crate::usage::asset_cost_words;
         use craft_anything_engines::assets::{Catalogue, Shape, usd};

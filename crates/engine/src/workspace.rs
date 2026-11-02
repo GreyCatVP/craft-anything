@@ -428,6 +428,7 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Create a new manifest with trimmed request text and paid asset generation disabled.
     fn new(name: &str, request: &str, target: TargetRef) -> Manifest {
         let now = now_ms();
         Manifest {
@@ -1092,6 +1093,7 @@ mod tests {
         assert_eq!(ProjectUsage::load(dir.path()).work_ms, 5, "read as far as it's known, never written over");
     }
 
+    /// Saving stale build progress must preserve the latest budget, provider choices and approvals on disk.
     #[test]
     fn a_run_holding_an_old_copy_keeps_the_persons_changes() {
         let dir = tempfile::tempdir().unwrap();
@@ -1122,6 +1124,7 @@ mod tests {
         assert_eq!(disk.asset_providers, Some(vec!["scenario".into()]));
     }
 
+    /// Legacy opt-in permits every provider; explicit choices obey the master switch and survive copying.
     #[test]
     fn provider_choices_migrate_from_legacy_and_survive_duplication() {
         let old = br#"{"version":2,"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true}"#;

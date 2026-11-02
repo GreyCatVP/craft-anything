@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// Register provider credential status, save and removal tools without exposing saved keys.
 pub fn specs() -> Vec<ToolSpec> {
     let spec = |id, title, summary, beginner, effects, input_schema, run| ToolSpec {
         id,

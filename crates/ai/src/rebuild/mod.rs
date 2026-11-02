@@ -844,8 +844,8 @@ impl Worker {
         self.emit(RunEvent::Agent(AgentEvent::Status { text }));
     }
 
-    /// `fresh`: what to send instead when the agent's saved session turns out not to be on this
-    /// computer.
+    /// Run a builder turn with fresh asset policy, preserving its session and retrying recoverable interruptions.
+    /// `fresh`: what to send instead when the agent's saved session turns out not to be on this computer.
     fn turn(&mut self, ws: &mut Workspace, agent: &mut dyn Conversation, prompt: &str, mut fresh: Option<String>) -> Result<String, ToolError> {
         let mut prompt = prompt.to_string();
         let mut tries = 0u64;

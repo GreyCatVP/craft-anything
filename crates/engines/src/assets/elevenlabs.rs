@@ -9,11 +9,13 @@ pub struct ElevenLabs {
     base: String,
 }
 impl Default for ElevenLabs {
+    /// Use the production ElevenLabs API endpoint.
     fn default() -> Self {
         Self { base: "https://api.elevenlabs.io/v1".into() }
     }
 }
 
+/// Check modality-specific limits, identifiers, provider ownership, and a positive finite estimate.
 fn validate(req: &AssetRequest) -> Result<(), ToolError> {
     let model = match *req {
         AssetRequest::Speech { model, text, voice_id } => {
@@ -40,22 +42,28 @@ fn validate(req: &AssetRequest) -> Result<(), ToolError> {
     Ok(())
 }
 impl AssetProvider for ElevenLabs {
+    /// Return the catalogue identifier used to route requests to ElevenLabs.
     fn id(&self) -> &'static str {
         ID
     }
+    /// Return the provider's display name.
     fn name(&self) -> &'static str {
         "ElevenLabs"
     }
+    /// Name the environment variable used when no credential is stored.
     fn key_env(&self) -> Option<&'static str> {
         Some("ELEVENLABS_API_KEY")
     }
+    /// Return the account page where the person can manage API credentials.
     fn keys_page(&self) -> Option<&'static str> {
         Some("https://elevenlabs.io/app/settings/api-keys")
     }
+    /// Validate the audio request and return its catalogue estimate without network access.
     fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
         validate(req)?;
         Ok(req.listed_cost())
     }
+    /// Validate and submit the modality's payload, returning bounded MP3 bytes and an estimated cost.
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
         validate(req)?;
         self.validate_key(key)?;
@@ -98,6 +106,7 @@ mod tests {
     use crate::assets::{AssetKind, Catalogue};
     use craft_anything_evidence::ErrorCode;
 
+    /// Check each audio endpoint's payload, authentication, binary result, and catalogue estimate.
     #[test]
     fn speech_sound_and_music_use_distinct_wire_schemas_and_binary_results() {
         let (base, seen) = http::tests::serve(|_| vec![(200, "ID3 speech".into()), (200, "ID3 sound".into()), (200, "ID3 music".into())]);
@@ -122,6 +131,7 @@ mod tests {
         assert!(seen[2].contains("\"music_length_ms\":10000") && seen[2].contains("\"force_instrumental\":true"));
         assert!(seen.iter().all(|s| s.to_ascii_lowercase().contains("xi-api-key: sk-test")));
     }
+    /// Reject invalid audio inputs locally and classify HTTP errors without echoing remote secrets.
     #[test]
     fn invalid_inputs_and_remote_errors_never_expose_credentials() {
         let c = Catalogue::built_in();

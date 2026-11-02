@@ -19,6 +19,7 @@ use std::sync::{Arc, PoisonError};
 /// Most feed items one call returns.
 const MAX_ITEMS: usize = 200;
 
+/// Expose project management tools with their parameter schemas and declared side effects.
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
@@ -232,6 +233,7 @@ pub struct BudgetParams {
     pub budget_usd: Option<f64>,
 }
 
+/// Read or persist a bounded asset budget and report spending with a nonnegative remaining balance.
 fn project_assets_budget(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: BudgetParams = parse_params(params)?;
     let mut ws = open(&p.project)?;
@@ -260,6 +262,8 @@ pub struct AllowAssetsParams {
     pub provider: Option<String>,
 }
 
+/// Read or update asset permissions using the latest manifest and registered provider ids.
+/// Individual changes preserve other enabled providers; the master switch retains stored choices.
 fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: AllowAssetsParams = parse_params(params)?;
     let providers = ctx.session.ext.get::<AssetProviders>().unwrap_or_default();
@@ -644,6 +648,7 @@ mod tests {
         assert!(call("project_show", json!({"project": d.path().join("nope")})).is_err());
     }
 
+    /// Budget updates persist within the allowed range, and past spending never produces a negative balance.
     #[test]
     fn a_projects_asset_budget_is_read_and_set() {
         let d = tempfile::tempdir().unwrap();
@@ -678,6 +683,7 @@ mod tests {
         assert!(call(json!({"project": ws.root, "allow": "yes"})).is_err());
     }
 
+    /// Provider toggles persist independently, while a master off/on cycle restores the selected providers.
     #[test]
     fn provider_switches_are_independent_persisted_and_preserved_by_the_master_switch() {
         let d = tempfile::tempdir().unwrap();
@@ -702,17 +708,21 @@ mod tests {
         assert_eq!(call(json!({"project": ws.root, "provider": "fal"})).unwrap()["generate_assets"], false, "query does not mutate");
     }
 
+    /// Restricting legacy all-provider permission must retain every other provider, including extensions.
     #[test]
     fn disabling_a_legacy_provider_keeps_other_registered_providers_enabled() {
         use craft_anything_engines::assets::{AssetProvider, AssetRequest, Generated};
         struct Custom;
         impl AssetProvider for Custom {
+            /// Register a provider outside the built-in catalogue to exercise permission preservation.
             fn id(&self) -> &'static str {
                 "custom"
             }
+            /// Supply a display label for the custom permission-test provider.
             fn name(&self) -> &'static str {
                 "Custom"
             }
+            /// Fail any generation attempt because this fixture only tests permission changes.
             fn generate(&self, _: &str, _: &AssetRequest) -> Result<Generated, ToolError> {
                 Err(ToolError::invalid("test provider must not generate"))
             }

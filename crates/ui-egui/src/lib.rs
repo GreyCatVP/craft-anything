@@ -432,6 +432,7 @@ pub struct CraftApp {
 }
 
 impl CraftApp {
+    /// Initialise UI state from the engine's saved settings before any background refreshes start.
     pub fn new(engine: Arc<Engine>, hub: Arc<AiHub>) -> Self {
         // Wait for the engine if it's busy: defaults here would show Clean room and no AI, and the
         // next settings change would save them over the person's own.
@@ -810,6 +811,7 @@ impl CraftApp {
         });
     }
 
+    /// Apply a button action's result to the relevant UI state and report success or failure.
     fn acted(&mut self, tool: &str, result: Result<Value, ToolError>) {
         match (tool, result) {
             ("project_preview", Ok(v)) => {
@@ -1223,6 +1225,7 @@ impl CraftApp {
 
     // ---- results ----------------------------------------------------------------------------
 
+    /// Release completed job markers and dispatch results, restoring controls after worker failures.
     fn handle_done(&mut self, done: jobs::Finished<Done>) {
         let job = done.job;
         if self.saving == Some(job) {

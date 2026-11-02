@@ -67,6 +67,7 @@ impl TargetKind for GameKind {
         "a playable game that plays like the original: the same rules, controls, numbers and feel"
     }
 
+    /// Add game study and verification instructions, including asset guidance only when enabled and keyed.
     fn brief_sections(&self, cx: &BriefCx) -> Vec<String> {
         let target = &cx.ws.manifest.target;
         if matches!(target, TargetRef::Website { .. }) {
@@ -83,6 +84,7 @@ impl TargetKind for GameKind {
         s
     }
 
+    /// Refresh game art guidance for follow-ups when the project permits generation and a key is available.
     fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
         if cx.assets && cx.ws.manifest.generate_assets { vec![assets_note(cx.ws, cx.image_model, cx.model_3d)] } else { Vec::new() }
     }

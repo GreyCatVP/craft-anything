@@ -12,6 +12,7 @@ fn choose(request: &str, target: &TargetRef) -> (&'static str, &'static str) {
 fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
+/// Build a test brief for a built-in kind using the catalogue's default asset models.
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
     super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None, model_3d: None }, extra)
 }
@@ -237,6 +238,7 @@ fn engine_stacks_get_their_own_steps_checks_and_play() {
     assert_eq!(launch(d.path(), None).map(|l| l.0), Some(build.join(exe("Game"))), "crash reporters aren't the game");
 }
 
+/// Game art instructions require both permission and credentials; shared asset policy also reaches apps.
 #[test]
 fn games_hear_about_generated_assets_only_when_allowed_and_with_a_key() {
     let d = tempfile::tempdir().unwrap();
@@ -263,6 +265,7 @@ fn a_new_project_keeps_the_persons_asset_choice() {
     }
 }
 
+/// Art estimates follow configured image and 3D prices, with catalogue defaults for unknown models.
 #[test]
 fn the_assets_note_reads_prices_from_the_asset_table() {
     let d = tempfile::tempdir().unwrap();
@@ -327,19 +330,25 @@ fn pictures_of_the_original_reach_the_builder() {
     assert!(pictures_reminder(&ws).contains("1 picture(s)"));
 }
 
+/// Each turn observes saved asset choices without replacing unsaved progress and refuses unreadable policy.
 #[test]
 fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progress() {
     #[derive(Default)]
     struct RecordedTurns(Vec<String>);
     impl Conversation for RecordedTurns {
+        /// Keep the complete prompt so the test can inspect the policy sent on each turn.
         fn send(&mut self, text: &str) {
             self.0.push(text.into());
         }
+        /// Complete the recorded turn immediately without contacting a backend.
         fn poll(&mut self) -> Vec<AgentEvent> {
             vec![AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false }]
         }
+        /// Ignore consent because this recorder never requests tool execution.
         fn answer_consent(&mut self, _: &str, _: bool) {}
+        /// No background work exists to cancel in this synchronous recorder.
         fn stop(&mut self) {}
+        /// Recorded turns have no pending background activity.
         fn is_busy(&self) -> bool {
             false
         }
@@ -587,6 +596,7 @@ impl TargetKind for SlidesKind {
     }
 }
 
+/// A registered kind supplies its own stack, checks and brief while preserving built-in detection.
 #[test]
 fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let mut kinds = KindRegistry::built_in();
@@ -721,6 +731,7 @@ fn the_builder_is_an_agent_app_first_then_any_ai_backend() {
     assert!(builder_backend(&none, None).unwrap_err().message.contains("API key"));
 }
 
+/// Site routes are deduplicated and bounded, and captured pages and interaction states reach the brief.
 #[test]
 fn other_pages_of_the_same_site_are_picked_from_its_links() {
     use kinds::website::{ROUTES_FILE, pick_routes, routes};
@@ -1380,10 +1391,12 @@ fn website_check_compares_the_text_and_names_what_is_missing() {
     assert!(text_likeness(&json!({"text": ""}), &built).is_none(), "nothing to compare");
 }
 
+/// Every project kind receives current provider permissions, including revocation after assets exist.
 #[test]
 fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
+    /// Isolate workspace policy and key availability from unrelated brief settings.
     fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
         BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None }
     }

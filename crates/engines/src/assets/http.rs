@@ -5,6 +5,7 @@ use std::{io::Read, time::Duration};
 pub(super) const MAX_BYTES: u64 = 200 << 20;
 pub(super) const MAX_JSON: u64 = 2 << 20;
 
+/// Build a client with a request deadline, redirects disabled, and explicit status handling.
 pub(super) fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -16,22 +17,27 @@ pub(super) fn agent(timeout: Duration) -> ureq::Agent {
         .new_agent()
 }
 
+/// Classify a locally supplied message as invalid provider settings.
 pub(super) fn bad(message: &str) -> ToolError {
     ToolError::new(ErrorCode::BadSettings, message)
 }
+/// Classify a locally supplied message as an unreadable provider response.
 pub(super) fn garbled(message: &str) -> ToolError {
     ToolError::new(ErrorCode::GarbledOutput, message)
 }
+/// Report a transport failure without exposing request details or implying no charge occurred.
 pub(super) fn network() -> ToolError {
     ToolError::new(ErrorCode::EngineMissing, "The asset service could not be reached or its request timed out.")
         .with_remediation("Check your connection and provider account before retrying; an accepted job may already have been charged.")
 }
+/// Accept only bounded, nonempty identifiers safe to embed in provider URL paths.
 pub(super) fn id(value: &str) -> Result<(), ToolError> {
     if value.is_empty() || value.len() > 200 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
         return Err(bad("The provider model, voice, job or asset identifier is invalid."));
     }
     Ok(())
 }
+/// Trim a credential and reject empty, oversized, non-ASCII, or control-character values.
 pub(super) fn key(value: &str) -> Result<&str, ToolError> {
     let value = value.trim();
     if value.is_empty() || value.len() > 4096 || !value.is_ascii() || value.chars().any(char::is_control) {
@@ -39,18 +45,21 @@ pub(super) fn key(value: &str) -> Result<&str, ToolError> {
     }
     Ok(value)
 }
+/// Require nonblank text within the model's limit measured in Unicode scalar values.
 pub(super) fn text(value: &str, limit: usize) -> Result<(), ToolError> {
     if value.trim().is_empty() || value.chars().count() > limit {
         return Err(bad("The asset text is empty or exceeds this model's length limit."));
     }
     Ok(())
 }
+/// Require a finite duration within the model's inclusive range.
 pub(super) fn duration(value: f64, min: f64, max: f64) -> Result<(), ToolError> {
     if !value.is_finite() || value < min || value > max {
         return Err(bad("The requested audio duration is outside this model's supported range."));
     }
     Ok(())
 }
+/// Accept successful statuses and map provider failures without reading remote error bodies.
 pub(super) fn status(status: u16) -> Result<(), ToolError> {
     match status {
         200..=299 => Ok(()),
@@ -61,6 +70,7 @@ pub(super) fn status(status: u16) -> Result<(), ToolError> {
         _ => Err(ToolError::new(ErrorCode::ProgramFailed, format!("The asset provider returned HTTP {status}."))),
     }
 }
+/// Read a nonempty body, stopping after one byte beyond the size limit to detect overflow.
 pub(super) fn bytes(body: ureq::Body, limit: u64) -> Result<Vec<u8>, ToolError> {
     let mut bytes = Vec::new();
     body.into_reader().take(limit + 1).read_to_end(&mut bytes).map_err(|_| network())?;
@@ -72,9 +82,11 @@ pub(super) fn bytes(body: ureq::Body, limit: u64) -> Result<Vec<u8>, ToolError> 
     }
     Ok(bytes)
 }
+/// Parse a size-bounded JSON response without including its contents in parse errors.
 pub(super) fn json(body: ureq::Body) -> Result<serde_json::Value, ToolError> {
     serde_json::from_slice(&bytes(body, MAX_JSON)?).map_err(|_| garbled("The asset provider returned unreadable JSON."))
 }
+/// Require HTTPS without embedded credentials, allowing loopback HTTP only in tests.
 pub(super) fn media_url(url: &str) -> Result<(), ToolError> {
     let uri: ureq::http::Uri = url.parse().map_err(|_| garbled("The asset provider returned an invalid download address."))?;
     let https = uri.scheme_str() == Some("https");
@@ -84,6 +96,7 @@ pub(super) fn media_url(url: &str) -> Result<(), ToolError> {
     }
     Ok(())
 }
+/// Download bounded media from a validated address without forwarding provider credentials.
 pub(super) fn download(url: &str, timeout: Duration) -> Result<Vec<u8>, ToolError> {
     media_url(url)?;
     // A separate agent and no auth headers: credentials never reach the media host.
@@ -103,6 +116,7 @@ pub(super) mod tests {
         time::Instant,
     };
 
+    /// Serve a finite response sequence on loopback and record request headers and payloads.
     pub fn serve(answers: impl FnOnce(&str) -> Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -149,6 +163,7 @@ pub(super) mod tests {
         (base, seen)
     }
 
+    /// Reject unsafe identifiers and download schemes while allowing signed HTTPS media URLs.
     #[test]
     fn identifiers_and_urls_cannot_inject_paths_or_credentials() {
         for value in ["", "../jobs", "x?token=y", "x/y", "a\r\nb"] {
@@ -159,6 +174,7 @@ pub(super) mod tests {
         }
         assert!(media_url("https://cdn.example.com/file?signature=fake").is_ok());
     }
+    /// Enforce both the body-size ceiling and a deadline when a server stalls.
     #[test]
     fn response_size_and_wall_clock_are_bounded() {
         let (base, _) = serve(|_| vec![(200, "too long".into())]);

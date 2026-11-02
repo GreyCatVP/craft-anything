@@ -582,6 +582,7 @@ impl CraftApp {
         }));
     }
 
+    /// Finish an asset settings save, updating the open project only if its root still matches.
     pub(crate) fn assets_changed(&mut self, result: Result<Box<Workspace>, craft_anything_engine::evidence::ToolError>) {
         self.asset_change_job = None;
         match result {
@@ -1778,6 +1779,7 @@ mod tests {
     use super::*;
     use craft_anything_ai::AgentEvent;
 
+    /// Cached spending stays hidden until it belongs to the project displayed by the sidebar.
     #[test]
     fn asset_sidebar_never_uses_another_projects_cached_spend() {
         use egui_kittest::{Harness, kittest::Queryable};

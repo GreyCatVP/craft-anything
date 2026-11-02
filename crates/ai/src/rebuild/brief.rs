@@ -59,6 +59,7 @@ const WEBSITE_FROM_OUTSIDE: &str = "capture/ holds what a visitor of the live si
 /// Clean room: what the builder has of an app or a game. Nothing inside it was read.
 const PROGRAM_FROM_OUTSIDE: &str = "capture/README.md says what we could see from outside. Clean room: nothing inside the program, its files or its folder was read, and you must not open, list, read, run or decompile anything there either (the tools that look inside are off, and reading its files is refused). Build from the person's request and description, the pictures in reference/ and, when capture/ has one, the picture of it running; ask the person with core_person_ask about anything you can't see.";
 
+/// Assemble the first builder prompt from the target evidence, project policy and kind-specific guidance.
 pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) -> String {
     let ws = cx.ws;
     let m = &ws.manifest;

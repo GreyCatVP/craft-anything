@@ -34,6 +34,7 @@ impl AssetKeys {
 /// Remembered when the person says "always" to going over the budget.
 const OVER_BUDGET: &str = "assets:over-budget";
 
+/// Expose image, model and audio generation tools with network and filesystem effects declared.
 pub fn specs() -> Vec<ToolSpec> {
     let effects = Effects::ACCESSES_NETWORK.union(Effects::WRITES_FILESYSTEM);
     vec![
@@ -201,10 +202,12 @@ pub struct MusicParams {
     pub model: Option<String>,
 }
 
+/// Prefer a nonblank explicit model id, trimming it before falling back to the saved setting.
 fn selected<'a>(explicit: Option<&'a str>, setting: Option<&'a str>) -> Option<&'a str> {
     explicit.map(str::trim).filter(|id| !id.is_empty()).or(setting)
 }
 
+/// Reject negative or nonfinite amounts before they enter budget or spending calculations.
 fn valid_cost(cost: f64) -> Result<(), ToolError> {
     if cost.is_finite() && cost >= 0.0 { Ok(()) } else { Err(ToolError::invalid("asset cost and budget must be finite and nonnegative")) }
 }
@@ -231,12 +234,14 @@ fn canonical_future(path: &Path) -> Result<PathBuf, ToolError> {
     }
 }
 
+/// Reject paths whose resolved ancestors escape the root, including through symbolic links.
 fn confined(root: &Path, path: &Path) -> Result<(), ToolError> {
     let root = canonical_future(root)?;
     let path = canonical_future(path)?;
     if inside(&root, &path) { Ok(()) } else { Err(ToolError::invalid("asset paths must stay inside the project, including through symbolic links")) }
 }
 
+/// Read a nonempty regular asset file with a 20 MiB cap, rechecking size after opening and reading.
 fn read_asset(path: &Path) -> Result<Vec<u8>, ToolError> {
     const MAX: u64 = 20 << 20;
     let before = std::fs::metadata(path).map_err(|e| ToolError::io(path.display(), e))?;
@@ -256,6 +261,7 @@ fn read_asset(path: &Path) -> Result<Vec<u8>, ToolError> {
     Ok(bytes)
 }
 
+/// Require a finite duration within the selected audio generator's inclusive bounds.
 fn duration_ok(seconds: f64, minimum: f64, maximum: f64) -> Result<(), ToolError> {
     if seconds.is_finite() && (minimum..=maximum).contains(&seconds) {
         Ok(())
@@ -264,6 +270,7 @@ fn duration_ok(seconds: f64, minimum: f64, maximum: f64) -> Result<(), ToolError
     }
 }
 
+/// Validate speech text and the voice id before routing the selected speech model through paid generation.
 fn assets_speech_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: SpeechParams = parse_params(params)?;
     let text = p.text.trim();
@@ -278,6 +285,7 @@ fn assets_speech_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
     generate_audio(ctx, &p.save_as, "speech", text, AssetRequest::Speech { model, text, voice_id: voice })
 }
 
+/// Validate the prompt and sound duration before generating an MP3 with the chosen sound model.
 fn assets_sound_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: SoundParams = parse_params(params)?;
     let prompt = prompt_ok(&p.prompt)?;
@@ -286,6 +294,7 @@ fn assets_sound_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     generate_audio(ctx, &p.save_as, "sound", prompt, AssetRequest::SoundEffect { model, prompt, duration_seconds: p.duration_seconds })
 }
 
+/// Validate music length and prompt, defaulting to instrumental audio before paid generation.
 fn assets_music_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: MusicParams = parse_params(params)?;
     let prompt = prompt_ok(&p.prompt)?;
@@ -300,6 +309,7 @@ fn assets_music_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     )
 }
 
+/// Check destination, provider permission, credentials and budget before generating and recording an MP3.
 fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, req: AssetRequest<'_>) -> Result<ToolOutput, ToolError> {
     let mut j = job(ctx)?;
     let (path, rel) = save_path(&j.ws, save_as, "mp3")?;
@@ -321,6 +331,7 @@ struct Job {
     ws: Workspace,
 }
 
+/// Load generation context only for an opted-in project whose manifest this build can safely update.
 fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
     let keys = ctx.session.ext.get::<AssetKeys>().unwrap_or_default();
     // A session can bring its own providers (a fork, a test); otherwise the built-in ones.
@@ -340,6 +351,7 @@ fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
     Ok(Job { keys, providers, inbox, ws })
 }
 
+/// Explain which provider lacks credentials and offer a fallback that requires no paid assets.
 fn no_key(provider: &str) -> ToolError {
     ToolError::new(ErrorCode::BadSettings, format!("No {provider} key is set up for this asset operation.")).with_remediation(format!(
         "Make these assets with simple shapes and colours instead, and tell the person they can add a {provider} key in Settings → AI for realistic ones."
@@ -445,6 +457,7 @@ fn prompt_ok(p: &str) -> Result<&str, ToolError> {
     Ok(p)
 }
 
+/// Resolve the model override and validate the destination, permission, key and estimate before saving a PNG.
 fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ImageParams = parse_params(params)?;
     let prompt = prompt_ok(&p.prompt)?;
@@ -465,6 +478,8 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     Ok(summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id(), "model": model.id})))
 }
 
+/// Generate a GLB from an existing image or a newly generated precursor picture.
+/// Preflight all participating providers and their combined estimate before either paid generation step.
 fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ModelParams = parse_params(params)?;
     let textured = p.textured.unwrap_or(true);
@@ -582,6 +597,7 @@ mod tests {
         assert_eq!(image_source(&w, "https://v3.fal.media/x.png").unwrap(), "https://v3.fal.media/x.png");
     }
 
+    /// Tool descriptions must retain the catalogue defaults, prices and guidance about model overrides.
     #[test]
     fn the_summaries_read_the_asset_table() {
         // The default picture model's name and price, and the default 3D model's.
@@ -763,16 +779,20 @@ mod tests {
     }
 
     impl AssetProvider for Recording {
+        /// Use the configured registry id so tests can replace any built-in provider.
         fn id(&self) -> &'static str {
             self.id
         }
+        /// Use the registry id as the stand-in provider's display name in errors.
         fn name(&self) -> &'static str {
             self.id
         }
+        /// Record quote requests and return the injected amount or the request's catalogue price.
         fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
             self.estimates.lock().unwrap().push(req.kind());
             Ok(self.estimate.unwrap_or_else(|| req.listed_cost()))
         }
+        /// Require the test key, record the request kind and return fixed bytes without network access.
         fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
             assert_eq!(key, "sk-test");
             self.calls.lock().unwrap().push(req.kind());
@@ -780,6 +800,7 @@ mod tests {
         }
     }
 
+    /// Build an isolated auto-mode engine with one keyed recording provider and an optional estimate override.
     fn recording_engine(w: &Workspace, provider: &'static str, estimate: Option<f64>) -> (crate::Engine, std::sync::Arc<Recording>) {
         let stub = std::sync::Arc::new(Recording { id: provider, calls: Default::default(), estimates: Default::default(), estimate });
         let mut providers = AssetProviders::built_in();
@@ -792,6 +813,7 @@ mod tests {
         (crate::Engine::new(session), stub)
     }
 
+    /// Provide valid speech, sound and music requests with distinct destinations and expected request kinds.
     fn audio_calls() -> Vec<(&'static str, Value, AssetKind)> {
         vec![
             ("assets_speech_generate", json!({"text":"A new adventure", "voice_id":"voice-test", "save_as":"audio/speech.mp3"}), AssetKind::Speech),
@@ -800,6 +822,7 @@ mod tests {
         ]
     }
 
+    /// Disabled providers must be rejected before quotes, approval prompts, files or spending, even as precursors.
     #[test]
     fn disabled_providers_cannot_spend_through_audio_or_model_overrides_or_precursors() {
         let (_d, mut w) = ws();
@@ -830,6 +853,7 @@ mod tests {
         assert!(!w.app_dir().join("crate.glb").exists());
     }
 
+    /// A newer manifest version must block every generation tool without altering the manifest or asset ledger.
     #[test]
     fn future_project_settings_refuse_all_paid_generation() {
         let (_d, w) = ws();
@@ -849,6 +873,7 @@ mod tests {
         assert_eq!(std::fs::read(w.root.join("craft.json")).unwrap(), original);
     }
 
+    /// Each audio tool must select its request kind, save the returned bytes and record exactly one paid asset.
     #[test]
     fn audio_tools_route_with_only_an_elevenlabs_key_and_record_each_asset_once() {
         let (_d, w) = ws();
@@ -866,6 +891,7 @@ mod tests {
         assert!(w.assets_spent() > 0.0);
     }
 
+    /// Auto-mode audio calls must stop before generation when opt-in is missing or the shared budget is exhausted.
     #[test]
     fn every_audio_tool_requires_opt_in_and_stops_before_spending_over_budget() {
         for (tool, params, _) in audio_calls() {
@@ -885,6 +911,7 @@ mod tests {
         }
     }
 
+    /// Invalid audio parameters, escaping paths and missing provider credentials must leave generation untouched.
     #[test]
     fn audio_validation_and_provider_keys_are_checked_before_paid_calls() {
         let (_d, w) = ws();
@@ -906,6 +933,7 @@ mod tests {
         assert!(w.assets().is_empty());
     }
 
+    /// Model overrides take precedence, and a two-stage model request needs both keys and sufficient total budget.
     #[test]
     fn scenario_selection_overrides_settings_and_both_keys_and_total_budget_are_preflighted() {
         let (_d, mut w) = ws();
@@ -943,6 +971,7 @@ mod tests {
         assert_eq!(stub.calls.lock().unwrap().len(), before);
     }
 
+    /// Invalid provider quotes must fail before generation or any asset ledger entry.
     #[test]
     fn nonfinite_or_negative_provider_estimates_never_authorize_spending() {
         for estimate in [f64::NAN, f64::INFINITY, -0.1] {
@@ -955,6 +984,7 @@ mod tests {
         }
     }
 
+    /// Invalid actual costs must prevent both writing generated bytes and adding a spending record.
     #[test]
     fn invalid_returned_cost_is_never_saved_or_recorded() {
         let (_d, w) = ws();
@@ -967,6 +997,7 @@ mod tests {
         }
     }
 
+    /// A malformed downstream model key must be rejected before paying for its precursor picture.
     #[test]
     fn malformed_model_credentials_stop_before_spending_on_the_source_picture() {
         let (_d, mut w) = ws();
@@ -983,6 +1014,7 @@ mod tests {
         assert!(w.assets().is_empty());
     }
 
+    /// Symlink escapes in inputs or outputs, including dangling links, must fail before paid generation.
     #[cfg(unix)]
     #[test]
     fn symlinked_outputs_and_inputs_cannot_escape_the_project() {

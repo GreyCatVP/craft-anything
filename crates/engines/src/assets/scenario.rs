@@ -13,11 +13,13 @@ pub struct Scenario {
     poll_interval: Duration,
 }
 impl Default for Scenario {
+    /// Use the production API with a ten-minute workflow deadline and two-second polling interval.
     fn default() -> Self {
         Self { base: "https://api.cloud.scenario.com/v1".into(), timeout: Duration::from_secs(600), poll_interval: Duration::from_secs(2) }
     }
 }
 
+/// Validate an image or mesh request and build its model identifier and Scenario payload.
 fn request<'a>(req: &'a AssetRequest<'_>) -> Result<(&'a str, Value), ToolError> {
     let (model, body) = match *req {
         AssetRequest::Image { model, prompt, shape } => {
@@ -56,6 +58,7 @@ fn request<'a>(req: &'a AssetRequest<'_>) -> Result<(&'a str, Value), ToolError>
     Ok((model, body))
 }
 
+/// Return the remaining workflow time, or a timeout warning that the remote job may still charge.
 fn remaining(start: Instant, timeout: Duration) -> Result<Duration, ToolError> {
     timeout.checked_sub(start.elapsed()).filter(|v| !v.is_zero()).ok_or_else(|| {
         ToolError::new(ErrorCode::ProgramFailed, "Scenario generation timed out. The remote job may still finish and incur a charge.")
@@ -63,6 +66,7 @@ fn remaining(start: Instant, timeout: Duration) -> Result<Duration, ToolError> {
     })
 }
 impl Scenario {
+    /// Send an authenticated JSON request, requiring status 269 to confirm an API-tier price check.
     fn call(&self, auth: &str, path: &str, body: Option<&Value>, timeout: Duration) -> Result<Value, ToolError> {
         let agent = http::agent(timeout);
         let url = format!("{}/{path}", self.base);
@@ -80,21 +84,27 @@ impl Scenario {
     }
 }
 impl AssetProvider for Scenario {
+    /// Return the catalogue identifier used to route requests to Scenario.
     fn id(&self) -> &'static str {
         ID
     }
+    /// Return the provider's display name.
     fn name(&self) -> &'static str {
         "Scenario"
     }
+    /// Name the environment variable containing the combined key and secret.
     fn key_env(&self) -> Option<&'static str> {
         Some("SCENARIO_API_KEY")
     }
+    /// Return the Scenario account site used for credential setup.
     fn keys_page(&self) -> Option<&'static str> {
         Some("https://app.scenario.com")
     }
+    /// Request a separate masked input for the secret paired with the API key.
     fn key_secret_label(&self) -> Option<&'static str> {
         Some("API secret")
     }
+    /// Require a header-safe credential with nonempty key and secret components separated by a colon.
     fn validate_key(&self, key: &str) -> Result<(), ToolError> {
         let key = http::key(key)?;
         if !key.split_once(':').is_some_and(|(k, s)| !k.is_empty() && !s.is_empty()) {
@@ -102,10 +112,13 @@ impl AssetProvider for Scenario {
         }
         Ok(())
     }
+    /// Validate the request and return its catalogue spending ceiling without submitting a job.
     fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
         request(req)?;
         Ok(req.listed_cost())
     }
+    /// Confirm a live quote within the ceiling, submit once, and poll and download within one deadline.
+    /// The returned cost converts the quoted creative units to an estimated USD amount.
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
         let (model, body) = request(req)?;
         self.validate_key(key)?;
@@ -166,6 +179,7 @@ mod tests {
     use super::*;
     use crate::assets::Catalogue;
 
+    /// Run the shared image fixture against a test-configured Scenario provider.
     fn image(provider: &Scenario) -> Result<Generated, ToolError> {
         provider.generate(
             "test-key:test-secret",
@@ -176,6 +190,7 @@ mod tests {
             },
         )
     }
+    /// Check the full quoted image workflow and ensure only API requests carry authentication.
     #[test]
     fn price_submit_poll_resolve_and_download_keep_auth_off_media_requests() {
         let (base, seen) = http::tests::serve(|base| {
@@ -201,6 +216,7 @@ mod tests {
         assert!(seen[0].to_ascii_lowercase().contains("authorization: basic "));
         assert!(!seen[5].to_ascii_lowercase().contains("authorization"));
     }
+    /// Preserve the requested image, polygon count, and texturing options in mesh submission.
     #[test]
     fn mesh_request_honours_target_polygons_and_texture() {
         let (base, seen) = http::tests::serve(|base| {
@@ -224,6 +240,7 @@ mod tests {
         assert!(seen[1].contains("\"image\":[\"https://example.com/input.png\"]"));
         assert!(seen[1].contains("\"targetPolycount\":3000") && seen[1].contains("\"shouldTexture\":true"));
     }
+    /// Stop after preflight when a quote is invalid, over budget, already a job, or unconfirmed.
     #[test]
     fn unsafe_or_missing_quotes_never_submit_a_generation() {
         for quote in [
@@ -241,6 +258,7 @@ mod tests {
         assert!(image(&Scenario { base, ..Scenario::default() }).is_err());
         assert_eq!(seen.lock().unwrap().len(), 1, "an ordinary success is not a confirmed dry run");
     }
+    /// Reject failed jobs, unsafe asset identifiers, and expired deadlines without exposing remote text.
     #[test]
     fn failed_jobs_invalid_ids_and_deadlines_fail_without_leaking_body() {
         for job in [json!({"status":"failure","metadata":{"error":"test-secret"}}), json!({"status":"success","metadata":{"assetIds":["../../bad"]}})] {
@@ -256,6 +274,7 @@ mod tests {
         }
         assert!(image(&Scenario { timeout: Duration::ZERO, ..Scenario::default() }).is_err());
     }
+    /// Require both credential components and reject control characters during local validation.
     #[test]
     fn credentials_are_validated_before_a_precursor_can_be_paid_for() {
         let provider = Scenario::default();

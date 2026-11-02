@@ -182,6 +182,7 @@ pub struct AssetSettings {
 }
 
 impl Default for AssetSettings {
+    /// Use the built-in budget and defer both model selections to the asset catalogue.
     fn default() -> Self {
         AssetSettings { budget_usd: crate::workspace::ASSET_BUDGET_USD, image_model: None, model_3d: None }
     }
@@ -564,6 +565,7 @@ default = "Claude Code"
         assert!(path.with_extension("toml.broken").exists());
     }
 
+    /// Older settings receive safe asset defaults, while budget and model choices round-trip through disk.
     #[test]
     fn the_asset_budget_is_a_setting_and_old_configs_load() {
         let old: Settings = toml::from_str("mode = \"experienced\"\nauto_mode = false\n").unwrap();

@@ -239,6 +239,7 @@ impl Catalogue {
         &self.model_3d
     }
 
+    /// Return the validated audio catalogue entries in their configured order.
     pub fn audio_models(&self) -> &[AudioModel] {
         &self.audio
     }
@@ -316,6 +317,7 @@ pub enum AssetRequest<'a> {
 }
 
 impl AssetRequest<'_> {
+    /// Identify the requested asset modality independently of its selected model.
     pub fn kind(&self) -> AssetKind {
         match self {
             AssetRequest::Image { .. } => AssetKind::Image,
@@ -370,6 +372,7 @@ pub trait AssetProvider: Send + Sync {
     fn keys_page(&self) -> Option<&'static str> {
         None
     }
+    /// Supply the default hint for the provider's primary credential field.
     fn key_hint(&self) -> &'static str {
         "API key"
     }
@@ -520,6 +523,7 @@ mod tests {
         assert!(e.remediation.unwrap_or_default().contains("nano-banana-pro"));
     }
 
+    /// Register the built-in providers and route a model to a custom provider after registration.
     #[test]
     fn the_registry_finds_the_provider_a_model_names() {
         struct Stub;
