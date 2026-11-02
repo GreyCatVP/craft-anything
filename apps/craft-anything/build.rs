@@ -20,7 +20,7 @@ fn main() {
         .set("InternalName", "craft-anything");
     if let Err(e) = res.compile() {
         if std::env::var_os("CRAFT_ANYTHING_REQUIRE_WINRES").is_some() {
-            println!("cargo:error=embedding Windows resources failed: {e}");
+            println!("cargo::error=embedding Windows resources failed: {e}");
             return;
         }
         println!("cargo:warning=craft-anything.exe built without icon/version resources: {e}");

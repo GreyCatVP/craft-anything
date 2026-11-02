@@ -22,7 +22,7 @@ fn main() {
     res.set_manifest(MANIFEST).set("OriginalFilename", "craft-anything-cli.exe").set("InternalName", "craft-anything-cli");
     if let Err(e) = res.compile() {
         if std::env::var_os("CRAFT_ANYTHING_REQUIRE_WINRES").is_some() {
-            println!("cargo:error=embedding Windows resources failed: {e}");
+            println!("cargo::error=embedding Windows resources failed: {e}");
             return;
         }
         println!("cargo:warning=craft-anything-cli.exe built without its DPI-aware manifest: {e}");
