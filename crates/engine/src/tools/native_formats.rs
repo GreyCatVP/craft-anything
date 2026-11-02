@@ -503,6 +503,11 @@ fn non_native_triage(t: &Target) -> (String, Vec<&'static str>, Vec<(&'static st
             (format!("{n} is a WebAssembly module."), vec!["core", "formats"], vec![("formats_wasm_module_show", "exports, imports and sections")])
         }
         TargetKind::Jar => (format!("{n} is a Java archive."), vec!["core", "artifacts"], vec![("core_archive_show", "list what's inside")]),
+        TargetKind::JavaClass => (
+            format!("{n} is a compiled Java class."),
+            vec!["core", "java"],
+            vec![("java_class_show", "fields, methods and code of the class"), ("java_classes_find", "find classes by name")],
+        ),
         TargetKind::Zip => (format!("{n} is a ZIP archive."), vec!["core"], vec![("core_archive_show", "list what's inside")]),
         TargetKind::Directory => (
             format!("{n} is a folder (an app bundle, an unpacked app or a project)."),
@@ -917,6 +922,18 @@ mod tests {
         let e = engine_with("app.asar", b"\x04\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0{\"files\":{}}");
         let r = call(&e, "core_target_triage", json!({}));
         assert!(r["result"]["recommended_toolsets"].as_array().unwrap().iter().any(|t| t == "javascript"));
+    }
+
+    #[test]
+    fn bare_java_class_triage_recommends_java_tools() {
+        let hex = "cafebabe00000031000801000550726f62650700010100106a6176612f6c616e672f4f626a656374070003010006616e73776572010003282949010004436f6465002100020004000000000001000900050006000100070000000f0001000000000003102aac000000000000";
+        let bytes: Vec<u8> = (0..hex.len() / 2).map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap()).collect();
+        let e = engine_with("Probe.class", &bytes);
+        let r = call(&e, "core_target_triage", json!({}));
+        assert_eq!(r["result"]["kind"], "java-class");
+        assert!(!r["result"]["plain_english"].as_str().unwrap().contains("recognise"));
+        assert!(r["result"]["recommended_toolsets"].as_array().unwrap().iter().any(|t| t == "java"));
+        assert_eq!(r["result"]["next_steps"][0]["tool"], "java_class_show");
     }
 
     #[test]
