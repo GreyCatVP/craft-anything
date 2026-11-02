@@ -686,29 +686,35 @@ pub fn feature_paths(prog: &Program, query: &str, case_sensitive: bool, names: N
     const CAP: usize = 200;
     let mut strings = Vec::new();
     let mut containing: BTreeMap<u64, Vec<String>> = BTreeMap::new();
-    for s in prog.strings.iter().filter(|s| matches(&s.text, query, case_sensitive)).take(CAP) {
-        let users: Vec<Value> = prog
-            .xrefs_to
-            .get(&s.addr)
-            .map(|xs| {
-                xs.iter()
-                    .take(64)
-                    .map(|x| {
-                        let f = prog.function_containing(x.from);
-                        if let Some(f) = f {
-                            containing.entry(f.entry).or_default().push(format!("uses string \"{}\"", s.text.chars().take(60).collect::<String>()));
-                        }
-                        json!({"from": hex(x.from), "kind": x.kind, "function": f.map(|f| fname(prog, names, f.entry))})
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        strings.push(json!({"address": hex(s.addr), "text": s.text, "references": users}));
+    let mut matching_strings = 0;
+    for s in prog.strings.iter().filter(|s| matches(&s.text, query, case_sensitive)) {
+        matching_strings += 1;
+        if strings.len() < CAP {
+            let users: Vec<Value> = prog
+                .xrefs_to
+                .get(&s.addr)
+                .map(|xs| {
+                    xs.iter()
+                        .take(64)
+                        .map(|x| {
+                            let f = prog.function_containing(x.from);
+                            if let Some(f) = f {
+                                containing.entry(f.entry).or_default().push(format!("uses string \"{}\"", s.text.chars().take(60).collect::<String>()));
+                            }
+                            json!({"from": hex(x.from), "kind": x.kind, "function": f.map(|f| fname(prog, names, f.entry))})
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            strings.push(json!({"address": hex(s.addr), "text": s.text, "references": users}));
+        }
     }
     let mut procs = Vec::new();
+    let mut matching_functions = 0;
     for f in prog.functions.values() {
         let n = fname(prog, names, f.entry);
         if matches(&n, query, case_sensitive) {
+            matching_functions += 1;
             containing.entry(f.entry).or_default().push("name matches".into());
             if procs.len() < CAP {
                 procs.push(json!({"address": hex(f.entry), "name": n}));
@@ -716,37 +722,45 @@ pub fn feature_paths(prog: &Program, query: &str, case_sensitive: bool, names: N
         }
     }
     let mut imports = Vec::new();
-    for (slot, s) in prog.import_slots.iter().filter(|(_, s)| matches(&s.name, query, case_sensitive)).take(CAP) {
-        let users: Vec<Value> = prog
-            .xrefs_to
-            .get(slot)
-            .map(|xs| {
-                xs.iter()
-                    .take(64)
-                    .filter_map(|x| prog.function_containing(x.from))
-                    .map(|f| json!({"function": fname(prog, names, f.entry), "address": hex(f.entry)}))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for u in &users {
-            if let Some(a) = u["address"].as_str().and_then(|a| u64::from_str_radix(a.trim_start_matches("0x"), 16).ok()) {
-                containing.entry(a).or_default().push(format!("calls {}", s.name));
+    let mut matching_imports = 0;
+    for (slot, s) in prog.import_slots.iter().filter(|(_, s)| matches(&s.name, query, case_sensitive)) {
+        matching_imports += 1;
+        if imports.len() < CAP {
+            let users: Vec<Value> = prog
+                .xrefs_to
+                .get(slot)
+                .map(|xs| {
+                    xs.iter()
+                        .take(64)
+                        .filter_map(|x| prog.function_containing(x.from))
+                        .map(|f| json!({"function": fname(prog, names, f.entry), "address": hex(f.entry)}))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for u in &users {
+                if let Some(a) = u["address"].as_str().and_then(|a| u64::from_str_radix(a.trim_start_matches("0x"), 16).ok()) {
+                    containing.entry(a).or_default().push(format!("calls {}", s.name));
+                }
             }
+            imports.push(json!({"slot": hex(*slot), "name": s.name, "library": s.library, "used_by": users}));
         }
-        imports.push(json!({"slot": hex(*slot), "name": s.name, "library": s.library, "used_by": users}));
     }
     let funcs: Vec<Value> = containing.iter().take(CAP).map(|(a, why)| json!({"address": hex(*a), "name": fname(prog, names, *a), "why": why})).collect();
     let summary = format!(
         "\"{query}\": {} matching strings, {} matching function names, {} matching imports; {} functions involved.",
-        strings.len(),
-        procs.len(),
-        imports.len(),
+        matching_strings,
+        matching_functions,
+        matching_imports,
         containing.len()
     );
     let locations: Vec<Location> = containing.keys().take(50).map(|a| Location::address(*a)).collect();
-    let result = json!({"query": query, "case_sensitive": case_sensitive, "strings": strings, "function_names": procs, "imports": imports, "functions": funcs});
+    let truncated = matching_strings > CAP || matching_functions > CAP || matching_imports > CAP || containing.len() > CAP;
+    let result = json!({"query": query, "case_sensitive": case_sensitive, "strings": strings, "function_names": procs, "imports": imports, "functions": funcs, "truncated": truncated});
     let mut r = Report::new(result, summary, Confidence::Derived);
     r.locations = locations;
+    if truncated {
+        r = r.limit("truncated", format!("results capped at {CAP} entries per category"));
+    }
     if containing.is_empty() {
         r = r.limit("no_match", "nothing matched; the text may be built at run time, encrypted, or come from a resource file (absence is not proof)");
     }
@@ -1211,5 +1225,22 @@ mod tests {
         assert_eq!(s.result["symbols_examined"], 4);
         let t = triage(&img.bin, &img.data, "app");
         assert!(t.result["recommended_toolsets"].as_array().unwrap().iter().any(|x| x == "apple"));
+    }
+
+    /// #351: feature_paths reports actual matching function count beyond CAP and records truncated limitation.
+    #[test]
+    fn feature_paths_reports_accurate_matching_function_count_beyond_cap() {
+        let names: Vec<String> = (0..205).map(|i| format!("beacon_{i:03}")).collect();
+        let funcs: Vec<(&str, Vec<u8>)> = names.iter().map(|s| (s.as_str(), vec![0x55, 0x48, 0x89, 0xe5, 0x5d, 0xc3])).collect();
+        let bytes = tk::program_facts::elf_with_functions(&funcs);
+        let (_, p) = setup(bytes);
+        let none = |_: u64| None;
+        let r = feature_paths(&p, "beacon_", false, &none);
+        assert_eq!(r.result["function_names"].as_array().unwrap().len(), 200, "capped at 200");
+        assert_eq!(r.result["functions"].as_array().unwrap().len(), 200, "capped at 200");
+        assert_eq!(r.result["truncated"], true);
+        assert!(r.summary.contains("205 matching function names"), "summary must report actual count: {}", r.summary);
+        assert!(r.summary.contains("205 functions involved"), "summary must report actual involved count: {}", r.summary);
+        assert!(r.limitations.iter().any(|l| l.code == "truncated"), "must include truncated limitation");
     }
 }
