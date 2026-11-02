@@ -1070,6 +1070,27 @@ mod tests {
         }
     }
 
+    /// A dangling ledger link cannot authorize a quote or generation and must remain untouched.
+    #[cfg(unix)]
+    #[test]
+    fn dangling_asset_ledger_blocks_provider_calls() {
+        let (_d, w) = ws();
+        let ledger = w.root.join("assets.json");
+        let target = w.root.join("missing-ledger.json");
+        std::os::unix::fs::symlink(&target, &ledger).unwrap();
+        let (engine, provider) = recording_engine(&w, "fal", None);
+        for (tool, params) in [
+            ("assets_image_generate", json!({"prompt":"a crate", "save_as":"crate.png"})),
+            ("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})),
+        ] {
+            assert!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).is_err());
+        }
+        assert!(provider.calls.lock().unwrap().is_empty() && provider.estimates.lock().unwrap().is_empty());
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+        assert_eq!(std::fs::read_link(ledger).unwrap(), target);
+        assert!(!target.exists());
+    }
+
     /// Once a provider has charged, a ledger failure must leave new and existing output destinations untouched.
     #[test]
     fn receipt_failure_preserves_the_destination_and_warns_of_possible_charges() {

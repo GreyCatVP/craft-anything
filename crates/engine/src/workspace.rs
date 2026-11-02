@@ -867,14 +867,22 @@ impl Workspace {
         self.try_assets().unwrap_or_default()
     }
 
-    /// Read and validate the asset ledger without changing it. Only a missing ledger means no spending.
+    /// Read and validate a regular-file asset ledger without changing it. Only an absent directory entry
+    /// means no spending; links and special files are rejected before opening them.
     pub fn try_assets(&self) -> Result<Vec<AssetRecord>, ToolError> {
         let path = self.root.join(ASSETS);
-        let file = match std::fs::File::open(&path) {
-            Ok(file) => file,
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(ToolError::io(path.display(), e)),
         };
+        if !metadata.is_file() {
+            return Err(ToolError::invalid("The asset ledger must be a regular file, not a link, directory or special file."));
+        }
+        let file = std::fs::File::open(&path).map_err(|e| ToolError::io(path.display(), e))?;
+        if !file.metadata().map_err(|e| ToolError::io(path.display(), e))?.is_file() {
+            return Err(ToolError::invalid("The opened asset ledger is not a regular file."));
+        }
         let mut bytes = Vec::new();
         file.take(MAX_ASSET_LEDGER_BYTES + 1).read_to_end(&mut bytes).map_err(|e| ToolError::io(path.display(), e))?;
         if bytes.len() as u64 > MAX_ASSET_LEDGER_BYTES {
@@ -1173,6 +1181,45 @@ mod tests {
         assert_eq!(ws.try_assets().unwrap_err().code, ErrorCode::OverLimit);
         assert!(ws.record_asset(asset_receipt(0.2)).is_err());
         assert_eq!(std::fs::metadata(path).unwrap().len(), MAX_ASSET_LEDGER_BYTES + 1);
+    }
+
+    /// Both dangling and live ledger links are rejected without replacing the link or touching its target.
+    #[cfg(unix)]
+    #[test]
+    fn asset_ledger_links_are_not_empty_or_replaced() {
+        for target_exists in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+            let target = dir.path().join("target.json");
+            if target_exists {
+                std::fs::write(&target, b"[]").unwrap();
+            }
+            let ledger = ws.root.join(ASSETS);
+            std::os::unix::fs::symlink(&target, &ledger).unwrap();
+            assert!(ws.try_assets().is_err());
+            assert!(ws.try_assets_spent().is_err());
+            assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+            assert_eq!(std::fs::read_link(&ledger).unwrap(), target);
+            assert_eq!(target.exists(), target_exists);
+            if target_exists {
+                assert_eq!(std::fs::read(target).unwrap(), b"[]");
+            }
+        }
+    }
+
+    /// Special ledger entries are rejected by metadata before opening, and cannot be replaced by a receipt.
+    #[cfg(unix)]
+    #[test]
+    fn nonregular_asset_ledger_is_rejected_before_opening() {
+        use std::os::unix::fs::FileTypeExt;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        let ledger = ws.root.join(ASSETS);
+        let _socket = std::os::unix::net::UnixListener::bind(&ledger).unwrap();
+        let err = ws.try_assets().unwrap_err();
+        assert!(err.message.contains("must be a regular file"));
+        assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+        assert!(std::fs::symlink_metadata(ledger).unwrap().file_type().is_socket());
     }
 
     #[test]
