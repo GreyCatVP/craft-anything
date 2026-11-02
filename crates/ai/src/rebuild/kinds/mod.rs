@@ -61,6 +61,8 @@ pub struct BriefCx<'a> {
     /// An asset provider's key is set up; assets are offered only if the project also allows them
     /// (`Manifest::generate_assets`).
     pub assets: bool,
+    /// Checked spending for this prompt snapshot; `None` denies generation because the ledger is unreadable.
+    pub asset_spent: Option<f64>,
     /// The picture model chosen in Settings (an asset-table id); `None` = the table's default.
     pub image_model: Option<&'a str>,
     /// The configured 3D model; None uses the catalogue default.

@@ -396,6 +396,13 @@ pub fn preview(ws: &Workspace) -> Result<StaticServer, ToolError> {
     serve_dir(&site).map_err(|e| ToolError::io(site.display(), e))
 }
 
+/// Delay policy-sensitive prompt rendering until immediately before a conversation send.
+enum BuilderPrompt {
+    Initial { extra: Option<String>, api: bool, originals: bool },
+    Message(String),
+    ResumedElsewhere { extra: Option<String>, handoff: Option<String> },
+}
+
 struct Worker {
     /// Told after each event.
     wake: Wake,
@@ -503,7 +510,7 @@ impl Worker {
         // A cancelled step can't be reported, but the notes go in either way.
         let _ = self.step(ws, Step::Build, Status::Building, "Reading what you added…");
         let texts: Vec<String> = notes.into_iter().map(|n| n.text).collect();
-        Some(added_prompt(&texts) + &pictures_reminder(ws))
+        Some(added_prompt(&texts))
     }
 
     /// Decides an ACP builder's permission requests with the same policy Claude Code's approval
@@ -637,43 +644,18 @@ impl Worker {
             Some(a) => Box::new(a),
             None => crate::cli_agents::builder_conversation(spec, self.approver(ws)),
         };
-        // The builder's tool server is started in this run's mode (`--deep` or `--clean-room`).
-        let s = self.engine.session();
-        let (deep, ghidra) = (!s.clean_room(), s.settings.ghidra_launcher().is_some());
-        let image_model = s.settings.assets.image_model.clone();
-        let model_3d = s.settings.assets.model_3d.clone();
-        drop(s);
-        let cx = BriefCx {
-            ws,
-            deep,
-            ghidra,
-            editor: self.editor.as_deref(),
-            assets: self.assets,
-            image_model: image_model.as_deref(),
-            model_3d: model_3d.as_deref(),
-        };
-        // The project's settings as they are now, for an agent that carries on its session.
-        let now = || kind.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>() + &pictures_reminder(ws);
         let mut prompt = match &opts.message {
-            // An agent with a saved session gets the follow-up; one without (an API loop) starts
-            // from the brief with the request added.
-            Some(m) if !first && has_history => follow_up(m, kind) + &now(),
+            // An agent with its own saved session gets the follow-up; otherwise start from the brief.
+            Some(m) if !first && has_history => BuilderPrompt::Message(follow_up(m, kind)),
             // Carrying on after a stop: the same, told to finish what it was doing.
-            None if carrying_on && !first && has_history => continue_prompt(kind) + &now(),
-            _ => {
-                let b = brief(kind, &cx, opts.message.as_deref());
-                if api_loop { format!("{API_BUILDER}\n\n{b}") } else { b }
-            }
+            None if carrying_on && !first && has_history => BuilderPrompt::Message(continue_prompt(kind)),
+            _ => BuilderPrompt::Initial { extra: opts.message.clone(), api: api_loop, originals: first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() },
         };
-        // The extraction step left the original's files in app/Original/: the builder starts from them.
-        if first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() {
-            prompt.push_str(ORIGINALS_READY);
-        }
         // A saved session may not be on this computer (the project was copied here): then a new
         // one starts from the brief and what the project already has.
         let mut fresh = (!api_loop && ws.manifest.agent_session.is_some()).then(|| {
             let handoff = keeper.as_ref().and_then(|a| a.handoff(&kept_session(ws)?, HANDOFF_CHARS));
-            resumed_elsewhere(&brief(kind, &cx, opts.message.as_deref()), &ws.manifest.last_reply, handoff.as_deref())
+            BuilderPrompt::ResumedElsewhere { extra: opts.message.clone(), handoff }
         });
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
         let mut refinements = 0;
@@ -691,7 +673,7 @@ impl Worker {
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
                 ws.manifest.awaiting_check = false;
-                let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take());
+                let reply = self.turn(ws, agent.as_mut(), kind, &prompt, fresh.take());
                 // Kept even when the turn failed: the conversation is still worth carrying.
                 if let Some(a) = &keeper {
                     self.keep_session(ws, a.as_ref());
@@ -712,12 +694,12 @@ impl Worker {
                 ws.save()?;
                 // What the person added while the agent worked goes in before anything else.
                 if let Some(p) = self.added(ws) {
-                    prompt = p;
+                    prompt = BuilderPrompt::Message(p);
                     continue;
                 }
                 if must_decompile && !self.decompiled && !reminded {
                     reminded = true;
-                    prompt = DECOMPILE_FIRST.to_string();
+                    prompt = BuilderPrompt::Message(DECOMPILE_FIRST.to_string());
                     continue;
                 }
             }
@@ -732,7 +714,7 @@ impl Worker {
             }
             let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
             if let Some(p) = self.added(ws) {
-                prompt = p;
+                prompt = BuilderPrompt::Message(p);
                 continue;
             }
             let Some(check) = not_good else { break };
@@ -740,10 +722,11 @@ impl Worker {
                 break;
             }
             refinements += 1;
-            prompt = kind.refine(check) + &pictures_reminder(ws);
+            let mut refinement = kind.refine(check);
             if !api_loop {
-                prompt.push_str(CHECK_BEFORE_REPLYING);
+                refinement.push_str(CHECK_BEFORE_REPLYING);
             }
+            prompt = BuilderPrompt::Message(refinement);
         }
         if let Some(url) = self.preview.lock().unwrap_or_else(PoisonError::into_inner).as_ref().map(StaticServer::url) {
             self.emit(RunEvent::Preview(url));
@@ -844,16 +827,83 @@ impl Worker {
         self.emit(RunEvent::Agent(AgentEvent::Status { text }));
     }
 
+    /// Render all policy-sensitive sections from one disk snapshot, overlaying only asset choices
+    /// on a clone so custom kind hooks still see this run's unsaved progress. Failed reads deny spending.
+    fn turn_prompt(&self, ws: &Workspace, kind: &dyn TargetKind, prompt: &BuilderPrompt) -> String {
+        let mut snapshot = ws.clone();
+        let spent = match Workspace::open(&ws.root) {
+            Ok(current) if !current.is_read_only() => {
+                snapshot.manifest.generate_assets = current.manifest.generate_assets;
+                snapshot.manifest.asset_providers = current.manifest.asset_providers.clone();
+                snapshot.manifest.asset_budget_usd = current.manifest.asset_budget_usd;
+                current.try_assets_spent().ok()
+            }
+            _ => None,
+        };
+        if spent.is_none() {
+            snapshot.manifest.generate_assets = false;
+        }
+        let (deep, ghidra, image_model, model_3d) = {
+            let session = self.engine.session();
+            (
+                !session.clean_room(),
+                session.settings.ghidra_launcher().is_some(),
+                session.settings.assets.image_model.clone(),
+                session.settings.assets.model_3d.clone(),
+            )
+        };
+        let cx = BriefCx {
+            ws: &snapshot,
+            deep,
+            ghidra,
+            editor: self.editor.as_deref(),
+            assets: self.assets && spent.is_some(),
+            asset_spent: spent,
+            image_model: image_model.as_deref(),
+            model_3d: model_3d.as_deref(),
+        };
+        match prompt {
+            BuilderPrompt::Initial { extra, api, originals } => {
+                let mut text = brief(kind, &cx, extra.as_deref());
+                if *api {
+                    text = format!("{API_BUILDER}\n\n{text}");
+                }
+                if *originals {
+                    text.push_str(ORIGINALS_READY);
+                }
+                text
+            }
+            BuilderPrompt::Message(message) => {
+                let mut text = format!("{message}\n\nCurrent asset policy for this turn (replaces earlier asset instructions): {}", project_assets_note(&cx));
+                for section in kind.follow_up_sections(&cx) {
+                    text.push_str(&format!("\n\n{section}"));
+                }
+                text.push_str(&pictures_reminder(&snapshot));
+                text
+            }
+            BuilderPrompt::ResumedElsewhere { extra, handoff } => {
+                resumed_elsewhere(&brief(kind, &cx, extra.as_deref()), &snapshot.manifest.last_reply, handoff.as_deref())
+            }
+        }
+    }
+
     /// Run a builder turn with fresh asset policy, preserving its session and retrying recoverable interruptions.
     /// `fresh`: what to send instead when the agent's saved session turns out not to be on this computer.
-    fn turn(&mut self, ws: &mut Workspace, agent: &mut dyn Conversation, prompt: &str, mut fresh: Option<String>) -> Result<String, ToolError> {
-        let mut prompt = prompt.to_string();
+    fn turn(
+        &mut self,
+        ws: &mut Workspace,
+        agent: &mut dyn Conversation,
+        kind: &dyn TargetKind,
+        prompt: &BuilderPrompt,
+        mut fresh: Option<BuilderPrompt>,
+    ) -> Result<String, ToolError> {
+        let mut retry_prompt = None;
         let mut tries = 0u64;
         loop {
             // Sidebar choices can change during a build. Read only the policy from disk, leaving
             // this worker's unsaved progress untouched; this also covers notes, fixes and retries.
-            let current = current_project_assets_note(&ws.root, self.assets);
-            let result = self.converse(ws, agent, &format!("{prompt}\n\n{current}"));
+            let text = self.turn_prompt(ws, kind, retry_prompt.as_ref().unwrap_or(prompt));
+            let result = self.converse(ws, agent, &text);
             let lost = result.is_err() && agent.session_lost();
             if lost {
                 // The id is for a session this computer doesn't have: never ask for it again.
@@ -871,7 +921,7 @@ impl Worker {
                         Status::Building,
                         "The builder's earlier conversation isn't on this computer. Starting a new one from what the project already has…",
                     )?;
-                    prompt = f;
+                    retry_prompt = Some(f);
                 }
                 Err(e) if e.code != ErrorCode::Cancelled && tries < 3 && agent.session_id().is_some() && worth_retrying(&e.message) => {
                     tries += 1;
@@ -893,9 +943,9 @@ impl Worker {
                         self.stop.check()?;
                         std::thread::sleep(Duration::from_secs(1));
                     }
-                    prompt = format!(
+                    retry_prompt = Some(BuilderPrompt::Message(format!(
                         "Your last turn was cut off ({why}). Carry on from where you stopped: look at what's already in app/ and your checklist, then finish the task."
-                    );
+                    )));
                 }
                 r => return r,
             }

@@ -12,9 +12,18 @@ fn choose(request: &str, target: &TargetRef) -> (&'static str, &'static str) {
 fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
+/// Quote model guidance with one checked ledger snapshot, as a builder prompt does.
+fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>) -> String {
+    super::assets_note(&BriefCx { ws, deep: false, ghidra: false, editor: None, assets: true, asset_spent: ws.try_assets_spent().ok(), image_model, model_3d })
+}
+
 /// Build a test brief for a built-in kind using the catalogue's default asset models.
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
-    super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None, model_3d: None }, extra)
+    super::brief(
+        kind(k).as_ref(),
+        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep, ghidra, editor, assets, image_model: None, model_3d: None },
+        extra,
+    )
 }
 fn refine(k: &str, check: &CheckResult) -> String {
     kind(k).refine(check)
@@ -334,15 +343,33 @@ fn pictures_of_the_original_reach_the_builder() {
 #[test]
 fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progress() {
     #[derive(Default)]
-    struct RecordedTurns(Vec<String>);
+    struct RecordedTurns(Vec<String>, Option<PathBuf>);
     impl Conversation for RecordedTurns {
         /// Keep the complete prompt so the test can inspect the policy sent on each turn.
         fn send(&mut self, text: &str) {
             self.0.push(text.into());
         }
-        /// Complete the recorded turn immediately without contacting a backend.
+        /// Finish locally; the optional retry fixture changes permission while its first turn fails.
         fn poll(&mut self) -> Vec<AgentEvent> {
-            vec![AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false }]
+            let mut events = Vec::new();
+            if let Some(root) = &self.1
+                && self.0.len() == 1
+            {
+                Workspace::open(root)
+                    .unwrap()
+                    .set_person(|m| {
+                        m.generate_assets = false;
+                        m.asset_budget_usd = 0.75;
+                    })
+                    .unwrap();
+                events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
+            }
+            events.push(AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false });
+            events
+        }
+        /// Only the interruption fixture has a resumable session.
+        fn session_id(&self) -> Option<String> {
+            self.1.as_ref().map(|_| "test-retry".into())
         }
         /// Ignore consent because this recorder never requests tool execution.
         fn answer_consent(&mut self, _: &str, _: bool) {}
@@ -373,7 +400,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         self_check: None,
     };
     let mut agent = RecordedTurns::default();
-    worker.turn(&mut ws, &mut agent, "Build the app").unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Build the app").into()), None).unwrap();
     assert!(agent.0.last().unwrap().contains("Generated assets are now off"));
     let mut sidebar = Workspace::open(&ws.root).unwrap();
     sidebar
@@ -385,7 +412,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         .unwrap();
     worker.notes.lock().unwrap().push(Note { id: 1, text: "Use generated textures".into(), shown: "Use generated textures".into() });
     let added = worker.added(&mut ws).unwrap();
-    worker.turn(&mut ws, &mut agent, &added).unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message((&added).into()), None).unwrap();
     let note = agent.0.last().unwrap();
     assert!(note.contains("Use generated textures") && note.contains("Current asset policy for this turn (replaces earlier asset instructions)"));
     assert!(note.contains("scenario: enabled") && note.contains("fal: disabled") && note.contains("$7.25"));
@@ -409,20 +436,74 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     ws.manifest.status = Status::Checking;
     let before_turn = ws.manifest.clone();
     let refinement = refine("app", &CheckResult::new(CheckResult::BUILD, 1, false, "Fix the build"));
-    worker.turn(&mut ws, &mut agent, &refinement).unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message((&refinement).into()), None).unwrap();
     let note = agent.0.last().unwrap();
     assert!(note.contains("Current asset policy for this turn") && note.contains("scenario: disabled") && note.contains("elevenlabs: enabled"));
     assert!(note.contains("$0.75") && note.contains("estimated spent $0.25, remaining $0.50"));
     assert_eq!(ws.manifest, before_turn, "policy reads never replace run-owned state");
 
+    // Real game guidance must use current policy on both the initial brief and every follow-up.
+    std::fs::create_dir_all(ws.root.join("reference")).unwrap();
+    std::fs::write(ws.root.join("reference/picture.png"), b"fixture").unwrap();
+    for (stale_enabled, current_enabled, current_budget, stale_budget) in [(true, false, 0.75, 5.0), (false, true, 5.0, 0.75)] {
+        ws.manifest.generate_assets = stale_enabled;
+        ws.manifest.asset_budget_usd = stale_budget;
+        sidebar
+            .set_person(|m| {
+                m.generate_assets = current_enabled;
+                m.asset_providers = Some(vec!["scenario".into()]);
+                m.asset_budget_usd = current_budget;
+            })
+            .unwrap();
+        let game = kind("game");
+        let initial = BuilderPrompt::Initial { extra: Some("Keep the score".into()), api: true, originals: false };
+        let followup = BuilderPrompt::Message(follow_up("Make it brighter", "game"));
+        let added = BuilderPrompt::Message(added_prompt(&["Add a score".into()]));
+        let refinement = BuilderPrompt::Message(game.refine(&CheckResult::new(CheckResult::BUILD, 2, false, "Fix the build")));
+        let before = ws.manifest.clone();
+        for prompt in [initial, followup, added, refinement] {
+            worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.matches("Project asset providers:").count(), 1, "{sent}");
+            assert!(sent.contains(&format!("${current_budget:.2}")), "{sent}");
+            assert!(!sent.contains(&format!("${stale_budget:.2}")), "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), current_enabled, "{sent}");
+            assert_eq!(sent.contains("assets_model_generate"), current_enabled, "{sent}");
+            assert_eq!(sent.contains("Generated assets are now off"), !current_enabled, "{sent}");
+            assert!(sent.contains("picture(s) of the original"), "{sent}");
+            assert_eq!(ws.manifest, before, "prompt rendering preserves run-owned state");
+        }
+    }
+    worker.turn(&mut ws, &mut agent, &SlidesKind, &BuilderPrompt::Message("Keep going".into()), None).unwrap();
+    let sent = agent.0.last().unwrap();
+    assert!(sent.contains("Custom follow-up sentinel: Unsaved progress in this worker"), "{sent}");
+    assert!(sent.contains("picture(s) of the original"));
+    let mut interrupted = RecordedTurns(Vec::new(), Some(ws.root.clone()));
+    worker.turn(&mut ws, &mut interrupted, kind("game").as_ref(), &BuilderPrompt::Initial { extra: None, api: false, originals: false }, None).unwrap();
+    assert_eq!(interrupted.0.len(), 2);
+    assert!(interrupted.0[0].contains("Realistic assets:") && interrupted.0[0].contains("$5.00"));
+    assert!(interrupted.0[1].contains("Generated assets are now off") && interrupted.0[1].contains("$0.75"));
+    assert!(!interrupted.0[1].contains("assets_model_generate") && !interrupted.0[1].contains("$5.00"));
+    assert_eq!(interrupted.0[1].matches("Project asset providers:").count(), 1);
+    sidebar.set_person(|m| m.generate_assets = true).unwrap();
+    // Invalid spending refuses generation in initial and follow-up game guidance, never assuming zero.
+    std::fs::write(ws.root.join("assets.json"), "not JSON").unwrap();
+    for prompt in [BuilderPrompt::Initial { extra: None, api: false, originals: false }, BuilderPrompt::Message("Continue".into())] {
+        worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt, None).unwrap();
+        let sent = agent.0.last().unwrap();
+        assert!(sent.contains("Do not generate assets or authorize new spending"), "{sent}");
+        assert!(!sent.contains("Realistic assets:") && !sent.contains("assets_model_generate") && !sent.contains("estimated spent $0.00"), "{sent}");
+    }
+    ws.manifest = before_turn.clone();
+
     let mut future = sidebar.manifest.clone();
     future.version = craft_anything_engine::workspace::MANIFEST_VERSION + 1;
     std::fs::write(ws.root.join("craft.json"), serde_json::to_vec(&future).unwrap()).unwrap();
-    worker.turn(&mut ws, &mut agent, "Continue with the future settings").unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Continue with the future settings").into()), None).unwrap();
     assert!(agent.0.last().unwrap().contains("Do not generate assets or authorize new spending"));
 
     std::fs::write(ws.root.join("craft.json"), "not valid JSON").unwrap();
-    worker.turn(&mut ws, &mut agent, "Try the fix again").unwrap();
+    worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Try the fix again").into()), None).unwrap();
     let note = agent.0.last().unwrap();
     assert!(note.contains("Do not generate assets or authorize new spending"));
     assert!(!note.contains("elevenlabs: enabled"), "unreadable choices never fall back to earlier permission");
@@ -591,6 +672,10 @@ impl TargetKind for SlidesKind {
     fn goal(&self) -> &'static str {
         "a slide deck"
     }
+    /// A non-asset extension sees run-owned progress alongside the current policy.
+    fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
+        vec![format!("Custom follow-up sentinel: {}", cx.ws.manifest.note)]
+    }
     fn checks(&self, _ws: &Workspace) -> Vec<Box<dyn Check>> {
         vec![Box::new(OutlineCheck)]
     }
@@ -614,7 +699,20 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let ws = Workspace::create(d.path(), "Deck", "Make slides", TargetRef::None).unwrap();
     let checks = kinds.get("slides").unwrap().checks(&ws);
     assert_eq!(checks.iter().map(|c| c.id()).collect::<Vec<_>>(), ["outline"]);
-    let b = super::brief(&SlidesKind, &BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None }, None);
+    let b = super::brief(
+        &SlidesKind,
+        &BriefCx {
+            asset_spent: ws.try_assets_spent().ok(),
+            ws: &ws,
+            deep: false,
+            ghidra: false,
+            editor: None,
+            assets: false,
+            image_model: None,
+            model_3d: None,
+        },
+        None,
+    );
     assert!(b.contains("What to build: a slide deck."), "{b}");
 }
 
@@ -719,7 +817,7 @@ fn an_api_backend_builds_with_the_build_tools() {
     let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10 };
     let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
     let mut api = ApiConversation::start_with(Arc::new(EngineHost(engine)), vec![slot], LoopConfig::default(), enabled).unwrap();
-    let reply = w.turn(&mut ws, &mut api, "Build it.", None).unwrap();
+    let reply = w.turn(&mut ws, &mut api, kind("app").as_ref(), &BuilderPrompt::Message(("Build it.").into()), None).unwrap();
     assert_eq!(reply.trim(), "Built the notes app.");
     assert_eq!(std::fs::read_to_string(ws.app_dir().join("README.md")).unwrap(), "# Notes\n");
     assert!(ws.manifest.agent_session.is_none(), "an API loop has no session to resume");
@@ -757,7 +855,7 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx { ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None };
+    let cx = |ws| BriefCx { asset_spent: Some(0.0), ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None };
     assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
@@ -1398,7 +1496,7 @@ fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     /// Isolate workspace policy and key availability from unrelated brief settings.
     fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
-        BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None }
+        BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None }
     }
     assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
     // Turned on after the first build, with a key: the follow-up carries the asset note and budget.
@@ -1595,7 +1693,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         self_check: Some((Arc::new(SheetKind), 90.0)),
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
-    let reply = w.turn(&mut ws, &mut builder, "Build it.", None).unwrap();
+    let reply = w.turn(&mut ws, &mut builder, kind("app").as_ref(), &BuilderPrompt::Message(("Build it.").into()), None).unwrap();
     // The same check the run makes after a turn, as round 0, with what to do next.
     assert!(reply.starts_with("mechanics: failed") && reply.contains("no app/mechanics.json") && reply.contains("check again with rebuild_check"), "{reply}");
     assert!(ws.manifest.checks.is_empty(), "the builder's own check isn't a round");
@@ -1934,12 +2032,12 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         usage: None,
         self_check: None,
     };
-    let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply, None);
-    let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
+    let first = BuilderPrompt::ResumedElsewhere { extra: Some("Make it blue".into()), handoff: None };
+    let reply = w.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("The person asks: make it blue".into()), Some(first)).unwrap();
     assert_eq!(reply.trim(), "Carried on: yes");
     let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
     assert!(
-        sent.starts_with("THE BRIEF") && sent.contains("already under way") && sent.contains("app/") && sent.contains("notes app with a sidebar"),
+        sent.contains("A notes app") && sent.contains("Make it blue") && sent.contains("already under way") && sent.contains("app/") && sent.contains("notes app with a sidebar"),
         "{sent}"
     );
     assert_eq!(ws.manifest.agent_session.as_deref(), Some("new-1"), "the new session is the one kept");
@@ -1988,7 +2086,7 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         usage: None,
         self_check: None,
     };
-    let e = w.turn(&mut ws, &mut agent, "Carry on.", None).unwrap_err();
+    let e = w.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("Carry on.".into()), None).unwrap_err();
     assert!(e.message.contains("isn't on this computer"), "{e:?}");
     assert!(ws.manifest.agent_session.is_none());
 }

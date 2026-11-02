@@ -237,13 +237,13 @@ pub struct BudgetParams {
 fn project_assets_budget(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: BudgetParams = parse_params(params)?;
     let mut ws = open(&p.project)?;
+    let spent = ws.try_assets_spent()?;
     if let Some(b) = p.budget_usd {
         if !b.is_finite() || !(0.0..=10_000.0).contains(&b) {
             return Err(ToolError::invalid("budget_usd must be between 0 and 10000."));
         }
         ws.set_person(|m| m.asset_budget_usd = b)?;
     }
-    let spent = ws.assets_spent();
     Ok(ToolOutput::Value(json!({"budget_usd": ws.manifest.asset_budget_usd, "spent_usd": spent,
         "remaining_usd": (ws.manifest.asset_budget_usd - spent).max(0.0)})))
 }
@@ -277,7 +277,8 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         ws.set_person(|m| {
             if let Some(id) = &p.provider {
                 // Work from the freshly merged manifest, including changes made during a build.
-                let mut enabled = if m.generate_assets {
+                let was_enabled = m.generate_assets;
+                let mut enabled = if was_enabled || !allow {
                     m.asset_providers.clone().unwrap_or_else(|| providers.ids().into_iter().map(str::to_owned).collect())
                 } else {
                     Vec::new()
@@ -286,7 +287,7 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
                 if allow {
                     enabled.push(id.clone());
                 }
-                m.generate_assets = !enabled.is_empty();
+                m.generate_assets = (was_enabled || allow) && !enabled.is_empty();
                 m.asset_providers = Some(enabled);
             } else {
                 m.generate_assets = allow;
@@ -706,6 +707,55 @@ mod tests {
         assert_eq!(call(json!({"project": ws.root, "provider": "elevenlabs", "allow": false})).unwrap()["generate_assets"], false);
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_providers, Some(Vec::new()));
         assert_eq!(call(json!({"project": ws.root, "provider": "fal"})).unwrap()["generate_assets"], false, "query does not mutate");
+    }
+
+    /// Editing a paused provider list never resumes its other providers; an explicit enable starts alone.
+    #[test]
+    fn paused_provider_changes_preserve_choices_without_resuming_them() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |p: Value| e.call("project_assets_allow", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+        for (disabled, remaining) in [("scenario", vec!["elevenlabs"]), ("fal", vec!["scenario", "elevenlabs"])] {
+            ws.set_person(|m| {
+                m.generate_assets = false;
+                m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+            })
+            .unwrap();
+            let paused = call(json!({"project": ws.root, "provider": disabled, "allow": false})).unwrap();
+            assert_eq!(paused["generate_assets"], false);
+            assert_eq!(paused["asset_providers"], json!(remaining));
+            assert!(paused["providers"].as_array().unwrap().iter().all(|p| p["enabled"] == false));
+            let resumed = call(json!({"project": ws.root, "allow": true})).unwrap();
+            assert_eq!(resumed["generate_assets"], true);
+            assert_eq!(resumed["asset_providers"], json!(remaining));
+        }
+        call(json!({"project": ws.root, "allow": false})).unwrap();
+        let enabled = call(json!({"project": ws.root, "provider": "fal", "allow": true})).unwrap();
+        assert_eq!(enabled["generate_assets"], true);
+        assert_eq!(enabled["asset_providers"], json!(["fal"]));
+    }
+
+    /// A missing ledger means no spending; an unreadable ledger refuses reads and leaves budget writes untouched.
+    #[test]
+    fn budget_ledger_errors_do_not_partially_change_the_budget() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |p: Value| e.call("project_assets_budget", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+        assert_eq!(call(json!({"project": ws.root})).unwrap()["spent_usd"], 0.0);
+        let ledger = ws.root.join("assets.json");
+        for contents in ["not JSON", "{\"version\":999,\"assets\":[]}"] {
+            std::fs::write(&ledger, contents).unwrap();
+            assert!(call(json!({"project": ws.root})).is_err());
+            assert!(call(json!({"project": ws.root, "budget_usd": 1.0})).is_err());
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 5.0);
+            assert_eq!(std::fs::read_to_string(&ledger).unwrap(), contents);
+        }
+        std::fs::remove_file(&ledger).unwrap();
+        std::fs::create_dir(&ledger).unwrap();
+        assert!(call(json!({"project": ws.root, "budget_usd": 1.0})).is_err());
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 5.0);
     }
 
     /// Restricting legacy all-provider permission must retain every other provider, including extensions.

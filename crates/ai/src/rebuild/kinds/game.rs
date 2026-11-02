@@ -74,10 +74,10 @@ impl TargetKind for GameKind {
             return vec![screenshot::SCREENSHOT_CONTRACT.to_string(), self_test::SELF_TEST_CONTRACT.to_string()];
         }
         // Paid, so only when the person turned it on for this project and a key is set up.
-        let generated = cx.assets && cx.ws.manifest.generate_assets;
+        let generated = cx.assets && cx.asset_spent.is_some() && cx.ws.manifest.generate_assets;
         let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
         if generated {
-            s.push(assets_note(cx.ws, cx.image_model, cx.model_3d));
+            s.push(assets_note(cx));
         }
         s.push(screenshot::SCREENSHOT_CONTRACT.to_string());
         s.push(self_test::SELF_TEST_CONTRACT.to_string());
@@ -86,7 +86,7 @@ impl TargetKind for GameKind {
 
     /// Refresh game art guidance for follow-ups when the project permits generation and a key is available.
     fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
-        if cx.assets && cx.ws.manifest.generate_assets { vec![assets_note(cx.ws, cx.image_model, cx.model_3d)] } else { Vec::new() }
+        if cx.assets && cx.asset_spent.is_some() && cx.ws.manifest.generate_assets { vec![assets_note(cx)] } else { Vec::new() }
     }
 
     /// Every game must play its core loop; a game of a website has no mechanics sheet (its brief
