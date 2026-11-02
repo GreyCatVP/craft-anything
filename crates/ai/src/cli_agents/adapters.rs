@@ -7,9 +7,11 @@ use super::*;
 
 mod antigravity;
 mod hermes;
+mod maki;
 mod opencode;
 pub use antigravity::Antigravity;
 pub use hermes::Hermes;
+pub use maki::Maki;
 pub use opencode::OpenCode;
 
 /// What a run's arguments are built from.
@@ -104,10 +106,18 @@ impl Default for AgentAdapters {
 }
 
 impl AgentAdapters {
-    /// Claude Code, Codex, Gemini CLI, OpenCode, Antigravity and Hermes.
+    /// Claude Code, Codex, Gemini CLI, OpenCode, Antigravity, Hermes and Maki.
     pub fn built_in() -> AgentAdapters {
         AgentAdapters {
-            adapters: vec![Arc::new(ClaudeCode), Arc::new(Codex), Arc::new(GeminiCli), Arc::new(OpenCode), Arc::new(Antigravity), Arc::new(Hermes)],
+            adapters: vec![
+                Arc::new(ClaudeCode),
+                Arc::new(Codex),
+                Arc::new(GeminiCli),
+                Arc::new(OpenCode),
+                Arc::new(Antigravity),
+                Arc::new(Hermes),
+                Arc::new(Maki),
+            ],
         }
     }
 

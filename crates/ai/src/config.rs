@@ -306,5 +306,7 @@ mod tests {
         assert_eq!(one("model = \"x/y\"\ncommand = \"opencode\"\ncli_model = \"z\""), ("opencode".into(), Some("z".into())));
         assert_eq!(one("model = \"my-agent\"\ncommand = \"my-agent-cli\""), ("my-agent".into(), None));
         assert_eq!(one("model = \"claude-code\""), ("claude-code".into(), None));
+        // Maki named by its program runs Maki's own adapter, not `maki <prompt>` (its terminal interface).
+        assert_eq!(one("model = \"anthropic/claude-sonnet-4-6\"\ncommand = \"maki\""), ("maki".into(), Some("anthropic/claude-sonnet-4-6".into())));
     }
 }
