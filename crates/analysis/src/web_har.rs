@@ -119,12 +119,9 @@ impl Redactor {
 pub(crate) fn split_url(url: &str) -> (String, String, String, Vec<(String, String)>, bool) {
     let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
     let rest = rest.split('#').next().unwrap_or(rest);
-    let (authority, path_q) = match rest.find('/') {
+    let (authority, path_q) = match rest.find(['/', '?', '#']) {
         Some(i) => (rest.get(..i).unwrap_or(""), rest.get(i..).unwrap_or("/")),
-        None => match rest.find('?') {
-            Some(i) => (rest.get(..i).unwrap_or(""), rest.get(i..).unwrap_or("")),
-            None => (rest, "/"),
-        },
+        None => (rest, "/"),
     };
     let (userinfo, host) = match authority.rsplit_once('@') {
         Some((_, h)) => (true, h),
@@ -499,6 +496,34 @@ pub fn all_strings(v: &Value, out: &mut BTreeSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_url_authority_cases() {
+        let mut failures = Vec::new();
+        for (row, url, host, path, userinfo) in [
+            ("at in path", "https://example.test/@profile", "example.test", "/@profile", false),
+            ("at in file name", "https://cdn.example.test/icon@2x.png", "cdn.example.test", "/icon@2x.png", false),
+            ("at in query", "https://example.test/?q=a@b", "example.test", "/", false),
+            ("at in fragment", "https://example.test/#a@b", "example.test", "/", false),
+            ("user-info and at in path", "https://user:pw@example.test/@x", "example.test", "/@x", true),
+            ("IPv6 and port", "https://[::1]:8080/@x", "[::1]:8080", "/@x", false),
+            ("query with slash, no path", "https://example.test?q=a/b@c", "example.test", "/", false),
+            ("port and at in path", "http://example.test:8080/a@b", "example.test:8080", "/a@b", false),
+            ("fragment, no path", "https://example.test#a@b", "example.test", "/", false),
+            ("user-info only", "https://user@example.test/p", "example.test", "/p", true),
+            ("plain", "https://example.test/path", "example.test", "/path", false),
+            ("percent-encoded at in user-info", "https://u%40x:pw@example.test/", "example.test", "/", true),
+            ("two at signs in user-info", "https://a@b@EXAMPLE.test/p", "example.test", "/p", true),
+        ] {
+            let (_, actual_host, actual_path, _, actual_userinfo) = split_url(url);
+            let actual = (actual_host.as_str(), actual_path.as_str(), actual_userinfo);
+            let expected = (host, path, userinfo);
+            if actual != expected {
+                failures.push(format!("{row}: expected {expected:?}, got {actual:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 
     const HAR: &str = r#"{"log":{"version":"1.2","creator":{"name":"t","version":"1"},"entries":[
       {"startedDateTime":"2026-01-01T00:00:00Z","time":120,
