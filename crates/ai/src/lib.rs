@@ -519,7 +519,14 @@ impl AiHub {
 
     /// Capture the exact settings and working directory that model discovery will use.
     pub fn model_context(&self, name: &str) -> Result<ModelContext, ToolError> {
-        Ok(ModelContext { backend: self.entry(name)?, directory: self.project_root() })
+        // Capture both fields under one guard: a busy session is not an absent project,
+        // and a concurrent settings change must not produce a mixed snapshot.
+        let session = self.engine.try_session().ok_or_else(|| ToolError::invalid("The app is busy with another task. Try again in a moment."))?;
+        let config = AiConfig::from_table(&session.settings.ai)?;
+        let backend = config.get(name).cloned().ok_or_else(|| {
+            ToolError::invalid(format!("No AI backend named {name:?}")).with_remediation("See `craft-anything-cli ai list`, or add one in Settings → AI.")
+        })?;
+        Ok(ModelContext { backend, directory: session.project.as_ref().map(|p| p.root.clone()) })
     }
 
     /// Model metadata from an agent's own instance; no API-provider catalogue is substituted.

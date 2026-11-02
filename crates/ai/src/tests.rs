@@ -190,6 +190,27 @@ fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
 }
 
 #[test]
+fn model_context_distinguishes_a_busy_session_from_no_project() {
+    use craft_anything_engine::project::{Project, Purpose};
+    let (h, dir) = hub();
+    let backend =
+        BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend(backend.clone(), None).unwrap();
+    assert_eq!(h.model_context("OpenCode").unwrap().directory, None);
+    let root = dir.path().join("test.cany");
+    {
+        let mut session = h.engine.session();
+        session.open_project(Project::create(&root, "test", Purpose::Education).unwrap()).unwrap();
+        assert!(h.model_context("OpenCode").is_err(), "lock contention must not capture a missing project");
+    }
+    let context = h.model_context("OpenCode").unwrap();
+    assert_eq!(context.directory.as_ref(), Some(&root));
+    assert_eq!(context.backend.config, backend);
+    assert!(h.set_agent_selection(&context, None, None).unwrap(), "a capture after contention must remain saveable");
+    assert!(h.model_context("missing").is_err());
+}
+
+#[test]
 fn a_failed_save_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     // The settings "file" can't be written: its folder is a file.

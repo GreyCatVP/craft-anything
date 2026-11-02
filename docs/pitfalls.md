@@ -357,6 +357,9 @@ the screen shows the last result.
 `try_session().unwrap_or_default()` at startup, so a busy engine meant Clean room and no AI, and
 the next settings change saved those defaults over theirs. Seen once in a live run. A fallback
 must never stand in for data that gets saved back: wait (it's startup), or keep what's on disk.
+The model picker later captured a busy session as "no project", queried in the wrong directory,
+and rejected the save as a settings change. Capture settings and project under one guard; report
+contention, preserve the draft and matching background results, and check again when available.
 
 **A save that changed memory first.** Adding an AI in the app put it in the session's settings,
 then the file write failed (on Windows, likely a virus scan holding config.toml), so the app showed

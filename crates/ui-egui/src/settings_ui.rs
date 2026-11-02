@@ -306,7 +306,7 @@ fn engines(app: &mut CraftApp, ui: &mut Ui) {
 }
 
 fn ai(app: &mut CraftApp, ui: &mut Ui) {
-    if app.agent_model_picker.as_ref().is_some_and(|p| app.hub.model_context(&p.context.backend.config.name).ok().as_ref() != Some(&p.context)) {
+    if app.agent_model_picker.as_ref().is_some_and(|p| app.hub.model_context(&p.context.backend.config.name).is_ok_and(|current| current != p.context)) {
         app.agent_model_picker = None;
     }
     let t = Tokens::get(ui.ctx());
@@ -861,5 +861,46 @@ fn safety(app: &mut CraftApp, ui: &mut Ui) {
         for tool in app.view.project_allows.clone() {
             ui.label(RichText::new(tool).font(theme::mono(12.0)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Done, builders::AgentModelPicker, demo, jobs::Finished};
+    use craft_anything_ai::{BackendConfig, BackendKind};
+
+    #[test]
+    fn a_busy_session_keeps_the_picker_and_its_matching_result() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Experienced, true));
+        app.hub
+            .add_backend(
+                BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true },
+                None,
+            )
+            .unwrap();
+        app.backends = app.hub.backends();
+        app.backend_options = app.hub.options();
+        let context = app.hub.model_context("OpenCode").unwrap();
+        app.agent_model_picker = Some(AgentModelPicker { request: 2, context: context.clone(), result: None, model: None, thinking: None });
+        let ctx = egui::Context::default();
+        theme::install_fonts(&ctx);
+        let draw = |app: &mut CraftApp| {
+            let mut output = ctx.run_ui(Default::default(), |ui| ai(app, ui));
+            output.textures_delta.clear();
+        };
+        let engine = app.engine.clone();
+        let session = engine.session();
+        app.handle_done(Finished { job: 0, result: Ok(Done::AgentModelChoices { request: 1, context: context.clone(), result: Ok(Vec::new()) }) });
+        assert!(app.agent_model_picker.as_ref().unwrap().result.is_none(), "an older reload must still be ignored");
+        app.handle_done(Finished { job: 0, result: Ok(Done::AgentModelChoices { request: 2, context, result: Ok(Vec::new()) }) });
+        draw(&mut app);
+        assert!(app.agent_model_picker.as_ref().unwrap().result.as_ref().unwrap().is_ok(), "a busy frame must keep the completed catalogue");
+        drop(session);
+        draw(&mut app);
+        assert!(app.agent_model_picker.is_some(), "unlocking an unchanged session keeps the draft");
+        app.hub.set_enabled("OpenCode", false).unwrap();
+        draw(&mut app);
+        assert!(app.agent_model_picker.is_none(), "a confirmed settings change still invalidates the picker");
     }
 }

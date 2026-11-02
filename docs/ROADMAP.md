@@ -309,6 +309,9 @@ Owner: open · Status: in progress
       depths (Low, Medium, High, Xhigh, Max) in settings and headless clients. Choices are validated
       before saving and native execution; explicit choices bypass ACP until it supports selection.
       See [OpenCode](opencode.md).
+- [x] Capture OpenCode settings and project together; refuse a busy session instead of treating
+      it as no project, and preserve open model pickers and matching results during contention.
+- [x] Report cancelled model validation as stopped, while preserving error events for other failures.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 

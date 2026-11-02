@@ -1326,10 +1326,9 @@ impl CraftApp {
                 }
             },
             Done::AgentModelChoices { request, context, result } => {
-                let current = self.hub.model_context(&context.backend.config.name).ok();
-                if let Some(picker) =
-                    self.agent_model_picker.as_mut().filter(|p| p.request == request && p.context == context && current.as_ref() == Some(&context))
-                {
+                // Keep a matching result even while the engine is busy. Settings invalidates
+                // changed contexts once it can read the session again; saving rechecks too.
+                if let Some(picker) = self.agent_model_picker.as_mut().filter(|p| p.request == request && p.context == context) {
                     picker.result = Some(result.map_err(|e| e.for_people()));
                 }
             }

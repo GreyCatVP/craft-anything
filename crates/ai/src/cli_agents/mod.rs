@@ -556,7 +556,12 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
     let mut adapter = spec.adapters.for_agent(&agent);
     if let Err(e) = adapter.validate_model(&spec.config, &spec.options, spec.project.as_deref(), stop) {
-        let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
+        let event = if e.code == ErrorCode::Cancelled {
+            AgentEvent::Status { text: "Stopped.".into() }
+        } else {
+            AgentEvent::Error { message: e.message, remediation: e.remediation, log: None }
+        };
+        let _ = tx.send(event);
         return;
     }
     let (help, needed) = adapter.required_flags();
@@ -988,6 +993,46 @@ mod tests {
         assert!(agent_env(false, None).contains(&("CLAUDE_CODE_EFFORT_LEVEL", "high".to_string())), "high unless chosen");
     }
     use crate::BackendKind;
+
+    #[test]
+    fn cancelled_model_validation_reports_stopped_and_other_failures_stay_errors() {
+        struct RefusedModel(ErrorCode);
+        impl AgentAdapter for RefusedModel {
+            fn ids(&self) -> &'static [&'static str] {
+                &["test-validation"]
+            }
+            fn args(&self, _cx: &ArgsCx) -> Vec<String> {
+                panic!("failed validation must not start the agent")
+            }
+            fn validate_model(&self, _config: &BackendConfig, _options: &BackendOptions, _directory: Option<&Path>, _stop: &Stop) -> Result<(), ToolError> {
+                Err(ToolError::new(self.0, "Validation stopped").with_remediation("Reload the models."))
+            }
+        }
+        for code in [ErrorCode::Cancelled, ErrorCode::BadInput, ErrorCode::TimedOut] {
+            let config = BackendConfig {
+                name: "Test".into(),
+                kind: BackendKind::AgentCli,
+                model: "test-validation".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            };
+            let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+            spec.adapters.register(Arc::new(RefusedModel(code)));
+            let (tx, rx) = std::sync::mpsc::channel();
+            run_cli(&spec, "test", &tx, &Stop::default(), &Mutex::new(None), &Mutex::new(None));
+            let events: Vec<_> = rx.try_iter().collect();
+            if code == ErrorCode::Cancelled {
+                assert!(matches!(events.as_slice(), [AgentEvent::Status { text }] if text == "Stopped."), "{events:?}");
+            } else {
+                assert!(
+                    matches!(events.as_slice(), [AgentEvent::Error { message, remediation: Some(help), log: None }]
+                    if message == "Validation stopped" && help == "Reload the models."),
+                    "{events:?}"
+                );
+            }
+        }
+    }
 
     fn mcp() -> McpCommand {
         McpCommand { command: "/opt/ca/craft-anything-cli".into(), args: vec!["mcp".into(), "--project".into(), "/p/x.cany".into()], notes: None }

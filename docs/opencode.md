@@ -26,6 +26,9 @@ use the current project directory; SSH queries use the remote shell's working di
 the existing remote runner does. Local model lists are never substituted for a remote one.
 Changing the program, backend settings or project invalidates an open picker. A saved explicit
 choice is checked again in the actual execution directory before each native run.
+If another task holds the session, opening or reloading the picker asks you to retry rather
+than querying without the project directory. An already open picker keeps its draft and any
+matching background result until the session can be checked again.
 
 ## CLI
 
