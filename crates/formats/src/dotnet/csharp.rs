@@ -415,35 +415,60 @@ impl Scanner {
         }
     }
 
+    /// Parse a type declaration header into its name, kind, generic arity, and line number.
     fn type_decl(&self, h: &[T]) -> Option<(String, String, usize, u32)> {
         let paren = h.iter().position(|t| is_p(t, '(')).unwrap_or(h.len());
         let kw = h.iter().take(paren).position(|t| ident(t).is_some_and(|w| TYPE_KW.contains(&w)))?;
+        // A declaration keyword cannot follow an assignment or arrow operator.
+        if h.iter().take(kw).any(|t| is_p(t, '=') || t.tok == Tok::Arrow) {
+            return None;
+        }
         let kind = ident(h.get(kw)?)?;
         if kind == "delegate" {
-            let (name_idx, arity) = if paren > 0 && is_p(h.get(paren - 1)?, '>') {
-                let mut depth = 0i32;
-                let mut open_lt = None;
-                for i in (0..paren).rev() {
-                    let t = h.get(i)?;
-                    if is_p(t, '>') {
-                        depth += 1;
-                    } else if is_p(t, '<') {
-                        depth -= 1;
-                        if depth == 0 {
-                            open_lt = Some(i);
-                            break;
+            if h.get(kw + 1).is_some_and(|t| is_p(t, '*')) {
+                return None;
+            }
+            let is_reserved = |w: &str| w == "delegate" || w == "ref" || w == "void" || MODIFIERS.contains(&w) || TYPE_KW.contains(&w);
+            let mut target = None;
+            for p in (kw + 1)..h.len() {
+                if !is_p(&h[p], '(') {
+                    continue;
+                }
+                if p > kw + 1 && is_p(&h[p - 1], '>') {
+                    let mut depth = 0i32;
+                    let mut open_lt = None;
+                    for i in (kw + 1..p).rev() {
+                        let t = &h[i];
+                        if is_p(t, '>') {
+                            depth += 1;
+                        } else if is_p(t, '<') {
+                            depth -= 1;
+                            if depth == 0 {
+                                open_lt = Some(i);
+                                break;
+                            }
                         }
                     }
+                    if let Some(lt) = open_lt
+                        && lt > kw + 1
+                        && let Some(name_tok) = h.get(lt - 1)
+                        && let Some(name) = ident(name_tok)
+                        && !is_reserved(name)
+                    {
+                        let arity = split_commas(h.get(lt + 1..p - 1).unwrap_or(&[])).len();
+                        target = Some((name.to_string(), arity, name_tok.line));
+                        break;
+                    }
+                } else if let Some(name_tok) = h.get(p - 1)
+                    && let Some(name) = ident(name_tok)
+                    && !is_reserved(name)
+                {
+                    target = Some((name.to_string(), 0, name_tok.line));
+                    break;
                 }
-                let lt = open_lt?;
-                let arity = split_commas(h.get(lt + 1..paren - 1)?).len();
-                (lt.checked_sub(1)?, arity)
-            } else {
-                (paren.checked_sub(1)?, 0)
-            };
-            let name_tok = h.get(name_idx)?;
-            let name = ident(name_tok)?.to_string();
-            return Some((name, "delegate".into(), arity, name_tok.line));
+            }
+            let (name, arity, line) = target?;
+            return Some((name, "delegate".into(), arity, line));
         }
         let mut k = kw + 1;
         let mut kind = kind.to_string();
@@ -603,6 +628,7 @@ impl Scanner {
         }
     }
 
+    /// Scan token stream into types, members, and namespace scopes.
     fn run(mut self, toks: &[T]) -> CsScan {
         let mut cur: Vec<T> = Vec::new();
         let mut expr_depth = 0i32;
@@ -1109,16 +1135,29 @@ namespace Newtonsoft.Json.Serialization;
 
 public delegate void ExtensionDataSetter(object o, string key, object value);
 public delegate TResult Func<out TResult>();
+public delegate (int, int) Pair();
+public delegate (string Name, int Age) GetUser<T>(T id);
 
 public class Container {
     public delegate bool Filter(int item);
+    public Action callback = delegate { };
+    public Action<int> onCount = delegate(int x) { };
+    public unsafe delegate*<int, void> fp;
 }
 "#,
         );
         let types: Vec<(&str, &str, usize)> = s.types.iter().map(|t| (t.full_name.as_str(), t.kind.as_str(), t.generic_arity)).collect();
         assert!(types.contains(&("Newtonsoft.Json.Serialization.ExtensionDataSetter", "delegate", 0)), "{types:?}");
         assert!(types.contains(&("Newtonsoft.Json.Serialization.Func", "delegate", 1)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.Pair", "delegate", 0)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.GetUser", "delegate", 1)), "{types:?}");
         assert!(types.contains(&("Newtonsoft.Json.Serialization.Container.Filter", "delegate", 0)), "{types:?}");
+        assert!(!types.iter().any(|(name, _, _)| name.ends_with(".delegate")), "anonymous delegates must not register as types: {types:?}");
+
+        let fields: Vec<(&str, &str)> = s.members.iter().filter(|m| m.kind == "field").map(|m| (m.name.as_str(), m.ty.as_str())).collect();
+        assert!(fields.contains(&("callback", "Action")), "{fields:?}");
+        assert!(fields.contains(&("onCount", "Action<int>")), "{fields:?}");
+        assert!(fields.iter().any(|(name, _)| *name == "fp"), "{fields:?}");
 
         let members = Members {
             types: vec![ty("Newtonsoft.Json.Serialization.ExtensionDataSetter", "delegate", &[".ctor", "Invoke", "BeginInvoke", "EndInvoke"], &[])],
