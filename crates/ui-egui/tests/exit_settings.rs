@@ -78,7 +78,12 @@ fn exit_save_preserves_latest_ai_and_pending_app_settings() {
         assert_eq!(Settings::load(), saved, "recovery is durable and runs only once");
         return;
     }
+    // A sidecar left by an earlier failed recovery must not undo this successful full save.
+    let stale = Settings { language: "fr".into(), mode: Mode::Beginner, ..app.settings.clone() };
+    stale.defer_save_to(&Settings::path()).unwrap();
     app.on_exit();
+    assert!(!Settings::path().with_extension("pending.toml").exists());
+    Settings::discard_pending(&Settings::path()).unwrap(); // Already absent is also success.
 
     let saved = Settings::load();
     assert_eq!(AiConfig::from_table(&saved.ai).unwrap().get("OpenCode"), Some(&entry));

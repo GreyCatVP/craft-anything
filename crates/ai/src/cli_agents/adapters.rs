@@ -57,6 +57,11 @@ pub trait AgentAdapter: Send + Sync {
     fn validate_model(&self, _config: &BackendConfig, _options: &BackendOptions, _directory: Option<&Path>, _stop: &Stop) -> Result<(), ToolError> {
         Ok(())
     }
+    /// Refuse options that the native transport cannot support, before preflight or process I/O.
+    /// Saving a model choice and discovering its catalogue do not imply native execution support.
+    fn check_native_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
+        Ok(())
+    }
     /// `(help invocation, substrings it must mention)`, checked once before the first run; when
     /// they're missing the run falls back to the plain adapter. Empty: nothing to check.
     fn required_flags(&self) -> (&'static [&'static str], &'static [&'static str]) {

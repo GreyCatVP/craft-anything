@@ -287,6 +287,13 @@ The exit-time save must merge the session's latest AI table before writing the a
 the UI's AI snapshot may predate a selection already committed by the hub. But waiting for that guard
 can hold shutdown behind a tool for hours. Try it once; if busy, durably defer only non-AI settings
 and recover them at startup against the latest committed AI table, rather than racing a live writer.
+After a successful full exit save, discard an older deferred snapshot so startup cannot replay it
+over the newer app settings.
+
+**Preflight checked a different transport.** An explicit OpenCode selection bypassed ACP, but
+builder preflight still checked ACP's helper and the native adapter never supplied the MCP server.
+Share transport selection between preflight and execution; reject unsupported native options
+before running a process rather than starting an agent without the tools its task requires.
 
 **Keywords that only some code paths honour.** "…in Rust" picked Rust for apps but not for games, so
 a headless game rebuild stopped at once for want of Unity. It was found only by a live run. Run the

@@ -374,6 +374,16 @@ impl Settings {
         pending.save_to(&path.with_extension("pending.toml"))
     }
 
+    /// Remove deferred edits superseded by a successful full save. A missing sidecar is fine.
+    pub fn discard_pending(path: &Path) -> Result<(), ToolError> {
+        let pending_path = path.with_extension("pending.toml");
+        match std::fs::remove_file(&pending_path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(ToolError::io(pending_path.display(), e)),
+        }
+    }
+
     /// Recover a deferred snapshot only when both files are readable and supported. Leave the
     /// sidecar intact on failure, and remove it only after the merged settings are saved.
     fn recover_pending(path: &Path) -> Result<(), ToolError> {
@@ -395,7 +405,7 @@ impl Settings {
         }
         pending.ai = current.ai;
         pending.save_to(path)?;
-        std::fs::remove_file(&pending_path).map_err(|e| ToolError::io(pending_path.display(), e))
+        Self::discard_pending(path)
     }
 
     pub fn save_to(&self, path: &Path) -> Result<(), ToolError> {

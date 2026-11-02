@@ -307,7 +307,7 @@ Owner: maintainers · Status: in progress
 Owner: open · Status: in progress
 - [x] Offer OpenCode locally and over SSH with its own visible chat models and supported thinking
       depths (Low, Medium, High, Xhigh, Max) in settings and headless clients. Choices are validated
-      before saving and native execution; explicit choices bypass ACP until it supports selection.
+      before saving; explicit choices are refused at execution until native MCP support is available.
       See [OpenCode](opencode.md).
 - [x] Capture OpenCode settings and project together; refuse a busy session instead of treating
       it as no project, and preserve open model pickers and matching results during contention.
@@ -326,6 +326,10 @@ Owner: open · Status: in progress
       an isolated exit-save regression preserves the latest model/depth and pending app settings.
 - [x] Never wait for a running tool's session lock at shutdown: defer non-AI app edits in a versioned
       sidecar when busy, then recover against the latest committed AI settings at startup.
+- [x] Discard superseded deferred settings after a successful full exit save; document model-only
+      and model-with-variant command forms, and share transport selection between preflight and runs.
+- [ ] Supply and verify the run's Craft Anything MCP server in native OpenCode before enabling
+      explicit model/thinking execution (currently refused for chat and builds, locally and over SSH).
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 

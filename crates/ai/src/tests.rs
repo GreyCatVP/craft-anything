@@ -137,10 +137,10 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
-/// A CLI stand-in checks discovery, persisted selections, native variant arguments and stale-context refusal.
+/// A CLI stand-in checks saved selections and refuses native execution until its MCP server is wired.
 #[cfg(unix)]
 #[test]
-fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
+fn opencode_selection_is_validated_saved_and_refused_without_native_mcp() {
     use std::os::unix::fs::PermissionsExt;
     let (h, dir) = hub();
     let program = dir.path().join("agent");
@@ -176,8 +176,12 @@ fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
         std::thread::sleep(Duration::from_millis(10));
     }
     events.extend(conversation.poll());
-    assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
-    assert!(std::fs::read_to_string(&seen).unwrap().contains("test/alias#max"), "ACP must not discard an explicit selection");
+    assert!(
+        matches!(events.as_slice(), [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }]
+        if message.contains("cannot yet connect")),
+        "{events:?}"
+    );
+    assert!(!seen.exists(), "an explicit selection must not start a run without its MCP server");
     assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(Effort::Xhigh)).is_err());
     assert_eq!(h.options()["OpenCode"].cli_thinking, Some(Effort::Max), "a failed validation changes nothing");
     let stale = h.model_context("OpenCode").unwrap();

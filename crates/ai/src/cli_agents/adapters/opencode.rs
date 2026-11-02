@@ -15,6 +15,18 @@ impl AgentAdapter for OpenCode {
         true
     }
 
+    /// Native model selection cannot yet carry this run's Craft Anything MCP server.
+    fn check_native_options(&self, options: &BackendOptions) -> Result<(), ToolError> {
+        if options.cli_model.is_some() || options.cli_thinking.is_some() {
+            return Err(ToolError::new(
+                ErrorCode::BadSettings,
+                "OpenCode's native model/thinking selection cannot yet connect this run's Craft Anything tools.",
+            )
+            .with_remediation("For a local OpenCode run, clear the model and thinking selection and enable ACP, or choose another AI. Native MCP configuration is not implemented yet."));
+        }
+        Ok(())
+    }
+
     /// Discover enabled chat models and thinking variants from the selected local or SSH installation.
     fn model_catalog(
         &self,

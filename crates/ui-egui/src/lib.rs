@@ -1743,9 +1743,14 @@ impl eframe::App for CraftApp {
             } else {
                 false
             };
-            // A tool can hold the session for hours. Keep edits separately for startup recovery;
-            // never race its eventual save by merging a disk snapshot into config.toml here.
-            if !saved && let Err(e) = self.settings.defer_save_to(&Settings::path()) {
+            if saved {
+                // This full save supersedes any deferred edits left by a failed recovery.
+                if let Err(e) = Settings::discard_pending(&Settings::path()) {
+                    log::error!("Couldn't discard superseded settings on exit: {}", e.message);
+                }
+            } else if let Err(e) = self.settings.defer_save_to(&Settings::path()) {
+                // A tool can hold the session for hours. Keep edits separately for startup recovery;
+                // never race its eventual save by merging a disk snapshot into config.toml here.
                 log::error!("Couldn't keep pending settings on exit: {}", e.message);
             }
         }

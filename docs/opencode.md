@@ -3,6 +3,11 @@
 Craft Anything can run OpenCode V2 locally or on an SSH host. OpenCode owns its provider
 connections and sign-in. Set these up in OpenCode on the computer where it will run.
 
+Model and thinking choices can be discovered, validated and saved. Running with an explicit
+selection is currently refused: our ACP transport cannot select it, and our native adapter
+does not yet supply the run's Craft Anything MCP server. For local runs, clear both choices
+and enable ACP, or use another AI. Native MCP integration remains pending in roadmap R2.2.
+
 ## Desktop
 
 1. Open **Settings → AI → Detect**, then add **OpenCode**, or **OpenCode on `<host>`**.
@@ -24,8 +29,8 @@ is marked unavailable; there is no fallback catalogue or silent downgrade.
 Discovery runs in the background with deadlines and output limits. Local queries explicitly
 use the current project directory; SSH queries use the remote shell's working directory, as
 the existing remote runner does. Local model lists are never substituted for a remote one.
-Changing the program, backend settings or project invalidates an open picker. A saved explicit
-choice is checked again in the actual execution directory before each native run.
+Changing the program, backend settings or project invalidates an open picker. Saving an explicit
+choice checks it against the selected installation's live catalogue.
 If another task holds the session, opening or reloading the picker asks you to retry rather
 than querying without the project directory. An already open picker keeps its draft and any
 matching background result until the session can be checked again.
@@ -72,7 +77,8 @@ cli_thinking = "high"
 
 These fields extend the existing versioned settings file. Old settings without them retain
 OpenCode's defaults; a known variant embedded in an existing `cli_model` reference is read into
-`cli_thinking`. Explicit selections run as `opencode run --model provider/model#variant`.
+`cli_thinking`. A model-only command uses `opencode run --model provider/model`;
+adding a thinking depth uses `opencode run --model provider/model#variant`.
 The shared `Effort` type represents all five levels. OpenCode's `cli_thinking` remains a separate
 setting from API/Claude `effort`: an unavailable OpenCode variant is refused, never stepped down.
 Hub and tool selections use the same save path: reread the settings file strictly, preserve unrelated
@@ -81,10 +87,12 @@ the session is updated only after a successful save.
 Closing the app also preserves the latest AI selection. If a running tool holds the session,
 pending non-AI app settings are kept in `config.pending.toml` instead of waiting for the tool or
 overwriting its settings. At the next startup they are merged with the latest saved AI table;
-the sidecar is removed only after a successful save. It uses the existing settings schema and
-migrations; unreadable or newer files are not overwritten by recovery.
-The current ACP transport cannot select models or variants, so an explicit choice uses the
-native adapter even if `acp = true` was previously set.
+the sidecar is removed after recovery or a successful full exit save that supersedes it.
+It uses the existing settings schema and migrations; unreadable or newer files are not overwritten
+by recovery.
+The current ACP transport cannot select models or variants. An explicit choice bypasses ACP
+even if `acp = true` was previously set, but native preflight and execution reject it until
+the run's MCP server can be supplied. The refusal completes the turn without starting OpenCode.
 
 Model discovery uses `opencode api model.list --param location[directory]=...` (the V2
 `GET /api/model` operation). This keeps credentials and configuration resolution inside OpenCode.
