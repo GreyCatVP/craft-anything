@@ -455,6 +455,11 @@ fn key_field(app: &mut CraftApp, ui: &mut Ui, provider: &dyn AssetProvider, save
     let ready = !key.is_empty() && (secret_label.is_none() || !secret.is_empty());
     if widgets::primary_icon(ui, None, save, ready).clicked() && ready {
         let credential = if secret_label.is_some() { format!("{key}:{secret}") } else { key.to_string() };
+        // Check it as generation will, so a credential it would refuse keeps its fields and says why.
+        if let Err(e) = provider.validate_key(&credential) {
+            app.toast(e.for_people(), true);
+            return None;
+        }
         app.key_inputs.remove(provider.id());
         app.key_inputs.remove(&secret_id);
         Some(credential)

@@ -231,6 +231,18 @@ fn scenario_settings_require_both_masked_fields_and_clear_them_after_save() {
     h.state_mut().key_inputs.insert("scenario".into(), "  ".into());
     h.run_steps(2);
     assert!(h.get_by_label("Save").accesskit_node().is_disabled(), "a secret alone is not enough");
+    // A credential generation would refuse (not ASCII) keeps both fields, saves nothing and says why.
+    h.state_mut().key_inputs.insert("scenario".into(), "sk-tëst-key".into());
+    h.run_steps(2);
+    h.get_by_label("Save").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    assert_eq!(h.state().key_inputs.get("scenario").map(String::as_str), Some("sk-tëst-key"));
+    assert!(h.state().key_inputs.contains_key("scenario:secret"));
+    assert!(h.state().asset_keys.as_ref().is_some_and(|keys| keys.get("scenario").is_none()), "nothing saved");
+    assert!(h.state().state.toasts.iter().any(|(text, error)| *error && text.contains("valid asset provider credential")));
+    h.state_mut().key_inputs.insert("scenario".into(), String::new());
     h.get_by_label("Scenario key").focus();
     h.run_steps(2);
     h.get_by_label("Scenario key").type_text("sk-test-key  ");

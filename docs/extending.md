@@ -97,8 +97,8 @@ estimate is recorded and reported as an overrun; a precursor overrun stops the 3
 blindly regenerate after these errors: check the recorded history and provider account first.
 
 A failure after the provider accepted the paid work is recorded too. Scenario reports its quoted
-charge for any failure after the job is submitted (a failed or unknown job status, a polling
-timeout, a missing asset or address, a failed download); ElevenLabs reports the request's estimate
+charge for any failure once it accepts the job (an unreadable submit answer, a failed or unknown
+job status, a polling timeout, a missing asset or address, a failed download); ElevenLabs reports the request's estimate
 when the accepted response body can't be read; fal reports it when a finished generation returns
 no usable output. The provider marks the error with `assets::charged`, and the tool records that
 charge for the intended file before returning the error, so a retry is checked against the budget

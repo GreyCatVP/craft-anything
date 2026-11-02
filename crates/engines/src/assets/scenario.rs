@@ -67,7 +67,9 @@ fn remaining(start: Instant, timeout: Duration) -> Result<Duration, ToolError> {
 }
 impl Scenario {
     /// Send an authenticated JSON request, requiring status 269 to confirm an API-tier price check.
-    fn call(&self, auth: &str, path: &str, body: Option<&Value>, timeout: Duration) -> Result<Value, ToolError> {
+    /// `charge` is the quoted cost of a paid submission: once Scenario accepts it, an unreadable
+    /// answer still reports that charge. Refusals (non-success statuses) are never charged.
+    fn call(&self, auth: &str, path: &str, body: Option<&Value>, timeout: Duration, charge: Option<f64>) -> Result<Value, ToolError> {
         let agent = http::agent(timeout);
         let url = format!("{}/{path}", self.base);
         let response = if let Some(body) = body {
@@ -80,7 +82,10 @@ impl Scenario {
         if path.ends_with("?dryRun=api") && response.status().as_u16() != 269 {
             return Err(http::garbled("Scenario did not confirm an API-tier price check; check your account before trying again."));
         }
-        http::json(response.into_body())
+        http::json(response.into_body()).map_err(|e| match charge {
+            Some(cost) => super::charged(e, cost),
+            None => e,
+        })
     }
 }
 impl AssetProvider for Scenario {
@@ -127,7 +132,7 @@ impl AssetProvider for Scenario {
         let auth = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(key));
         let start = Instant::now();
         let path = format!("generate/custom/{model}");
-        let quote = self.call(&auth, &format!("{path}?dryRun=api"), Some(&body), remaining(start, self.timeout)?)?;
+        let quote = self.call(&auth, &format!("{path}?dryRun=api"), Some(&body), remaining(start, self.timeout)?, None)?;
         // Fail closed if a server ignores dryRun: never follow it with another paid request.
         if quote.get("job").is_some() || quote.get("jobId").is_some() {
             return Err(http::garbled("Scenario returned a job during the price check; check your account before trying again."));
@@ -141,8 +146,8 @@ impl AssetProvider for Scenario {
         if !cost.is_finite() || cost > req.listed_cost() {
             return Err(ToolError::new(ErrorCode::OverLimit, "Scenario's current quote exceeds this model's spending ceiling; generation was not started."));
         }
-        let submitted = self.call(&auth, &path, Some(&body), remaining(start, self.timeout)?)?;
-        // The job is accepted from here on: every later failure reports the quoted charge.
+        // Accepted from its successful status on: an unreadable answer and every later failure report the quoted charge.
+        let submitted = self.call(&auth, &path, Some(&body), remaining(start, self.timeout)?, Some(cost))?;
         let (url, bytes) = self.finish(&auth, &submitted, start).map_err(|e| super::charged(e, cost))?;
         Ok(Generated { url, bytes, cost_usd: cost })
     }
@@ -154,13 +159,13 @@ impl Scenario {
         let job_id = submitted.pointer("/job/jobId").and_then(Value::as_str).ok_or_else(|| http::garbled("Scenario returned no job identifier."))?;
         http::id(job_id)?;
         loop {
-            let job = self.call(auth, &format!("jobs/{job_id}"), None, remaining(start, self.timeout)?)?;
+            let job = self.call(auth, &format!("jobs/{job_id}"), None, remaining(start, self.timeout)?, None)?;
             match job.pointer("/job/status").and_then(Value::as_str) {
                 Some("success") => {
                     let asset_id =
                         job.pointer("/job/metadata/assetIds/0").and_then(Value::as_str).ok_or_else(|| http::garbled("Scenario completed without an asset."))?;
                     http::id(asset_id)?;
-                    let asset = self.call(auth, &format!("assets/{asset_id}"), None, remaining(start, self.timeout)?)?;
+                    let asset = self.call(auth, &format!("assets/{asset_id}"), None, remaining(start, self.timeout)?, None)?;
                     let url = asset
                         .pointer("/asset/url")
                         .and_then(Value::as_str)
@@ -315,6 +320,17 @@ mod tests {
         let (base, _) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":19}).to_string()), (402, "no credit".into())]);
         let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
         assert_eq!(crate::assets::charged_usd(&error), None, "a refused submission is not charged");
+        // An accepted submission whose answer is empty or not JSON is still charged.
+        for answer in ["", "not json"] {
+            let (base, _) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":19}).to_string()), (200, answer.into())]);
+            let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
+            assert_eq!(error.code, ErrorCode::GarbledOutput);
+            assert_eq!(crate::assets::charged_usd(&error), Some(0.19), "answer {answer:?}");
+        }
+        // An unreadable price check is not: nothing was submitted.
+        let (base, seen) = http::tests::serve(|_| vec![(269, "not json".into())]);
+        assert_eq!(crate::assets::charged_usd(&image(&Scenario { base, ..Scenario::default() }).unwrap_err()), None);
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
     /// Require both credential components and reject control characters during local validation.
     #[test]
