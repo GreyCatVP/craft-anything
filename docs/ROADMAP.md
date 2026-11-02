@@ -142,6 +142,7 @@ No `deny.toml` exists. The survey found no GPL, AGPL or SSPL crates, and only MP
 ### R0.5 Small correctness items from the survey
 Owner: open · Status: done (branch chore/r0.5-cleanups)
 - [x] Decode Objective-C chained pointer offsets past file-empty PAGEZERO mappings (#296).
+- [ ] Recognise root-relative macOS bundles and nested XPC services in Apple app graphs (#282); claimed: contributor, branch bugfix/apple-bundle-projection
 - [x] Checked arithmetic on file offsets in `elf.rs`: `va_to_off` adds a segment's file offset to an
       address delta unchecked, so a `PT_LOAD` at offset `u64::MAX` overflows, found by a lint scan
       of `crates/formats` (#43)
