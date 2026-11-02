@@ -10,8 +10,14 @@ model_3d = "tripo-p1"
 
 # Pictures (textures, skies, concept art), billed by megapixel (`usd_per_megapixel`) or per picture
 # (`usd_per_image`). `size_by` says how the model is told the shape: `image_size` (a named size, the
-# default) or `aspect_ratio`. FLUX prices checked against fal's model pages on 2026-10-19; fal rounds
-# each picture up to whole megapixels, which the estimate doesn't yet.
+# default) or `aspect_ratio`. `round_up_megapixels` opts into a conservative estimate using whole
+# decimal megapixels (1 MP = 1,000,000 pixels); omitted means fractional megapixels.
+# FLUX prices and rounding policy checked on 2026-11-02:
+# https://fal.ai/models/fal-ai/flux/dev and https://fal.ai/models/fal-ai/flux/schnell
+# Both pages say to round up, but fal's publishing guide uses 1024*1024 pixels per unit:
+# https://fal.ai/docs/documentation/serverless/publishing-to-marketplace
+# Use the larger decimal-MP estimate until invoice units are verified. A 1024-square estimate
+# therefore uses two units; this is a conservative budget estimate, not a verified invoice charge.
 
 # Checked on fal's model page on 2026-10-20: $0.15 per picture at 1K and 2K (4K costs double; we ask
 # for the default 1K).
@@ -30,6 +36,7 @@ provider = "fal"
 name = "FLUX.1 [dev]"
 endpoint = "fal-ai/flux/dev"
 usd_per_megapixel = 0.025
+round_up_megapixels = true
 licence = "FLUX.1 [dev] Non-Commercial License (model weights)"
 
 [[image]]
@@ -38,6 +45,7 @@ provider = "fal"
 name = "FLUX.1 [schnell]"
 endpoint = "fal-ai/flux/schnell"
 usd_per_megapixel = 0.003
+round_up_megapixels = true
 licence = "Apache-2.0 (model weights)"
 
 # Game-ready 3D models (GLB) from a picture, billed per model; `faces` is the face-count range the

@@ -101,6 +101,9 @@ pub struct ImageModel {
     /// The price by size; a model billed per picture leaves it at 0.
     #[serde(default)]
     pub usd_per_megapixel: f64,
+    /// Round decimal megapixels up for a conservative estimate, not an invoice measurement.
+    #[serde(default)]
+    pub round_up_megapixels: bool,
     /// The price per picture, whatever its size.
     #[serde(default)]
     pub usd_per_image: f64,
@@ -112,9 +115,11 @@ pub struct ImageModel {
 }
 
 impl ImageModel {
-    /// What a picture of this shape costs.
+    /// Estimate a picture's cost using the table's rate and conservative rounding policy.
     pub fn cost(&self, shape: Shape) -> f64 {
-        self.usd_per_image + self.usd_per_megapixel * shape.megapixels()
+        let megapixels = shape.megapixels();
+        let megapixels = if self.round_up_megapixels { megapixels.ceil() } else { megapixels };
+        self.usd_per_image + self.usd_per_megapixel * megapixels
     }
 }
 
@@ -213,6 +218,7 @@ impl Catalogue {
                 name: "Nano Banana Pro".into(),
                 endpoint: "fal-ai/nano-banana-pro".into(),
                 usd_per_megapixel: 0.0,
+                round_up_megapixels: false,
                 usd_per_image: 0.15,
                 size_by: SizeBy::AspectRatio,
                 licence: "Commercial use enabled through fal.ai".into(),
@@ -469,6 +475,7 @@ mod tests {
         assert_eq!(t.image_model(Some("flux-dev")).unwrap().size_by, SizeBy::ImageSize, "a named size unless the table says otherwise");
         for m in t.images() {
             assert!(AssetProviders::built_in().get(&m.provider).is_some(), "{} names an unknown provider", m.id);
+            assert_eq!(m.round_up_megapixels, matches!(m.id.as_str(), "flux-dev" | "flux-schnell"));
         }
     }
 
@@ -476,17 +483,66 @@ mod tests {
     fn prices_and_face_limits() {
         let c = Catalogue::built_in();
         let flux = c.image_model(Some("flux-dev")).unwrap();
-        assert!((flux.cost(Shape::Square) - 0.0262144).abs() < 1e-9, "1024×1024 at $0.025 per megapixel");
+        assert!((flux.cost(Shape::Square) - 0.05).abs() < 1e-9, "a conservative two decimal megapixels, not a verified invoice charge");
         assert!(flux.cost(Shape::Wide) < flux.cost(Shape::Square));
         let nano = c.image_model(None).unwrap();
         assert_eq!((nano.cost(Shape::Square), nano.cost(Shape::Wide)), (0.15, 0.15), "per picture, whatever its shape");
         let tripo = c.model_3d(Some(" ")).unwrap();
         assert_eq!((tripo.cost(true), tripo.cost(false)), (0.50, 0.40));
         assert_eq!(tripo.faces(), 48..=20_000);
-        assert_eq!(about_usd(tripo.cost(true) + flux.cost(Shape::Square)), "about $0.53");
+        assert_eq!(about_usd(tripo.cost(true) + flux.cost(Shape::Square)), "about $0.55");
         assert_eq!(about_usd(tripo.cost(true) + nano.cost(Shape::Square)), "about $0.65");
         assert_eq!(about_usd(0.0031), "under $0.01");
         assert_eq!(usd(0.0262144), "$0.03");
+    }
+
+    /// Keep FLUX estimates above fractional decimal megapixels for every supported shape.
+    #[test]
+    fn flux_estimates_round_up_to_whole_decimal_megapixels() {
+        let catalogue = Catalogue::built_in();
+        for (id, rate) in [("flux-dev", 0.025), ("flux-schnell", 0.003)] {
+            let model = catalogue.image_model(Some(id)).unwrap();
+            for (shape, units) in [(Shape::Square, 2.0), (Shape::Wide, 1.0), (Shape::Tall, 1.0)] {
+                assert_eq!(model.cost(shape), rate * units);
+                let request = AssetRequest::Image { model, prompt: "a crate", shape };
+                assert_eq!(request.listed_cost(), rate * units);
+                assert!(model.cost(shape) >= rate * shape.megapixels());
+            }
+        }
+    }
+
+    /// Leave flat image prices unchanged for every supported shape and rounding setting.
+    #[test]
+    fn flat_image_prices_do_not_depend_on_rounding() {
+        for (id, price) in [("nano-banana-pro", 0.15), ("scenario-gemini-3-1", 1.0)] {
+            let mut model = Catalogue::built_in().image_model(Some(id)).unwrap().clone();
+            for round_up in [false, true] {
+                model.round_up_megapixels = round_up;
+                for shape in [Shape::Square, Shape::Wide, Shape::Tall] {
+                    assert_eq!(model.cost(shape), price);
+                }
+            }
+        }
+    }
+
+    /// Preserve fractional pricing for custom tables that omit the opt-in rounding policy.
+    #[test]
+    fn custom_models_default_to_fractional_megapixel_estimates() {
+        let model: ImageModel = toml::from_str(
+            r#"
+            id = "custom-image"
+            provider = "custom"
+            name = "Custom image"
+            endpoint = "custom/image"
+            usd_per_megapixel = 0.01
+            usd_per_image = 0.1
+            "#,
+        )
+        .unwrap();
+        assert!(!model.round_up_megapixels);
+        for shape in [Shape::Square, Shape::Wide, Shape::Tall] {
+            assert_eq!(model.cost(shape), 0.1 + 0.01 * shape.megapixels());
+        }
     }
 
     #[test]
