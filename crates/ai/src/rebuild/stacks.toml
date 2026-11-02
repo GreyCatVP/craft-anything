@@ -38,6 +38,11 @@ uses = ["vite"]
 steps = "Use Vite + React + TypeScript. Create the project files directly in app/ (package.json with scripts \"build\": \"tsc -b && vite build\" or \"vite build\", vite.config.ts with base './', index.html, src/). Then run `npm install` and `npm run build` from app/ until it succeeds; the output must be app/dist and must work when served as static files."
 
 [[stack]]
+name = "Plain HTML and CSS"
+asked_by = [" html and css ", " plain html ", " no frameworks ", " no javascript ", " no build step ", " static html "]
+steps = "Use plain HTML, CSS and a little JavaScript only if the page needs it: no framework, no bundler, no build step. Create the project directly in app/: index.html at the top, one .css file (and .js only if needed) beside it, with each other page at its own path (about.html, contact.html). Link the stylesheet with a relative path. Then check that the pages open and look right when served as static files; there is nothing to build."
+
+[[stack]]
 name = "Rust (console)"
 uses = []
 steps = "Use Rust for a console program: create a cargo project in app/ (Cargo.toml, src/main.rs), read its arguments (std::env::args, or clap if it has many options), print to standard output and standard error the way the original does, exit with the original's exit codes, and draw no window. Run `cargo build` until it succeeds."
