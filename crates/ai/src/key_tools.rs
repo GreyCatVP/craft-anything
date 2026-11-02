@@ -1,4 +1,4 @@
-//! Asset providers' keys (fal.ai today) for generated game assets as tools, so they can be set up
+//! Asset providers' keys for generated game assets as tools, so they can be set up
 //! without the app. Each provider has its own key, in the system keychain (or the private key
 //! file); a key is never returned, and the journal redacts `api_key` like every secret-named field.
 
@@ -28,7 +28,7 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "assets_key_status",
             "Is an asset key set up?",
-            "Whether each asset provider (fal.ai today) has a key for generated pictures and 3D models, stored or in its environment variable. `stored` answers for `provider` (default fal). Keys themselves are never shown.",
+            "Whether each asset provider (fal.ai, Scenario and ElevenLabs) has a key for generated pictures, 3D models or audio, stored or in its environment variable. `stored` answers for `provider` (default fal). Keys themselves are never shown.",
             "Shows whether generated art is set up.",
             Effects::READ_ONLY,
             schema_of::<ProviderParams>,
@@ -37,7 +37,7 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "assets_key_set",
             "Save an asset key",
-            "Store an asset provider's key (`provider`, default fal) for generated pictures and 3D models in the system keychain (or the private key file). It's never shown again or written to logs.",
+            "Store an asset provider's key (`provider`: fal, scenario or elevenlabs; default fal) for generated pictures, 3D models or audio in the system keychain (or the private key file). Scenario uses API key:API secret. It's never shown again or written to logs.",
             "Saves your key for generated art.",
             Effects::WRITES_FILESYSTEM,
             schema_of::<SetParams>,
@@ -66,7 +66,7 @@ pub struct ProviderParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetParams {
-    /// The provider's key.
+    /// The provider's API key; Scenario requires API key:API secret.
     pub api_key: String,
     /// The asset provider's id (default `fal`).
     #[serde(default)]

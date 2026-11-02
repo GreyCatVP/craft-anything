@@ -83,7 +83,7 @@
     </td>
     <td width="25%" valign="top">
       <h3>🤖 Agent-ready</h3>
-      314 tools, each one a CLI command and an MCP tool, so any agent can drive the same engine the app uses. No AI is needed to inspect.
+      318 tools, each one a CLI command and an MCP tool, so any agent can drive the same engine the app uses. No AI is needed to inspect.
     </td>
   </tr>
 </table>
@@ -157,6 +157,12 @@ Qwen Code, opencode, goose, Hermes, Maki) can be switched to it per backend; of 
 been run live. Anthropic, OpenAI, OpenRouter and local
 OpenAI-compatible servers are available for questions and analysis (Settings → AI).
 
+Generated assets can use your own **Scenario** account for pictures and 3D models, and
+**ElevenLabs** for text-to-speech, sound effects and music. Add credentials in Settings → AI →
+Game assets, choose picture and 3D models in Settings → Builds, and turn on generated assets
+for the project. The CLI and MCP use the same tools and project budget.
+See [asset provider setup and spending estimates](docs/extending.md#built-in-generated-assets).
+
 ## Built for agents
 
 Every tool is also a CLI subcommand and an MCP tool, so an agent can study a target or run a
@@ -174,7 +180,7 @@ connects Craft Anything to coding-agent apps.
 
 ## Under the hood
 
-A pure-Rust reverse-engineering engine with 314 tools (298 in the engine, the rest from the AI and
+A pure-Rust reverse-engineering engine with 318 tools (302 in the engine, the rest from the AI and
 setup layers) for native programs, .NET, Java, Android, Apple, Electron/JavaScript, websites,
 firmware, packet captures, databases and game files. Its own decoders, disassembler and
 decompiler work without any outside program; Deep mode uses them all, and Ghidra when it's
@@ -228,7 +234,7 @@ only takes it off the list.
 > - **Works today:** the desktop app (Simple and Advanced), the CLI and the MCP server; the
 >   Study → Build → Check → Refine workflow for websites, apps and games with Claude Code as the
 >   builder; website checks at three screen widths; game rebuilds in Unity, Unreal or Godot; Deep
->   mode with Ghidra; generated pictures and 3D models (opt-in, your own fal.ai key); plugins (MCP
+>   mode with Ghidra; generated pictures, 3D models and audio (opt-in, your own provider keys); plugins (MCP
 >   servers, and WASM components in builds with the `wasm-plugins` option).
 > - **Partly there:** building with API keys and other coding agents (built, not yet run live),
 >   behaviour checks for apps and games, a few engine tools tested only against stand-ins.

@@ -1365,3 +1365,19 @@ your files there are the app, edited in place	該位置的檔案就是應用程�
 … {} older	… 還有 {} 則較早內容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 選擇 · Enter 執行 · Esc 關閉
+# Asset providers
+Generate speech	產生語音
+Generate a sound effect	產生音效
+Generate music	產生音樂
+Generate pictures, models and audio	產生圖片、模型和音訊
+Needs an asset provider key. Until then the game is built without generated assets.	需要素材服務金鑰。在新增金鑰之前，遊戲建置不會使用產生的素材。
+Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	費用從你的服務帳戶扣除：估算每個 3D 模型 {model}，每張圖片 {picture}。音訊費用取決於長度。關閉後，遊戲建置不使用產生的素材。
+Add a provider key	新增服務金鑰
+Your asset provider keys	你的素材服務金鑰
+Use fal.ai, Scenario or ElevenLabs for generated assets.	使用 fal.ai、Scenario 或 ElevenLabs 產生素材。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys are kept in your system keychain. Choose picture and 3D providers in Settings → Builds.	使用你自己的服務帳戶產生原創圖片、模型、語音、音效和音樂。視覺素材估算費用：每個模型 {model}，每張圖片 {picture}。每個專案預算為 {budget}。金鑰儲存在系統鑰匙圈中。在設定 → 建置中選擇圖片和 3D 服務。
+Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	透過 fal.ai 或 Scenario 產生圖片和 3D 模型；透過 ElevenLabs 產生語音、音效和音樂。每個模型估算 {model}，每個專案預算為 {budget}。在設定 → 建置中選擇視覺模型。
+API key:API secret	API 金鑰:API 金鑰機密
+3D model generator	3D 模型產生器
+What pictures are turned into 3D models with.	用於將圖片轉換為 3D 模型的服務。
+What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	新遊戲在請求你批准之前可用於產生圖片、3D 模型和音訊的金額。每個專案保留自己的預算。

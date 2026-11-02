@@ -317,7 +317,8 @@ Owner: maintainers · Status: in progress (Codex resume needs a real install)
 
 ### R1.4 Asset provider trait
 Owner: open · Status: done (branch `feature/r1.4-asset-providers`)
-- [ ] Add Scenario image/3D and ElevenLabs speech, sound effects, music and transcription through the asset-provider tools — claimed: one-bit, branch `feature/scenario-elevenlabs-assets` (explicit contributor request)
+- [x] Add Scenario image/3D and ElevenLabs speech, sound effects and music through the asset-provider tools — one-bit, branch `feature/scenario-elevenlabs-assets` (explicit contributor request; local provider, tool and UI tests)
+- [ ] Exercise Scenario image → 3D and ElevenLabs speech, sound effects and music with real credentials; compare spending estimates against invoices (needs keys)
 - [x] `AssetProvider` (image, 3D, later audio) with a cost estimate; fal becomes one impl
 - [x] Model ids and prices in a table; prompts read prices from it (today `assets_note` repeats
       "$0.53")

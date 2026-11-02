@@ -237,6 +237,21 @@ Game engines	ゲームエンジン
 Game files	ゲームファイル
 General	一般
 Generate custom pictures and models	独自の画像とモデルを生成
+Generate pictures, models and audio	画像、モデル、音声を生成
+Generate speech	読み上げを生成
+Generate a sound effect	効果音を生成
+Generate music	音楽を生成
+Needs an asset provider key. Until then the game is built without generated assets.	素材サービスのキーが必要です。追加するまで、生成素材を使わずにゲームを作成します。
+Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	各サービスのアカウントで支払います。3D モデルは約 {model}、画像は約 {picture}。音声の料金は長さによって異なります。オフの場合、生成素材を使わずにゲームを作成します。
+Add a provider key	サービスのキーを追加
+Your asset provider keys	素材サービスのキー
+Use fal.ai, Scenario or ElevenLabs for generated assets.	fal.ai、Scenario、ElevenLabs で素材を生成します。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys are kept in your system keychain. Choose picture and 3D providers in Settings → Builds.	ご自身のサービスアカウントでオリジナルの画像、モデル、読み上げ、効果音、音楽を生成します。視覚素材の概算料金はモデルが {model}、画像が {picture} です。各プロジェクトの予算は {budget} です。キーはシステムのキーチェーンに保存されます。設定 → ビルドで画像と 3D のサービスを選択できます。
+Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	fal.ai または Scenario で画像と 3D モデルを、ElevenLabs で読み上げ、効果音、音楽を生成します。モデルは約 {model}、各プロジェクトの予算は {budget} です。設定 → ビルドで視覚モデルを選択できます。
+API key:API secret	API キー:API シークレット
+3D model generator	3D モデル生成サービス
+What pictures are turned into 3D models with.	画像を 3D モデルに変換するサービス。
+What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	承認を求める前に、新しいゲームが画像、3D モデル、音声の生成に使用できる金額です。各プロジェクトが独自の予算を保持します。
 Generated art (games)	生成アート(ゲーム)
 Generated assets	生成アセット
 Generated pictures and 3D models are made with fal.ai.	生成画像と 3D モデルは fal.ai で作成します。

@@ -1,6 +1,6 @@
 //! Game engines in the UI: the "Build with" choice on Make, the step-by-step "Get Unity / Unreal /
 //! Godot" dialog, the engines list in Settings, and the download progress shown everywhere. Also a
-//! game's generated-assets switch and the fal.ai key it needs.
+//! game's generated-assets switch and provider keys.
 //!
 //! Craft Anything downloads only what it can check (Godot against its official checksums; Unity
 //! Hub and the Epic Games Launcher against their vendors' signatures). Sign-in, licences and the
@@ -12,7 +12,7 @@ use crate::theme::{self, Tokens};
 use crate::{CraftApp, Done, icons, widgets};
 use craft_anything_ai::rebuild::KindRegistry;
 use craft_anything_engine::{CallOptions, Caller};
-use craft_anything_engines::assets::{AssetProvider, AssetProviders, fal};
+use craft_anything_engines::assets::{AssetProvider, AssetProviders};
 use craft_anything_engines::game::{self, Builder, Inventory};
 use craft_anything_engines::ghidra::{self, get};
 use egui::{RichText, Ui, Vec2};
@@ -392,9 +392,9 @@ impl CraftApp {
         self.jobs.spawn("Check the asset keys", false, move |_| Ok(Done::AssetKeys(stored_keys(&hub))));
     }
 
-    /// Whether a fal.ai key is set up: it makes the generated pictures and models.
-    pub fn fal_key(&self) -> Option<bool> {
-        self.asset_keys.as_ref().map(|k| k.get(fal::ID).copied().unwrap_or(false))
+    /// Whether any asset provider has a key. Each tool checks the key for its chosen model.
+    pub fn has_asset_key(&self) -> Option<bool> {
+        self.asset_keys.as_ref().map(|keys| keys.values().any(|ready| *ready))
     }
 
     /// Save an asset provider's key in the system keychain.
@@ -414,9 +414,9 @@ impl CraftApp {
         });
     }
 
-    /// Let the builder generate pictures and 3D models, or not: for the open project on its screen
+    /// Let the builder generate assets, or not: for the open project on its screen
     /// (through the project_assets_allow tool), else for the game being set up on Make. Turning it
-    /// on without a fal.ai key asks for one.
+    /// on without a provider key asks for one.
     pub fn set_generate_assets(&mut self, on: bool) {
         let project = self.workspace.as_ref().filter(|_| self.state.screen == Screen::Project).map(|w| w.root.clone());
         match project {
@@ -426,7 +426,7 @@ impl CraftApp {
             }
             None => self.state.make.generate_assets = on,
         }
-        if on && self.fal_key() == Some(false) {
+        if on && self.has_asset_key() == Some(false) {
             self.state.modal = Some(Modal::Assets);
         }
     }
@@ -436,6 +436,7 @@ impl CraftApp {
 fn key_field(app: &mut CraftApp, ui: &mut Ui, provider: &dyn AssetProvider, save: &str) -> Option<String> {
     let t = Tokens::get(ui.ctx());
     let mut out = None;
+    ui.label(RichText::new(tr(provider.key_hint())).size(theme::CAPTION).color(t.text_dim));
     ui.horizontal(|ui| {
         let key = app.key_inputs.entry(provider.id().into()).or_default();
         let r = ui.add(
@@ -459,28 +460,28 @@ fn key_field(app: &mut CraftApp, ui: &mut Ui, provider: &dyn AssetProvider, save
 /// project builds: a run keeps the person's choice when it saves, and the asset tools read it each time.
 pub fn assets_toggle(app: &mut CraftApp, ui: &mut Ui, mut on: bool) {
     let t = Tokens::get(ui.ctx());
-    if widgets::toggle(ui, &mut on, "Generate custom pictures and models").changed() {
+    if widgets::toggle(ui, &mut on, "Generate pictures, models and audio").changed() {
         app.set_generate_assets(on);
     }
-    let no_key = on && app.fal_key() == Some(false);
+    let no_key = on && app.has_asset_key() == Some(false);
     let note = if no_key {
-        tr("Needs a fal.ai key. Until then the game is built without them.")
+        tr("Needs an asset provider key. Until then the game is built without generated assets.")
     } else {
         let p = AssetPrices::of(app);
         trf(
-            "Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.",
+            "Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.",
             &[("model", &p.model), ("picture", &p.picture)],
         )
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(note).color(if no_key { t.warning } else { t.text_dim }).size(theme::SMALL));
-        if no_key && widgets::link(ui, "Add a fal.ai key").clicked() {
+        if no_key && widgets::link(ui, "Add a provider key").clicked() {
             app.state.modal = Some(Modal::Assets);
         }
     });
 }
 
-/// Asks for a fal.ai key when generated assets are turned on without one.
+/// Asks for provider credentials when generated assets are turned on without them.
 pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
     let t = Tokens::get(ui.ctx());
     ui.set_width(520.0);
@@ -489,8 +490,8 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
         ui.painter().rect_filled(rect, t.radius, t.accent_soft);
         icons::paint(ui, rect, "boxes", 24.0, t.accent_ink);
         ui.vertical(|ui| {
-            ui.label(theme::heading(tr("Your fal.ai key"), theme::SECTION));
-            ui.label(RichText::new(tr("Generated pictures and 3D models are made with fal.ai.")).color(t.text_dim));
+            ui.label(theme::heading(tr("Your asset provider keys"), theme::SECTION));
+            ui.label(RichText::new(tr("Use fal.ai, Scenario or ElevenLabs for generated assets.")).color(t.text_dim));
         });
     });
     ui.add_space(12.0);
@@ -499,7 +500,7 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
             RichText::new({
                 let p = AssetPrices::of(app);
                 trf(
-                    "The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.",
+                    "Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys are kept in your system keychain. Choose picture and 3D providers in Settings → Builds.",
                     &[("model", &p.model), ("picture", &p.picture), ("budget", &p.budget)],
                 )
             })
@@ -508,12 +509,17 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
         .wrap(),
     );
     ui.add_space(10.0);
-    let fal = fal::Fal::default();
-    keys_link(ui, &fal);
-    ui.add_space(8.0);
-    if let Some(key) = key_field(app, ui, &fal, "Save") {
-        *close = true;
-        app.save_asset_key(fal.id().into(), key);
+    let all = AssetProviders::built_in();
+    for provider in all.ids().into_iter().filter_map(|id| all.get(id)) {
+        ui.push_id(provider.id(), |ui| {
+            ui.label(RichText::new(provider.name()).size(theme::SMALL));
+            keys_link(ui, provider.as_ref());
+            if let Some(key) = key_field(app, ui, provider.as_ref(), "Save") {
+                *close = true;
+                app.save_asset_key(provider.id().into(), key);
+            }
+        });
+        ui.add_space(8.0);
     }
     ui.add_space(14.0);
     if widgets::secondary(ui, None, "Not now").clicked() {
@@ -539,7 +545,7 @@ impl AssetPrices {
         let table = Catalogue::built_in();
         let picture =
             table.image_model(app.settings.assets.image_model.as_deref()).or_else(|_| table.image_model(None)).map(|m| m.cost(Shape::Square)).unwrap_or(0.0);
-        let model = table.model_3d(None).map(|m| m.cost(true)).unwrap_or(0.0) + picture;
+        let model = table.model_3d(app.settings.assets.model_3d.as_deref()).or_else(|_| table.model_3d(None)).map(|m| m.cost(true)).unwrap_or(0.0) + picture;
         AssetPrices { model: asset_cost_words(model), picture: asset_cost_words(picture), budget: tr(&usd(app.settings.assets.budget())) }
     }
 }
@@ -562,7 +568,7 @@ pub fn assets_settings(app: &mut CraftApp, ui: &mut Ui) {
             RichText::new({
                 let p = AssetPrices::of(app);
                 trf(
-                    "Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.",
+                    "Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.",
                     &[("model", &p.model), ("budget", &p.budget)],
                 )
             })
@@ -574,23 +580,25 @@ pub fn assets_settings(app: &mut CraftApp, ui: &mut Ui) {
     let all = AssetProviders::built_in();
     for provider in all.ids().into_iter().filter_map(|id| all.get(id)) {
         ui.add_space(6.0);
-        ui.label(RichText::new(provider.name()).size(theme::SMALL));
         let stored = app.asset_keys.as_ref().and_then(|k| k.get(provider.id()).copied());
-        ui.push_id(provider.id(), |ui| {
-            if stored == Some(true) {
-                ui.horizontal(|ui| {
-                    widgets::pill(ui, "Key saved", t.success, t.raised);
-                    if widgets::secondary(ui, None, "Remove").clicked() {
-                        app.remove_asset_key(provider.id().into());
+        egui::CollapsingHeader::new(RichText::new(provider.name()).size(theme::SMALL))
+            .id_salt(("asset-provider", provider.id()))
+            .icon(widgets::disclosure_icon)
+            .show(ui, |ui| {
+                if stored == Some(true) {
+                    ui.horizontal(|ui| {
+                        widgets::pill(ui, "Key saved", t.success, t.raised);
+                        if widgets::secondary(ui, None, "Remove").clicked() {
+                            app.remove_asset_key(provider.id().into());
+                        }
+                    });
+                } else {
+                    if let Some(key) = key_field(app, ui, provider.as_ref(), "Save") {
+                        app.save_asset_key(provider.id().into(), key);
                     }
-                });
-            } else {
-                if let Some(key) = key_field(app, ui, provider.as_ref(), "Save") {
-                    app.save_asset_key(provider.id().into(), key);
+                    keys_link(ui, provider.as_ref());
                 }
-                keys_link(ui, provider.as_ref());
-            }
-        });
+            });
     }
 }
 

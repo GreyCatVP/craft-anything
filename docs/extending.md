@@ -18,6 +18,64 @@ place to add yours. Follow `AGENTS.md` (never crash, layers, external programs t
 | A persisted file | its owner module | A version field and a migration step; see [file-formats.md](file-formats.md). |
 | A UI language | `crates/ui-egui/src/i18n/` and `i18n.rs` | Add a TSV catalog and a language registry entry; preserve placeholders and run the catalog tests and `cargo xtask i18n-coverage`. See [localisation](localization.md) for scope and font setup. |
 
+## Built-in generated assets
+
+Settings → AI → Game assets stores each provider's credentials in the system keychain, separately
+from coding-agent credentials. Use **Scenario** for images and image-to-3D models, **ElevenLabs**
+for text-to-speech, sound effects and music, or the existing **fal.ai** models. Scenario's credential
+is its API key and secret joined with a colon (`API key:API secret`). ElevenLabs needs its API key.
+Credentials also come from `SCENARIO_API_KEY` (the same combined value), `ELEVENLABS_API_KEY`, or
+`FAL_KEY` when no key is stored. Never include real credentials in a project, prompt or committed file.
+
+Choose the picture and 3D models in Settings → Builds. Headless settings use `[assets] image_model`
+and `model_3d`; individual image/model tool calls can override their model. Existing fal.ai defaults
+are preserved. Turn on generated assets for the project (`project_assets_allow`) before generating.
+Having a key alone does not enable spending.
+
+For example, these settings select Scenario for both stages and give a new project enough budget
+for a model and its source picture:
+
+```toml
+[assets]
+image_model = "scenario-gemini-3-1"
+model_3d = "scenario-meshy"
+budget_usd = 20.0
+```
+
+Existing projects keep their own budget; change one through `project_assets_budget` or its project
+screen. To request speech, pass a tool call such as the following (the voice id is an example;
+choose one available to your ElevenLabs account):
+
+```json
+{"text":"Welcome to the game.","voice_id":"JBFqnCBsd6RMkjVDRZzb","save_as":"Audio/welcome.mp3"}
+```
+
+The shared tool path saves assets inside the project's `app/` folder and records each asset's
+estimated cost against the project budget. `assets_speech_generate` accepts text and a voice id;
+`assets_sound_generate` and `assets_music_generate` accept a prompt and duration. These tools save
+MP3 audio, work with ElevenLabs alone, and are available in the CLI, MCP and builder for generating
+original assets.
+
+Scenario bills Compute Units, which depend on model settings and account discounts. Its table
+amounts are conservative spending ceilings, not published per-generation prices: $1 per image
+and $10 per 3D model. Before submitting a paid job, the provider checks Scenario's authenticated
+`dryRun=api` quote and refuses missing, invalid or over-ceiling quotes. The dollar tally values a
+CU at $0.01, an estimate based on the Starter plan; it is not an invoice. A Scenario 3D call therefore
+needs a project budget covering the $10 ceiling (plus its source picture when generated first),
+even if the eventual quote is smaller. ElevenLabs estimates use the model rates in `assets.toml`
+and the requested character count or duration. Speech rates assume standard-priced voices;
+Voice Library credit multipliers can increase the actual charge. The project budget tracks these
+estimates, and actual provider billing can depend on your plan and selected voice.
+
+Protocol and budget behavior is tested with local stand-in providers. Scenario and ElevenLabs
+generation have not been tested with live account credentials. Current API sources:
+[Scenario generation](https://docs.scenario.com/api/resources/generate/methods/run_model),
+[Scenario Compute Units](https://help.scenario.com/articles/7934059476-api-usage-and-credits-compute-units),
+[Scenario pricing](https://www.scenario.com/pricing),
+[ElevenLabs speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert),
+[sound effects](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert), and
+[music](https://elevenlabs.io/docs/api-reference/music/compose).
+
 ## Plugins: external MCP servers
 
 Any MCP server, local (stdio) or remote (Streamable HTTP), can add tools without changing code.

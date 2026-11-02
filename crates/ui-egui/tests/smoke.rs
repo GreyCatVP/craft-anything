@@ -127,7 +127,7 @@ fn fal_key(stored: bool) -> std::collections::BTreeMap<String, bool> {
 }
 
 #[test]
-fn turning_on_generated_assets_without_a_fal_key_asks_for_one() {
+fn turning_on_generated_assets_offers_all_providers_and_accepts_a_scenario_key() {
     use craft_anything_engine::workspace::TargetRef;
     use craft_anything_engines::game::{Builder, Installed, Inventory};
     use craft_anything_ui_egui::state::Modal;
@@ -150,12 +150,14 @@ fn turning_on_generated_assets_without_a_fal_key_asks_for_one() {
     });
     h.run_steps(3);
     assert!(!h.state().state.make.generate_assets, "off until the person turns it on");
-    h.get_by_label("Generate custom pictures and models").click();
+    h.get_by_label("Generate pictures, models and audio").click();
     h.run_steps(3);
     assert!(h.state().state.make.generate_assets);
     assert_eq!(h.state().state.modal, Some(Modal::Assets), "no key yet, so it's asked for");
-    h.get_by_label("Your fal.ai key");
+    h.get_by_label("Your asset provider keys");
     h.get_by_label("fal.ai key");
+    h.get_by_label("Scenario key");
+    h.get_by_label("ElevenLabs key");
     h.get_by_label("Not now").click();
     h.run_steps(3);
     assert_eq!(h.state().state.modal, None);
@@ -164,14 +166,24 @@ fn turning_on_generated_assets_without_a_fal_key_asks_for_one() {
     for deep in [true, false] {
         h.state_mut().settings.deep_mode = deep;
         h.run_steps(2);
-        h.get_by_label_contains("Off, the game is built without them.");
+        h.get_by_label_contains("Off, the game is built without generated assets.");
         assert!(h.query_by_label_contains("original game").is_none());
     }
     // With a key, turning it on asks nothing.
-    h.state_mut().asset_keys = Some(fal_key(true));
-    h.get_by_label("Generate custom pictures and models").click();
+    h.state_mut().asset_keys = Some([("scenario".to_string(), true)].into());
+    h.get_by_label("Generate pictures, models and audio").click();
     h.run_steps(3);
     assert!(h.state().state.make.generate_assets && h.state().state.modal.is_none());
+    // Provider credentials remain reachable in Settings without crowding the AI controls.
+    h.state_mut().asset_keys = Some(Default::default());
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(3);
+    h.get_by_label("Scenario").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Scenario").click();
+    h.run_steps(3);
+    h.get_by_label("Scenario key");
 }
 
 #[test]
@@ -272,7 +284,7 @@ fn a_game_project_shows_its_asset_spending_and_can_raise_the_budget() {
     assert!(wait(&mut h, |a| a.facts.assets.0 == 1));
     h.get_by_label("1 · $0.51 of $5.00");
     // Generated assets are the person's choice, saved with the project through project_assets_allow.
-    h.get_by_label("Generate custom pictures and models").click();
+    h.get_by_label("Generate pictures, models and audio").click();
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.generate_assets)));
     assert!(Workspace::open(&root).unwrap().manifest.generate_assets);
     assert!(h.state().state.modal.is_none(), "a key is set up");
