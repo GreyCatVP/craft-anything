@@ -962,12 +962,12 @@ fn feed(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         let step = items.iter().rposition(|i| matches!(i, FeedItem::Step { .. }));
         // The builder's own words for the step it's on, else the workflow's stage.
         let doing = plan(items).and_then(|p| p.iter().find(|s| s.status == PlanStatus::Doing)).map(|s| s.doing.as_str());
-        let title = doing.or_else(|| {
-            step.and_then(|s| match &items[s] {
-                FeedItem::Step { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
+        let workflow = step.and_then(|s| match &items[s] {
+            FeedItem::Step { text, .. } => Some(activity(text)),
+            _ => None,
         });
+        let title = doing.map(str::to_string).or(workflow);
+        let fallback = tr("Working on it");
         let done: usize = items[step.map_or(0, |s| s + 1)..]
             .iter()
             .map(|i| match i {
@@ -984,7 +984,7 @@ fn feed(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
                 .collect::<Vec<_>>()
                 .join("  ·  ");
         let (began, quiet) = app.open_run().map_or((None, None), |r| (Some(r.started()), Some(r.quiet_for())));
-        widgets::working_since(ui, title.unwrap_or("Working on it"), (!detail.is_empty()).then_some(detail.as_str()), began, quiet);
+        widgets::working_since(ui, title.as_deref().unwrap_or(&fallback), (!detail.is_empty()).then_some(detail.as_str()), began, quiet);
     }
     run_details(app, ui, status_row);
     for (id, a, shown) in answers {
@@ -1109,7 +1109,7 @@ fn draw_items(
         questions_up_to(app, ui, i);
         ui.push_id(i, |ui| match item {
             FeedItem::User(text) => chat::user_bubble(ui, text, false),
-            FeedItem::Step { text, .. } => chat::activity_row(ui, RichText::new(text).color(t.text_dim).size(theme::SMALL)),
+            FeedItem::Step { text, .. } => chat::activity_row(ui, RichText::new(activity(text)).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Paused => chat::activity_row(ui, RichText::new(tr("Paused.")).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Agent { text, streaming } => {
                 chat::bubble(&t, false, false).show(ui, |ui| {
@@ -1173,6 +1173,51 @@ fn draw_items(
         ui.add_space(chat::MESSAGE_GAP);
     }
     questions_up_to(app, ui, usize::MAX);
+}
+
+/// The rebuild workflow's own activity lines. Exact catalog entries first; the lines that carry a
+/// URL, a page count or an error are matched by their fixed parts. The builder's own words and
+/// tool activity are left alone.
+fn activity(text: &str) -> String {
+    let exact = tr(text);
+    if exact != text {
+        return exact;
+    }
+    if let Some(url) = text.strip_prefix("Opening ").and_then(|r| r.strip_suffix(" in a private browser…")) {
+        return trf("Opening {url} in a private browser…", &[("url", url)]);
+    }
+    if let Some(rest) = text.strip_prefix("Photographing more pages (")
+        && let Some((counts, page)) = rest.split_once("): ")
+        && let Some((i, n)) = counts.split_once(" of ")
+    {
+        let page = page.strip_suffix('…').unwrap_or(page);
+        return trf("Photographing more pages ({i} of {n}): {path}…", &[("i", i), ("n", n), ("path", page)]);
+    }
+    if let Some(rest) = text.strip_prefix("Couldn't open its menus and pop-ups at ")
+        && let Some((width, error)) = rest.split_once(" px: ")
+    {
+        return trf("Couldn't open its menus and pop-ups at {width} px: {error}", &[("width", width), ("error", error)]);
+    }
+    if let Some(rest) = text.strip_prefix("Couldn't photograph ")
+        && let Some((path, error)) = rest.rsplit_once(": ")
+    {
+        return trf("Couldn't photograph {path}: {error}", &[("path", path), ("error", error)]);
+    }
+    if let Some(name) = text.strip_suffix(" is taking the game's own files out…") {
+        return trf("{name} is taking the game's own files out…", &[("name", name)]);
+    }
+    if let Some(rest) = text.strip_suffix("). Building with what's there.")
+        && let Some((name, why)) = rest.split_once(" couldn't finish taking the files out (")
+    {
+        return trf("{name} couldn't finish taking the files out ({why}). Building with what's there.", &[("name", name), ("why", why)]);
+    }
+    if let Some(error) = text.strip_prefix("The check couldn't finish (").and_then(|r| r.strip_suffix("). Trying it once more…")) {
+        return trf("The check couldn't finish ({error}). Trying it once more…", &[("error", error)]);
+    }
+    if let Some(why) = text.strip_prefix("The builder stopped (").and_then(|r| r.strip_suffix("). Picking up where it left off…")) {
+        return trf("The builder stopped ({why}). Picking up where it left off…", &[("why", why)]);
+    }
+    text.to_string()
 }
 
 fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advanced: bool, t: &Tokens) {

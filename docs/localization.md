@@ -19,10 +19,12 @@ under the repository's MIT OR Apache-2.0 licence. Each UTF-8 line has two column
 `English source<TAB>translation`. Comments begin with `#`; `\n` represents a newline. The language
 registry in `i18n.rs` embeds the catalogs.
 
-The catalogs cover first run, new projects, project controls, Settings, the workbench, tool titles,
-tool groups, target descriptions, tooltips and accessibility labels. The command palette searches
-translated tool titles as well as English titles and stable tool IDs. Missing translations fall
-back to the original English text. Product and technology names retain their spelling.
+The catalogs cover first run, new projects, project controls, the rebuild workflow's own activity
+lines (the builder's words and tool activity stay as they are), Settings, the workbench, tool
+titles, tool groups, target descriptions, tooltips and accessibility labels. The command palette
+searches translated tool titles as well as English titles and stable tool IDs. Missing
+translations fall back to the original English text. Product and technology names retain their
+spelling.
 
 User text, AI responses, evidence and raw tool results, tool summaries and schema descriptions,
 logs and exported reports retain their original text. The CLI, MCP, tool IDs, stored project data
