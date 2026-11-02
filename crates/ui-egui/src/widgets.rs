@@ -449,15 +449,17 @@ pub fn working_since(ui: &mut Ui, title: &str, detail: Option<&str>, began: Opti
             let arc = (0..=20).map(|i| c + radius * Vec2::angled(start + sweep * i as f32 / 20.0)).collect();
             ui.painter().add(egui::Shape::line(arc, Stroke::new(2.5, t.accent)));
             ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new(tr(title)).font(theme::semibold(theme::BODY)).color(t.text));
-                if !sub.is_empty() {
-                    ui.add(egui::Label::new(RichText::new(sub).color(t.text_dim).size(theme::SMALL)).wrap());
-                }
-            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let clock = crate::usage::duration_words(std::time::Duration::from_secs(secs));
                 ui.label(RichText::new(clock).font(theme::mono(12.5)).color(t.text_faint));
+                // The title and detail get the space left of the clock, so a long command or
+                // error wraps instead of running under it.
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.add(egui::Label::new(RichText::new(tr(title)).font(theme::semibold(theme::BODY)).color(t.text)).wrap());
+                    if !sub.is_empty() {
+                        ui.add(egui::Label::new(RichText::new(sub).color(t.text_dim).size(theme::SMALL)).wrap());
+                    }
+                });
             });
         });
         // An indeterminate sweep along the bottom: movement even when nothing new has arrived.
