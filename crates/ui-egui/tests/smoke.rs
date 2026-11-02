@@ -1048,10 +1048,13 @@ fn a_claude_ais_effort_is_set_in_settings() {
     h.run_steps(2);
     h.get_by_label("Effort:");
     assert!(h.state().backend_options.get("Claude Code").and_then(|o| o.effort).is_none(), "the usual level until one is chosen");
-    h.state_mut().set_effort("Claude Code", Effort::Max);
+    // Chosen through the dropdown itself, which shows the level in use.
+    h.get_by_value("high").click();
+    h.run();
+    h.get_by_label("max").click();
     assert!(wait(&mut h, |a| a.backend_options.get("Claude Code").and_then(|o| o.effort) == Some(Effort::Max)));
     h.run_steps(2);
-    h.get_by_label("Effort:");
+    h.get_by_value("max");
 }
 
 #[test]

@@ -435,6 +435,35 @@ impl CliConversation {
     }
 }
 
+/// The environment an agent program runs with: Claude Code's limits raised for a long build, and
+/// the effort it thinks with. Other agents ignore these names.
+fn agent_env(builder: bool, effort: Option<crate::model::Effort>) -> Vec<(&'static str, String)> {
+    let (tool, shell) = if builder { (24 * 3600, 8 * 3600) } else { (40 * 60, 10 * 60) };
+    let ms = |secs: u64| (secs * 1000).to_string();
+    vec![
+        ("MCP_TOOL_TIMEOUT", ms(tool)),
+        // Progress updates keep a long tool call alive; this also covers one that sends none.
+        ("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT", "0".into()),
+        // A builder waits for every tool result (Ghidra above all) instead of carrying on without it.
+        ("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS", if builder { "0" } else { "120000" }.into()),
+        ("BASH_DEFAULT_TIMEOUT_MS", ms(shell / 2)),
+        ("BASH_MAX_TIMEOUT_MS", ms(shell)),
+        // High effort for Claude Code unless chosen. An environment variable rather than
+        // `--effort`: it ranks highest, and an older Claude Code that doesn't know it ignores it.
+        ("CLAUDE_CODE_EFFORT_LEVEL", crate::prompt::choose_effort(effort).as_str().into()),
+    ]
+}
+
+/// The command run on another computer over SSH. ssh passes on none of our environment, so it is
+/// set there with `env`.
+fn remote_command(program: &str, args: Vec<String>, env: &[(&'static str, String)]) -> Vec<String> {
+    let mut cmd = vec!["env".to_string()];
+    cmd.extend(env.iter().map(|(k, v)| format!("{k}={v}")));
+    cmd.push(program.to_string());
+    cmd.extend(args);
+    cmd
+}
+
 fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, session: &Mutex<Option<String>>, verified: &Mutex<Option<bool>>) {
     let name = spec.config.name.clone();
     let agent = spec.config.model.clone();
@@ -481,12 +510,14 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, ses
     };
     let args = build_args(adapter.as_ref(), &spec.options, text, &preamble, &mcp, if adapter.resumes() { resume.as_deref() } else { None }, access);
     let shown = FailureContext::new(&program, &args, text, remote.as_deref(), spec);
+    // A builder turn may take hours and sit silent for long stretches: Ghidra's first look at a big
+    // game, an engine build, or the person answering a question. Claude Code's own limits are
+    // raised to match, so nothing cuts a long clone short (its defaults stop a quiet tool call at
+    // 30 minutes and a background build at 10).
+    let (turn, quiet) = if builder { (24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60) };
+    let env = agent_env(builder, spec.options.effort);
     let (prog, argv) = match &remote {
-        Some(host) => {
-            let mut remote_cmd = vec![program.clone()];
-            remote_cmd.extend(args);
-            ("ssh".to_string(), crate::ssh::ssh_args(host, &remote_cmd))
-        }
+        Some(host) => ("ssh".to_string(), crate::ssh::ssh_args(host, &remote_command(&program, args, &env))),
         None => (program.clone(), args),
     };
     let _ =
@@ -494,26 +525,14 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, ses
     let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
     let (p2, tx2, tx_err) = (parser.clone(), tx.clone(), tx.clone());
     let stop2 = stop.clone();
-    // A builder turn may take hours and sit silent for long stretches: Ghidra's first look at a big
-    // game, an engine build, or the person answering a question. Claude Code's own limits are
-    // raised to match, so nothing cuts a long clone short (its defaults stop a quiet tool call at
-    // 30 minutes and a background build at 10).
-    let (turn, quiet, tool, shell) = if builder { (24 * 3600, 8 * 3600, 24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60, 40 * 60, 10 * 60) };
-    let ms = |secs: u64| (secs * 1000).to_string();
     let mut proc = (if remote.is_none() { adapter.process(&prog) } else { Process::new(&prog) })
         .args(&argv)
         .timeout(Duration::from_secs(spec.options.timeout_secs.unwrap_or(turn)))
-        .idle_timeout(Duration::from_secs(quiet))
-        .env("MCP_TOOL_TIMEOUT", ms(tool))
-        // Progress updates keep a long tool call alive; this also covers one that sends none.
-        .env("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT", "0")
-        // A builder waits for every tool result (Ghidra above all) instead of carrying on without it.
-        .env("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS", if builder { "0" } else { "120000" })
-        .env("BASH_DEFAULT_TIMEOUT_MS", ms(shell / 2))
-        .env("BASH_MAX_TIMEOUT_MS", ms(shell))
-        // High effort for Claude Code. An environment variable rather than `--effort`: it ranks
-        // highest, and an older Claude Code that doesn't know it simply ignores it.
-        .env("CLAUDE_CODE_EFFORT_LEVEL", crate::prompt::choose_effort(spec.options.effort).as_str())
+        .idle_timeout(Duration::from_secs(quiet));
+    for (k, v) in &env {
+        proc = proc.env(k, v.as_str());
+    }
+    let mut proc = proc
         .stdout_cap(4 * 1024 * 1024)
         .cancel_when(move || stop2.is_stopped())
         .on_stdout_line(move |l| {
@@ -742,6 +761,22 @@ impl Drop for CliConversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Over SSH our environment doesn't reach the other computer, so the chosen effort (and Claude
+    /// Code's raised limits) go in the remote command itself.
+    #[test]
+    fn an_agent_over_ssh_gets_its_effort_on_the_other_computer() {
+        let env = agent_env(true, Some(crate::model::Effort::Max));
+        assert!(env.contains(&("CLAUDE_CODE_EFFORT_LEVEL", "max".to_string())));
+        assert!(env.contains(&("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS", "0".to_string())));
+        let cmd = remote_command("claude", vec!["-p".into(), "hi".into()], &env);
+        assert_eq!(cmd.first().map(String::as_str), Some("env"));
+        assert!(cmd.contains(&"CLAUDE_CODE_EFFORT_LEVEL=max".to_string()));
+        assert_eq!(cmd[cmd.len() - 3..], ["claude", "-p", "hi"]);
+        let line = crate::ssh::ssh_args("box", &cmd).pop().unwrap_or_default();
+        assert!(line.starts_with("env ") && line.contains("CLAUDE_CODE_EFFORT_LEVEL=max") && line.ends_with("claude -p hi"), "{line}");
+        assert!(agent_env(false, None).contains(&("CLAUDE_CODE_EFFORT_LEVEL", "high".to_string())), "high unless chosen");
+    }
     use crate::BackendKind;
 
     fn mcp() -> McpCommand {
