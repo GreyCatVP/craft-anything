@@ -284,7 +284,7 @@ fn the_assets_note_reads_prices_from_the_asset_table() {
     assert!(before.contains("a picture (about $0.15)") && before.contains("(about $0.65 each)"), "{before}");
     assert_eq!(assets_note(&ws, Some("no-such-model"), None), before, "an unknown model quotes the default's prices");
     let schnell = assets_note(&ws, Some("flux-schnell"), None);
-    assert!(schnell.contains("(about $0.50 each)") && schnell.contains("a picture (under $0.01)"), "{schnell}");
+    assert!(schnell.contains("(about $0.51 each)") && schnell.contains("a picture (about $0.01)"), "{schnell}");
     let scenario = assets_note(&ws, Some("scenario-gemini-3-1"), Some("scenario-meshy"));
     assert!(scenario.contains("(about $11.00 each)"), "configured 3D and image prices: {scenario}");
 }

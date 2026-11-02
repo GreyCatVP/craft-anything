@@ -56,6 +56,9 @@ previous asset records and spending. Provider switches do not change the selecte
 Headless clients use `project_assets_allow` with `project`, `provider` and `allow` to control a
 single provider; omit `allow` to read its status. Omitting `provider` retains the existing master
 asset switch. `project_assets_budget` reads or sets the shared budget and reports spending.
+While the master switch is paused, disabling a provider preserves the other remembered choices
+without resuming generation. Enabling one provider from the paused state activates only that
+provider; it does not silently enable other unchecked providers.
 
 For example, these settings select Scenario for both stages and give a new project enough budget
 for a model and its source picture:
@@ -81,6 +84,22 @@ estimated cost against the project budget. `assets_speech_generate` accepts text
 MP3 audio, work with ElevenLabs alone, and are available in the CLI, MCP and builder for generating
 original assets.
 
+The spending ledger is checked before authorizing generation or changing a budget. Only a missing
+`assets.json` means no history; an unreadable, invalid, oversized or non-regular ledger blocks
+generation and is left untouched. Ledger symlinks are rejected rather than followed or replaced.
+The sidebar shows spending as unavailable until that history is repaired.
+
+Once generation has returned a valid reported cost, its spending record is saved before the output
+file is published. A failed ledger write leaves the destination untouched. A later file-save
+failure keeps the spending record and any previous destination file, so a record's `file` is the
+intended output location rather than proof that the new bytes were saved. A cost above the approved
+estimate is recorded and reported as an overrun; a precursor overrun stops the 3D stage. Do not
+blindly regenerate after these errors: check the recorded history and provider account first.
+
+This is not a reservation journal or a guarantee against process crashes or ambiguous provider
+timeouts. A provider may charge a request whose result never reaches the app, or a ledger write
+itself can fail. Use provider-side spending limits when a hard account-level cap is needed.
+
 Scenario bills Compute Units, which depend on model settings and account discounts. Its table
 amounts are conservative spending ceilings, not published per-generation prices: $1 per image
 and $10 per 3D model. Before submitting a paid job, the provider checks Scenario's authenticated
@@ -91,6 +110,10 @@ even if the eventual quote is smaller. ElevenLabs estimates use the model rates 
 and the requested character count or duration. Speech rates assume standard-priced voices;
 Voice Library credit multipliers can increase the actual charge. The project budget tracks these
 estimates, and actual provider billing can depend on your plan and selected voice.
+fal FLUX estimates round up to whole decimal megapixels conservatively. Its model pages specify
+rounding up, while its publishing guide uses a 1024×1024-pixel unit; the effective invoice unit
+still needs a real invoice check. The app therefore uses the larger estimate rather than claiming
+a measured per-image charge.
 
 Protocol and budget behavior is tested with local stand-in providers. Scenario and ElevenLabs
 generation have not been tested with live account credentials. Current API sources:

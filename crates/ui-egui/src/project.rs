@@ -481,21 +481,28 @@ pub struct Facts {
     pub references: usize,
     /// Generated assets: how many, what they cost.
     pub assets: (usize, f64),
+    /// Why spending could not be read; an unreadable ledger must not appear as zero spending.
+    pub assets_error: Option<String>,
     /// The builder's open questions, most important first.
     pub open_questions: Vec<String>,
 }
 
 impl Facts {
+    /// Read project facts on a worker, keeping ledger failures distinct from an empty history.
     pub fn read(ws: &Workspace, godot: Option<&Path>) -> Facts {
         let dir = ws.app_dir();
-        let a = ws.assets();
+        let (assets, assets_error) = match ws.try_assets() {
+            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
+            Ok(records) => ((records.len(), records.iter().fold(0.0, |sum, record| sum + record.cost_usd)), None),
+            Err(error) => ((0, 0.0), Some(error.for_people())),
+        };
         Facts {
             root: ws.root.clone(),
             site: rebuild::site_dir(&dir).is_some(),
             program: rebuild::launch(&dir, godot).is_some(),
             references: ws.references().len(),
-            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
-            assets: (a.len(), a.iter().fold(0.0, |s, x| s + x.cost_usd)),
+            assets,
+            assets_error,
             open_questions: craft_anything_ai::rebuild::self_check::open_questions(ws).into_iter().map(|u| u.question).collect(),
         }
     }
@@ -621,7 +628,12 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     if widgets::link(ui, "Manage provider keys").clicked() {
         app.state.modal = Some(Modal::Assets);
     }
-    let assets = (app.facts.root == ws.root).then_some(app.facts.assets);
+    let facts_match = app.facts.root == ws.root;
+    let assets = (facts_match && app.facts.assets_error.is_none()).then_some(app.facts.assets);
+    if let Some(error) = app.facts.assets_error.as_deref().filter(|_| facts_match) {
+        ui.label(RichText::new(tr("Asset spending is unavailable. Repair assets.json before generating.")).color(t.warning).size(theme::SMALL))
+            .on_hover_text(error);
+    }
     ui.add_space(6.0);
     let budget = ws.manifest.asset_budget_usd;
     let (count, spent, remaining) = assets.map_or_else(
@@ -1778,6 +1790,45 @@ impl CraftApp {
 mod tests {
     use super::*;
     use craft_anything_ai::AgentEvent;
+
+    /// A broken ledger is shown as unavailable until repaired, never as an empty spending history.
+    #[test]
+    fn asset_sidebar_reports_a_broken_ledger_without_resetting_spending() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let ledger = ws.root.join("assets.json");
+        let broken = b"{not-json";
+        std::fs::write(&ledger, broken).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.facts = Facts::read(&ws, None);
+        assert!(app.facts.assets_error.is_some());
+        assert_eq!(std::fs::read(&ledger).unwrap(), broken);
+        let mut setup = false;
+        let mut h = Harness::builder().with_size(egui::vec2(320.0, 750.0)).build_ui_state(
+            move |ui, (app, ws)| {
+                if !setup {
+                    CraftApp::setup_context(ui.ctx());
+                    setup = true;
+                    return;
+                }
+                asset_line(app, ui, ws);
+            },
+            (app, ws),
+        );
+        h.run_steps(2);
+        h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
+        h.get_by_label("Assets: … · estimated spent $…");
+        h.get_by_label("Budget $5.00 · remaining $…");
+        assert!(h.query_by_label("Assets: 0 · estimated spent $0.00").is_none());
+        std::fs::write(&ledger, b"[]").unwrap();
+        let (app, ws) = h.state_mut();
+        app.facts = Facts::read(ws, None);
+        h.run_steps(2);
+        assert!(h.query_by_label("Asset spending is unavailable. Repair assets.json before generating.").is_none());
+        h.get_by_label("Assets: 0 · estimated spent $0.00");
+        h.get_by_label("Budget $5.00 · remaining $5.00");
+    }
 
     /// Cached spending stays hidden until it belongs to the project displayed by the sidebar.
     #[test]

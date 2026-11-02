@@ -224,6 +224,12 @@ edit, right before committing.
 
 ## Design
 
+**A damaged spending ledger looked like an empty project.** Budget authorization must use a
+checked ledger read; only a missing ledger is empty. Never overwrite an unreadable history with
+a new row. After a provider returns, record its reported cost before publishing its output:
+rejecting a late cost overrun or deleting an output cannot undo an expense already incurred.
+Surface the error, retain known spending and stop any following paid stage instead of hiding it.
+
 **Reading literals and skipping the rest.** The Electron window reader skipped a spread inside
 `webPreferences`, so a window whose preferences came partly from another object was reported as
 "contextIsolation is not set; the default applies", which nobody had checked until a live run on

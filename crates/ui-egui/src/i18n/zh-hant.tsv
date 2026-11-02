@@ -1393,3 +1393,4 @@ Asset budget in USD	素材預算（美元）
 Save budget	儲存預算
 Saving asset settings…	正在儲存素材設定…
 Enter an amount from 0 to 10000 USD.	請輸入 0 到 10000 美元之間的金額。
+Asset spending is unavailable. Repair assets.json before generating.	無法讀取素材支出。請先修復 assets.json，再產生素材。

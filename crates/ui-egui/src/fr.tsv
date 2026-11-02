@@ -858,3 +858,4 @@ Asset budget in USD	Budget des ressources en USD
 Save budget	Enregistrer le budget
 Saving asset settings…	Enregistrement des réglages des ressources…
 Enter an amount from 0 to 10000 USD.	Saisissez un montant entre 0 et 10000 USD.
+Asset spending is unavailable. Repair assets.json before generating.	Dépenses indisponibles. Réparez assets.json avant de générer des ressources.

@@ -60,6 +60,12 @@ their previous master asset opt-in behavior until individual providers are selec
 tests cover independent provider switches, exact/lowered budgets, existing spending, reopening,
 migration and disabled-provider no-spend cases. No new live generation was needed for these controls.
 
+Budget authorization and recording now reject unreadable or invalid spending history instead of
+treating it as zero. The sidebar shows unavailable spending until the ledger is repaired. Returned
+costs are recorded before output publication; failed output saves retain their receipt, and late
+cost overruns stop any following paid stage after preserving known spending. This is checked
+receipt accounting, not a crash-safe reservation journal or an invoice reconciliation service.
+
 ### Linux Unreal setup
 
 Unreal installations registered in `~/.config/Epic/UnrealEngine/Install.ini` are found on Linux.
