@@ -97,6 +97,17 @@ fn a_coding_agent_test_says_it_only_checked_the_version() {
     assert_eq!(serde_json::to_value(&r).unwrap()["version_only"], true, "the CLI's ai test prints it");
 }
 
+/// Every known agent with an adapter of its own is offered when adding a coding agent.
+#[test]
+fn every_agent_with_its_own_adapter_is_offered() {
+    let adapters = cli_agents::adapters::AgentAdapters::built_in();
+    let own: Vec<&str> = cli_agents::KNOWN.iter().map(|(id, _, _)| *id).filter(|id| adapters.for_agent(id).ids().contains(id)).collect();
+    assert!(own.contains(&"maki"), "{own:?}");
+    for id in own {
+        assert!(BackendKind::AgentCli.suggested_models().contains(&id), "{id} isn't offered");
+    }
+}
+
 /// #37: doctor asks a local server for its models instead of trusting an open port.
 #[test]
 fn a_local_server_is_reachable_only_when_it_lists_models() {
