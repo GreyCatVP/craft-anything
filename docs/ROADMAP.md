@@ -862,7 +862,7 @@ to the project next. Pins are the engine's (tools), kept in the project's `pinne
       291 MB pin to 49 MB, far more than sharing could
 - [x] Leave out a project's old program copies (`*.running-*.exe`, 22 MB each in one project), which
       a pin can't tell from the program's helpers by their name alone
-- [ ] Say when a light pin ended up copying what it meant to share (a drive without hard links)
+- [x] Say when a light pin ended up copying what it meant to share (a drive without hard links): `copied_shared_bytes` on `Pin`
 - [ ] Pins of one project sharing with each other, so a third frozen copy of the same assets
       takes no more space
 - [ ] Pin a website (a frozen copy of the built site, each served on its own port)
