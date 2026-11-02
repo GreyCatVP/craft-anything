@@ -695,9 +695,7 @@ impl Worker {
                 self.emit(RunEvent::Checked(c.clone()));
             }
             let kind_checks = kind.checks(ws);
-            let not_good = checks
-                .iter()
-                .find(|c| !c.good(opts.good_enough) && kind_checks.iter().find(|check| check.id() == c.check).is_none_or(|check| check.can_refine(c)));
+            let not_good = checks.iter().find(|c| !c.good(opts.good_enough) && kinds::can_refine(&kind_checks, c));
             if let Some(p) = self.added(ws) {
                 prompt = p;
                 continue;
