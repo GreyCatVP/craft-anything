@@ -714,7 +714,7 @@ Gaps found while using the app for real projects.
 - [x] A folded sidebar stays lined up with the open one: its button is centred over the row
       icons, its sections keep their height, so nothing moves when it folds, and a rule takes the
       place of each heading, with Refresh and the Pinned arrow still there
-- [ ] A prompt brought back with Up keeps its pictures (only the text comes back now)
+- [x] A prompt brought back with Up keeps its pictures (only the text comes back now)
 - [x] The smoke test `a_game_project_shows_its_asset_spending_and_can_raise_the_budget` failed
       once in a full run and passed in the next 11: wait for `a.facts.assets.0 == 1` instead of a fixed frame step
 - [x] The prompt box no longer jumps while typing: a frame laid out with its old height is
@@ -874,7 +874,8 @@ to the project next. Pins are the engine's (tools), kept in the project's `pinne
       page with the frozen/light choice and each copy's size; the pin tools are in the command
       palette with every other tool
 - [ ] Opening a pin that's already running brings its window to the front, instead of a message
-- [ ] Show a pin's folder (the right-click menu), and how much space pins take in Settings
+- [ ] How much space pins take in Settings. Showing a pin's folder is done in the right-click menu,
+      through `project_open_folder` with `pin` — claimed: muraa-p, branch bugfix/r2.10-pin-folder
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't blocked
 
 ## M3 Engine depth

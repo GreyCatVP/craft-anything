@@ -44,7 +44,7 @@ impl StandIns {
             let running = Arc::new(AtomicBool::new(true));
             let feed = Arc::new(Mutex::new(feed::FeedLog::open(&ws)));
             if let Some(shown) = opts.shown {
-                feed.lock().unwrap_or_else(PoisonError::into_inner).push(feed::FeedItem::User(shown));
+                feed.lock().unwrap_or_else(PoisonError::into_inner).push(feed::FeedItem::User(feed::UserItem::new(shown, opts.shown_pictures)));
             }
             all.lock().unwrap_or_else(PoisonError::into_inner).push(Handle {
                 root: ws.root.clone(),

@@ -75,8 +75,9 @@ pub enum RunEvent {
     Step { step: Step, text: String },
     /// Something from the coding agent (text, tool calls, errors).
     Agent(AgentEvent),
-    /// A note the person added while it worked, now read by the agent (as the feed shows it).
-    Note(String),
+    /// A note the person added while it worked, now read by the agent (as the feed shows it),
+    /// with the pictures attached to it (their copies in the project).
+    Note { shown: String, pictures: Vec<PathBuf> },
     /// A question or approval waiting for the person.
     Ask(Request),
     /// A check finished.
@@ -124,6 +125,9 @@ pub struct RunOptions {
     /// How the person's message is shown in the project's feed (it can differ from `message`,
     /// which carries attachment paths). `None` adds nothing to the feed.
     pub shown: Option<String>,
+    /// The pictures attached to `shown` (their copies in the project), so the feed keeps them
+    /// with the message for Up to bring back.
+    pub shown_pictures: Vec<PathBuf>,
     /// Pick up a build whose last run stopped part-way (paused, the app closed, the computer
     /// stopped): Study isn't repeated when it was done, and an agent with a saved session is
     /// told to carry on rather than given the brief again. A run with no message on a project
@@ -148,6 +152,7 @@ impl Default for RunOptions {
             backend: None,
             message: None,
             shown: None,
+            shown_pictures: Vec::new(),
             continuing: false,
             max_rounds: 6,
             good_enough: 90.0,
@@ -168,6 +173,8 @@ pub struct Note {
     pub text: String,
     /// How it appears in the project's feed.
     pub shown: String,
+    /// The pictures attached to it (their copies in the project), for the feed's history.
+    pub pictures: Vec<PathBuf>,
 }
 
 /// A running (or finished) rebuild.
@@ -225,7 +232,7 @@ impl RebuildRun {
         // The project's conversation: the run keeps it in the folder as it goes.
         let feed = Arc::new(Mutex::new(feed::FeedLog::open(&ws)));
         if let Some(shown) = opts.shown.clone() {
-            feed.lock().unwrap_or_else(PoisonError::into_inner).push(feed::FeedItem::User(shown));
+            feed.lock().unwrap_or_else(PoisonError::into_inner).push(feed::FeedItem::User(feed::UserItem::new(shown, opts.shown_pictures.clone())));
         }
         let ctx = Worker {
             wake: opts.wake.clone(),
@@ -276,15 +283,16 @@ impl RebuildRun {
     }
 
     /// Add something while it works; the agent reads it at its next step, and only then does it
-    /// join the feed (as `shown`). Returns its id, to take it back with `unsend` until then.
-    pub fn add_note(&self, text: String, shown: String) -> u64 {
+    /// join the feed (as `shown`, with `pictures`). Returns its id, to take it back with `unsend`
+    /// until then.
+    pub fn add_note(&self, text: String, shown: String, pictures: Vec<PathBuf>) -> u64 {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
         // Also left for an agent that takes notes at its next step; without it, after the turn.
         if let Err(e) = notes::hand_over(&notes::notes_dir(self.inbox.dir()), id, &text) {
             log::warn!("A note waits for the builder's turn to end: {}", e.message);
         }
-        self.notes.lock().unwrap_or_else(PoisonError::into_inner).push(Note { id, text, shown });
+        self.notes.lock().unwrap_or_else(PoisonError::into_inner).push(Note { id, text, shown, pictures });
         id
     }
 
@@ -498,7 +506,7 @@ impl Worker {
             notes::forget(&dir, n.id);
         }
         for n in &notes {
-            self.emit(RunEvent::Note(n.shown.clone()));
+            self.emit(RunEvent::Note { shown: n.shown.clone(), pictures: n.pictures.clone() });
         }
         // A cancelled step can't be reported, but the notes go in either way.
         let _ = self.step(ws, Step::Build, Status::Building, "Reading what you added…");
@@ -880,7 +888,7 @@ impl Worker {
         };
         for n in read {
             notes::forget(&dir, n.id);
-            self.emit(RunEvent::Note(n.shown));
+            self.emit(RunEvent::Note { shown: n.shown, pictures: n.pictures });
         }
     }
 

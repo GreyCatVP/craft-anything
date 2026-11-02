@@ -17,7 +17,11 @@ version up to the current one, then turn the document into Rust types. The step 
 | `<project>/questions.json` | `engine::questions` (`AskedQuestion`, written by `rebuild_question_ask`) | `QUESTIONS_VERSION` = 1 (`{version, items}`) | read as before | read as far as its fields are known |
 | `<project>/pinned/<n>/pin.json` | `engine::pins` (`Pin`) | `PIN_VERSION` = 1 (`version`; missing = 1) | brought forward | read as far as its fields are known |
 | `<folder>/standin.json` | `engine::tools::standin_tools` (`analysis::standin::StandIn`; written only by `web_standin_build`) | `STANDIN_VERSION` = 1 (`version`, required) | brought forward | refused, with "update Craft Anything", and never written over |
-| `<project>/feed.json` | `ai::rebuild::feed` (written by the run) | `FEED_VERSION` = 1 (`{version, items}`; a bare list = 0) | read as before, saved as current | never written over; the conversation is rebuilt from the project for display |
+| `<project>/feed.json` | `ai::rebuild::feed` (written by the run) | `FEED_VERSION` = 3 (`{version, items}`; a bare list = 0) | read as before, saved as current | never written over; the conversation is rebuilt from the project for display |
+
+A saved `User` message with pictures is `{text, pictures: [paths]}`, where the pictures are the
+copies in the project's `attachments/`; one without pictures stays the plain string earlier
+versions wrote.
 
 Other JSON in a project (`assets.json`, `inbox/`, `checks/`, evidence records) has no version yet;
 add one the first time its shape changes.

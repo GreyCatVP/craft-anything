@@ -57,20 +57,21 @@ pub fn question_in(text: &str, just_ask: bool) -> Result<Option<String>, String>
     }
 }
 
-/// Everything sent in a project, oldest first: its messages as they were typed, and its questions
-/// where they were asked, as `/btw` so they stay questions when sent again.
-pub fn prompts(feed: &[FeedItem], asked: &[Asked]) -> Vec<String> {
+/// Everything sent in a project, oldest first: its messages as they were typed (with their
+/// pictures), and its questions where they were asked, as `/btw` so they stay questions when sent
+/// again.
+pub fn prompts(feed: &[FeedItem], asked: &[Asked]) -> Vec<prompt_box::Prompt> {
     let mut out = Vec::new();
     let mut asked = asked.iter().peekable();
     for (i, item) in feed.iter().enumerate() {
         while let Some(a) = asked.next_if(|a| a.after <= i) {
-            out.push(format!("/btw {}", a.question));
+            out.push(prompt_box::Prompt { text: format!("/btw {}", a.question), pictures: Vec::new() });
         }
-        if let FeedItem::User(shown) = item {
-            out.push(prompt_box::as_typed(shown).to_string());
+        if let FeedItem::User(u) = item {
+            out.push(prompt_box::Prompt { text: prompt_box::as_typed(u.text()).to_string(), pictures: u.pictures().to_vec() });
         }
     }
-    out.extend(asked.map(|a| format!("/btw {}", a.question)));
+    out.extend(asked.map(|a| prompt_box::Prompt { text: format!("/btw {}", a.question), pictures: Vec::new() }));
     out
 }
 
@@ -182,14 +183,34 @@ pub fn card(ui: &mut Ui, a: &mut Asked, glossary: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::FeedItem;
+    use crate::state::UserItem;
 
     #[test]
     fn prompts_keep_questions_where_they_were_asked() {
         let asked = |q: &str, after| Asked { question: q.into(), answer: None, after, collapsed: false, reveal: false };
-        let user = |t: &str| FeedItem::User(t.into());
+        let user = |t: &str| FeedItem::User(UserItem::Text(t.into()));
         let feed = [user("A notes app"), FeedItem::Paused, user("Make it blue\n(1 picture attached)")];
         let list = [asked("why Rust", 1), asked("where are the files", 3)];
-        assert_eq!(prompts(&feed, &list), ["A notes app", "/btw why Rust", "Make it blue", "/btw where are the files"]);
+        assert_eq!(
+            prompts(&feed, &list).iter().map(|p| p.text.as_str()).collect::<Vec<_>>(),
+            ["A notes app", "/btw why Rust", "Make it blue", "/btw where are the files"]
+        );
+    }
+
+    #[test]
+    fn a_prompt_brought_back_with_up_keeps_its_pictures() {
+        let asked = |q: &str, after| Asked { question: q.into(), answer: None, after, collapsed: false, reveal: false };
+        // The feed stores the shown text with its "(n pictures attached)" line, and the
+        // pictures travel with the same UserItem.
+        let pics = [std::path::PathBuf::from("attachments/picture-1.png")];
+        let feed = [FeedItem::User(UserItem::new("Make it blue\n(1 picture attached)", pics.clone()))];
+        let list = [asked("where are the files", 1)];
+        let out = prompts(&feed, &list);
+        assert_eq!(out[0].text, "Make it blue");
+        assert_eq!(out[0].pictures, pics);
+        assert_eq!(out[1].text, "/btw where are the files");
+        assert!(out[1].pictures.is_empty());
     }
 
     #[test]

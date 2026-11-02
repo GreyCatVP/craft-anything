@@ -296,14 +296,14 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         self_check: None,
     };
     assert!(w.added(&mut ws).is_none(), "nothing added, nothing to say");
-    let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into() };
+    let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into(), pictures: Vec::new() };
     notes.lock().unwrap().extend([note(1, "Make it faster"), note(2, "A blue sky")]);
     let p = w.added(&mut ws).unwrap();
     assert!(p.contains("- Make it faster (pictures: a.png)\n- A blue sky"), "{p}");
     assert!(notes.lock().unwrap().is_empty(), "each note goes in once");
     // The notes join the feed as they're read, before the step that reads them.
     let events: Vec<RunEvent> = rx.try_iter().collect();
-    let shown: Vec<_> = events.iter().filter_map(|e| if let RunEvent::Note(s) = e { Some(s.as_str()) } else { None }).collect();
+    let shown: Vec<_> = events.iter().filter_map(|e| if let RunEvent::Note { shown, .. } = e { Some(shown.as_str()) } else { None }).collect();
     assert_eq!(shown, ["Make it faster", "A blue sky"]);
     assert!(matches!(events.last(), Some(RunEvent::Step { text, .. }) if text == "Reading what you added…"));
 }
@@ -1596,8 +1596,8 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
         inbox: Inbox::new(ws.inbox_dir()),
         editor: None,
         notes: Arc::new(Mutex::new(vec![
-            Note { id: 1, text: "make the header blue".into(), shown: "make the header blue".into() },
-            Note { id: 2, text: "add a footer".into(), shown: "add a footer".into() },
+            Note { id: 1, text: "make the header blue".into(), shown: "make the header blue".into(), pictures: Vec::new() },
+            Note { id: 2, text: "add a footer".into(), shown: "add a footer".into(), pictures: Vec::new() },
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
@@ -1613,7 +1613,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
     assert_eq!(notes::claim(&dir), ["make the header blue"]);
     std::fs::rename(dir.join("2.wait"), dir.join("2.json")).unwrap();
     w.relay_read_notes(&ws);
-    let shown: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Note(s) = e { Some(s) } else { None }).collect();
+    let shown: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Note { shown, .. } = e { Some(shown) } else { None }).collect();
     assert_eq!(shown, ["make the header blue"], "it joins the feed as soon as the builder took it");
     assert!(!notes::was_read(&dir, 1), "its files are gone");
     // After the turn, only the note nobody took is sent, and no hook can hand it over again.
