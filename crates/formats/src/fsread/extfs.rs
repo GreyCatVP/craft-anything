@@ -164,16 +164,17 @@ fn extents(data: &[u8], sb: &Sb, node_off: usize, map: &mut Vec<Option<u64>>, de
         let e = node_off + 12 + i * 12;
         if depth == 0 {
             let logical = r.u32_le(e).unwrap_or(0);
-            let len = r.u16_le(e + 4).unwrap_or(0);
+            let raw_len = r.u16_le(e + 4).unwrap_or(0);
             let start_hi = r.u16_le(e + 6).unwrap_or(0);
             let start_lo = r.u32_le(e + 8).unwrap_or(0);
             let phys = u64::from(start_lo) | (u64::from(start_hi) << 32);
-            let len = if len > 32768 { len - 32768 } else { len }; // uninitialised extents
+            let unwritten = raw_len > 32768; // uninitialised extents
+            let len = if unwritten { raw_len - 32768 } else { raw_len };
             for k in 0..u64::from(len) {
                 if let Ok(idx) = usize::try_from(u64::from(logical).saturating_add(k))
                     && idx < map.len()
                 {
-                    map[idx] = Some(phys.saturating_add(k));
+                    map[idx] = if unwritten { None } else { Some(phys.saturating_add(k)) };
                 }
             }
         } else {
@@ -329,6 +330,19 @@ mod tests {
     #[test]
     fn reads_ext4_extents() {
         check(true);
+    }
+
+    #[test]
+    fn unwritten_ext4_extents_read_as_zeros() {
+        let mut base = craft_anything_testkit::firmware::ext_image(true);
+        // Inode 11 ("hello.txt", 22 bytes) starts at 5120 + (11 - 1) * 128 = 6400; its first extent's ee_len is at +56.
+        base[6456..6458].copy_from_slice(&32769u16.to_le_bytes());
+        let img = read(&base, &Limits::default());
+        assert!(img.complete, "{:?}", img.warnings);
+        let hello = img.entries.iter().find(|e| e.path == "hello.txt").expect("hello.txt entry");
+        assert_eq!(hello.size, 22);
+        assert_eq!(hello.data.as_deref(), Some([0u8; 22].as_slice()));
+        assert_eq!(img.entries.iter().find(|e| e.path == "sub/note").unwrap().data.as_deref(), Some(b"nested note".as_slice()));
     }
 
     /// Switch to 64-bit group descriptors and send `group`'s inode table to the last
