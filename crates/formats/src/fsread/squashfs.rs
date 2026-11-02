@@ -225,7 +225,14 @@ fn file_bytes(data: &[u8], sb: &Sb, idata: &[u8], pos: usize, limits: &Limits, i
     // Regular file inode (basic=2, extended=9).
     let (blocks_start, fragment, frag_offset, file_size, list_off) = match itype {
         2 => (u64::from(r.u32_le(pos + 16)?), r.u32_le(pos + 20)?, r.u32_le(pos + 24)?, u64::from(r.u32_le(pos + 28)?), pos + 32),
-        9 => (r.u64_le(pos + 16)?, r.u32_le(pos + 44)?, r.u32_le(pos + 48)?, r.u64_le(pos + 24)?, pos + 56),
+        9 => {
+            let xattr = r.u32_le(pos + 52)?;
+            if xattr != 0xffff_ffff {
+                img.warn("squashfs: extended inode xattrs are not supported");
+                img.complete = false;
+            }
+            (r.u64_le(pos + 16)?, r.u32_le(pos + 44)?, r.u32_le(pos + 48)?, r.u64_le(pos + 24)?, pos + 56)
+        }
         _ => return None,
     };
     if file_size > limits.max_file_bytes || img.bytes.saturating_add(file_size) > limits.max_total_bytes {
@@ -239,7 +246,11 @@ fn file_bytes(data: &[u8], sb: &Sb, idata: &[u8], pos: usize, limits: &Limits, i
     let mut out = Vec::with_capacity(usize::try_from(file_size).unwrap_or(0));
     let mut data_pos = blocks_start;
     for i in 0..full_blocks.min(1 << 20) {
-        let bsize = r.u32_le(list_off + i * 4)?;
+        let Some(bsize) = r.u32_le(list_off + i * 4) else {
+            img.warn("squashfs: file block list not read");
+            img.complete = false;
+            return None;
+        };
         let uncompressed = bsize & 0x0100_0000 != 0;
         let len = (bsize & 0x00ff_ffff) as usize;
         if len == 0 {
@@ -361,6 +372,12 @@ mod tests {
         let got = file_bytes(&data, &sb, &idata, 0, &Limits::default(), &mut img);
         assert_eq!(got.as_deref(), Some(body.as_slice()));
         assert!(img.complete, "{:?}", img.warnings);
+
+        let mut bad_frag = idata.clone();
+        bad_frag[44..48].copy_from_slice(&0u32.to_le_bytes());
+        let mut fail_img = FsImage::new("squashfs");
+        assert!(file_bytes(&data, &sb, &bad_frag, 0, &Limits::default(), &mut fail_img).is_none());
+        assert!(!fail_img.complete);
     }
 
     #[test]
