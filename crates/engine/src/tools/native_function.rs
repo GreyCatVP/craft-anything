@@ -572,7 +572,13 @@ fn native_call_site_resolve(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutp
     let jt = f.and_then(|f| f.jump_tables.iter().find(|j| j.site == a));
     let insn = st.img.decode(a, true);
     let (status, targets, mut lims): (&str, Vec<Value>, Vec<Limitation>) = match (call, jt, insn.as_ref().map(|i| i.flow)) {
-        (Some(c), _, _) if c.import.is_some() => ("resolved", vec![json!({"import": c.import, "slot": c.target.map(hex)})], vec![]),
+        (Some(c), _, flow) if c.import.is_some() => {
+            let slot = match flow {
+                Some(Flow::IndirectCall { slot: Some(s) } | Flow::IndirectJump { slot: Some(s) }) => Some(s),
+                _ => c.target.or_else(|| c.import.as_ref().and_then(|imp| st.prog.import_slots.iter().find(|(_, s)| s.name == *imp).map(|(s, _)| *s))),
+            };
+            ("resolved", vec![json!({"import": c.import, "slot": slot.map(hex)})], vec![])
+        }
         (Some(c), _, _) if c.target.is_some() => {
             ("resolved", vec![json!({"address": c.target.map(hex), "name": c.target.and_then(|x| name_of(t, &st.prog, x))})], vec![])
         }
@@ -774,6 +780,7 @@ mod tests {
         assert_eq!(r["result"]["references"][0]["string"], tk::HELLO);
         let r = call(&e, "native_call_site_resolve", json!({"address": format!("{:#x}", l.code_va + 15)}));
         assert_eq!(r["result"]["targets"][0]["import"], "puts");
+        assert_eq!(r["result"]["targets"][0]["slot"], format!("{:#x}", l.got_va));
         let jmp = format!("{:#x}", l.code_va + tk::x64::DISPATCH + 0x15);
         let r = call(&e, "native_call_site_resolve", json!({"address": jmp}));
         assert_eq!(r["result"]["status"], "ambiguous");
@@ -814,5 +821,34 @@ mod tests {
         let inside = format!("{:#x}", l.code_va + 4);
         let find = call(&e, "native_function_find", json!({"address": inside}));
         assert!(find["summary"].as_str().unwrap().contains("is inside RenamedEntry "));
+    }
+
+    #[test]
+    fn call_site_resolve_preserves_indirect_import_slot() {
+        let (bytes, layout) = tk::elf64(tk::ElfArch::X86_64, true);
+        let e = engine_with("prog", &bytes);
+        let site = layout.code_va + 15;
+        let r = call(&e, "native_call_site_resolve", json!({"address": format!("{site:#x}")}));
+        assert_eq!(r["result"]["status"], "resolved");
+        assert_eq!(r["result"]["targets"][0]["import"], "puts");
+        assert_eq!(r["result"]["targets"][0]["slot"], format!("{:#x}", layout.got_va));
+
+        // Control 1: non-import indirect memory call retains slot
+        let mut nonimport = bytes.clone();
+        let off = (tk::ELF_TEXT_OFF as usize) + 15;
+        let disp = (layout.rodata_va as i64 - (site + 6) as i64) as i32;
+        nonimport[off + 2..off + 6].copy_from_slice(&disp.to_le_bytes());
+        let e_nonimport = engine_with("nonimport", &nonimport);
+        let r_nonimport = call(&e_nonimport, "native_call_site_resolve", json!({"address": format!("{site:#x}")}));
+        assert_eq!(r_nonimport["result"]["status"], "resolved");
+        assert_eq!(r_nonimport["result"]["targets"][0]["slot"], format!("{:#x}", layout.rodata_va));
+
+        // Control 2: register call (call rax) is unresolved
+        let mut register = bytes;
+        register[off..off + 6].copy_from_slice(&[0xff, 0xd0, 0x90, 0x90, 0x90, 0x90]);
+        let e_reg = engine_with("reg", &register);
+        let r_reg = call(&e_reg, "native_call_site_resolve", json!({"address": format!("{site:#x}")}));
+        assert_eq!(r_reg["result"]["status"], "unresolved");
+        assert_eq!(r_reg["result"]["targets"], json!([]));
     }
 }
