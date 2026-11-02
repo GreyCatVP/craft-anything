@@ -370,8 +370,13 @@ Owner: open · Status: in progress
       immediately; loading, retryable failures and save errors keep the controls in place
 - [x] Local agent chats share a saved investigation and open-target metadata with MCP; background
       refresh makes recorded findings visible in the workbench Evidence pane. `core_finding_edit`
-      corrects a finding with checked evidence and an optional revision guard. Engine, process-level
-      MCP and headless rendering tests cover sharing, mode boundaries and finding ids
+      corrects a finding with checked evidence and an optional revision guard, preserving confidence
+      when omitted. Builder refresh failures warn instead of ending the turn; shared ACP errors
+      use the current agent and its sign-in guidance. Engine, process-level MCP and headless
+      rendering tests cover sharing, mode boundaries and finding ids; regressions cover confidence
+      preservation, explicit overrides and agent-specific errors
+- [ ] Refresh externally changed investigation/evidence records incrementally, avoiding repeated
+      full reloads under the session lock while retaining mid-turn findings visibility
 - [x] Offer OpenCode locally and over SSH with its own visible chat models and supported thinking
       depths (Low, Medium, High, Xhigh, Max) in settings and headless clients. Choices are validated
       before saving; explicit choices are refused at execution until native MCP support is available.

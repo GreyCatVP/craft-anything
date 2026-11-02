@@ -562,11 +562,15 @@ impl AcpConversation {
                 }
             }
             if started.elapsed() >= timeout {
-                return Err(craft_anything_evidence::ToolError::unavailable("Copilot did not list its models before the deadline.")
-                    .with_remediation(self.adapter.sign_in_fix().unwrap_or_else(|| "Check the agent in a terminal, then try again.".into())));
+                return Err(self.model_metadata_timeout());
             }
             std::thread::park_timeout(Duration::from_millis(10));
         }
+    }
+
+    fn model_metadata_timeout(&self) -> craft_anything_evidence::ToolError {
+        craft_anything_evidence::ToolError::unavailable(format!("{} did not list its models before the deadline.", display_for(&self.agent)))
+            .with_remediation(self.adapter.sign_in_fix().unwrap_or_else(|| "Check the agent in a terminal, then try again.".into()))
     }
 
     /// Keep an adapter's settings check until the conversation starts. A failure is reported
@@ -844,6 +848,17 @@ mod tests {
         core.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"copilot-test","models":{"availableModels":[{"modelId":"model-one","name":"One"},{"modelId":"model-two","name":"Two"},{"name":"missing-id"}]}}}"#);
         assert_eq!(core.models, ["model-one", "model-two"]);
         assert!(core.ready);
+    }
+
+    #[test]
+    fn model_metadata_deadlines_name_the_current_agent() {
+        for (agent, name) in [("gemini-cli", "Gemini CLI"), ("copilot", "GitHub Copilot")] {
+            let mcp = McpCommand { command: "not-started".into(), args: Vec::new(), notes: None };
+            let conversation = AcpConversation::new("Test", agent, "not-started".into(), Vec::new(), PathBuf::new(), mcp, None);
+            let error = conversation.model_metadata_timeout();
+            assert_eq!(error.message, format!("{name} did not list its models before the deadline."));
+            assert_eq!(error.remediation.unwrap().contains("copilot login"), agent == "copilot");
+        }
     }
 
     #[test]

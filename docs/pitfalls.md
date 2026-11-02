@@ -543,6 +543,15 @@ points to as well (`agent-session.jsonl`), tell "not here" apart from a failure 
 
 ## Agent tooling
 
+**A finding correction reset omitted confidence to inferred.** Edit defaults must preserve existing
+values unless explicitly changed; test omitted fields and every supplied confidence level.
+
+**An optional view refresh could fail the builder's turn.** Log cache-refresh errors and continue
+relaying agent events; only failures of the actual build belong on its fatal path.
+
+**Generic ACP errors named Copilot for every adapter.** Use the current agent's display name and
+the adapter's sign-in guidance; test an ACP-only adapter with and without that guidance.
+
 **An agent's findings existed only in its own session.** A separate MCP process started without
 the desktop's targets or a saved project, so its `fnd_*` records never reached the app. Local
 agent chats now attach a shared investigation, hand over target metadata and refresh snapshots

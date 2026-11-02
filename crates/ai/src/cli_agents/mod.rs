@@ -677,11 +677,10 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
     let mut adapter = spec.adapters.for_agent(&agent);
     if adapter.requires_acp() {
+        let sign_in = adapter.sign_in_fix().map(|fix| format!(" {fix}")).unwrap_or_default();
         let _ = tx.send(AgentEvent::Error {
             message: format!("{name} requires a local ACP connection."),
-            remediation: Some(
-                "Use the installed Copilot CLI on this computer, remove the SSH host and do not disable ACP. Sign in separately with `copilot login`.".into(),
-            ),
+            remediation: Some(format!("Run {} on this computer, remove the SSH host and do not disable ACP.{sign_in}", display_for(&agent))),
             log: None,
         });
         return nothing_done(&name);
@@ -2160,6 +2159,44 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
             let mut output: Vec<_> = receiver.try_iter().collect();
             output.push(done);
             assert!(matches!(&output[..], [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }] if message.contains("local ACP")));
+        }
+    }
+
+    #[test]
+    fn acp_only_refusals_use_the_registered_adapters_sign_in_guidance() {
+        struct AcpOnlyAgent(Option<&'static str>);
+        impl AgentAdapter for AcpOnlyAgent {
+            fn ids(&self) -> &'static [&'static str] {
+                &["test-acp-agent"]
+            }
+            fn args(&self, _context: &ArgsCx) -> Vec<String> {
+                Vec::new()
+            }
+            fn requires_acp(&self) -> bool {
+                true
+            }
+            fn sign_in_fix(&self) -> Option<String> {
+                self.0.map(str::to_string)
+            }
+        }
+        for guidance in [None, Some("Use test-agent sign-in.")] {
+            let config = BackendConfig {
+                name: "Test agent".into(),
+                kind: BackendKind::AgentCli,
+                model: "test-acp-agent".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            };
+            let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+            spec.adapters.register(Arc::new(AcpOnlyAgent(guidance)));
+            let (sender, receiver) = std::sync::mpsc::channel();
+            run_cli(&spec, "hello", &sender, &Stop::default(), &Mutex::new(None), &Mutex::new(None));
+            let output: Vec<_> = receiver.try_iter().collect();
+            let [AgentEvent::Error { remediation: Some(fix), .. }, AgentEvent::TurnDone { .. }] = output.as_slice() else { panic!("{output:?}") };
+            assert!(fix.contains("test-acp-agent") && fix.contains("remove the SSH host") && fix.contains("do not disable ACP"), "{fix}");
+            assert!(!fix.to_lowercase().contains("copilot"), "{fix}");
+            assert_eq!(fix.contains("Use test-agent sign-in."), guidance.is_some());
         }
     }
 }

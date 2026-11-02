@@ -550,8 +550,9 @@ pub struct EditFindingParams {
     pub statement: String,
     /// Evidence ids that establish the corrected answer (at least one).
     pub evidence_ids: Vec<String>,
-    #[serde(default = "inferred")]
-    pub confidence: ConfidenceParam,
+    /// Omit to keep the finding's current confidence.
+    #[serde(default)]
+    pub confidence: Option<ConfidenceParam>,
     /// The investigation revision read before editing; a stale revision is refused.
     #[serde(default)]
     pub based_on_revision: Option<u64>,
@@ -572,11 +573,13 @@ fn core_finding_edit(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         .ok_or_else(|| ToolError::invalid(format!("Unknown finding {}", params.finding_id)))?;
     finding.statement = params.statement;
     finding.evidence_ids = params.evidence_ids;
-    finding.confidence = match params.confidence {
-        ConfidenceParam::Observed => Confidence::Observed,
-        ConfidenceParam::Derived => Confidence::Derived,
-        ConfidenceParam::Inferred => Confidence::Inferred,
-    };
+    if let Some(confidence) = params.confidence {
+        finding.confidence = match confidence {
+            ConfidenceParam::Observed => Confidence::Observed,
+            ConfidenceParam::Derived => Confidence::Derived,
+            ConfidenceParam::Inferred => Confidence::Inferred,
+        };
+    }
     let investigation = save(ctx.session, investigation)?;
     Ok(ToolOutput::Value(json!({"finding_id": params.finding_id, "revision": investigation.revision})))
 }
@@ -681,6 +684,17 @@ mod tests {
         assert_eq!(investigation["result"]["findings"].as_array().unwrap().len(), 1);
         assert_eq!(investigation["result"]["findings"][0]["statement"], "corrected");
         assert_eq!(call(&engine, "core_finding_edit", edit).unwrap_err().code, craft_anything_evidence::ErrorCode::StaleRevision);
+        for (confidence, expected) in [("observed", Confidence::Observed), ("derived", Confidence::Derived), ("inferred", Confidence::Inferred)] {
+            call(
+                &engine,
+                "core_finding_edit",
+                json!({"finding_id":"fnd_1", "statement":"reclassified", "evidence_ids":[evidence_id], "confidence":confidence}),
+            )
+            .unwrap();
+            assert_eq!(super::cached(&engine.session()).findings[0].confidence, expected);
+            call(&engine, "core_finding_edit", json!({"finding_id":"fnd_1", "statement":"clarified", "evidence_ids":[evidence_id]})).unwrap();
+            assert_eq!(super::cached(&engine.session()).findings[0].confidence, expected);
+        }
     }
 
     #[test]

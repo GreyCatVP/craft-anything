@@ -114,13 +114,15 @@ the MCP connection. A saved agent session is carried across only within the same
 Tool completion and turn completion reload the shared evidence and findings on a worker; the
 UI renders the cached snapshot without reading files while drawing.
 Rebuild agents receive the same target handoff at startup and refresh their project's shared
-investigation before completed tool and turn events reach the app.
+investigation before completed tool and turn events reach the app. A refresh error is logged
+without ending the builder's turn.
 
 The workbench's **Evidence** pane now lists recorded findings (`fnd_1`, `fnd_2`, ...), their
 statements, confidence and links to supporting evidence. These are separate from evidence
 records (`ev_...`). Agents read them with `core_investigation_show`, record a settled answer
 with `core_finding_record`, and correct one with `core_finding_edit`. Corrections keep the id,
-require valid evidence and can refuse a stale `based_on_revision`.
+require valid evidence and can refuse a stale `based_on_revision`. Omitting `confidence` keeps
+the existing confidence; supplying it explicitly replaces it.
 
 An older MCP process that started without a project may still hold its findings only in memory.
 Before closing that conversation, ask it to export its investigation or a report to a file.

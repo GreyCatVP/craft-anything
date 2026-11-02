@@ -1050,8 +1050,10 @@ impl Worker {
                 if matches!(e, AgentEvent::ToolFinished { .. } | AgentEvent::TurnDone { .. }) {
                     let mut session = self.engine.session();
                     let project = session.project.clone().filter(|project| project.root == ws.investigation_dir());
-                    if let Some(project) = project {
-                        session.open_project(project)?;
+                    if let Some(project) = project
+                        && let Err(error) = session.open_project(project)
+                    {
+                        log::warn!("Couldn't refresh the investigation: {}", error.message);
                     }
                 }
                 match &e {
