@@ -24,6 +24,7 @@ use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub const MANIFEST: &str = "craft.json";
@@ -487,21 +488,36 @@ fn default_asset_budget() -> f64 {
     ASSET_BUDGET_USD
 }
 
-/// One generated asset (a picture or a 3D model) and what it cost.
+/// One paid generation and what it cost, including generations whose output could not be saved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssetRecord {
-    /// Where it was saved, relative to app/.
+    /// Intended destination relative to app/; recording a charge does not guarantee this file exists.
     pub file: String,
-    /// "image" or "model".
+    /// Asset category: image, model, speech, sound or music.
     pub kind: String,
     /// What it was made from (the description, or the picture it was made from).
     pub prompt: String,
+    /// Provider-reported spending estimate in USD, which may differ from the final bill.
     pub cost_usd: f64,
     pub at_ms: u64,
 }
 
 /// The list of generated assets, in the workspace folder.
 const ASSETS: &str = "assets.json";
+
+/// Bound untrusted ledger reads, including files that grow after opening.
+const MAX_ASSET_LEDGER_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Validate every recorded charge and reject totals that overflow instead of understating spending.
+fn asset_total(records: &[AssetRecord]) -> Result<f64, ToolError> {
+    records.iter().try_fold(0.0, |spent, record| {
+        let total = spent + record.cost_usd;
+        if !record.cost_usd.is_finite() || record.cost_usd < 0.0 || !total.is_finite() {
+            return Err(ToolError::invalid("The asset ledger contains an invalid charge or overflowing total."));
+        }
+        Ok(total)
+    })
+}
 
 /// What a project's builds have taken and used, every run together (`usage.json`). The rebuild
 /// run is its only writer; everything else reads it.
@@ -846,9 +862,27 @@ impl Workspace {
         copy_pictures(&self.reference_dir(), files).map(|v| v.len())
     }
 
-    /// Every generated asset so far, oldest first.
+    /// Best-effort display of generated assets, oldest first; use `try_assets` for accounting.
     pub fn assets(&self) -> Vec<AssetRecord> {
-        std::fs::read(self.root.join(ASSETS)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        self.try_assets().unwrap_or_default()
+    }
+
+    /// Read and validate the asset ledger without changing it. Only a missing ledger means no spending.
+    pub fn try_assets(&self) -> Result<Vec<AssetRecord>, ToolError> {
+        let path = self.root.join(ASSETS);
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(ToolError::io(path.display(), e)),
+        };
+        let mut bytes = Vec::new();
+        file.take(MAX_ASSET_LEDGER_BYTES + 1).read_to_end(&mut bytes).map_err(|e| ToolError::io(path.display(), e))?;
+        if bytes.len() as u64 > MAX_ASSET_LEDGER_BYTES {
+            return Err(ToolError::new(ErrorCode::OverLimit, "The asset ledger exceeds the 64 MiB reading limit."));
+        }
+        let records: Vec<AssetRecord> = serde_json::from_slice(&bytes).map_err(|_| ToolError::invalid("The asset ledger is not valid asset-record JSON."))?;
+        asset_total(&records)?;
+        Ok(records)
     }
 
     /// What the builds have taken and used so far.
@@ -856,17 +890,25 @@ impl Workspace {
         ProjectUsage::load(&self.root)
     }
 
-    /// What generated assets have cost so far.
+    /// Best-effort display total, or zero on an unreadable ledger; never use this to authorize spending.
     pub fn assets_spent(&self) -> f64 {
-        // A fold from 0.0: an empty `sum()` of floats is -0.0, which prints as "$-0.00".
-        self.assets().iter().fold(0.0, |spent, a| spent + a.cost_usd)
+        self.try_assets_spent().unwrap_or_default()
     }
 
-    /// Add a generated asset to the list.
+    /// Checked spending total; unreadable, malformed or invalid ledgers fail closed.
+    pub fn try_assets_spent(&self) -> Result<f64, ToolError> {
+        asset_total(&self.try_assets()?)
+    }
+
+    /// Add a paid generation receipt, preserving an unreadable ledger and rejecting invalid charges.
     pub fn record_asset(&self, rec: AssetRecord) -> Result<(), ToolError> {
-        let mut all = self.assets();
+        let mut all = self.try_assets()?;
         all.push(rec);
+        asset_total(&all)?;
         let json = serde_json::to_vec_pretty(&all).map_err(|e| ToolError::internal(e.to_string()))?;
+        if json.len() as u64 > MAX_ASSET_LEDGER_BYTES {
+            return Err(ToolError::new(ErrorCode::OverLimit, "The asset ledger would exceed the 64 MiB reading limit."));
+        }
         write_atomic(&self.root.join(ASSETS), &json)
     }
 
@@ -1074,6 +1116,64 @@ pub fn default_projects_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Construct a receipt independently of provider APIs for ledger validation tests.
+    fn asset_receipt(cost_usd: f64) -> AssetRecord {
+        AssetRecord { file: "picture.png".into(), kind: "image".into(), prompt: "a crate".into(), cost_usd, at_ms: 0 }
+    }
+
+    /// A missing ledger is empty, but malformed JSON and invalid totals must never be overwritten.
+    #[test]
+    fn checked_asset_ledger_preserves_invalid_bytes_and_accepts_first_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        assert!(ws.try_assets().unwrap().is_empty());
+        assert_eq!(ws.try_assets_spent().unwrap().to_bits(), 0.0f64.to_bits());
+        ws.record_asset(asset_receipt(0.5)).unwrap();
+        assert_eq!(ws.try_assets_spent().unwrap(), 0.5);
+        let path = ws.root.join(ASSETS);
+        for bytes in [
+            b"broken JSON".to_vec(),
+            serde_json::to_vec(&[asset_receipt(-1.0)]).unwrap(),
+            serde_json::to_vec(&[asset_receipt(f64::MAX), asset_receipt(f64::MAX)]).unwrap(),
+        ] {
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(ws.try_assets().is_err());
+            assert!(ws.try_assets_spent().is_err());
+            assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(ws.try_assets().is_err());
+        assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+        assert!(path.is_dir());
+    }
+
+    /// New invalid charges and an overflowing append cannot damage an existing valid ledger.
+    #[test]
+    fn asset_receipts_reject_invalid_costs_and_overflow_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        ws.record_asset(asset_receipt(f64::MAX)).unwrap();
+        let original = std::fs::read(ws.root.join(ASSETS)).unwrap();
+        for cost in [f64::NAN, f64::INFINITY, -1.0, f64::MAX] {
+            assert!(ws.record_asset(asset_receipt(cost)).is_err());
+            assert_eq!(std::fs::read(ws.root.join(ASSETS)).unwrap(), original);
+        }
+    }
+
+    /// Sparse oversized ledgers are refused and preserved instead of being read without a bound.
+    #[test]
+    fn oversized_asset_ledger_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        let path = ws.root.join(ASSETS);
+        std::fs::File::create(&path).unwrap().set_len(MAX_ASSET_LEDGER_BYTES + 1).unwrap();
+        assert_eq!(ws.try_assets().unwrap_err().code, ErrorCode::OverLimit);
+        assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+        assert_eq!(std::fs::metadata(path).unwrap().len(), MAX_ASSET_LEDGER_BYTES + 1);
+    }
 
     #[test]
     fn a_projects_usage_adds_up_across_runs_and_a_newer_file_is_left_alone() {

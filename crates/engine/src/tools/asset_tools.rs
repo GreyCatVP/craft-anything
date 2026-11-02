@@ -315,11 +315,14 @@ fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, re
     let (path, rel) = save_path(&j.ws, save_as, "mp3")?;
     let provider = j.providers.for_request(&req)?;
     let key = j.key(provider.as_ref())?;
-    within_budget(ctx, &j.inbox, &mut j.ws, provider.estimate(&req)?)?;
+    j.ws.try_assets_spent()?;
+    let estimate = provider.estimate(&req)?;
+    within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
     ctx.report(None, "Generating audio…");
     let g = provider.generate(&key, &req)?;
     keep(&j.ws, &path, &rel, kind, prompt, &g)?;
-    Ok(summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id()})))
+    within_estimate(&rel, g.cost_usd, estimate)?;
+    summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id()}))
 }
 
 /// What a generation needs: the keys, the providers, the inbox (for the over-budget question) and
@@ -392,7 +395,7 @@ fn save_path(ws: &Workspace, save_as: &str, ext: &str) -> Result<(PathBuf, Strin
 /// Go ahead if this stays within the budget, else ask the person (unless they said "always").
 fn within_budget(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, cost: f64) -> Result<(), ToolError> {
     valid_cost(cost)?;
-    let spent = ws.assets_spent();
+    let spent = ws.try_assets_spent()?;
     let budget = ws.manifest.asset_budget_usd;
     valid_cost(spent)?;
     valid_cost(budget)?;
@@ -416,16 +419,10 @@ fn within_budget(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, cost: f64
     }
 }
 
-/// Save a generated file and list it with its cost.
+/// Record a paid generation before preparing or saving its output. A failed save keeps the receipt;
+/// a failed receipt leaves the destination untouched. These two files are not a crash-atomic transaction.
 fn keep(ws: &Workspace, path: &Path, rel: &str, kind: &str, made_from: &str, g: &Generated) -> Result<(), ToolError> {
     valid_cost(g.cost_usd)?;
-    confined(&ws.root, &ws.app_dir())?;
-    confined(&ws.app_dir(), path)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| ToolError::io(parent.display(), e))?;
-    }
-    confined(&ws.app_dir(), path)?;
-    crate::project::write_atomic(path, &g.bytes)?;
     ws.record_asset(AssetRecord {
         file: rel.to_string(),
         kind: kind.into(),
@@ -433,16 +430,53 @@ fn keep(ws: &Workspace, path: &Path, rel: &str, kind: &str, made_from: &str, g: 
         cost_usd: g.cost_usd,
         at_ms: crate::inbox::now_ms(),
     })
+    .map_err(|e| {
+        ToolError::new(
+            e.code,
+            format!("Asset spending could not be recorded; the provider may have charged ${:.6}. Output was not saved: {}", g.cost_usd, e.message),
+        )
+        .with_remediation("Do not blindly regenerate or retry: check the provider charge and repair the asset ledger first.")
+    })?;
+    let save = || {
+        confined(&ws.root, &ws.app_dir())?;
+        confined(&ws.app_dir(), path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ToolError::io(parent.display(), e))?;
+        }
+        confined(&ws.app_dir(), path)?;
+        crate::project::write_atomic(path, &g.bytes)
+    };
+    save().map_err(|e| {
+        ToolError::new(e.code, format!("Asset spending of ${:.6} was recorded, but saving {rel} failed: {}", g.cost_usd, e.message)).with_remediation(
+            "Do not blindly regenerate or retry: the generation is already recorded as spending. Check the destination and provider output first.",
+        )
+    })
 }
 
-fn summary(ws: &Workspace, saved: &str, cost: f64, extra: Value) -> ToolOutput {
-    let spent = ws.assets_spent();
+/// Report an overrun only after preserving both the charge and the generated output.
+fn within_estimate(saved: &str, actual: f64, estimate: f64) -> Result<(), ToolError> {
+    if actual > estimate + 1e-9 {
+        return Err(ToolError::new(
+            ErrorCode::OverLimit,
+            format!("Saved {saved} and recorded ${actual:.6}, exceeding the approved stage estimate of ${estimate:.6}."),
+        )
+        .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and review the recorded spending before continuing."));
+    }
+    Ok(())
+}
+
+/// Report checked spending after saving, without representing an unreadable ledger as an empty one.
+fn summary(ws: &Workspace, saved: &str, cost: f64, extra: Value) -> Result<ToolOutput, ToolError> {
+    let spent = ws.try_assets_spent().map_err(|e| {
+        ToolError::new(e.code, format!("Saved {saved} and recorded ${cost:.6}, but the spending total could not be read: {}", e.message))
+            .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and check the asset ledger before continuing.")
+    })?;
     let mut v =
         json!({"saved": saved, "cost_usd": round(cost), "spent_usd": round(spent), "budget_left_usd": round((ws.manifest.asset_budget_usd - spent).max(0.0))});
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
         o.extend(e.clone());
     }
-    ToolOutput::Value(v)
+    Ok(ToolOutput::Value(v))
 }
 
 fn round(x: f64) -> f64 {
@@ -471,11 +505,14 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let req = AssetRequest::Image { model, prompt, shape };
     let provider = j.providers.for_request(&req)?;
     let key = j.key(provider.as_ref())?;
-    within_budget(ctx, &j.inbox, &mut j.ws, provider.estimate(&req)?)?;
+    j.ws.try_assets_spent()?;
+    let estimate = provider.estimate(&req)?;
+    within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
     ctx.report(None, "Making a picture…");
     let g = provider.generate(&key, &req)?;
     keep(&j.ws, &path, &rel, "image", prompt, &g)?;
-    Ok(summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id(), "model": model.id})))
+    within_estimate(&rel, g.cost_usd, estimate)?;
+    summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id(), "model": model.id}))
 }
 
 /// Generate a GLB from an existing image or a newly generated precursor picture.
@@ -494,9 +531,10 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let (path, rel) = save_path(&j.ws, &p.save_as, "glb")?;
     let image = p.image.trim();
     let from_prompt = image.is_empty();
-    if from_prompt {
-        prompt_ok(&p.prompt)?;
-    }
+    let prompt = if from_prompt { prompt_ok(&p.prompt)? } else { "" };
+    // Quote the same trimmed, expanded prompt sent to generation: custom providers may price its length.
+    let described =
+        format!("{prompt}. One whole object, centred and fully in view, on a plain light-grey background, soft even lighting, three-quarter view, no text.");
     // The picture's address isn't known yet; the estimate doesn't depend on it.
     let model_req = AssetRequest::Model3d { model, image_url: "https://example.invalid/preflight.png", textured, faces };
     let provider = j.providers.for_request(&model_req)?;
@@ -505,38 +543,37 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let mut picture_maker = None;
     if from_prompt {
         let image_model = catalogue.image_model(selected(p.image_model.as_deref(), ctx.session.settings.assets.image_model.as_deref()))?;
-        let picture_req = AssetRequest::Image { model: image_model, prompt: &p.prompt, shape: Shape::Square };
+        let picture_req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
         let picture_provider = j.providers.for_request(&picture_req)?;
         let picture_key = j.key(picture_provider.as_ref())?;
-        save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?;
-        picture_maker = Some((image_model, picture_provider, picture_key));
+        let (pic_path, pic_rel) = save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?;
+        picture_maker = Some((image_model, picture_provider, picture_key, pic_path, pic_rel));
     }
     // All participating providers are allowed and keyed before asking any provider for a quote.
-    let mut estimate = provider.estimate(&model_req)?;
-    valid_cost(estimate)?;
-    if let Some((image_model, picture_provider, _)) = &picture_maker {
-        let req = AssetRequest::Image { model: image_model, prompt: &p.prompt, shape: Shape::Square };
+    j.ws.try_assets_spent()?;
+    let model_estimate = provider.estimate(&model_req)?;
+    valid_cost(model_estimate)?;
+    let picture_estimate = if let Some((image_model, picture_provider, ..)) = &picture_maker {
+        let req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
         let picture_cost = picture_provider.estimate(&req)?;
         valid_cost(picture_cost)?;
-        estimate += picture_cost;
-    }
+        picture_cost
+    } else {
+        0.0
+    };
     let source = if from_prompt { None } else { Some(image_source(&j.ws, image)?) };
-    within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
+    within_budget(ctx, &j.inbox, &mut j.ws, model_estimate + picture_estimate)?;
     let mut cost = 0.0;
     let mut picture = Value::Null;
     let (url, made_from) = match source {
         Some(src) => (src, format!("from {image}")),
         None => {
-            let prompt = prompt_ok(&p.prompt).map_err(|_| ToolError::invalid("give a prompt (what to make) or an image to make it from"))?;
-            let (image_model, picture_provider, picture_key) = picture_maker.ok_or_else(|| ToolError::internal("no picture model was chosen"))?;
+            let (image_model, picture_provider, picture_key, pic_path, pic_rel) =
+                picture_maker.ok_or_else(|| ToolError::internal("no picture model was chosen"))?;
             ctx.report(None, "Making a picture of it first…");
-            // Image-to-3D works best from one whole object on a plain background.
-            let described = format!(
-                "{prompt}. One whole object, centred and fully in view, on a plain light-grey background, soft even lighting, three-quarter view, no text."
-            );
             let g = picture_provider.generate(&picture_key, &AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square })?;
-            let (pic_path, pic_rel) = save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?;
             keep(&j.ws, &pic_path, &pic_rel, "image", prompt, &g)?;
+            within_estimate(&pic_rel, g.cost_usd, picture_estimate)?;
             cost += g.cost_usd;
             picture = Value::String(pic_rel);
             (g.url, prompt.to_string())
@@ -545,8 +582,9 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     ctx.report(None, "Turning it into a 3D model (a minute or two)…");
     let g = provider.generate(&key, &AssetRequest::Model3d { model, image_url: &url, textured, faces })?;
     keep(&j.ws, &path, &rel, "model", &made_from, &g)?;
+    within_estimate(&rel, g.cost_usd, model_estimate)?;
     cost += g.cost_usd;
-    Ok(summary(&j.ws, &rel, cost, json!({"picture": picture, "textured": textured, "faces": faces, "provider": provider.id(), "model": model.id})))
+    summary(&j.ws, &rel, cost, json!({"picture": picture, "textured": textured, "faces": faces, "provider": provider.id(), "model": model.id}))
 }
 
 /// The picture a model is made from: a web address as it is, or a picture in the project sent
@@ -657,7 +695,10 @@ mod tests {
         assert_eq!(*stand_in.0.lock().unwrap(), vec!["fal-ai/flux/schnell".to_string(), "tripo3d/p1/image-to-3d".to_string()], "the configured picture model");
         assert_eq!(std::fs::read(w.app_dir().join("Assets/crate.glb")).unwrap(), b"glb");
         let spent = w.assets_spent();
-        assert!((spent - (0.50 + 0.003 * 1.048576)).abs() < 1e-9, "{spent}");
+        let catalogue = Catalogue::built_in();
+        let image = catalogue.image_model(Some("flux-schnell")).unwrap();
+        let expected = 0.50 + AssetRequest::Image { model: image, prompt: "a crate", shape: Shape::Square }.listed_cost();
+        assert!((spent - expected).abs() < 1e-9, "{spent}");
         assert_eq!(w.assets().len(), 2);
     }
 
@@ -994,6 +1035,228 @@ mod tests {
             assert!(keep(&w, &path, &rel, "speech", "hi", &made).is_err());
             assert!(!path.exists());
             assert!(w.assets().is_empty());
+        }
+    }
+
+    /// Unreadable ledgers stop every paid tool before quotes, approval questions or provider calls.
+    #[test]
+    fn invalid_ledgers_block_all_generations_before_provider_calls() {
+        for invalid in ["json", "directory", "negative", "overflow"] {
+            let (_d, w) = ws();
+            let ledger = w.root.join("assets.json");
+            let receipt = |cost_usd| AssetRecord { file: "old.png".into(), kind: "image".into(), prompt: "x".into(), cost_usd, at_ms: 0 };
+            match invalid {
+                "directory" => std::fs::create_dir(&ledger).unwrap(),
+                "negative" => std::fs::write(&ledger, serde_json::to_vec(&[receipt(-1.0)]).unwrap()).unwrap(),
+                "overflow" => std::fs::write(&ledger, serde_json::to_vec(&[receipt(f64::MAX), receipt(f64::MAX)]).unwrap()).unwrap(),
+                _ => std::fs::write(&ledger, "not JSON").unwrap(),
+            }
+            let original = std::fs::read(&ledger).ok();
+            let (engine, audio) = recording_engine(&w, "elevenlabs", None);
+            for (tool, params, _) in audio_calls() {
+                assert!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).is_err());
+            }
+            let (engine, pictures) = recording_engine(&w, "fal", None);
+            for (tool, params) in [
+                ("assets_image_generate", json!({"prompt":"a crate", "save_as":"crate.png"})),
+                ("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})),
+            ] {
+                assert!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).is_err());
+            }
+            assert!(audio.calls.lock().unwrap().is_empty() && audio.estimates.lock().unwrap().is_empty());
+            assert!(pictures.calls.lock().unwrap().is_empty() && pictures.estimates.lock().unwrap().is_empty());
+            assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+            assert_eq!(std::fs::read(&ledger).ok(), original);
+        }
+    }
+
+    /// Once a provider has charged, a ledger failure must leave new and existing output destinations untouched.
+    #[test]
+    fn receipt_failure_preserves_the_destination_and_warns_of_possible_charges() {
+        for existing in [false, true] {
+            let (_d, w) = ws();
+            let (path, rel) = save_path(&w, "audio/a.mp3", "mp3").unwrap();
+            if existing {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, b"original").unwrap();
+            }
+            std::fs::write(w.root.join("assets.json"), "broken").unwrap();
+            let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost_usd: 0.2 };
+            let err = keep(&w, &path, &rel, "speech", "hi", &made).unwrap_err();
+            assert!(err.message.contains("may have charged"));
+            assert!(err.remediation.unwrap().contains("Do not blindly"));
+            if existing {
+                assert_eq!(std::fs::read(&path).unwrap(), b"original");
+            } else {
+                assert!(!path.parent().unwrap().exists(), "no destination preparation before a receipt");
+            }
+            assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
+        }
+    }
+
+    /// A final ledger read failure cannot be reported as successful generation with zero historical spending.
+    #[test]
+    fn saved_asset_summary_reports_ledger_failure_without_erasing_output() {
+        let (_d, w) = ws();
+        let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
+        let made = Generated { url: String::new(), bytes: b"generated".to_vec(), cost_usd: 0.2 };
+        keep(&w, &path, &rel, "speech", "hi", &made).unwrap();
+        std::fs::write(w.root.join("assets.json"), "broken").unwrap();
+        let err = summary(&w, &rel, made.cost_usd, json!({})).unwrap_err();
+        assert!(err.message.contains("Saved a.mp3 and recorded") && err.message.contains("total could not be read"));
+        assert!(err.remediation.unwrap().contains("Do not blindly"));
+        assert_eq!(std::fs::read(path).unwrap(), b"generated");
+        assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
+    }
+
+    /// Filesystem preparation and atomic-save failures happen after accounting and never erase a charge.
+    #[test]
+    fn saving_failure_keeps_the_receipt_and_existing_files() {
+        for blocked_parent in [false, true] {
+            let (_d, w) = ws();
+            let (path, rel) = save_path(&w, "audio/a.mp3", "mp3").unwrap();
+            std::fs::create_dir_all(w.app_dir()).unwrap();
+            let preserved = if blocked_parent {
+                path.parent().unwrap().to_path_buf()
+            } else {
+                std::fs::create_dir_all(&path).unwrap();
+                path.join("original")
+            };
+            std::fs::write(&preserved, b"original").unwrap();
+            let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost_usd: 0.2 };
+            let err = keep(&w, &path, &rel, "speech", "hi", &made).unwrap_err();
+            assert!(err.message.contains("was recorded, but saving"));
+            assert!(err.remediation.unwrap().contains("Do not blindly"));
+            assert_eq!(w.try_assets_spent().unwrap(), 0.2);
+            assert_eq!(w.try_assets().unwrap()[0].file, rel);
+            assert_eq!(std::fs::read(preserved).unwrap(), b"original");
+        }
+    }
+
+    /// A confinement check that fails after generation still retains the paid receipt and the old target bytes.
+    #[cfg(unix)]
+    #[test]
+    fn post_generation_confinement_failure_keeps_charge_and_existing_output() {
+        let (_d, w) = ws();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("original.mp3");
+        std::fs::write(&target, b"original").unwrap();
+        let (path, rel) = save_path(&w, "audio/a.mp3", "mp3").unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost_usd: 0.2 };
+        assert!(keep(&w, &path, &rel, "speech", "hi", &made).unwrap_err().message.contains("was recorded, but saving"));
+        assert_eq!(w.try_assets_spent().unwrap(), 0.2);
+        assert_eq!(std::fs::read(target).unwrap(), b"original");
+    }
+
+    /// Overruns for every asset kind preserve output and charge, and return a non-retryable explanation.
+    #[test]
+    fn stage_overruns_are_reported_only_after_recording_and_saving() {
+        let mut calls: Vec<_> = audio_calls().into_iter().map(|(tool, params, _)| ("elevenlabs", tool, params)).collect();
+        calls.push(("fal", "assets_image_generate", json!({"prompt":"a crate", "save_as":"crate.png"})));
+        calls.push(("fal", "assets_model_generate", json!({"image":"https://example.invalid/source.png", "save_as":"crate.glb"})));
+        for (provider, tool, params) in calls {
+            let (_d, w) = ws();
+            let (engine, stub) = recording_engine(&w, provider, Some(0.0));
+            let rel = params["save_as"].as_str().unwrap().to_string();
+            let err = engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err();
+            assert_eq!(err.code, ErrorCode::OverLimit);
+            assert!(err.message.contains(&rel) && err.message.contains("recorded"));
+            assert!(err.remediation.unwrap().contains("Do not blindly"));
+            assert_eq!(std::fs::read(w.app_dir().join(rel)).unwrap(), b"generated");
+            assert_eq!(w.try_assets().unwrap().len(), 1);
+            assert!(w.try_assets_spent().unwrap() > 0.0);
+            assert_eq!(stub.calls.lock().unwrap().len(), 1);
+        }
+    }
+
+    /// An over-budget precursor is kept and recorded, but cannot authorize the subsequent model generation.
+    #[test]
+    fn precursor_overrun_stops_before_model_generation() {
+        let (_d, w) = ws();
+        let (engine, stub) = recording_engine(&w, "fal", Some(0.0));
+        let err =
+            engine.call("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"}), crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OverLimit);
+        assert!(err.message.contains("crate.png"));
+        assert_eq!(*stub.calls.lock().unwrap(), [AssetKind::Image]);
+        assert_eq!(std::fs::read(w.app_dir().join("crate.png")).unwrap(), b"generated");
+        assert!(!w.app_dir().join("crate.glb").exists());
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+    }
+
+    /// A custom provider whose price depends on the exact prompt, exposing quote/generation mismatches.
+    #[derive(Default)]
+    struct PromptPriced {
+        quoted: craft_anything_platform::sync::Mutex<Vec<String>>,
+        generated: craft_anything_platform::sync::Mutex<Vec<String>>,
+        model_calls: craft_anything_platform::sync::Mutex<usize>,
+    }
+
+    impl PromptPriced {
+        /// Price every image character; charge a fixed amount for the downstream model.
+        fn price(req: &AssetRequest) -> f64 {
+            match req {
+                AssetRequest::Image { prompt, .. } => prompt.chars().count() as f64 / 1000.0,
+                _ => 0.5,
+            }
+        }
+    }
+
+    impl AssetProvider for PromptPriced {
+        /// Replace fal without real credentials or network calls.
+        fn id(&self) -> &'static str {
+            "fal"
+        }
+        /// Name the local stand-in in any error.
+        fn name(&self) -> &'static str {
+            "prompt-priced stand-in"
+        }
+        /// Capture exactly what was quoted.
+        fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
+            if let AssetRequest::Image { prompt, .. } = req {
+                self.quoted.lock().unwrap().push(prompt.to_string());
+            }
+            Ok(Self::price(req))
+        }
+        /// Capture exactly what was generated and return the matching charge.
+        fn generate(&self, _key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+            match req {
+                AssetRequest::Image { prompt, .. } => self.generated.lock().unwrap().push(prompt.to_string()),
+                _ => *self.model_calls.lock().unwrap() += 1,
+            }
+            Ok(Generated { url: "https://example.invalid/source.png".into(), bytes: b"generated".to_vec(), cost_usd: Self::price(req) })
+        }
+    }
+
+    /// Precursor quotes use the expanded trimmed prompt, while ledger provenance retains the person's description.
+    #[test]
+    fn precursor_quotes_and_generation_use_identical_expanded_prompts() {
+        for budget in [0.507, 5.0] {
+            let (_d, mut w) = ws();
+            w.set_person(|m| m.asset_budget_usd = budget).unwrap();
+            let (engine, _) = recording_engine(&w, "fal", None);
+            let stub = std::sync::Arc::new(PromptPriced::default());
+            let mut providers = AssetProviders::built_in();
+            providers.register(stub.clone());
+            engine.session().ext.insert(std::sync::Arc::new(providers));
+            let result =
+                engine.call("assets_model_generate", json!({"prompt":"  a crate  ", "save_as":"crate.glb"}), crate::CallOptions::new(crate::Caller::Mcp));
+            let quoted = stub.quoted.lock().unwrap().clone();
+            assert_eq!(quoted.len(), 1);
+            assert!(quoted[0].starts_with("a crate. One whole object"));
+            if budget < 1.0 {
+                assert_eq!(result.unwrap_err().code, ErrorCode::OverLimit);
+                assert!(stub.generated.lock().unwrap().is_empty());
+                assert_eq!(*stub.model_calls.lock().unwrap(), 0);
+                assert!(w.try_assets().unwrap().is_empty());
+            } else {
+                result.unwrap();
+                assert_eq!(*stub.generated.lock().unwrap(), quoted);
+                assert_eq!(*stub.model_calls.lock().unwrap(), 1);
+                assert!(w.try_assets().unwrap().iter().all(|record| record.prompt == "a crate"));
+            }
         }
     }
 
