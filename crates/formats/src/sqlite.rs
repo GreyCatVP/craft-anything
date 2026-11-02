@@ -119,6 +119,8 @@ pub enum CellValue {
     Real(f64),
     Text { text: String, truncated: bool },
     Blob { len: usize, sha256_prefix: String },
+    PartialBlob { len: usize },
+    NotRead,
 }
 
 impl Serialize for CellValue {
@@ -142,6 +144,17 @@ impl Serialize for CellValue {
                 let mut m = s.serialize_map(Some(2))?;
                 m.serialize_entry("blob_len", len)?;
                 m.serialize_entry("sha256_prefix", sha256_prefix)?;
+                m.end()
+            }
+            CellValue::PartialBlob { len } => {
+                let mut m = s.serialize_map(Some(2))?;
+                m.serialize_entry("blob_len", len)?;
+                m.serialize_entry("truncated", &true)?;
+                m.end()
+            }
+            CellValue::NotRead => {
+                let mut m = s.serialize_map(Some(1))?;
+                m.serialize_entry("not_read", &true)?;
                 m.end()
             }
         }
@@ -563,7 +576,7 @@ impl<'a> SqliteDb<'a> {
         let (payload_len, n1) = varint(self.data, cell_off)?;
         let (rowid, n2) = varint(self.data, cell_off.checked_add(n1)?)?;
         let body_off = cell_off.checked_add(n1)?.checked_add(n2)?;
-        let payload_len = (payload_len as usize).min(MAX_CELL_SIZE);
+        let payload_len = usize::try_from(payload_len).ok()?;
         let payload = self.assemble_payload(body_off, payload_len, true, notes)?;
         let values = parse_record(&payload);
         let rowid = i64::from_le_bytes(rowid.to_le_bytes());
@@ -574,10 +587,6 @@ impl<'a> SqliteDb<'a> {
     fn read_index_cell(&self, cell_off: usize, notes: &mut Vec<String>) -> Option<Row> {
         let (payload_len, n) = varint(self.data, cell_off)?;
         let payload_len = usize::try_from(payload_len).ok()?;
-        if payload_len > MAX_CELL_SIZE {
-            notes.push("Skipped an index record exceeding the cell-size cap.".into());
-            return None;
-        }
         let payload = self.assemble_payload(cell_off.checked_add(n)?, payload_len, false, notes)?;
         Some(Row { rowid: None, values: parse_record(&payload) })
     }
@@ -615,15 +624,14 @@ impl<'a> SqliteDb<'a> {
                 let Some(chunk) = self.data.get(pbase.checked_add(4)?..pbase.checked_add(4)?.checked_add(per_page).unwrap_or(pbase)) else {
                     break;
                 };
-                let remaining = payload_len.saturating_sub(out.len());
+                let remaining = payload_len.min(MAX_CELL_SIZE).saturating_sub(out.len());
                 let take = remaining.min(chunk.len());
                 out.extend_from_slice(chunk.get(..take)?);
                 next = read_u32_be(self.data, pbase).unwrap_or(0);
-                if out.len() >= MAX_CELL_SIZE {
-                    notes.push("A value was cut at the cell-size cap.".into());
-                    break;
-                }
             }
+        }
+        if out.len() < payload_len {
+            notes.push("A cell payload was only partially read; some values are truncated or not read.".into());
         }
         Some(out)
     }
@@ -656,19 +664,26 @@ fn parse_record(payload: &[u8]) -> Vec<CellValue> {
     for st in types {
         let (val, size) = decode_serial(st, payload, body);
         out.push(val);
-        body = match body.checked_add(size) {
-            Some(v) => v,
-            None => break,
-        };
-        if body > payload.len() {
-            break;
-        }
+        body = body.saturating_add(size);
     }
     out
 }
 
 /// Decode one serial-typed value at `off`; returns the value and its byte size.
 fn decode_serial(serial: u64, data: &[u8], off: usize) -> (CellValue, usize) {
+    let size = match serial {
+        1..=4 => serial as usize,
+        5 => 6,
+        6 | 7 => 8,
+        n if n >= 12 => usize::try_from((n - 12) / 2).unwrap_or(usize::MAX),
+        _ => 0,
+    };
+    if off > data.len() || (off == data.len() && size != 0) {
+        return (CellValue::NotRead, size);
+    }
+    if serial < 12 && size > data.len().saturating_sub(off) {
+        return (CellValue::NotRead, size);
+    }
     match serial {
         0 => (CellValue::Null, 0),
         1 => (int_be(data, off, 1), 1),
@@ -685,16 +700,23 @@ fn decode_serial(serial: u64, data: &[u8], off: usize) -> (CellValue, usize) {
         9 => (CellValue::Int(1), 0),
         10 | 11 => (CellValue::Null, 0), // reserved for internal use.
         n if n >= 12 && n % 2 == 0 => {
-            let len = ((n - 12) / 2) as usize;
-            let slice = data.get(off..off.saturating_add(len)).unwrap_or(&[]);
-            (blob_value(slice, len), len)
+            let len = size;
+            let slice = data.get(off..off.saturating_add(len).min(data.len())).unwrap_or(&[]);
+            let value = if slice.len() < len { CellValue::PartialBlob { len } } else { blob_value(slice, len) };
+            (value, len)
         }
-        n => {
+        _ => {
             // Odd and >= 13: text of (n-13)/2 bytes (encoding handled by the caller's DB header;
             // decoded here as UTF-8 lossily, which is correct for the common case).
-            let len = ((n - 13) / 2) as usize;
-            let slice = data.get(off..off.saturating_add(len)).unwrap_or(&[]);
-            (text_value(slice), len)
+            let len = size;
+            let slice = data.get(off..off.saturating_add(len).min(data.len())).unwrap_or(&[]);
+            let mut value = text_value(slice);
+            if slice.len() < len
+                && let CellValue::Text { truncated, .. } = &mut value
+            {
+                *truncated = true;
+            }
+            (value, len)
         }
     }
 }
@@ -1086,6 +1108,90 @@ fn extract_type(rest: &str) -> String {
 mod tests {
     use super::*;
 
+    fn payload_cap_case(case: u8) {
+        use craft_anything_testkit::sqlite::{Val, overflow_row_db};
+        use sha2::Digest as _;
+        let values = match case {
+            1 => vec![Val::Text("x".repeat(8_000_000))],
+            2 => vec![Val::Text("x".repeat(8_400_000))],
+            3 => vec![Val::Blob(vec![0x5a; 8_400_000])],
+            4 => vec![Val::Text("x".repeat(4_300_000)), Val::Blob(vec![0x5a; 4_300_000])],
+            5 => vec![Val::Int(42), Val::Blob(vec![0x5a; 8_400_000]), Val::Int(73)],
+            6 => vec![Val::Blob(vec![0x5a; 1_000_000])],
+            _ => panic!("unknown payload-cap case"),
+        };
+        let bytes = overflow_row_db(&values);
+        let db = SqliteDb::parse(&bytes).expect("fixture parses");
+        let page = db.read_rows(2, 0, 1);
+        assert_eq!(page.rows.len(), 1);
+        let row = &page.rows[0];
+        assert_eq!(row.values.len(), values.len(), "d{case}: every column is present");
+        for (i, source) in values.iter().enumerate() {
+            let value = serde_json::to_value(&row.values[i]).expect("serializes");
+            match source {
+                Val::Text(_) => assert_eq!(value, serde_json::json!({"text": "x".repeat(MAX_TEXT), "truncated": true}), "d{case}: text prefix"),
+                Val::Blob(blob) => {
+                    assert_eq!(value["blob_len"], blob.len(), "d{case}: true blob length");
+                    if case == 6 {
+                        let hash: String = sha2::Sha256::digest(blob).iter().take(8).map(|b| format!("{b:02x}")).collect();
+                        assert_eq!(value, serde_json::json!({"blob_len": blob.len(), "sha256_prefix": hash}));
+                    } else {
+                        assert_eq!(value["truncated"], true, "d{case}: partial blob marked");
+                        assert!(value.get("sha256_prefix").is_none_or(serde_json::Value::is_null), "d{case}: no partial hash");
+                    }
+                }
+                Val::Int(n) if i == 0 => assert_eq!(value, *n),
+                Val::Int(_) => assert_eq!(value, serde_json::json!({"not_read": true})),
+                _ => panic!("unexpected payload-cap fixture value"),
+            }
+        }
+        assert_eq!(page.notes.is_empty(), matches!(case, 1 | 6), "d{case}: cap disclosure");
+    }
+
+    #[test]
+    fn payload_cap_d1() {
+        payload_cap_case(1);
+    }
+    #[test]
+    fn payload_cap_d2() {
+        payload_cap_case(2);
+    }
+    #[test]
+    fn payload_cap_d3() {
+        payload_cap_case(3);
+    }
+    #[test]
+    fn payload_cap_d4() {
+        payload_cap_case(4);
+    }
+    #[test]
+    fn payload_cap_d5() {
+        payload_cap_case(5);
+    }
+    #[test]
+    fn payload_cap_d6() {
+        payload_cap_case(6);
+    }
+
+    #[test]
+    fn payload_cap_d7_without_rowid() {
+        use craft_anything_testkit::sqlite::{Val, without_rowid_db};
+        let bytes = without_rowid_db(
+            "CREATE TABLE t(v BLOB, k INT PRIMARY KEY, tail INT) WITHOUT ROWID",
+            &[vec![Val::Int(42), Val::Blob(vec![0x5a; 8_400_000]), Val::Int(73)]],
+        );
+        let page = SqliteDb::parse(&bytes).expect("fixture").read_rows(2, 0, 10);
+        assert_eq!(page.rows.len(), 1, "d7: capped index rows must remain present");
+        assert_eq!(page.rows[0].rowid, None);
+        assert_eq!(
+            serde_json::to_value(&page.rows[0].values).unwrap(),
+            serde_json::json!([
+                {"blob_len": 8_400_000, "truncated": true}, 42, {"not_read": true}
+            ])
+        );
+        assert!(!page.notes.is_empty(), "d7: cap disclosure");
+    }
+
     fn short_record_case(declarations: &str, defaults: Vec<CellValue>, note: bool) {
         use craft_anything_testkit::sqlite::{Val, table_db};
         let mut full = vec![Val::Int(2)];
@@ -1095,6 +1201,7 @@ mod tests {
             CellValue::Text { text, .. } => Val::Text(text.clone()),
             CellValue::Blob { .. } => Val::Blob(vec![0, 255]),
             CellValue::Null => Val::Null,
+            _ => panic!("unexpected default fixture value"),
         }));
         let bytes = table_db(&format!("CREATE TABLE t(n INT, {declarations})"), &[(1, vec![Val::Int(1)]), (2, full)]);
         let db = SqliteDb::parse(&bytes).expect("fixture");

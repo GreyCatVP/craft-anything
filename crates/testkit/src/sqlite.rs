@@ -196,6 +196,48 @@ pub fn table_db(sql: &str, rows: &[(i64, Vec<Val>)]) -> Vec<u8> {
     file
 }
 
+/// Build one table row, spilling its record over a chain of overflow pages.
+pub fn overflow_row_db(values: &[Val]) -> Vec<u8> {
+    let record = build_record(values);
+    let max_local = PAGE_SIZE - 35;
+    let min_local = (PAGE_SIZE - 12) * 32 / 255 - 23;
+    let candidate = min_local + (record.len().saturating_sub(min_local) % (PAGE_SIZE - 4));
+    let local = if record.len() <= max_local {
+        record.len()
+    } else if candidate <= max_local {
+        candidate
+    } else {
+        min_local
+    };
+    let overflow = &record[local..];
+    let pages = 2 + overflow.len().div_ceil(PAGE_SIZE - 4);
+    let mut file = vec![0; pages * PAGE_SIZE];
+    write_db_header(&mut file[..PAGE_SIZE], pages as u32);
+    let sql = format!("CREATE TABLE items({})", (0..values.len()).map(|i| format!("c{i}")).collect::<Vec<_>>().join(", "));
+    let schema = build_record(&[Val::Text("table".into()), Val::Text("items".into()), Val::Text("items".into()), Val::Int(2), Val::Text(sql)]);
+    write_table_leaf(&mut file[..PAGE_SIZE], 100, &[(1, schema)]);
+    let mut cell = sqlite_varint(record.len() as u64);
+    cell.extend(sqlite_varint(1));
+    cell.extend_from_slice(&record[..local]);
+    if !overflow.is_empty() {
+        cell.extend_from_slice(&3u32.to_be_bytes());
+    }
+    let top = PAGE_SIZE - cell.len();
+    let leaf = &mut file[PAGE_SIZE..2 * PAGE_SIZE];
+    leaf[0] = 0x0d;
+    leaf[3..5].copy_from_slice(&1u16.to_be_bytes());
+    leaf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+    leaf[8..10].copy_from_slice(&(top as u16).to_be_bytes());
+    leaf[top..].copy_from_slice(&cell);
+    for (i, chunk) in overflow.chunks(PAGE_SIZE - 4).enumerate() {
+        let base = (i + 2) * PAGE_SIZE;
+        let next = if i + 3 < pages { (i + 4) as u32 } else { 0 };
+        file[base..base + 4].copy_from_slice(&next.to_be_bytes());
+        file[base + 4..base + 4 + chunk.len()].copy_from_slice(chunk);
+    }
+    file
+}
+
 /// A database whose header declares WAL mode (write/read version 2) but no sidecar is present.
 pub fn wal_mode_db() -> Vec<u8> {
     let mut db = simple_db();

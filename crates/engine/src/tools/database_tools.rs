@@ -107,7 +107,7 @@ fn db_sqlite_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolEr
                 let total = rc.count;
                 let shown = page.rows.len() as u64;
                 let next = p.offset as u64 + shown;
-                let cov = if page.truncated || rc.bounded || next < total {
+                let cov = if page.truncated || rc.bounded || next < total || !page.notes.is_empty() {
                     Coverage { status: CoverageStatus::Partial, examined: Some(shown), total: Some(total), next_offset: (next < total).then_some(next) }
                 } else {
                     Coverage { status: CoverageStatus::Complete, examined: Some(shown), total: Some(total), next_offset: None }
@@ -336,6 +336,20 @@ mod tests {
     }
 
     #[test]
+    fn payload_cap_is_disclosed_in_coverage() {
+        let e = Engine::new(crate::testing::session());
+        for size in [1_000_000, 8_400_000] {
+            let bytes = fx::overflow_row_db(&[fx::Val::Int(42), fx::Val::Blob(vec![0x5a; size]), fx::Val::Int(73)]);
+            let p = temp_file("overflow.db", &bytes);
+            let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "items"}));
+            let partial = size == 8_400_000;
+            assert_eq!(v["coverage"]["status"], if partial { "partial" } else { "complete" });
+            assert_eq!(v["result"]["rows"]["notes"].as_array().unwrap().is_empty(), !partial);
+            assert_eq!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "read_notes"), partial);
+        }
+    }
+
+    #[test]
     fn blob_is_summarised_not_dumped() {
         let e = Engine::new(crate::testing::session());
         let p = temp_file("app.db", &fx::simple_db());
@@ -380,5 +394,24 @@ mod tests {
         let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
         assert_eq!(v["result"]["rows"]["rows"][0]["values"], json!([1, 42, null]));
         assert!(v["result"]["rows"]["notes"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("unsupported DEFAULT")));
+    }
+
+    #[test]
+    fn payload_cap_without_rowid_is_disclosed_in_coverage() {
+        let e = Engine::new(crate::testing::session());
+        let bytes = fx::without_rowid_db(
+            "CREATE TABLE t(v BLOB, k INT PRIMARY KEY, tail INT) WITHOUT ROWID",
+            &[vec![fx::Val::Int(42), fx::Val::Blob(vec![0x5a; 8_400_000]), fx::Val::Int(73)]],
+        );
+        let p = temp_file("overflow-index.db", &bytes);
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
+        assert_eq!(v["coverage"]["status"], "partial");
+        assert_eq!(
+            v["result"]["rows"]["rows"][0]["values"],
+            json!([
+                {"blob_len": 8_400_000, "truncated": true}, 42, {"not_read": true}
+            ])
+        );
+        assert!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "read_notes"));
     }
 }
