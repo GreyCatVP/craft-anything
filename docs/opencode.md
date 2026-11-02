@@ -29,6 +29,8 @@ choice is checked again in the actual execution directory before each native run
 If another task holds the session, opening or reloading the picker asks you to retry rather
 than querying without the project directory. An already open picker keeps its draft and any
 matching background result until the session can be checked again.
+If validation fails or is cancelled, the conversation emits its error or stopped status followed
+by a terminal turn event, so headless chat finishes without waiting for an agent that never started.
 
 ## CLI
 
@@ -71,6 +73,11 @@ cli_thinking = "high"
 These fields extend the existing versioned settings file. Old settings without them retain
 OpenCode's defaults; a known variant embedded in an existing `cli_model` reference is read into
 `cli_thinking`. Explicit selections run as `opencode run --model provider/model#variant`.
+The shared `Effort` type represents all five levels. OpenCode's `cli_thinking` remains a separate
+setting from API/Claude `effort`: an unavailable OpenCode variant is refused, never stepped down.
+Hub and tool selections use the same save path: reread the settings file strictly, preserve unrelated
+disk changes, and reject a changed backend or project. Malformed settings are left untouched, and
+the session is updated only after a successful save.
 The current ACP transport cannot select models or variants, so an explicit choice uses the
 native adapter even if `acp = true` was previously set.
 

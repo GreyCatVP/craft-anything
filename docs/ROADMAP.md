@@ -312,6 +312,10 @@ Owner: open · Status: in progress
 - [x] Capture OpenCode settings and project together; refuse a busy session instead of treating
       it as no project, and preserve open model pickers and matching results during contention.
 - [x] Report cancelled model validation as stopped, while preserving error events for other failures.
+- [x] Finish rejected or cancelled model validation with a terminal event so headless chat exits;
+      document functions touched by the OpenCode model-selection changes.
+- [x] Integrate the five-level `Effort` type from #395 for agent variants, and share a strict
+      disk-based selection save between the hub and headless tools, preserving unrelated edits.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 

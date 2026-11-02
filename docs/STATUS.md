@@ -98,6 +98,13 @@ correction also passed [hosted CI](https://github.com/storytold/craft-anything/a
 in PR #544. This correction concerns reported finish reasons; handling of a missing finish
 reason is unchanged. No live provider or local-model build was run.
 
+### OpenCode review follow-up
+
+OpenCode variants now use the shared five-level `Effort` type while retaining exact catalogue
+validation. Hub and headless tool selections share a strict disk-based save that preserves unrelated
+settings changes and refuses damaged files or changed backends. Regression tests cover both entry
+points. Rejected or cancelled model validation emits a terminal turn event so headless chat exits.
+
 ### Linux Unreal setup
 
 Unreal installations registered in `~/.config/Epic/UnrealEngine/Install.ini` are found on Linux.

@@ -8,6 +8,7 @@ fn cli(args: &[&str], config: &std::path::Path) -> Output {
     Process::new(env!("CARGO_BIN_EXE_craft-anything-cli")).args(args).env("CRAFT_ANYTHING_CONFIG_DIR", config).timeout(Duration::from_secs(60)).run().unwrap()
 }
 
+/// The CLI lists installation-specific depths and refuses unsupported selections using an isolated agent fixture.
 #[cfg(unix)]
 #[test]
 fn opencode_cli_lists_supported_depths_and_rejects_unsupported_choices() {

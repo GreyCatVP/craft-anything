@@ -236,6 +236,7 @@ fn remote_agents(host: String) -> Vec<Detected> {
 mod tests {
     use super::*;
 
+    /// Non-Git SSH hosts offer both supported agent suggestions without probing the remote computer.
     #[test]
     fn ssh_hosts_offer_opencode_as_well_as_claude_code() {
         let found = remote_agents("test-box".into());

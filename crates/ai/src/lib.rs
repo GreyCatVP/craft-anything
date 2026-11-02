@@ -25,7 +25,7 @@ pub mod prompt;
 pub mod rebuild;
 pub mod ssh;
 
-pub use cli_agents::models::{AgentModel, ModelContext, ThinkingDepth};
+pub use cli_agents::models::{AgentModel, ModelContext};
 pub use config::{AiConfig, BackendEntry, BackendOptions, Price};
 pub use failure::{FailureKind, TurnFailure};
 pub use keys::KeyStore;
@@ -537,28 +537,18 @@ impl AiHub {
 
     /// Set an agent's model and thinking together. None uses OpenCode's default.
     /// Discovery happens before taking the session lock, and stale settings aren't overwritten.
-    pub fn set_agent_model(&self, name: &str, model: Option<&str>, thinking: Option<ThinkingDepth>) -> Result<bool, ToolError> {
+    pub fn set_agent_model(&self, name: &str, model: Option<&str>, thinking: Option<Effort>) -> Result<bool, ToolError> {
         let context = self.model_context(name)?;
         self.set_agent_selection(&context, model, thinking)
     }
 
     /// Commit a picker selection only if its captured settings and project are still current.
-    pub fn set_agent_selection(&self, context: &ModelContext, model: Option<&str>, thinking: Option<ThinkingDepth>) -> Result<bool, ToolError> {
+    pub fn set_agent_selection(&self, context: &ModelContext, model: Option<&str>, thinking: Option<Effort>) -> Result<bool, ToolError> {
         let options = cli_agents::models::select(context, model, thinking)?;
         // Re-read and compare under the same lock as the save. A long catalogue lookup must
         // not overwrite another settings change that finished while it was running.
         let mut session = self.engine.session();
-        let mut cfg = AiConfig::from_table(&session.settings.ai)?;
-        let Some(entry) = cfg.backends.iter_mut().find(|e| e.config.name == context.backend.config.name) else { return Ok(false) };
-        if *entry != context.backend || session.project.as_ref().map(|p| p.root.clone()) != context.directory {
-            return Err(ToolError::invalid("The AI settings changed while its models were loading. Reload the models and try again."));
-        }
-        entry.options = options;
-        let mut next = session.settings.clone();
-        next.ai = cfg.to_table()?;
-        next.save_to(&self.settings_path())?;
-        session.settings = next;
-        Ok(true)
+        config::save_agent_selection(&mut session, &self.settings_path(), context, options)
     }
 
     /// Remove a backend and its stored key. Returns false when there was no such backend.

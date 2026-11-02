@@ -15,7 +15,7 @@ pub struct AgentModelPicker {
     pub context: craft_anything_ai::ModelContext,
     pub result: Option<Result<Vec<craft_anything_ai::AgentModel>, String>>,
     pub model: Option<String>,
-    pub thinking: Option<craft_anything_ai::ThinkingDepth>,
+    pub thinking: Option<craft_anything_ai::Effort>,
 }
 
 /// The UI keeps the draft; discovery, validation and persistence live in the AI layer.
@@ -168,6 +168,8 @@ impl CraftApp {
         });
     }
 
+    /// Capture the backend context and load its catalogue in a worker tagged with a fresh picker request id.
+    /// If the session cannot be read, report the error and keep the existing draft.
     pub fn pick_agent_model(&mut self, name: &str) {
         let context = match self.hub.model_context(name) {
             Ok(context) => context,
@@ -192,7 +194,8 @@ impl CraftApp {
         });
     }
 
-    pub fn set_agent_model(&mut self, name: &str, model: Option<String>, thinking: Option<craft_anything_ai::ThinkingDepth>) {
+    /// Submit the matching picker's selection for background validation and persistence against its captured context.
+    pub fn set_agent_model(&mut self, name: &str, model: Option<String>, thinking: Option<craft_anything_ai::Effort>) {
         let Some(picker) = self.agent_model_picker.take().filter(|p| p.context.backend.config.name == name) else { return };
         let hub = self.hub.clone();
         self.jobs.spawn(tr("Change an AI's model"), false, move |_| {

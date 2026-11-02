@@ -1082,9 +1082,10 @@ fn a_claude_ais_effort_is_set_in_settings() {
     h.get_by_value("max");
 }
 
+/// The picker exposes only the chosen model's depths and clears an old depth when changing models.
 #[test]
 fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
-    use craft_anything_ai::{AgentModel, BackendConfig, BackendKind, ThinkingDepth};
+    use craft_anything_ai::{AgentModel, BackendConfig, BackendKind, Effort};
     use craft_anything_ui_egui::builders::AgentModelPicker;
     let mut h = harness(|| {
         let mut a = demo::app(demo::engine(Mode::Experienced, true));
@@ -1104,8 +1105,8 @@ fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
             model: Some("test/deep".into()),
             thinking: None,
             result: Some(Ok(vec![
-                AgentModel { id: "test/deep".into(), name: "Deep".into(), thinking: ThinkingDepth::ALL.into() },
-                AgentModel { id: "test/small".into(), name: "Small".into(), thinking: vec![ThinkingDepth::Low] },
+                AgentModel { id: "test/deep".into(), name: "Deep".into(), thinking: Effort::ALL.into() },
+                AgentModel { id: "test/small".into(), name: "Small".into(), thinking: vec![Effort::Low] },
             ])),
         });
         a
@@ -1118,7 +1119,7 @@ fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
     }
     h.get_by_label("Max").click();
     h.run_steps(2);
-    assert_eq!(h.state().agent_model_picker.as_ref().unwrap().thinking, Some(ThinkingDepth::Max));
+    assert_eq!(h.state().agent_model_picker.as_ref().unwrap().thinking, Some(Effort::Max));
     h.get_by_label("OpenCode model").click();
     h.run_steps(2);
     h.get_by_label("Small · test/small").click();

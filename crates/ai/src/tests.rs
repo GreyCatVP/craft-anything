@@ -137,6 +137,7 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
+/// A CLI stand-in checks discovery, persisted selections, native variant arguments and stale-context refusal.
 #[cfg(unix)]
 #[test]
 fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
@@ -162,9 +163,9 @@ fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
     )
     .unwrap();
     assert_eq!(h.model_choices("OpenCode").unwrap(), ["test/alias"]);
-    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(ThinkingDepth::Max)).unwrap());
+    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(Effort::Max)).unwrap());
     let saved = AiConfig::from_settings(&Settings::load_from(&dir.path().join("config.toml")));
-    assert_eq!(saved.get("OpenCode").unwrap().options.cli_thinking, Some(ThinkingDepth::Max));
+    assert_eq!(saved.get("OpenCode").unwrap().options.cli_thinking, Some(Effort::Max));
     assert_eq!(saved.get("OpenCode").unwrap().config.model, "opencode");
     let mut conversation = h.start(Some("OpenCode"), false).unwrap();
     conversation.send("test prompt");
@@ -177,8 +178,8 @@ fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
     events.extend(conversation.poll());
     assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
     assert!(std::fs::read_to_string(&seen).unwrap().contains("test/alias#max"), "ACP must not discard an explicit selection");
-    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(ThinkingDepth::Xhigh)).is_err());
-    assert_eq!(h.options()["OpenCode"].cli_thinking, Some(ThinkingDepth::Max), "a failed validation changes nothing");
+    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(Effort::Xhigh)).is_err());
+    assert_eq!(h.options()["OpenCode"].cli_thinking, Some(Effort::Max), "a failed validation changes nothing");
     let stale = h.model_context("OpenCode").unwrap();
     h.set_enabled("OpenCode", false).unwrap();
     assert!(h.set_agent_selection(&stale, None, None).is_err(), "a late picker cannot overwrite newer settings");
@@ -189,6 +190,7 @@ fn opencode_selection_is_validated_saved_and_used_by_the_native_runner() {
     assert!(h.options()["OpenCode"].cli_thinking.is_none());
 }
 
+/// Contention is an error, while an available session retains its actual optional project and remains saveable.
 #[test]
 fn model_context_distinguishes_a_busy_session_from_no_project() {
     use craft_anything_engine::project::{Project, Purpose};

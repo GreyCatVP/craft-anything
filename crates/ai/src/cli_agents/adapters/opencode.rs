@@ -10,10 +10,12 @@ impl AgentAdapter for OpenCode {
         &["opencode"]
     }
 
+    /// OpenCode V2 exposes a catalogue through its authenticated CLI.
     fn has_model_catalog(&self) -> bool {
         true
     }
 
+    /// Discover enabled chat models and thinking variants from the selected local or SSH installation.
     fn model_catalog(
         &self,
         config: &BackendConfig,
@@ -24,6 +26,8 @@ impl AgentAdapter for OpenCode {
         models::discover(config, options, directory, stop)
     }
 
+    /// Refuse model overrides in extra arguments and validate explicit choices against the live catalogue.
+    /// Default selections require no catalogue query.
     fn validate_model(&self, config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>, stop: &Stop) -> Result<(), ToolError> {
         // Extra flags must not silently override the selected model or its thinking variant.
         if options.args.iter().any(|a| a == "--model" || a.starts_with("--model=") || a.starts_with("-m")) {
@@ -35,6 +39,7 @@ impl AgentAdapter for OpenCode {
         models::validate(options, &self.model_catalog(config, options, directory, stop)?)
     }
 
+    /// Build native `run` arguments, encoding an optional thinking depth as `provider/model#variant`.
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = vec!["run".to_string()];
         // A builder works unattended: what OpenCode would stop to ask is allowed, unless its own
@@ -43,7 +48,7 @@ impl AgentAdapter for OpenCode {
             a.push("--auto".into());
         }
         if let Some(m) = &cx.options.cli_model {
-            let model = cx.options.cli_thinking.map_or_else(|| m.clone(), |d| format!("{m}#{}", d.id()));
+            let model = cx.options.cli_thinking.map_or_else(|| m.clone(), |d| format!("{m}#{}", d.as_str()));
             a.extend(["--model".into(), model]);
         }
         a.extend(cx.options.args.iter().cloned());
@@ -245,14 +250,15 @@ mod tests {
         assert_eq!(zero.cost_usd, Some(0.0), "an explicit zero is a known cost");
     }
 
+    /// Every supported depth reaches native chat and builder runs in the selected model reference.
     #[test]
     fn thinking_depth_is_part_of_the_selected_model_reference() {
-        for depth in models::ThinkingDepth::ALL {
+        for depth in crate::Effort::ALL {
             let options = BackendOptions { cli_model: Some("test/model".into()), cli_thinking: Some(depth), ..Default::default() };
             for builder in [false, true] {
                 let argv = args(builder, &options);
                 let model = argv.iter().position(|a| a == "--model").unwrap();
-                assert_eq!(argv[model + 1], format!("test/model#{}", depth.id()));
+                assert_eq!(argv[model + 1], format!("test/model#{}", depth.as_str()));
                 assert_eq!(argv.last().unwrap(), "PRE make a game");
             }
         }

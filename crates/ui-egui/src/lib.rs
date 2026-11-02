@@ -438,6 +438,7 @@ pub struct CraftApp {
 }
 
 impl CraftApp {
+    /// Initialize UI state from the shared engine's saved settings, waiting rather than substituting defaults.
     pub fn new(engine: Arc<Engine>, hub: Arc<AiHub>) -> Self {
         // Wait for the engine if it's busy: defaults here would show Clean room and no AI, and the
         // next settings change would save them over the person's own.
@@ -1228,6 +1229,7 @@ impl CraftApp {
 
     // ---- results ----------------------------------------------------------------------------
 
+    /// Apply a completed background job, reporting failures and accepting picker results only for matching requests.
     fn handle_done(&mut self, done: jobs::Finished<Done>) {
         let job = done.job;
         if self.saving == Some(job) {

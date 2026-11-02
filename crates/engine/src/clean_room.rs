@@ -159,6 +159,7 @@ pub fn is_refusal(e: &ToolError) -> bool {
 mod tests {
     use super::*;
 
+    /// Clean-room entries are unique and resolve to engine tools or a recognised higher-layer namespace.
     #[test]
     fn every_engine_tool_in_the_table_exists_and_none_is_listed_twice() {
         let r = crate::Registry::with_all_tools();

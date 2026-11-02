@@ -1,56 +1,20 @@
 //! Model discovery through the selected agent's own CLI, in the same execution context as a run.
 //! Only public model metadata is retained; provider headers and credentials are never returned.
 
-use crate::model::Stop;
+use crate::model::{Effort, Stop};
 use crate::{BackendConfig, BackendEntry, BackendOptions};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use craft_anything_platform::Process;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-/// OpenCode variant ids, deliberately separate from API backends' effort settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ThinkingDepth {
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-}
-
-impl ThinkingDepth {
-    pub const ALL: [Self; 5] = [Self::Low, Self::Medium, Self::High, Self::Xhigh, Self::Max];
-
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
-            Self::Xhigh => "Xhigh",
-            Self::Max => "Max",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentModel {
     /// The selectable reference (provider/id), including aliases defined in OpenCode.
     pub id: String,
     pub name: String,
-    pub thinking: Vec<ThinkingDepth>,
+    pub thinking: Vec<Effort>,
 }
 
 /// A snapshot of the context a picker queried. Also used to reject stale background results.
@@ -85,11 +49,14 @@ struct Variant {
     id: String,
 }
 
+/// Describe an invalid catalogue without including potentially sensitive raw CLI output.
 fn malformed() -> ToolError {
     ToolError::new(ErrorCode::GarbledOutput, "OpenCode returned an unreadable model list.")
         .with_remediation("Use OpenCode V2 on the selected computer and try loading its models again.")
 }
 
+/// Parse a bounded V2 catalogue into sorted, deduplicated enabled chat models and known depths.
+/// Reject malformed references or oversized responses; discard unrelated provider metadata.
 pub(crate) fn parse_models(bytes: &[u8]) -> Result<Vec<AgentModel>, ToolError> {
     if bytes.len() >= MAX_OUTPUT {
         return Err(ToolError::new(ErrorCode::OverLimit, "OpenCode's model list is too large."));
@@ -107,7 +74,7 @@ pub(crate) fn parse_models(bytes: &[u8]) -> Result<Vec<AgentModel>, ToolError> {
             return Err(malformed());
         }
         let id = format!("{}/{}", m.provider, m.id);
-        let thinking = ThinkingDepth::ALL.into_iter().filter(|d| m.variants.iter().any(|v| v.id == d.id())).collect();
+        let thinking = Effort::ALL.into_iter().filter(|d| m.variants.iter().any(|v| v.id == d.as_str())).collect();
         models.insert(id.clone(), AgentModel { id, name: m.name, thinking });
     }
     Ok(models.into_values().collect())
@@ -129,12 +96,15 @@ fn connection_args(options: &BackendOptions) -> Result<Vec<String>, ToolError> {
     Ok(result)
 }
 
+/// Build the model-list operation with connection flags shared by discovery and execution.
 pub(crate) fn query_args(options: &BackendOptions) -> Result<Vec<String>, ToolError> {
     let mut args = vec!["api".into(), "model.list".into()];
     args.extend(connection_args(options)?);
     Ok(args)
 }
 
+/// Select the configured executable and catalogue location, quoting SSH arguments for the remote shell.
+/// Local queries use the supplied directory or current directory; SSH queries expand remote `$PWD`.
 fn query_command(config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>) -> Result<(String, Vec<String>), ToolError> {
     let program = options.command.clone().unwrap_or_else(|| super::program_for(&config.model));
     let mut args = query_args(options)?;
@@ -161,6 +131,7 @@ fn query_command(config: &BackendConfig, options: &BackendOptions, directory: Op
     }
 }
 
+/// Prepare an unstarted catalogue process with bounded output, deadlines and a local-only working directory.
 pub(crate) fn query_process(config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>) -> Result<Process, ToolError> {
     let (program, args) = query_command(config, options, directory)?;
     let mut process = Process::new(program).args(args);
@@ -170,6 +141,7 @@ pub(crate) fn query_process(config: &BackendConfig, options: &BackendOptions, di
     Ok(process.timeout(Duration::from_secs(20)).idle_timeout(Duration::from_secs(15)).stdout_cap(MAX_OUTPUT).stderr_cap(64 * 1024))
 }
 
+/// Query the selected installation, propagating cancellation, process failures and invalid catalogue errors.
 pub(crate) fn discover(config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>, stop: &Stop) -> Result<Vec<AgentModel>, ToolError> {
     let stop = stop.clone();
     let out = query_process(config, options, directory)?
@@ -196,11 +168,13 @@ pub(crate) fn validate(options: &BackendOptions, models: &[AgentModel]) -> Resul
 }
 
 /// Shared by the hub and headless tools. An empty model means OpenCode chooses its own default.
-pub fn select(context: &ModelContext, model: Option<&str>, thinking: Option<ThinkingDepth>) -> Result<BackendOptions, ToolError> {
+pub fn select(context: &ModelContext, model: Option<&str>, thinking: Option<Effort>) -> Result<BackendOptions, ToolError> {
     select_with_stop(context, model, thinking, &Stop::default())
 }
 
-pub fn select_with_stop(context: &ModelContext, model: Option<&str>, thinking: Option<ThinkingDepth>, stop: &Stop) -> Result<BackendOptions, ToolError> {
+/// Return validated options for a catalogue-capable agent without persisting them.
+/// Empty model names select the default; cancellation is checked before any discovery I/O.
+pub fn select_with_stop(context: &ModelContext, model: Option<&str>, thinking: Option<Effort>, stop: &Stop) -> Result<BackendOptions, ToolError> {
     stop.check()?;
     let adapter = super::adapter_for(&context.backend.config.model);
     if context.backend.config.kind != crate::BackendKind::AgentCli || !adapter.has_model_catalog() {
@@ -218,6 +192,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// An owner's cancellation survives reset and prevents model-selection I/O.
     #[test]
     fn a_cancelled_tool_stops_selection_before_io() {
         let cancel = craft_anything_engine::CancelToken::default();
@@ -230,11 +205,13 @@ mod tests {
         assert_eq!(select_with_stop(&context, None, None, &stop).unwrap_err().code, ErrorCode::Cancelled);
     }
 
+    /// Build catalogue metadata with an alias distinct from its upstream model id.
     fn model(id: &str, enabled: bool, kind: &str, variants: &[&str]) -> serde_json::Value {
         json!({"id":id,"modelID":"upstream-name","providerID":"test","name":id,"enabled":enabled,"type":kind,
             "variants":variants.iter().map(|v| json!({"id":v})).collect::<Vec<_>>()})
     }
 
+    /// Filtering retains selectable aliases and supported depths while rejecting malformed or oversized input.
     #[test]
     fn only_enabled_chat_models_and_their_actual_variants_are_offered() {
         let text = json!({"data":[
@@ -244,8 +221,8 @@ mod tests {
         ]});
         let list = parse_models(text.to_string().as_bytes()).unwrap();
         assert_eq!(list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["test/alias", "test/small"]);
-        assert_eq!(list[0].thinking, ThinkingDepth::ALL);
-        assert_eq!(list[1].thinking, [ThinkingDepth::Low, ThinkingDepth::High]);
+        assert_eq!(list[0].thinking, Effort::ALL);
+        assert_eq!(list[1].thinking, [Effort::Low, Effort::High]);
         assert!(parse_models(br#"{"data":[]}"#).unwrap().is_empty());
         for invalid in [b"not json".as_slice(), br#"{"data":[{}]}"#, br#"{}"#] {
             assert_eq!(parse_models(invalid).unwrap_err().code, ErrorCode::GarbledOutput);
@@ -253,26 +230,29 @@ mod tests {
         assert_eq!(parse_models(&vec![b' '; MAX_OUTPUT]).unwrap_err().code, ErrorCode::OverLimit);
     }
 
+    /// Explicit unavailable models and unsupported depths fail instead of silently changing the selection.
     #[test]
     fn a_selection_never_falls_back_to_another_model_or_thinking_depth() {
-        let list = vec![AgentModel { id: "test/model".into(), name: "Test".into(), thinking: vec![ThinkingDepth::High] }];
+        let list = vec![AgentModel { id: "test/model".into(), name: "Test".into(), thinking: vec![Effort::High] }];
         let mut options = BackendOptions::default();
         assert!(validate(&options, &list).is_ok());
-        options.cli_thinking = Some(ThinkingDepth::High);
+        options.cli_thinking = Some(Effort::High);
         assert!(validate(&options, &list).is_err());
         options.cli_model = Some("test/model".into());
         assert!(validate(&options, &list).is_ok());
-        options.cli_thinking = Some(ThinkingDepth::Max);
+        options.cli_thinking = Some(Effort::Max);
         assert!(validate(&options, &list).is_err());
         options.cli_model = Some("test/removed".into());
         options.cli_thinking = None;
         assert!(validate(&options, &list).is_err());
     }
 
+    /// An isolated local backend for catalogue fixtures.
     fn config() -> BackendConfig {
         BackendConfig { name: "OpenCode".into(), kind: crate::BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true }
     }
 
+    /// Discovery preserves the chosen executable and server, omitting run-only flags and local paths over SSH.
     #[test]
     fn remote_discovery_uses_the_remote_program_and_connection_context() {
         let mut cfg = config();
@@ -296,6 +276,7 @@ mod tests {
         assert_eq!(args, ["api", "model.list", "--server", "http://localhost:4096", "--param", "location[directory]=/work/test"]);
     }
 
+    /// A shell stand-in checks remote directory expansion and quoting of paths with special characters.
     #[cfg(unix)]
     #[test]
     fn a_remote_query_expands_only_the_remote_working_directory() {
@@ -314,6 +295,7 @@ mod tests {
         assert_eq!(output.stdout_text().lines().collect::<Vec<_>>(), ["api", "model.list", "--param", &format!("location[directory]={}", remote.display())]);
     }
 
+    /// A local CLI stand-in verifies project-specific discovery, malformed output, exit errors and deadlines.
     #[cfg(unix)]
     #[test]
     fn discovery_reads_the_selected_program_in_the_project_and_reports_errors() {

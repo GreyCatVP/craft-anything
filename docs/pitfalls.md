@@ -244,6 +244,10 @@ edit, right before committing.
 
 ## Design
 
+**An early error without a terminal event.** Model validation returned after reporting an error,
+but headless chat waits for `TurnDone`, not just an idle worker. Preflight failures and cancellation
+must finish the event sequence too; regression tests check both the error/status and the terminal event.
+
 **Reading literals and skipping the rest.** The Electron window reader skipped a spread inside
 `webPreferences`, so a window whose preferences came partly from another object was reported as
 "contextIsolation is not set; the default applies", which nobody had checked until a live run on

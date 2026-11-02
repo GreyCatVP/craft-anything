@@ -562,7 +562,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
             AgentEvent::Error { message: e.message, remediation: e.remediation, log: None }
         };
         let _ = tx.send(event);
-        return;
+        return nothing_done(&name);
     }
     let (help, needed) = adapter.required_flags();
     if !needed.is_empty() {
@@ -994,16 +994,20 @@ mod tests {
     }
     use crate::BackendKind;
 
+    /// Validation failures finish exactly once, preserving cancellation status and other error details.
     #[test]
     fn cancelled_model_validation_reports_stopped_and_other_failures_stay_errors() {
         struct RefusedModel(ErrorCode);
         impl AgentAdapter for RefusedModel {
+            /// Register the fixture without replacing any built-in agent.
             fn ids(&self) -> &'static [&'static str] {
                 &["test-validation"]
             }
+            /// Fail the test if a rejected model reaches command construction.
             fn args(&self, _cx: &ArgsCx) -> Vec<String> {
                 panic!("failed validation must not start the agent")
             }
+            /// Return the selected validation failure without performing I/O.
             fn validate_model(&self, _config: &BackendConfig, _options: &BackendOptions, _directory: Option<&Path>, _stop: &Stop) -> Result<(), ToolError> {
                 Err(ToolError::new(self.0, "Validation stopped").with_remediation("Reload the models."))
             }
@@ -1019,18 +1023,26 @@ mod tests {
             };
             let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
             spec.adapters.register(Arc::new(RefusedModel(code)));
-            let (tx, rx) = std::sync::mpsc::channel();
-            run_cli(&spec, "test", &tx, &Stop::default(), &Mutex::new(None), &Mutex::new(None));
-            let events: Vec<_> = rx.try_iter().collect();
+            let mut conversation = CliConversation::new(spec);
+            conversation.send("test");
+            let events: Vec<_> = (0..2).map(|_| conversation.rx.recv_timeout(Duration::from_secs(5)).unwrap()).collect();
+            assert!(!conversation.is_busy(), "the next message is accepted before TurnDone");
+            assert!(conversation.poll().is_empty(), "exactly one terminal event");
             if code == ErrorCode::Cancelled {
-                assert!(matches!(events.as_slice(), [AgentEvent::Status { text }] if text == "Stopped."), "{events:?}");
+                assert!(matches!(events.as_slice(), [AgentEvent::Status { text }, AgentEvent::TurnDone { .. }] if text == "Stopped."), "{events:?}");
             } else {
                 assert!(
-                    matches!(events.as_slice(), [AgentEvent::Error { message, remediation: Some(help), log: None }]
+                    matches!(events.as_slice(), [AgentEvent::Error { message, remediation: Some(help), log: None }, AgentEvent::TurnDone { .. }]
                     if message == "Validation stopped" && help == "Reload the models."),
                     "{events:?}"
                 );
             }
+            assert!(
+                matches!(events.last(), Some(AgentEvent::TurnDone {
+                backend, input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false,
+            }) if backend == "Test"),
+                "{events:?}"
+            );
         }
     }
 

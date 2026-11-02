@@ -305,6 +305,7 @@ fn engines(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
+/// Draw AI settings and model pickers, preserving drafts during contention and invalidating confirmed context changes.
 fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if app.agent_model_picker.as_ref().is_some_and(|p| app.hub.model_context(&p.context.backend.config.name).is_ok_and(|current| current != p.context)) {
         app.agent_model_picker = None;
@@ -870,6 +871,7 @@ mod tests {
     use crate::{Done, builders::AgentModelPicker, demo, jobs::Finished};
     use craft_anything_ai::{BackendConfig, BackendKind};
 
+    /// Busy frames retain matching catalogue results, ignore older requests and defer context invalidation until readable.
     #[test]
     fn a_busy_session_keeps_the_picker_and_its_matching_result() {
         let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Experienced, true));

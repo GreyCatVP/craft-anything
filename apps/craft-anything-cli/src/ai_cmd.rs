@@ -195,6 +195,8 @@ fn read_key(key_env: &Option<String>, key_stdin: bool) -> Result<Option<String>,
     Ok(None)
 }
 
+/// Dispatch AI configuration, discovery and model-selection commands through the shared hub.
+/// Render results in the requested format and return an exit status for success or failure.
 pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
     let hub = match hub(cli) {
         Ok(h) => h,
@@ -268,7 +270,7 @@ pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
             }
         }
         AiCommand::Model { name, model, thinking, default } if *default || thinking.is_some() => {
-            let depth = thinking.as_deref().and_then(|s| craft_anything_ai::ThinkingDepth::ALL.into_iter().find(|d| d.id() == s));
+            let depth = thinking.as_deref().and_then(craft_anything_ai::Effort::parse);
             let model = if *default { None } else { model.clone().or_else(|| hub.options().get(name).and_then(|o| o.cli_model.clone())) };
             match hub.set_agent_model(name, model.as_deref(), depth) {
                 Ok(found) => {
