@@ -119,6 +119,11 @@ browser outlived the CLI (the job isn't killed when closed) and held the shell's
 the command hung and old browsers piled up. Start programs that hand off with `.hands_off()`, and
 after a live run check that the command returned and nothing it started is still running.
 
+**A separate config folder hides the agent's own settings.** To keep a live run from touching the
+real `config.toml`, `XDG_CONFIG_HOME` was pointed at a scratch folder; the agent CLI we start reads
+the same variable, lost its own provider settings, and failed with "unsupported provider". Back up
+`config.toml` and restore it after the run instead, and leave the agent's environment as it is.
+
 **A renamed CLI can't start the builder's tools.** To keep a live run's binary from being locked, it
 was copied as `cli-r25.exe`; the CLI finds itself by name (`craft-anything-cli`) to start the
 builder's MCP server, so Claude Code saw no tools and stopped. Copy it under its own name into a
