@@ -143,14 +143,18 @@ pub fn project_android(inv: &Inventory) -> Value {
 pub fn project_apple(inv: &Inventory) -> Value {
     let e = &inv.entries;
     let h = Hints { entries: e };
-    // App roots: folders ending in .app with an Info.plist directly inside (iOS) or in Contents/ (macOS).
+    // Bundle roots have an Info.plist directly inside (iOS) or in Contents/ (macOS).
     let mut apps: Vec<String> = Vec::new();
     for x in e {
         let p = x.path.as_str();
         if name_of(p) == "Info.plist" {
             let dir = p.rsplit_once('/').map_or("", |(d, _)| d);
-            let root = dir.strip_suffix("/Contents").unwrap_or(dir);
-            if (root.ends_with(".app") || root.ends_with(".appex") || root.is_empty()) && !apps.contains(&root.to_string()) && apps.len() < 64 {
+            // A selected macOS bundle has no directory prefix before Contents.
+            let root = if dir == "Contents" { "" } else { dir.strip_suffix("/Contents").unwrap_or(dir) };
+            if (root.ends_with(".app") || root.ends_with(".appex") || root.ends_with(".xpc") || root.is_empty())
+                && !apps.contains(&root.to_string())
+                && apps.len() < 64
+            {
                 apps.push(root.to_string());
             }
         }
@@ -169,6 +173,7 @@ pub fn project_apple(inv: &Inventory) -> Value {
         v
     };
     let extensions: Vec<String> = apps.iter().filter(|a| a.ends_with(".appex")).cloned().collect();
+    let services: Vec<String> = apps.iter().filter(|a| a.ends_with(".xpc")).cloned().collect();
     let executables: Vec<Value> = e
         .iter()
         .filter(|x| matches!(x.kind.as_str(), "macho" | "macho-fat") && !x.path.contains(".framework/") && !x.path.ends_with(".dylib"))
@@ -186,7 +191,14 @@ pub fn project_apple(inv: &Inventory) -> Value {
     let catalogs: Vec<String> = e.iter().filter(|x| x.role.as_deref() == Some("asset-catalog")).map(|x| x.path.clone()).collect();
     let mut nodes: Vec<(String, &str, String)> = Vec::new();
     for a in &apps {
-        nodes.push((format!("bundle:{a}"), if a.ends_with(".appex") { "extension" } else { "bundle" }, a.clone()));
+        let kind = if a.ends_with(".appex") {
+            "extension"
+        } else if a.ends_with(".xpc") {
+            "xpc-service"
+        } else {
+            "bundle"
+        };
+        nodes.push((format!("bundle:{a}"), kind, a.clone()));
     }
     for f in &frameworks {
         nodes.push((format!("framework:{f}"), "framework", name_of(f).to_string()));
@@ -206,7 +218,7 @@ pub fn project_apple(inv: &Inventory) -> Value {
         "platform": "apple",
         "recognised": !apps.is_empty(),
         "shape": shape,
-        "bundles": apps, "extensions": extensions, "executables": executables, "frameworks": frameworks, "dylibs": dylibs,
+        "bundles": apps, "extensions": extensions, "services": services, "executables": executables, "frameworks": frameworks, "dylibs": dylibs,
         "signing": signing, "interface_files": interfaces, "asset_catalogs": catalogs,
         "runtimes": runtimes(&h),
         "graph": graph(&nodes, &inv.root),
@@ -296,6 +308,45 @@ mod tests {
         assert_eq!(p["native_libraries"]["arm64-v8a"].as_array().unwrap().len(), 2);
         assert!(p["runtimes"].as_array().unwrap().iter().any(|r| r["runtime"] == "flutter"));
         assert_eq!(p["signing"], json!(["META-INF/CERT.RSA"]));
+    }
+
+    #[test]
+    fn relative_macos_bundle_and_nested_xpc_are_recognised() {
+        let p = project_apple(&inv(&[
+            ("Contents/Info.plist", b"bplist00"),
+            ("Contents/MacOS/Example", &[0xcf, 0xfa, 0xed, 0xfe]),
+            ("Contents/XPCServices/Helper.xpc/Contents/Info.plist", b"bplist00"),
+            ("Contents/XPCServices/Helper.xpc/Contents/MacOS/Helper", &[0xcf, 0xfa, 0xed, 0xfe]),
+        ]));
+        assert_eq!(p["recognised"], true);
+        assert_eq!(p["shape"], "app-bundle");
+        assert_eq!(p["bundles"], json!(["", "Contents/XPCServices/Helper.xpc"]));
+        assert_eq!(p["services"], json!(["Contents/XPCServices/Helper.xpc"]));
+        assert_eq!(p["executables"].as_array().unwrap().len(), 2);
+        assert!(p["extensions"].as_array().unwrap().is_empty());
+        let service = "Contents/XPCServices/Helper.xpc";
+        assert!(p["graph"]["nodes"].as_array().unwrap().iter().any(|n| n["id"] == format!("bundle:{service}") && n["kind"] == "xpc-service"));
+        assert!(p["graph"]["nodes"].as_array().unwrap().iter().any(|n| n["id"] == "bundle:" && n["kind"] == "bundle"));
+        assert!(p["graph"]["edges"].as_array().unwrap().iter().any(|edge| edge["to"] == format!("bundle:{service}") && edge["kind"] == "contains"));
+    }
+
+    #[test]
+    fn apple_bundle_layout_controls() {
+        for (plist, root) in [
+            ("Example.app/Contents/Info.plist", "Example.app"),
+            ("Info.plist", ""),
+            ("Contents/XPCServices/Helper.xpc/Info.plist", "Contents/XPCServices/Helper.xpc"),
+        ] {
+            let p = project_apple(&inv(&[(plist, b"bplist00")]));
+            assert_eq!(p["recognised"], true, "{plist}");
+            assert_eq!(p["bundles"], json!([root]));
+        }
+        let p = project_apple(&inv(&[("Resources/Info.plist", b"bplist00")]));
+        assert_eq!(p["recognised"], false);
+        assert_eq!(p["shape"], "none");
+        let bare = project_apple(&inv(&[("Contents/MacOS/Example", &[0xcf, 0xfa, 0xed, 0xfe])]));
+        assert_eq!(bare["recognised"], false);
+        assert_eq!(bare["shape"], "bare-executable");
     }
 
     #[test]
