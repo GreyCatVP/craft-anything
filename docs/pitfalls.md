@@ -148,6 +148,9 @@ program.
 adapter, but eframe starts every backend first, and starting GL loaded an old Intel OpenGL driver
 that crashed the app before any window or error box (#196). Ranking can't protect you from a
 backend that's started at all: start only the backends the app may use.
+It happened again with Vulkan on Windows (#394): starting Vulkan loaded an Intel Vulkan driver
+(`igvk64.dll`) that crashed with `0xc0000005` on startup. Windows now starts DX12 only by default
+(which includes WARP); `WGPU_BACKEND` still allows choosing other backends.
 
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't

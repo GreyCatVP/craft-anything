@@ -49,8 +49,9 @@ fn main() -> eframe::Result {
     #[cfg(windows)]
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
         // Starting GL loads the system's OpenGL driver before any adapter is picked, and some
-        // Intel drivers crash in it (ig9icd64.dll, #196), so the window never opens. DX12 (with
-        // WARP) and Vulkan always cover Windows; `WGPU_BACKEND=gl` still asks for GL.
+        // Intel drivers crash in it (ig9icd64.dll, #196), so the window never opens. Similarly,
+        // starting Vulkan loads Intel's Vulkan driver (igvk64.dll, #394) and crashes before any
+        // window. DX12 (with WARP) covers all Windows systems; `WGPU_BACKEND` still asks for others.
         setup.instance_descriptor.backends = windows_backends(eframe::wgpu::Backends::from_env());
         setup.native_adapter_selector = Some(Arc::new(pick_adapter));
     }
@@ -107,11 +108,13 @@ fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgp
     }
 }
 
-/// Windows: the graphics backends to start. `WGPU_BACKEND` decides when set; otherwise every
-/// primary backend and not GL (#196).
+/// Windows: the graphics backends to start. `WGPU_BACKEND` decides when set; otherwise DX12
+/// only (#196, #394). Vulkan and GL load third-party driver DLLs (igvk64.dll, ig9icd64.dll) before
+/// an adapter is chosen, which crash on some Intel systems. DX12 (with WARP) covers all Windows
+/// installations; `WGPU_BACKEND=vulkan` or `gl` still asks for them explicitly.
 #[cfg(windows)]
 fn windows_backends(from_env: Option<eframe::wgpu::Backends>) -> eframe::wgpu::Backends {
-    from_env.unwrap_or(eframe::wgpu::Backends::PRIMARY)
+    from_env.unwrap_or(eframe::wgpu::Backends::DX12)
 }
 
 /// Lower is better: GL last, fastest device first, DX12 before Vulkan only between same-class devices
@@ -156,12 +159,14 @@ mod tests {
     }
 
     /// #196: an Intel OpenGL driver crashed the app as wgpu started GL, before any window.
+    /// #394: an Intel Vulkan driver (igvk64.dll) crashed the app as wgpu started Vulkan.
     #[test]
-    fn gl_is_only_started_when_asked_for() {
+    fn gl_and_vulkan_are_only_started_when_asked_for() {
         use eframe::wgpu::Backends;
         let started = windows_backends(None);
-        assert!(!started.contains(Backends::GL) && started.contains(Backends::DX12) && started.contains(Backends::VULKAN));
+        assert_eq!(started, Backends::DX12);
         assert_eq!(windows_backends(Some(Backends::GL)), Backends::GL, "WGPU_BACKEND=gl still works");
+        assert_eq!(windows_backends(Some(Backends::VULKAN)), Backends::VULKAN, "WGPU_BACKEND=vulkan still works");
     }
 }
 
