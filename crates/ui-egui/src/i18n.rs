@@ -20,6 +20,7 @@ pub struct LangInfo {
 
 pub static LANGUAGES: &[LangInfo] = &[
     LangInfo { code: "en", name: "English", source: "" },
+    LangInfo { code: "de", name: "Deutsch", source: include_str!("i18n/de.tsv") },
     LangInfo { code: "fr", name: "Français", source: include_str!("fr.tsv") },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv") },
     LangInfo { code: "zh-hans", name: "简体中文", source: include_str!("i18n/zh-hans.tsv") },
@@ -137,10 +138,13 @@ mod tests {
         assert_eq!(language_from_tag("en-US"), Some("en"));
         assert_eq!(language_from_tag("ja-JP"), Some("ja"));
         assert_eq!(language_from_tag("fr-CA"), Some("fr"));
-        assert_eq!(language_from_tag("de-DE"), None);
-        assert_eq!(preferred_language(["de-DE", "zh-HK", "en-US"]), "zh-hant");
+        assert_eq!(language_from_tag("de-DE"), Some("de"));
+        assert_eq!(language_from_tag("de_AT.UTF-8"), Some("de"));
+        assert_eq!(language_from_tag("es-ES"), None);
+        assert_eq!(preferred_language(["es-ES", "zh-HK", "en-US"]), "zh-hant");
+        assert_eq!(preferred_language(["de-DE", "zh-HK"]), "de");
         assert_eq!(preferred_language(["en-US", "zh-CN"]), "en");
-        assert_eq!(preferred_language(["de-DE"]), "en");
+        assert_eq!(preferred_language(["es-ES"]), "en");
         assert_eq!(preferred_language(std::iter::empty::<&str>()), "en");
     }
 
@@ -172,6 +176,25 @@ mod tests {
         }
         assert_eq!(catalogs.len(), 2);
         assert_eq!(catalogs.first(), catalogs.last());
+    }
+
+    #[test]
+    fn german_catalog_covers_the_chinese_keys() {
+        let keys = |code: &str| {
+            let lang = LANGUAGES.iter().find(|l| l.code == code).expect("language is registered");
+            let mut seen = std::collections::BTreeSet::new();
+            for (i, line) in lang.source.lines().enumerate() {
+                if line.trim().is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let (key, value) = line.split_once('\t').unwrap_or_else(|| panic!("{code}:{}: missing tab", i + 1));
+                assert!(!value.trim().is_empty() && !value.contains('\t'), "{code}:{}: bad value", i + 1);
+                assert!(seen.insert(key.to_string()), "{code}:{}: duplicate {key}", i + 1);
+                assert_eq!(key.ends_with('…'), value.ends_with('…'), "{code}: {key}");
+            }
+            seen
+        };
+        assert_eq!(keys("de"), keys("zh-hans"));
     }
 
     /// Every translation keeps its key's `{placeholders}`, or `trf` would leave them unfilled.
