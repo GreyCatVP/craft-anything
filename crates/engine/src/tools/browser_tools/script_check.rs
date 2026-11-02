@@ -243,6 +243,9 @@ impl WalkthroughParams {
         if self.keep_bodies.any() && !self.capture_network {
             return Err(ToolError::invalid("keep_bodies needs capture_network"));
         }
+        if !(1..=600).contains(&self.timeout_secs) {
+            return Err(ToolError::invalid("timeout_secs must be 1..=600"));
+        }
         Ok(())
     }
 }

@@ -684,6 +684,8 @@ fn the_checker_agrees_with_what_the_recorder_refuses() {
         json!({"actions": [ok_goto], "capture": {"events": ["no_such_family"]}}),
         json!({"actions": [ok_goto], "keep_bodies": {"request_body": true}, "capture_network": false}),
         json!({"actions": [ok_goto], "storage": {"cookies": [{"url": "ftp://x", "name": "a", "value": "b"}]}}),
+        json!({"actions": [ok_goto], "timeout_secs": 0}),
+        json!({"actions": [ok_goto], "timeout_secs": 601}),
         // Refused at the step, after those before it ran.
         json!({"actions": [{"kind": "goto", "url": "example.com"}]}),
         json!({"actions": [ok_goto, {"kind": "click"}]}),
