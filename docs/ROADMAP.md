@@ -856,7 +856,7 @@ Gaps found while using the app for real projects.
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
 - [ ] Two engine tests fail on a Mac, on `main` too: `real_binary_end_to_end_if_present` expects
       `/bin/ls` to be Linux, and `auto_mode_keeps_going_but_never_does_the_dangerous_things` is
-      refused `rm -rf` in a temp folder under `/var/folders`
+      refused `rm -rf` in a temp folder under `/var/folders` — claimed: Claude, branch bugfix/r3.11-mac-engine-tests
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -1119,7 +1119,7 @@ against what its original was recorded answering.
       a file with unusual gaps between sections can read as different
 - [ ] Two engine tests fail on a Mac, on `main` too: `real_binary_end_to_end_if_present` expects
       `/bin/ls` to be Linux, and `auto_mode_keeps_going_but_never_does_the_dangerous_things`
-      refuses `rm -rf` of a temp path under `/var/folders`
+      refuses `rm -rf` of a temp path under `/var/folders` — claimed: Claude, branch bugfix/r3.11-mac-engine-tests
 - [ ] Looked at and left for later, as niche for now: firmware image kinds (ESP32, U-Boot, device
       trees, Intel HEX), Erlang BEAM, GPU code objects, kernel modules, GameCube DOL, Mac crash
       reports, SAZ and qlog captures, protobuf bodies, R8 mappings, JNI links, MCP over HTTP
