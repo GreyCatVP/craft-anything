@@ -376,7 +376,8 @@ pub fn sanitize_url(url: &str) -> String {
     // Strip scheme://userinfo@ → scheme://host…
     if let Some(scheme_end) = url.find("://") {
         let (scheme, rest) = url.split_at(scheme_end + 3);
-        if let Some(at) = rest.find('@') {
+        let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        if let Some(at) = rest.get(..auth_end).and_then(|a| a.rfind('@')) {
             let after = rest.get(at + 1..).unwrap_or("");
             return format!("{scheme}{after}");
         }
@@ -1060,7 +1061,11 @@ mod tests {
     #[test]
     fn sanitize_url_strips_userinfo() {
         assert_eq!(sanitize_url("https://user:pw@host/path?q=1"), "https://host/path?q=1");
+        assert_eq!(sanitize_url("https://user:pw@host/@profile"), "https://host/@profile");
         assert_eq!(sanitize_url("https://host/x"), "https://host/x");
+        assert_eq!(sanitize_url("https://example.test/@profile"), "https://example.test/@profile");
+        assert_eq!(sanitize_url("https://cdn.example.test/icon@2x.png"), "https://cdn.example.test/icon@2x.png");
+        assert_eq!(sanitize_url("https://example.test/search?to=reader@example.test"), "https://example.test/search?to=reader@example.test");
     }
 
     #[test]
