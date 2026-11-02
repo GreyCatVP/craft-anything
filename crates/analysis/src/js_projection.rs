@@ -160,6 +160,10 @@ pub fn project_apple(inv: &Inventory) -> Value {
         let p = x.path.as_str();
         if name_of(p) == "Info.plist" {
             let dir = p.rsplit_once('/').map_or("", |(d, _)| d);
+            // A directory's name identifies its bundle; an archive's name identifies the container.
+            if dir == "Contents" && inv.root_kind == "directory" && ![".app", ".appex", ".xpc"].iter().any(|suffix| inv.root.ends_with(*suffix)) {
+                continue;
+            }
             // A selected macOS bundle has no directory prefix before Contents.
             let root = if dir == "Contents" { "" } else { dir.strip_suffix("/Contents").unwrap_or(dir) };
             if (root.ends_with(".app") || root.ends_with(".appex") || root.ends_with(".xpc") || root.is_empty())
@@ -387,6 +391,18 @@ mod tests {
         assert_eq!(p["services"], json!([service]));
         let paths: Vec<_> = p["executables"].as_array().unwrap().iter().map(|v| v["path"].as_str().unwrap()).collect();
         assert_eq!(paths, vec![executable.as_str()]);
+    }
+
+    #[test]
+    fn root_relative_apple_layout_distinguishes_directories_from_archives() {
+        for (name, kind, recognised) in [("Data", "directory", false), ("Example.app", "directory", true), ("bundle.zip", "zip", true)] {
+            let mut inventory = inv(&[("Contents/Info.plist", b"bplist00"), ("Contents/MacOS/Example", &[0xcf, 0xfa, 0xed, 0xfe])]);
+            inventory.root = name.into();
+            inventory.root_kind = kind.into();
+            let p = project_apple(&inventory);
+            assert_eq!(p["recognised"], recognised, "{name}");
+            assert_eq!(p["shape"], if recognised { "app-bundle" } else { "bare-executable" });
+        }
     }
 
     #[test]
