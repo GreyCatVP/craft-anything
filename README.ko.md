@@ -95,31 +95,31 @@
 대상을 가리키고 원하는 것을 말한 뒤 시작을 누르세요. Craft Anything은 네 단계로 진행하며,
 결정이 여러분의 몫이면 쉬운 말로 물어봅니다.
 
-1. **조사:** 원본을 살펴봅니다. 모든 너비의 페이지, 코드, 파일, 실행 방식을 확인합니다.
-2. **빌드:** 코딩 에이전트가 새 프로젝트를 만듭니다. 요청에 적힌 언어, 프레임워크 또는 엔진을 쓰고, 적힌 것이 없으면 합리적인 기본값을 씁니다.
-3. **검사:** 빌드를 원본과 비교하고, 아직 맞지 않는 부분을 나열합니다.
-4. **완료:** 결과를 열거나, 플레이하거나, 미리 볼 수 있습니다. 바꿀 부분을 요청하면 다듬어 줍니다.
+1. **Study:** 원본을 살펴봅니다. 모든 너비의 페이지, 코드, 파일, 실행 방식을 확인합니다.
+2. **Build:** 코딩 에이전트가 새 프로젝트를 만듭니다. 요청에 적힌 언어, 프레임워크 또는 엔진을 쓰고, 적힌 것이 없으면 합리적인 기본값을 씁니다.
+3. **Check:** 빌드를 원본과 비교하고, 아직 맞지 않는 부분을 나열합니다.
+4. **Ready:** 결과를 열거나, 플레이하거나, 미리 볼 수 있습니다. 바꿀 부분을 요청하면 다듬어 줍니다.
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/make.png" alt="만들기 화면: 재현할 웹사이트, 앱 또는 게임을 고르고, 주소를 입력하고, Clean room 또는 Deep 중 하나를 고르고, 원하는 것을 말한 뒤 시작을 누릅니다" width="100%"><br>
-      <sub><b>만들기:</b> 재현할 대상을 고르고, 원하는 것을 말한 뒤 시작을 누르세요.</sub>
+      <img src="docs/images/make.png" alt="Make 화면: 재현할 웹사이트, 앱 또는 게임을 고르고, 주소를 입력하고, Clean room 또는 Deep 중 하나를 고르고, 원하는 것을 말한 뒤 시작을 누릅니다" width="100%"><br>
+      <sub><b>Make:</b> 재현할 대상을 고르고, 원하는 것을 말한 뒤 시작을 누르세요.</sub>
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/project-game.png" alt="모든 단계가 끝난 뱀 게임 프로젝트와 게임 플레이 버튼" width="100%"><br>
-      <sub><b>완료:</b> 게임을 플레이하거나, 아래에서 변경을 요청하세요.</sub>
+      <sub><b>Ready:</b> 게임을 플레이하거나, 아래에서 변경을 요청하세요.</sub>
     </td>
   </tr>
 </table>
 
 ## <a id="two-ways-to-use-it"></a>사용 방법 두 가지
 
-- **간단 모드**(기본): "무엇을 만들고 싶으세요?" 웹사이트, 앱 또는 게임을 고르고 설명한 뒤 시작을 누릅니다.
-  프로젝트 페이지에는 네 단계(조사 → 빌드 → 검사 → 완료), 에이전트가 하는 일을 쉬운 말로 적은 내용,
+- **Simple 모드**(기본): "What do you want to make?" 웹사이트, 앱 또는 게임을 고르고 설명한 뒤 Start를 누릅니다.
+  프로젝트 페이지에는 네 단계(Study → Build → Check → Ready), 에이전트가 하는 일을 쉬운 말로 적은 내용,
   질문과 승인 카드, 결과가 원본과 얼마나 비슷한지, 결과나 폴더를 여는 버튼이 표시됩니다.
-  아래쪽 입력창에서 변경을 요청하세요. "그냥 들여다보기"는 아무것도 만들지 않고 대상을 열어 질문만 할 수 있게 합니다(Deep 모드에서).
-- **고급 모드**: 전체 작업 화면입니다. 모든 도구(Ctrl/Cmd+K), 함수, 문자열, 의사 C 코드, 디스어셈블리,
+  아래쪽 입력창에서 변경을 요청하세요. "Just look inside"는 아무것도 만들지 않고 대상을 열어 질문만 할 수 있게 합니다(Deep 모드에서).
+- **Advanced 모드**: 전체 작업 화면입니다. 모든 도구(Ctrl/Cmd+K), 함수, 문자열, 의사 C 코드, 디스어셈블리,
   16진수, 호출 그래프, 근거, 미확인 사항, 작업, 로그, 에이전트 콘솔을 제공합니다.
 
 두 모드 모두 같은 엔진을 사용합니다.
@@ -127,24 +127,24 @@
 ## <a id="clean-room-or-deep"></a>Clean room 또는 Deep
 
 - **Clean room**(기본): 원본 안은 읽지 않습니다. 코드, 파일, 페이지 소스 모두 포함해서요. Craft Anything은
-  눈에 보이는 것만으로 작업합니다. 여러분이 추가한 사진, 방문자가 보는 웹사이트(스크린샷, 보이는 텍스트,
+  눈에 보이는 것만으로 작업합니다. 추가한 사진, 방문자가 보는 웹사이트(스크린샷, 보이는 텍스트,
   측정한 레이아웃, 색, 글꼴, 간격, 열어 본 메뉴), 그리고 허용하면 앱 창의 그림이 여기에 해당합니다.
   내부를 들여다보는 도구는 거부되며, Deep 모드를 켜는 방법을 알려 줍니다.
-- **Deep**: 모든 도구를 사용합니다. 여러분의 개인 용도로만 쓰세요. 프로그램의 코드와 파일은 내장 엔진(설치되어 있으면 Ghidra도)으로 읽고,
+- **Deep**: 모든 도구를 사용합니다. 개인 용도로만 사용하세요. 프로그램의 코드와 파일은 내장 엔진(설치되어 있으면 Ghidra도)으로 읽고,
   웹사이트의 JavaScript를 읽고 시작 페이지를 관찰하며, 빌더는 이 모두를 쓸 수 있습니다.
 
-제목 표시줄이나 설정에서 전환하거나, `settings_set deep_mode true`로 바꾸거나, CLI를 한 번 실행할 때
+제목 표시줄이나 Settings에서 전환하거나, `settings_set deep_mode true`로 바꾸거나, CLI를 한 번 실행할 때
 `--deep`(또는 `--clean-room`)을 붙여 전환합니다.
 
 <p align="center">
-  <img src="docs/images/workbench.png" alt="고급 작업 화면: 함수 목록, 선택한 함수의 의사 C 코드, 도구 호출로 질문에 답하는 에이전트, 근거 장부" width="100%">
+  <img src="docs/images/workbench.png" alt="Advanced 작업 화면: 함수 목록, 선택한 함수의 의사 C 코드, 도구 호출로 질문에 답하는 에이전트, 근거 장부" width="100%">
   <br>
-  <sub><b>고급:</b> 함수, 의사 C 코드, 에이전트, 그리고 모든 답 뒤의 근거.</sub>
+  <sub><b>Advanced:</b> 함수, 의사 C 코드, 에이전트, 그리고 모든 답 뒤의 근거.</sub>
 </p>
 
 ## <a id="ai"></a>AI
 
-빌드하려면 컴퓨터에 코딩 에이전트가 있어야 합니다. **Claude Code**를 먼저 지원합니다. Craft Anything은 여러분이 설치한 원래 그대로의 `claude` 프로그램을 실행하며, 여러분의 로그인을 사용합니다. Craft Anything은 여러분의 계정을 보거나 다루지 않습니다. 이 사용은 Anthropic과 맺은 여러분의 약관을 따릅니다. 방법과 이유는 [docs/claude-code.md](docs/claude-code.md)를 보세요. Codex 어댑터도 있지만 실제 설치에서는 아직 검증되지 않았습니다. Anthropic, OpenAI, OpenRouter, 그리고 로컬 OpenAI 호환 서버는 질문과 분석에 사용할 수 있습니다(설정 → AI).
+빌드하려면 컴퓨터에 코딩 에이전트가 있어야 합니다. **Claude Code**를 먼저 지원합니다. Craft Anything은 설치한 원래 그대로의 `claude` 프로그램을 실행하며, 여러분의 로그인을 사용합니다. Craft Anything은 계정을 보거나 다루지 않습니다. 이 사용은 Anthropic과 맺은 약관을 따릅니다. 방법과 이유는 [docs/claude-code.md](docs/claude-code.md)를 보세요. Codex 어댑터도 있지만 실제 설치에서는 아직 검증되지 않았습니다. Anthropic, OpenAI, OpenRouter, 그리고 로컬 OpenAI 호환 서버는 질문과 분석에 사용할 수 있습니다(Settings → AI).
 
 ## <a id="built-for-agents"></a>에이전트를 위한 설계
 
@@ -188,22 +188,22 @@ craft-anything-cli rebuild https://example.com "Make the header blue" --continue
 craft-anything-cli rebuild - "Add a contact form" --project-folder "<your folder>" --existing edit
 ```
 
-새 프로젝트는 `Documents/Craft Anything`에 저장됩니다(설정 → 일반에서 바꿀 수 있습니다). 각 프로젝트 폴더에는 `craft.json`(요청, 대상, 상태, 기록), `capture/`(대상에서 기록한 것), `app/`(생성된 프로젝트), `checks/`(원본과의 각 비교), `investigation.cany/`(근거), `inbox/`(열린 질문)이 들어 있습니다.
+새 프로젝트는 `Documents/Craft Anything`에 저장됩니다(Settings → General에서 바꿀 수 있습니다). 각 프로젝트 폴더에는 `craft.json`(요청, 대상, 상태, 기록), `capture/`(대상에서 기록한 것), `app/`(생성된 프로젝트), `checks/`(원본과의 각 비교), `investigation.cany/`(근거), `inbox/`(열린 질문)이 들어 있습니다.
 
-프로젝트는 여러분이 고른 폴더에서 시작할 수도 있습니다(시작 아래의 "폴더 선택…" 또는 `--project-folder`). 폴더에 이미 파일이 있다면 그것이 무엇인지 알려 주어야 합니다. 빌더가 그 자리에서 편집하는 앱 자체인지, 시작점으로 쓸 자료인지 정하면, 앱은 그 옆 `app/`에 빌드됩니다(설정 → 일반에서 답을 기억하게 할 수 있습니다). 설정 → 일반에는 여러 폴더의 프로젝트 목록도 나오며, 목록에서 빼도 프로젝트 폴더는 지워지지 않습니다.
+프로젝트는 고른 폴더에서 시작할 수도 있습니다(Start 아래의 "Choose a folder…" 또는 `--project-folder`). 폴더에 이미 파일이 있다면 그것이 무엇인지 알려 주어야 합니다. 빌더가 그 자리에서 편집하는 앱 자체인지, 시작점으로 쓸 자료인지 정하면, 앱은 그 옆 `app/`에 빌드됩니다(Settings → General에서 답을 기억하게 할 수 있습니다). Settings → General에는 여러 폴더의 프로젝트 목록도 나오며, 목록에서 빼도 프로젝트 폴더는 지워지지 않습니다.
 
 ## <a id="status"></a>현재 상태
 
 > [!IMPORTANT]
 > **현재 상태:** Craft Anything은 얼리 알파 단계입니다. 지금 되는 것, 일부만 되는 것, 다음 작업은 다음과 같습니다.
 >
-> - **지금 되는 것:** 데스크톱 앱(간단 및 고급 모드), CLI, MCP 서버. Claude Code를 빌더로 쓰는 웹사이트, 앱, 게임의 조사 → 빌드 → 검사 → 다듬기 워크플로. 세 가지 화면 너비의 웹사이트 검사. Unity, Unreal 또는 Godot 게임 재구현. Ghidra를 쓰는 Deep 모드. 생성된 그림과 3D 모델(선택 사항, 여러분의 fal.ai 키 사용). 플러그인(MCP 서버, 그리고 `wasm-plugins` 옵션으로 빌드할 때 WASM 컴포넌트).
+> - **지금 되는 것:** 데스크톱 앱(Simple 및 Advanced 모드), CLI, MCP 서버. Claude Code를 빌더로 쓰는 웹사이트, 앱, 게임의 Study → Build → Check → Refine 워크플로. 세 가지 화면 너비의 웹사이트 검사. Unity, Unreal 또는 Godot 게임 재구현. Ghidra를 쓰는 Deep 모드. 생성된 그림과 3D 모델(선택 사항, 직접 준비한 fal.ai 키 사용). 플러그인(MCP 서버, 그리고 `wasm-plugins` 옵션으로 빌드할 때 WASM 컴포넌트).
 > - **부분적으로 됨:** API 키와 다른 코딩 에이전트로 빌드(구현은 되었지만 실제 실행은 아직 안 함), 앱과 게임의 동작 검사, 일부 엔진 도구는 대역(stand-in)으로만 테스트됨.
 > - **다음:** 첫 공개 릴리스(Windows, macOS, Linux, FreeBSD용 설치 파일과 브라우저 뷰어는 CI에 준비되어 있음), 그다음 관리형 요금제.
 >
 > [docs/STATUS.md](docs/STATUS.md)에 자세한 내용과 각 부분을 확인한 방법이, [docs/tool-status.md](docs/tool-status.md)에 도구별 점검표가, [docs/ROADMAP.md](docs/ROADMAP.md)에 항목별 계획이 있습니다. 이슈를 남기거나, [디스코드](https://discord.gg/artcraft)에서 고장 난 부분을 알려 주세요.
 
-**책임 있는 사용.** Craft Anything은 여러분이 소유하거나 살펴볼 권한이 있는 소프트웨어에만 사용하세요. DRM, 로그인, 안티치트를 우회하지 않습니다. 재구현은 근거에서 레이아웃, 스타일, 동작을 재현하며, 에이전트는 여러분이 소유하거나 허가받았음을 확인하지 않는 한 로고, 사진, 텍스트를 복사하지 않도록 지시받습니다.
+**책임 있는 사용.** Craft Anything은 소유하거나 살펴볼 권한이 있는 소프트웨어에만 사용하세요. DRM, 로그인, 안티치트를 우회하지 않습니다. 재구현은 근거에서 레이아웃, 스타일, 동작을 재현하며, 에이전트는 소유하거나 허가받았음을 확인하지 않는 한 로고, 사진, 텍스트를 복사하지 않도록 지시받습니다.
 
 ## <a id="downloads"></a>내려받기
 
@@ -298,18 +298,14 @@ RISC-V(riscv64): `craft-anything-<ver>-linux-riscv64.tar.gz`, 타르볼만 제�
 
 ## <a id="license-and-credits"></a>라이선스와 크레딧
 
-Craft Anything is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
-Copyright (c) 2026 ArtCraft Team and the Craft Anything contributors. Required notices are in [NOTICE](NOTICE).
+Craft Anything은 [MIT](LICENSE-MIT) 또는 [Apache-2.0](LICENSE-APACHE) 듀얼 라이선스이며, 원하는 쪽을 선택할 수 있습니다.
+Copyright (c) 2026 ArtCraft Team and the Craft Anything contributors. 필수 고지는 [NOTICE](NOTICE)에 있습니다.
 
-Bundled fonts, icons, images and other assets keep their own open licenses; each one is listed
-with its author, source and license in [ATTRIBUTION.md](ATTRIBUTION.md).
+동봉된 폰트, 아이콘, 이미지 및 기타 에셋은 각자의 오픈 라이선스를 유지합니다. 각 항목의 작성자, 출처, 라이선스는 [ATTRIBUTION.md](ATTRIBUTION.md)에 나와 있습니다.
 
-스크린샷은 예시로 만든 프로젝트를 보여 줍니다. example.com, 뱀 게임, 작은 계산기 프로그램입니다.
+스크린샷에 보이는 것은 그 용도로 만든 예시 프로젝트입니다: example.com, 뱀 게임, 작은 계산기 프로그램.
 
-The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
-ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
-part of this repository and Craft Anything, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
-Forks and modified versions must remove them.
+[`docs/brand/`](docs/brand/)에 있는 ArtCraft 이름, 워드마크, 로고는 ArtCraft Team의 상표이며 이 라이선스의 적용을 받지 않습니다. 수정하지 않은 상태에서만, 이 저장소와 Craft Anything의 일부로서에만 사용할 수 있으며, 이때 [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt)를 따라야 합니다. 포크와 수정본은 이를 제거해야 합니다.
 
 <p align="center">
   <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
