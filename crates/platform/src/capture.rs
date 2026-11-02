@@ -940,29 +940,29 @@ mod unix {
 
             std::thread::sleep(Duration::from_millis(10));
         };
-        // Teardown: kill the whole process group.
-        if reason != "exited" {
-            if let Some(pid) = leader_pid.and_then(|p| i32::try_from(p).ok()) {
-                if spec.finalization > Duration::ZERO {
-                    send_group(pid, Signal::SIGTERM);
-                    finalized_with = Some("SIGTERM".into());
-                    // Wait for the whole group, not just the leader: a helper can outlive it (#230).
-                    // Reaping the leader as we go keeps a zombie from counting as alive.
-                    let deadline = Instant::now() + spec.finalization;
-                    while Instant::now() < deadline {
-                        let _ = child.try_wait();
-                        if !group_alive(pid) {
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(10));
+        // Teardown: kill the whole process group, including any helper that outlived a normal leader exit.
+        if let Some(pid) = leader_pid.and_then(|p| i32::try_from(p).ok()) {
+            if group_alive(pid) && spec.finalization > Duration::ZERO {
+                send_group(pid, Signal::SIGTERM);
+                finalized_with = Some("SIGTERM".into());
+                // Wait for the whole group, not just the leader: a helper can outlive it (#230).
+                // Reaping the leader as we go keeps a zombie from counting as alive.
+                let deadline = Instant::now() + spec.finalization;
+                while Instant::now() < deadline {
+                    let _ = child.try_wait();
+                    if !group_alive(pid) {
+                        break;
                     }
-                }
-                let _ = child.try_wait();
-                if group_alive(pid) {
-                    send_group(pid, Signal::SIGKILL);
-                    finalized_with = Some("SIGKILL".into());
+                    std::thread::sleep(Duration::from_millis(10));
                 }
             }
+            let _ = child.try_wait();
+            if group_alive(pid) {
+                send_group(pid, Signal::SIGKILL);
+                finalized_with = Some("SIGKILL".into());
+            }
+        }
+        if reason != "exited" {
             let _ = child.kill();
         }
 
@@ -1233,6 +1233,40 @@ mod tests {
         assert_eq!(cap.settlement.status, "settled");
         assert_eq!(cap.cleanup.process_group, "verified");
         assert_eq!(cap.exit.finalized_with.as_deref(), Some("SIGKILL"), "the helper needed SIGKILL");
+    }
+
+    /// #361: when the leader exits normally after starting a helper in its process group,
+    /// teardown still stops the surviving group member before returning.
+    #[test]
+    fn normal_exit_kills_a_helper_that_outlives_the_leader() {
+        if !sh_available() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("helper.pid");
+        let script = "sh -c 'trap \"\" HUP; echo $$ >\"$1\"; exec sleep 8' _ \"$1\" </dev/null >/dev/null 2>&1 & while [ ! -s \"$1\" ]; do sleep 0.02; done";
+        let spec = Spec {
+            executable: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into(), "leader".into(), ready.into_os_string()],
+            cwd: Some(dir.path().to_path_buf()),
+            env: Vec::new(),
+            terminal: Terminal::default(),
+            events: Vec::new(),
+            timeout: Duration::from_secs(5),
+            idle_timeout: Duration::from_secs(5),
+            settle: Duration::from_millis(500),
+            finalization: Duration::ZERO,
+            observation_paths: Vec::new(),
+            limits: Limits::default(),
+            sandbox: SandboxRequest::Off,
+        };
+        let cap = capture(spec, no_cancel()).unwrap();
+        let group = i32::try_from(cap.exit.leader_pid.unwrap()).unwrap();
+        assert_eq!(cap.exit.reason, "exited");
+        assert_eq!(cap.exit.code, Some(0));
+        assert_eq!(cap.settlement.status, "settled");
+        assert_eq!(cap.cleanup.process_group, "verified");
+        assert!(nix::sys::signal::killpg(nix::unistd::Pid::from_raw(group), None).is_err());
     }
 
     #[test]
