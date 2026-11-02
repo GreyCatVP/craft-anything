@@ -21,6 +21,16 @@ pub enum Val {
 }
 
 fn sqlite_varint(mut v: u64) -> Vec<u8> {
+    if v > 0x00ff_ffff_ffff_ffff {
+        let mut out = vec![0u8; 9];
+        out[8] = v as u8;
+        v >>= 8;
+        for byte in out[..8].iter_mut().rev() {
+            *byte = (v as u8 & 0x7f) | 0x80;
+            v >>= 7;
+        }
+        return out;
+    }
     if v == 0 {
         return vec![0];
     }
@@ -172,6 +182,17 @@ pub fn simple_db() -> Vec<u8> {
         write_db_header(page1, page_count);
         write_table_leaf(page1, 100, &[(1, schema_record)]);
     }
+    file
+}
+
+/// A two-page database with one table named `t` and explicitly stored rowids and values.
+pub fn table_db(sql: &str, rows: &[(i64, Vec<Val>)]) -> Vec<u8> {
+    let mut file = vec![0u8; PAGE_SIZE * 2];
+    let cells: Vec<_> = rows.iter().map(|(rowid, values)| (*rowid, build_record(values))).collect();
+    write_table_leaf(&mut file[PAGE_SIZE..], 0, &cells);
+    let schema = build_record(&[Val::Text("table".into()), Val::Text("t".into()), Val::Text("t".into()), Val::Int(2), Val::Text(sql.into())]);
+    write_db_header(&mut file[..PAGE_SIZE], 2);
+    write_table_leaf(&mut file[..PAGE_SIZE], 100, &[(1, schema)]);
     file
 }
 

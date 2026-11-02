@@ -397,7 +397,15 @@ impl<'a> SqliteDb<'a> {
         self.collect_table_rows(&mut w, rootpage, 0);
         let hit_cap = w.out.len() >= want && want > 0;
         let skipped = offset.min(w.out.len());
-        let page: Vec<Row> = w.out.into_iter().skip(offset).take(limit).collect();
+        let mut page: Vec<Row> = w.out.into_iter().skip(offset).take(limit).collect();
+        let (schema, _) = self.schema();
+        if let Some(index) = schema.iter().find(|o| o.obj_type == "table" && o.rootpage == rootpage).and_then(|o| rowid_alias_index(&o.sql)) {
+            for row in &mut page {
+                if let Some(value @ CellValue::Null) = row.values.get_mut(index) {
+                    *value = CellValue::Int(row.rowid);
+                }
+            }
+        }
         RowPage { rows: page, offset: skipped, truncated: hit_cap, notes: w.notes }
     }
 
@@ -690,6 +698,120 @@ pub fn parse_create_columns(sql: &str) -> Vec<Column> {
     cols
 }
 
+/// Identify the single INTEGER primary key, excluding the column-level DESC exception.
+fn rowid_alias_index(sql: &str) -> Option<usize> {
+    let tokens = sql_tokens(sql);
+    let is = |token: &&str, word: &str| token.eq_ignore_ascii_case(word);
+    let open = tokens.iter().position(|t| *t == "(")?;
+    let mut depth = 0usize;
+    let close = tokens.iter().enumerate().skip(open).find_map(|(i, t)| {
+        match *t {
+            "(" => depth = depth.saturating_add(1),
+            ")" => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        (depth == 0).then_some(i)
+    })?;
+    let tail = tokens.get(close.saturating_add(1)..)?;
+    if tail.windows(2).any(|w| w.first().is_some_and(|t| is(t, "WITHOUT")) && w.get(1).is_some_and(|t| is(t, "ROWID"))) {
+        return None;
+    }
+    let columns = parse_create_columns(sql);
+    let mut key = None;
+    let mut column = 0usize;
+    let body_start = open.saturating_add(1);
+    let mut start = body_start;
+    depth = 0;
+    for i in body_start..=close {
+        let token = *tokens.get(i)?;
+        if i == close || (token == "," && depth == 0) {
+            let mut segment = tokens.get(start..i)?;
+            start = i.saturating_add(1);
+            if segment.first().is_some_and(|t| is(t, "CONSTRAINT")) {
+                segment = segment.get(2..)?;
+            }
+            if segment.first().is_some_and(|t| is(t, "PRIMARY")) {
+                if key.is_some() || !segment.get(1).is_some_and(|t| is(t, "KEY")) || segment.get(2) != Some(&"(") {
+                    return None;
+                }
+                let end = segment.iter().position(|t| *t == ")")?;
+                let members = segment.get(3..end)?;
+                if members.contains(&",") {
+                    return None;
+                }
+                let (name, _) = take_identifier(members.first()?);
+                key = Some(columns.iter().position(|c| c.name.eq_ignore_ascii_case(&name))?);
+            } else if !segment.first().is_some_and(|t| ["UNIQUE", "CHECK", "FOREIGN"].iter().any(|word| is(t, word))) {
+                let mut nesting = 0usize;
+                for (j, t) in segment.iter().enumerate().skip(1) {
+                    match *t {
+                        "(" => nesting = nesting.saturating_add(1),
+                        ")" => nesting = nesting.saturating_sub(1),
+                        _ => {}
+                    }
+                    if nesting == 0 && is(t, "PRIMARY") && segment.get(j.saturating_add(1)).is_some_and(|t| is(t, "KEY")) {
+                        if key.is_some() || segment.get(j.saturating_add(2)).is_some_and(|t| is(t, "DESC")) {
+                            return None;
+                        }
+                        key = Some(column);
+                    }
+                }
+                column = column.saturating_add(1);
+            }
+        } else {
+            match token {
+                "(" => depth = depth.saturating_add(1),
+                ")" => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+    let index = key?;
+    columns.get(index)?.type_name.eq_ignore_ascii_case("INTEGER").then_some(index)
+}
+
+/// Keep quoted text intact so defaults and constraint names cannot become SQL keywords.
+fn sql_tokens(mut sql: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    while !sql.is_empty() {
+        sql = sql.trim_start();
+        if sql.is_empty() {
+            break;
+        }
+        if sql.starts_with("--") {
+            sql = sql.get(sql.find('\n').unwrap_or(sql.len())..).unwrap_or("");
+            continue;
+        }
+        if sql.starts_with("/*") {
+            sql = sql.get(2..).and_then(|s| s.find("*/").and_then(|end| s.get(end.saturating_add(2)..))).unwrap_or("");
+            continue;
+        }
+        let mut chars = sql.char_indices().peekable();
+        let Some((_, first)) = chars.next() else { break };
+        let mut end = first.len_utf8();
+        if matches!(first, '\'' | '"' | '`' | '[') {
+            let quote = if first == '[' { ']' } else { first };
+            while let Some((i, c)) = chars.next() {
+                end = i.saturating_add(c.len_utf8());
+                if c == quote {
+                    if first != '[' && chars.peek().is_some_and(|(_, c)| *c == quote) {
+                        if let Some((i, c)) = chars.next() {
+                            end = i.saturating_add(c.len_utf8());
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } else if !matches!(first, '(' | ')' | ',') {
+            end = sql.find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ',' | '\'' | '"' | '`' | '[')).unwrap_or(sql.len());
+        }
+        tokens.push(sql.get(..end).unwrap_or(""));
+        sql = sql.get(end..).unwrap_or("");
+    }
+    tokens
+}
+
 /// Split on top-level commas (ignoring commas inside parentheses).
 fn split_top_level(s: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -876,6 +998,66 @@ mod tests {
         let parsed = SqliteDb::parse(&db).expect("parses");
         assert!(parsed.header().wal_mode);
         assert!(parsed.overview().integrity_notes.iter().any(|n| n.contains("WAL")));
+    }
+
+    fn check_rowid_alias(declaration: &str, column: usize, alias: bool) {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        let sql = format!("CREATE TABLE t({declaration})");
+        let columns = parse_create_columns(&sql);
+        let rows: Vec<_> = [-3, 7]
+            .into_iter()
+            .map(|rowid| {
+                let mut values = vec![Val::Text("x".into()); columns.len()];
+                values[column] = Val::Null;
+                (rowid, values)
+            })
+            .collect();
+        let bytes = table_db(&sql, &rows);
+        let db = SqliteDb::parse(&bytes).expect("fixture parses");
+        let page = db.read_rows(2, 0, 10);
+        assert_eq!(page.rows.len(), 2);
+        for (row, (rowid, _)) in page.rows.iter().zip(&rows) {
+            assert_eq!(row.rowid, *rowid);
+            let mut expected = vec![CellValue::Text { text: "x".into(), truncated: false }; columns.len()];
+            expected[column] = if alias { CellValue::Int(*rowid) } else { CellValue::Null };
+            assert_eq!(row.values, expected, "{declaration}, rowid {rowid}");
+        }
+        // Even an alias must preserve a non-NULL stored value.
+        let mut values = vec![Val::Null; columns.len()];
+        values[column] = Val::Int(99);
+        let bytes = table_db(&sql, &[(7, values)]);
+        let db = SqliteDb::parse(&bytes).expect("fixture parses");
+        assert_eq!(db.read_rows(2, 0, 1).rows[0].values[column], CellValue::Int(99));
+    }
+
+    #[test]
+    fn integer_primary_key_aliases_show_the_rowid() {
+        // (declaration, column, is an alias): the rule from SQLite's CREATE TABLE docs.
+        for (declaration, column, alias) in [
+            ("id INTEGER PRIMARY KEY, v TEXT", 0, true),
+            ("id integer primary key, v text", 0, true),
+            ("id INTEGER, v TEXT, PRIMARY KEY(id)", 0, true),
+            ("id INTEGER PRIMARY KEY DESC, v TEXT", 0, false),
+            ("id INT PRIMARY KEY, v TEXT", 0, false),
+            ("v TEXT, id INTEGER PRIMARY KEY, w TEXT", 1, true),
+            ("id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT", 0, true),
+            ("a INTEGER, b INTEGER, PRIMARY KEY(a, b)", 0, false),
+            ("id INTEGER PRIMARY KEY ASC, v TEXT", 0, true),
+            ("id INTEGER NOT NULL PRIMARY KEY, v TEXT", 0, true),
+            ("id BIGINT PRIMARY KEY, v TEXT", 0, false),
+            ("id INTEGER, v TEXT, CONSTRAINT pk PRIMARY KEY(id DESC)", 0, true),
+        ] {
+            check_rowid_alias(declaration, column, alias);
+        }
+    }
+
+    #[test]
+    fn a_without_rowid_table_has_no_rowid_alias() {
+        // Only test alias classification here; index b-tree reading is a separate defect.
+        let sql = "CREATE TABLE t(id INTEGER PRIMARY KEY) WITHOUT ROWID";
+        let bytes = craft_anything_testkit::sqlite::table_db(sql, &[(7, vec![craft_anything_testkit::sqlite::Val::Null])]);
+        let db = SqliteDb::parse(&bytes).expect("fixture parses");
+        assert_eq!(db.read_rows(2, 0, 1).rows[0].values, vec![CellValue::Null]);
     }
 
     #[test]
