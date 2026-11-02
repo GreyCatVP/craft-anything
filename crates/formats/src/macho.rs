@@ -696,4 +696,28 @@ mod tests {
             let _ = crate::parse_binary(&d);
         }
     }
+
+    #[test]
+    fn read_only_segments_keep_stub_and_unwind_sections_read_only() {
+        let mut m = tk::apple::macho_min(tk::apple::CPU_ARM64, 2, &[], &[("__text", &[0; 4]), ("__stubs", &[0; 12]), ("__unwind_info", &[0; 8])]);
+        m[32 + 72 + 64..32 + 72 + 68].copy_from_slice(&0x8000_0400u32.to_le_bytes());
+        m[32 + 72 + 80 + 64..32 + 72 + 80 + 68].copy_from_slice(&0x8000_0408u32.to_le_bytes());
+        m.resize(0x4000, 0);
+        let b = crate::parse_binary(&m).unwrap();
+        assert_eq!(b.sections.len(), 3);
+        assert!(!b.segments[0].write);
+        for s in &b.sections {
+            assert!(s.read);
+            assert!(!s.write, "{} must inherit its read-only segment", s.name);
+        }
+        assert!(b.sections[0].exec);
+        assert!(b.sections[1].exec);
+        assert!(!b.sections[2].exec);
+        m[32 + 56..32 + 60].copy_from_slice(&7u32.to_le_bytes());
+        m[32 + 60..32 + 64].copy_from_slice(&3u32.to_le_bytes());
+        let writable = crate::parse_binary(&m).unwrap();
+        assert!(writable.sections.iter().all(|s| s.read && s.write));
+        assert!(writable.sections[1].exec);
+        assert!(!writable.sections[2].exec);
+    }
 }

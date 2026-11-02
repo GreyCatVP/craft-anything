@@ -593,6 +593,17 @@ fn parse_object(data: &[u8], slice_offset: u64) -> Result<Binary, FormatError> {
         let name = seg.name().ok().flatten().map(String::from).unwrap_or_else(|| format!("LOAD{i}"));
         b.segments.push(Segment { name, addr: seg.address(), size: seg.size(), file_offset: o.saturating_add(slice_offset), file_size: n, read, write, exec });
     }
+    if format == Format::MachO {
+        for section in &mut b.sections {
+            if let Some(segment) = b.segments.iter().find(|seg| {
+                section.segment.as_deref() == Some(seg.name.as_str())
+                    && section.addr.checked_sub(seg.addr).and_then(|offset| offset.checked_add(section.size)).is_some_and(|end| end <= seg.size)
+            }) {
+                section.read = segment.read;
+                section.write = segment.write;
+            }
+        }
+    }
     // PE sections double as segments in `object`; keep one list.
     if format == Format::Pe {
         b.segments.clear();
