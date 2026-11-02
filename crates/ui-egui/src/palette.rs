@@ -248,7 +248,7 @@ fn form(app: &mut CraftApp, ctx: &egui::Context, tool: &str) {
         .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 80.0))
         .show(ctx, |ui| {
             ui.label(RichText::new(spec.summary).color(t.text_dim));
-            ui.label(RichText::new(spec.id).font(theme::mono(11.5)).color(t.text_faint));
+            ui.label(RichText::new(spec.id).font(theme::mono(theme::CAPTION)).color(t.text_faint));
             if spec.effects.needs_consent() {
                 ui.horizontal(|ui| {
                     icons::show(ui, "shield", 14.0, t.warning);

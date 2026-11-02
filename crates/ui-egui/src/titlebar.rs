@@ -135,7 +135,7 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
         }
         if let Some((name, kind)) = target {
             icons::show(ui, crate::kind_icon(kind), 14.0, t.icon);
-            ui.add(egui::Label::new(RichText::new(name).font(theme::mono(11.5)).color(t.text)).truncate()).on_hover_text(tr(kind.plain()));
+            ui.add(egui::Label::new(RichText::new(name).font(theme::mono(theme::CAPTION)).color(t.text)).truncate()).on_hover_text(tr(kind.plain()));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;

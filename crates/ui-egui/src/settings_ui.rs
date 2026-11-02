@@ -656,7 +656,7 @@ fn plugins(app: &mut CraftApp, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.set_width(300.0);
                     ui.label(RichText::new(p.display_name()).font(theme::medium(theme::SMALL)));
-                    ui.label(RichText::new(p.place()).font(theme::mono(11.5)).color(t.text_faint));
+                    ui.label(RichText::new(p.place()).font(theme::mono(theme::CAPTION)).color(t.text_faint));
                     if let Some(problem) = p.problem() {
                         ui.label(RichText::new(problem).color(t.warning).size(theme::CAPTION));
                     }
@@ -683,7 +683,7 @@ fn plugins(app: &mut CraftApp, ui: &mut Ui) {
                 ui.vertical(|ui| {
                     ui.set_width(300.0);
                     ui.label(RichText::new(p.display_name()).font(theme::medium(theme::SMALL)));
-                    ui.label(RichText::new(p.path.display().to_string()).font(theme::mono(11.5)).color(t.text_faint));
+                    ui.label(RichText::new(p.path.display().to_string()).font(theme::mono(theme::CAPTION)).color(t.text_faint));
                     if let Some(problem) = p.problem() {
                         ui.label(RichText::new(problem).color(t.warning).size(theme::CAPTION));
                     }

@@ -57,7 +57,7 @@ fn details(ui: &mut Ui, e: &Evidence, t: &Tokens) {
                     None => l.value.clone(),
                 };
                 egui::Frame::new().fill(t.raised).corner_radius(t.r_sm()).inner_margin(Margin::symmetric(8, 3)).show(ui, |ui| {
-                    ui.label(RichText::new(text).font(theme::mono(11.5)).color(t.text)).on_hover_text(&l.kind);
+                    ui.label(RichText::new(text).font(theme::mono(theme::CAPTION)).color(t.text)).on_hover_text(&l.kind);
                 });
             }
             if e.locations.len() > 40 {
@@ -89,7 +89,7 @@ fn details(ui: &mut Ui, e: &Evidence, t: &Tokens) {
         widgets::pill(ui, &format!("{} · {}", e.environment.engine, e.environment.host), t.text_faint, t.raised);
         let short = e.id.get(..18).unwrap_or(&e.id).to_string();
         if ui
-            .add(egui::Button::new(RichText::new(format!("{short}…")).font(theme::mono(11.0)).color(t.text_faint)).frame(false))
+            .add(egui::Button::new(RichText::new(format!("{short}…")).font(theme::mono(theme::CAPTION)).color(t.text_faint)).frame(false))
             .on_hover_text(tr("Copy the evidence id"))
             .clicked()
         {

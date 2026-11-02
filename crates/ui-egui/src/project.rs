@@ -1063,9 +1063,10 @@ fn run_details(app: &mut CraftApp, ui: &mut Ui, status_row: bool) {
                             };
                             ui.horizontal(|ui| {
                                 ui.set_height(LINE);
-                                ui.label(RichText::new(crate::usage::duration_words(line.at)).font(theme::mono(11.5)).color(t.text_faint));
-                                ui.label(RichText::new(line.kind.tag()).font(theme::mono(11.5)).color(colour));
-                                ui.add(egui::Label::new(RichText::new(&line.text).font(theme::mono(11.5)).color(words)).truncate()).on_hover_text(&line.text);
+                                ui.label(RichText::new(crate::usage::duration_words(line.at)).font(theme::mono(theme::CAPTION)).color(t.text_faint));
+                                ui.label(RichText::new(line.kind.tag()).font(theme::mono(theme::CAPTION)).color(colour));
+                                ui.add(egui::Label::new(RichText::new(&line.text).font(theme::mono(theme::CAPTION)).color(words)).truncate())
+                                    .on_hover_text(&line.text);
                             });
                         }
                     },

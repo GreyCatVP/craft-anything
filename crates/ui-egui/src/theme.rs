@@ -436,6 +436,195 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind, roomy: bool) {
 mod tests {
     use super::*;
 
+    /// The type scale is the only place a size is written down. Screens outside the workbench
+    /// use its names (`CAPTION`, `BODY`, …) or a literal of 12 pt or more; the workbench's dense
+    /// lists may use `TINY`. This walks the source so a new screen can't quietly go smaller.
+    #[test]
+    fn no_literal_text_size_under_12_outside_the_workbench() {
+        fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rust_files(&path, out);
+                } else if path.extension().is_some_and(|x| x == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        // Markers whose next argument is a text size. `.size` on a `RichText` counts; the
+        // `.size` of a spinner or a galley does not.
+        let texts = ["label_text(", "heading(", "medium(", "semibold(", "mono(", "FontId::proportional(", "FontId::monospace("];
+
+        let mut files = Vec::new();
+        rust_files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        assert!(files.len() > 10, "the source scan found only {} files", files.len());
+
+        let mut checked = 0;
+        for path in files {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            // `theme.rs` is the scale itself, and `workbench.rs` is the dense workbench.
+            if name == "theme.rs" || name == "workbench.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                let mut markers: Vec<&str> = texts.iter().copied().filter(|m| code.contains(m)).collect();
+                if code.contains("RichText") && code.contains(".size(") && !code.contains("Spinner") {
+                    markers.push(".size(");
+                }
+                for marker in markers {
+                    let mut from = 0;
+                    while let Some(rel) = code[from..].find(marker) {
+                        let at = from + rel;
+                        let open = at + marker.len() - 1;
+                        if let Some(call) = call_text(code, open) {
+                            let arg = if marker == "label_text(" || marker == "heading(" { top_level_parts(call).last().copied().unwrap_or("") } else { call };
+                            for size in size_literals(arg) {
+                                assert!(
+                                    size >= 12.0,
+                                    "{}:{}: a literal text size of {size} pt is below 12; use the theme scale: {}",
+                                    path.display(),
+                                    n + 1,
+                                    code
+                                );
+                            }
+                            checked += 1;
+                        }
+                        from = at + marker.len();
+                    }
+                }
+            }
+        }
+        assert!(checked > 40, "the source scan checked only {checked} text sizes");
+    }
+
+    /// The text between `open`'s parenthesis and its match, or `None` when it isn't closed on
+    /// this line.
+    fn call_text(line: &str, open: usize) -> Option<&str> {
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escaped = false;
+        for (i, c) in line.get(open..)?.char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match c {
+                '"' => in_string = true,
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return line.get(open + 1..open + i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Split at commas that aren't inside brackets, braces or a string.
+    fn top_level_parts(s: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut start = 0;
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escaped = false;
+        for (i, c) in s.char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match c {
+                '"' => in_string = true,
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                ',' if depth == 0 => {
+                    out.push(&s[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        out.push(&s[start..]);
+        out
+    }
+
+    /// The literals a size argument is written as: one bare number, or every number in an
+    /// `if`/`else`. An expression such as `body.size + 2.0` isn't a size of its own and is left
+    /// to the reviewer.
+    fn size_literals(arg: &str) -> Vec<f64> {
+        let arg = arg.trim();
+        if arg.starts_with("if ") {
+            return floats_outside_strings(arg);
+        }
+        let bare = arg.strip_suffix("f32").unwrap_or(arg).trim();
+        bare.parse::<f64>().ok().into_iter().collect()
+    }
+
+    /// Float literals on a line, ignoring digits inside string literals (a version or a count).
+    fn floats_outside_strings(line: &str) -> Vec<f64> {
+        let mut out = Vec::new();
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            if c == '"' {
+                in_string = true;
+                continue;
+            }
+            if c.is_ascii_digit() {
+                let mut number = String::from(c);
+                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                    if let Some(d) = chars.next() {
+                        number.push(d);
+                    }
+                }
+                if chars.peek() == Some(&'.') {
+                    number.push('.');
+                    chars.next();
+                    while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                        if let Some(d) = chars.next() {
+                            number.push(d);
+                        }
+                    }
+                    if let Ok(v) = number.parse::<f64>() {
+                        out.push(v);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// WCAG relative luminance of an opaque colour.
     fn luminance(c: Color32) -> f64 {
         let ch = |v: u8| {
