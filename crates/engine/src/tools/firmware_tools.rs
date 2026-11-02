@@ -375,6 +375,7 @@ fn firmware_image_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
     let mut deeper_than_limit = 0usize;
     let mut jobs = vec![Job { data: data.to_vec(), dir: Vec::new(), level: 0, parent: "<input>".into(), base }];
     let mut scanned = 0usize;
+    let mut scan_truncated = false;
     while let Some(job) = jobs.pop() {
         ctx.cancel.check()?;
         scanned += 1;
@@ -383,6 +384,7 @@ fn firmware_image_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         if scan.cancelled {
             return Err(ToolError::cancelled());
         }
+        scan_truncated |= scan.truncated;
         let regions = scan.regions;
         for (k, r) in regions.iter().enumerate() {
             ctx.cancel.check()?;
@@ -605,7 +607,14 @@ fn firmware_image_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
     if w.truncated {
         lims.push(Limitation::new("truncated", "The output byte or file limit stopped extraction; raise max_output_bytes or max_output_files."));
     }
-    let complete = !w.truncated && w.skipped.is_empty() && deeper_than_limit == 0;
+    if scan_truncated {
+        lims.push(Limitation::new(
+            "truncated",
+            format!("A scan stopped at max_regions={}; extract smaller ranges to recover omitted regions.", ScanOptions::default().max_regions),
+        ));
+    }
+    let truncated = w.truncated || scan_truncated;
+    let complete = !truncated && w.skipped.is_empty() && deeper_than_limit == 0;
     let ev = builder(
         ctx,
         "firmware_image_extract",
@@ -624,7 +633,7 @@ fn firmware_image_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         "outputs": listed,
         "skipped": w.skipped,
         "not_unpacked": not_unpacked,
-        "truncated": w.truncated,
+        "truncated": truncated,
     }))
     .summary(summary)
     .confidence(Confidence::Observed)
@@ -781,6 +790,53 @@ mod tests {
         assert!(err.message.contains("already exists"));
         assert!(call_err(&e, "firmware_image_extract", json!({"path": p, "output_directory": "rel/out"})).message.contains("absolute"));
         std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn extraction_reports_a_scan_cap_as_partial_coverage() {
+        let mut elf = vec![0; 121];
+        elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+        for (offset, value) in [(16, 2u16), (18, 62), (52, 64), (54, 56), (56, 1), (58, 64)] {
+            elf[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+        for (offset, value) in [(20, 1u32), (64, 1), (68, 5)] {
+            elf[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (offset, value) in [(24, 0x400078u64), (32, 64), (80, 0x400000), (88, 0x400000), (96, 121), (104, 121), (112, 4096)] {
+            elf[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        elf[120] = 0xc3;
+        let root = tempfile::tempdir().unwrap();
+        let input = root.path().join("many-elf.bin");
+        std::fs::write(&input, elf.repeat(2001)).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let listing = call(&e, "firmware_regions_list", json!({"path": input, "max_regions": 2002, "limit": 5000}));
+        assert_eq!(listing["result"]["regions_total"], 2001);
+        assert_eq!(listing["result"]["truncated"], false);
+        let out = root.path().join("out");
+        let v = call(&e, "firmware_image_extract", json!({"path": input, "output_directory": out, "limit": 1}));
+        assert_eq!(v["result"]["files_written"], 2000);
+        assert_eq!(v["result"]["bytes_written"], 242000);
+        assert_eq!(v["result"]["skipped"], json!([]));
+        assert_eq!(v["result"]["outputs"].as_array().unwrap().len(), 1);
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest["outputs"].as_array().unwrap().len(), 2000);
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 2001);
+        assert_eq!(std::fs::read(out.join(format!("{:x}-elf.bin", 1999 * 121))).unwrap(), elf);
+        assert!(!out.join(format!("{:x}-elf.bin", 2000 * 121)).exists());
+        assert_eq!(v["result"]["truncated"], true);
+        assert_eq!(v["coverage"]["status"], "partial");
+        assert!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "truncated" && l["message"].as_str().unwrap().contains("2000")));
+        let ranged_out = root.path().join("ranged-out");
+        let ranged = call(
+            &e,
+            "firmware_image_extract",
+            json!({"path": input, "output_directory": ranged_out, "range": {"offset": 2000 * 121, "length": 121}, "limit": 1}),
+        );
+        assert_eq!(ranged["result"]["files_written"], 1);
+        assert_eq!(ranged["result"]["truncated"], false);
+        assert_eq!(ranged["coverage"]["status"], "complete");
+        assert_eq!(std::fs::read(ranged_out.join(format!("{:x}-elf.bin", 2000 * 121))).unwrap(), elf);
     }
 
     #[test]
