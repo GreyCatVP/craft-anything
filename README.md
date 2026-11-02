@@ -232,8 +232,10 @@ only takes it off the list.
 >   servers, and WASM components in builds with the `wasm-plugins` option).
 > - **Partly there:** building with API keys and other coding agents (built, not yet run live),
 >   behaviour checks for apps and games, a few engine tools tested only against stand-ins.
-> - **Next:** the first public release (installers for Windows, macOS, Linux and FreeBSD, and the
->   browser viewer are set up in CI), then the managed tier.
+> - **Released:** public releases with installers for Windows, macOS, Linux and FreeBSD are
+>   published on the [Releases page](https://github.com/storytold/craft-anything/releases); they are
+>   still alpha.
+> - **Next:** the managed tier.
 >
 > [docs/STATUS.md](docs/STATUS.md) has the detail and how each part was checked,
 > [docs/tool-status.md](docs/tool-status.md) the tool-by-tool checklist, and
