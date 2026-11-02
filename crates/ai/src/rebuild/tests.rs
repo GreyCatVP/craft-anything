@@ -278,10 +278,10 @@ fn a_new_project_keeps_the_persons_asset_choice() {
 #[test]
 fn the_assets_note_reads_prices_from_the_asset_table() {
     let d = tempfile::tempdir().unwrap();
-    let ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
-    // The default picture model is Nano Banana Pro ($0.15 a picture).
-    let before = "Realistic assets: use the configured asset providers. Images and 3D support fal.ai and Scenario (choose model explicitly or use Settings); audio uses ElevenLabs. Each operation requires its own provider key; a key for one provider does not unlock the others. The picture and 3D prices below are estimates using the configured picture and 3D models; selected models can differ. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description (about $0.65 each); set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture (about $0.15) for textures, skies, backgrounds and menu art. This project's asset budget is $5.00 ($0.00 used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it (e.g. assets/generated/). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. assets_speech_generate makes dialogue from text and a voice_id; assets_sound_generate makes sound effects; assets_music_generate makes original music. Audio operations share this asset budget. Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used.";
-    assert_eq!(assets_note(&ws, None, None), before);
+    let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
+    ws.manifest.generate_assets = true;
+    let before = assets_note(&ws, None, None);
+    assert!(before.contains("a picture (about $0.15)") && before.contains("(about $0.65 each)"), "{before}");
     assert_eq!(assets_note(&ws, Some("no-such-model"), None), before, "an unknown model quotes the default's prices");
     let schnell = assets_note(&ws, Some("flux-schnell"), None);
     assert!(schnell.contains("(about $0.50 each)") && schnell.contains("a picture (under $0.01)"), "{schnell}");
@@ -478,6 +478,30 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     let sent = agent.0.last().unwrap();
     assert!(sent.contains("Custom follow-up sentinel: Unsaved progress in this worker"), "{sent}");
     assert!(sent.contains("picture(s) of the original"));
+    // A master switch alone cannot enable any modality; audio permission cannot enable visual tools.
+    for (providers, visual, audio) in [(vec![], false, false), (vec!["elevenlabs"], false, true), (vec!["scenario"], true, false)] {
+        sidebar
+            .set_person(|m| {
+                m.generate_assets = true;
+                m.asset_providers = Some(providers.iter().map(|id| (*id).into()).collect());
+            })
+            .unwrap();
+        // A local target also exercises game_steps' permission-sensitive instructions.
+        ws.manifest.target = TargetRef::Local { path: d.path().join("fixture-game") };
+        for prompt in [BuilderPrompt::Initial { extra: None, api: false, originals: false }, BuilderPrompt::Message("Keep going".into())] {
+            worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt).unwrap();
+            let sent = agent.0.last().unwrap();
+            assert_eq!(sent.contains("assets_model_generate"), visual, "{sent}");
+            assert_eq!(sent.contains("assets_image_generate"), visual, "{sent}");
+            assert_eq!(sent.contains("Realistic assets:"), visual, "{sent}");
+            for tool in ["assets_speech_generate", "assets_sound_generate", "assets_music_generate"] {
+                assert_eq!(sent.contains(tool), audio, "{sent}");
+            }
+            assert_eq!(sent.contains("Generated assets are now off"), !visual && !audio, "{sent}");
+            assert!(sent.contains("picture(s) of the original"), "{sent}");
+            assert_eq!(sent.matches("Project asset providers:").count(), 1);
+        }
+    }
     let mut interrupted = RecordedTurns(Vec::new(), Some(ws.root.clone()));
     worker.turn(&mut ws, &mut interrupted, kind("game").as_ref(), &BuilderPrompt::Initial { extra: None, api: false, originals: false }, None).unwrap();
     assert_eq!(interrupted.0.len(), 2);

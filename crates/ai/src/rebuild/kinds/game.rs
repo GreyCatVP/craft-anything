@@ -74,11 +74,10 @@ impl TargetKind for GameKind {
             return vec![screenshot::SCREENSHOT_CONTRACT.to_string(), self_test::SELF_TEST_CONTRACT.to_string()];
         }
         // Paid, so only when the person turned it on for this project and a key is set up.
-        let generated = cx.assets && cx.asset_spent.is_some() && cx.ws.manifest.generate_assets;
+        let generated = asset_kind_allowed(cx, craft_anything_engines::assets::AssetKind::Image)
+            && asset_kind_allowed(cx, craft_anything_engines::assets::AssetKind::Model3d);
         let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
-        if generated {
-            s.push(assets_note(cx));
-        }
+        s.extend(self.follow_up_sections(cx));
         s.push(screenshot::SCREENSHOT_CONTRACT.to_string());
         s.push(self_test::SELF_TEST_CONTRACT.to_string());
         s
@@ -86,7 +85,11 @@ impl TargetKind for GameKind {
 
     /// Refresh game art guidance for follow-ups when the project permits generation and a key is available.
     fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
-        if cx.assets && cx.asset_spent.is_some() && cx.ws.manifest.generate_assets { vec![assets_note(cx)] } else { Vec::new() }
+        if !cx.assets || cx.asset_spent.is_none() {
+            return Vec::new();
+        }
+        let note = assets_note(cx);
+        if note.is_empty() { Vec::new() } else { vec![note] }
     }
 
     /// Every game must play its core loop; a game of a website has no mechanics sheet (its brief
