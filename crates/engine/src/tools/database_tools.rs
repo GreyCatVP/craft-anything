@@ -371,4 +371,14 @@ mod tests {
         assert!(v["summary"].as_str().unwrap().contains("WAL"));
         assert!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "wal_not_read"));
     }
+
+    #[test]
+    fn short_records_include_defaults_and_disclose_expressions() {
+        let e = Engine::new(crate::testing::session());
+        let bytes = fx::table_db("CREATE TABLE t(n INT, x INT DEFAULT 42, d TEXT DEFAULT (lower('A')))", &[(1, vec![fx::Val::Int(1)])]);
+        let p = temp_file("defaults.db", &bytes);
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
+        assert_eq!(v["result"]["rows"]["rows"][0]["values"], json!([1, 42, null]));
+        assert!(v["result"]["rows"]["notes"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("unsupported DEFAULT")));
+    }
 }

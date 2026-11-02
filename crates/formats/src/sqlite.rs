@@ -417,10 +417,27 @@ impl<'a> SqliteDb<'a> {
         let skipped = offset.min(w.out.len());
         let mut page: Vec<Row> = w.out.into_iter().skip(offset).take(limit).collect();
         let (schema, _) = self.schema();
-        if let Some(index) = schema.iter().find(|o| o.obj_type == "table" && o.rootpage == rootpage).and_then(|o| rowid_alias_index(&o.sql)) {
+        if let Some(table) = schema.iter().find(|o| o.obj_type == "table" && o.rootpage == rootpage) {
+            let defaults: Vec<_> = column_definitions(&table.sql).into_iter().map(|(_, rest)| column_default(rest)).collect();
+            let mut unsupported = vec![false; defaults.len()];
             for row in &mut page {
-                if let (Some(rowid), Some(value @ CellValue::Null)) = (row.rowid, row.values.get_mut(index)) {
-                    *value = CellValue::Int(rowid);
+                for ((value, supported), disclosed) in defaults.iter().zip(&mut unsupported).skip(row.values.len()) {
+                    row.values.push(value.clone());
+                    if !supported {
+                        *disclosed = true;
+                    }
+                }
+            }
+            for (i, disclosed) in unsupported.into_iter().enumerate() {
+                if disclosed {
+                    w.notes.push(format!("Column {} has an unsupported DEFAULT expression; missing values were filled as NULL.", i + 1));
+                }
+            }
+            if let Some(index) = rowid_alias_index(&table.sql) {
+                for row in &mut page {
+                    if let (Some(rowid), Some(value @ CellValue::Null)) = (row.rowid, row.values.get_mut(index)) {
+                        *value = CellValue::Int(rowid);
+                    }
                 }
             }
         }
@@ -754,23 +771,25 @@ fn without_rowid_order(table: &SchemaObject) -> Option<Vec<usize>> {
 
 /// Parse column names and types from a CREATE TABLE statement (best effort, bounded).
 pub fn parse_create_columns(sql: &str) -> Vec<Column> {
+    column_definitions(sql).into_iter().map(|(column, _)| column).collect()
+}
+
+fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
     let mut cols = Vec::new();
     // Take the text inside the outermost parentheses.
     let Some(open) = sql.find('(') else { return cols };
     let inner = &sql[open + 1..];
-    let mut depth = 1i32;
+    let mut depth = 1usize;
     let mut end = inner.len();
-    for (i, c) in inner.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = i;
-                    break;
-                }
-            }
+    for token in sql_tokens(inner) {
+        match token {
+            "(" => depth = depth.saturating_add(1),
+            ")" => depth = depth.saturating_sub(1),
             _ => {}
+        }
+        if depth == 0 {
+            end = (token.as_ptr() as usize).saturating_sub(inner.as_ptr() as usize);
+            break;
         }
     }
     let body = inner.get(..end).unwrap_or("");
@@ -792,7 +811,7 @@ pub fn parse_create_columns(sql: &str) -> Vec<Column> {
             continue;
         }
         let type_name = extract_type(rest.trim());
-        cols.push(Column { name, type_name });
+        cols.push((Column { name, type_name }, rest));
     }
     cols
 }
@@ -902,13 +921,79 @@ fn sql_tokens(mut sql: &str) -> Vec<&str> {
                     }
                 }
             }
-        } else if !matches!(first, '(' | ')' | ',') {
-            end = sql.find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ',' | '\'' | '"' | '`' | '[')).unwrap_or(sql.len());
+        } else if !matches!(first, '(' | ')' | ',' | '/') {
+            end = sql.find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ',' | '\'' | '"' | '`' | '[' | '/')).unwrap_or(sql.len());
         }
         tokens.push(sql.get(..end).unwrap_or(""));
         sql = sql.get(end..).unwrap_or("");
     }
     tokens
+}
+
+/// Missing trailing fields use literal defaults; expressions remain explicitly unknown.
+fn column_default(rest: &str) -> (CellValue, bool) {
+    let tokens = sql_tokens(rest);
+    let mut depth = 0usize;
+    for (i, token) in tokens.iter().enumerate() {
+        if depth == 0 && token.eq_ignore_ascii_case("DEFAULT") {
+            return tokens.get(i.saturating_add(1)..).and_then(literal_default).map(|v| (v, true)).unwrap_or((CellValue::Null, false));
+        }
+        match *token {
+            "(" => depth = depth.saturating_add(1),
+            ")" => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    (CellValue::Null, true)
+}
+
+fn literal_default(tokens: &[&str]) -> Option<CellValue> {
+    let token = *tokens.first()?;
+    if token.eq_ignore_ascii_case("NULL") {
+        return Some(CellValue::Null);
+    }
+    if token.eq_ignore_ascii_case("TRUE") || token.eq_ignore_ascii_case("FALSE") {
+        return Some(CellValue::Int(i64::from(token.eq_ignore_ascii_case("TRUE"))));
+    }
+    if token.starts_with('\'') && token.ends_with('\'') && token.len() >= 2 {
+        return Some(text_value(token.get(1..token.len().checked_sub(1)?)?.replace("''", "'").as_bytes()));
+    }
+    if token.eq_ignore_ascii_case("X") {
+        let quoted = *tokens.get(1)?;
+        if !quoted.starts_with('\'') || !quoted.ends_with('\'') || quoted.len() < 2 {
+            return None;
+        }
+        let hex = quoted.get(1..quoted.len().checked_sub(1)?)?;
+        if !hex.len().is_multiple_of(2) {
+            return None;
+        }
+        let bytes: Option<Vec<u8>> = hex
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| {
+                let high = char::from(*pair.first()?).to_digit(16)?;
+                let low = char::from(*pair.get(1)?).to_digit(16)?;
+                Some((high * 16 + low) as u8)
+            })
+            .collect();
+        let bytes = bytes?;
+        return Some(blob_value(&bytes, bytes.len()));
+    }
+    let number = if matches!(token, "+" | "-") {
+        let value = *tokens.get(1)?;
+        format!("{token}{value}")
+    } else {
+        token.to_owned()
+    };
+    if !number.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'+' | b'-' | b'.' | b'e' | b'E')) {
+        return None;
+    }
+    if let Ok(n) = number.parse::<i64>() {
+        return Some(CellValue::Int(n));
+    }
+    number.parse::<f64>().ok().filter(|n| n.is_finite()).map(CellValue::Real)
 }
 
 /// Split on top-level commas (ignoring commas inside parentheses).
@@ -1000,6 +1085,99 @@ fn extract_type(rest: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn short_record_case(declarations: &str, defaults: Vec<CellValue>, note: bool) {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        let mut full = vec![Val::Int(2)];
+        full.extend(defaults.iter().map(|v| match v {
+            CellValue::Int(n) => Val::Int(*n),
+            CellValue::Real(n) => Val::Real(*n),
+            CellValue::Text { text, .. } => Val::Text(text.clone()),
+            CellValue::Blob { .. } => Val::Blob(vec![0, 255]),
+            CellValue::Null => Val::Null,
+        }));
+        let bytes = table_db(&format!("CREATE TABLE t(n INT, {declarations})"), &[(1, vec![Val::Int(1)]), (2, full)]);
+        let db = SqliteDb::parse(&bytes).expect("fixture");
+        let page = db.read_rows(2, 0, 10);
+        let mut expected = vec![CellValue::Int(1)];
+        expected.extend(defaults.clone());
+        assert_eq!(page.rows[0].values, expected, "old record must include trailing defaults");
+        expected[0] = CellValue::Int(2);
+        assert_eq!(page.rows[1].values, expected, "full record must stay unchanged");
+        assert_eq!(!page.notes.is_empty(), note, "unsupported defaults must be disclosed");
+    }
+
+    #[test]
+    fn added_columns_c1_integer() {
+        short_record_case("x INT DEFAULT 42", vec![CellValue::Int(42)], false);
+    }
+    #[test]
+    fn added_columns_c2_null() {
+        short_record_case("x INT", vec![CellValue::Null], false);
+    }
+    #[test]
+    fn added_columns_c3_real_text() {
+        short_record_case("x REAL DEFAULT -1.5, y TEXT DEFAULT 'it''s'", vec![CellValue::Real(-1.5), text_value(b"it's")], false);
+    }
+    #[test]
+    fn added_columns_c4_blob() {
+        short_record_case("x BLOB DEFAULT X'00ff'", vec![blob_value(&[0, 255], 2)], false);
+    }
+    #[test]
+    fn added_columns_c7_expression() {
+        short_record_case("d TEXT DEFAULT (lower('A'))", vec![CellValue::Null], true);
+    }
+    #[test]
+    fn added_columns_c5_rewritten_control() {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        let bytes = table_db("CREATE TABLE t(n INT, x INT DEFAULT 42)", &[(1, vec![Val::Int(1), Val::Int(42)])]);
+        let page = SqliteDb::parse(&bytes).expect("fixture").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![CellValue::Int(1), CellValue::Int(42)]);
+        assert!(page.notes.is_empty());
+    }
+
+    #[test]
+    fn added_columns_literal_forms_and_unknowns() {
+        for (declaration, value) in [
+            ("x INT DEFAULT +42 NOT NULL", CellValue::Int(42)),
+            ("x INT DEFAULT - 42", CellValue::Int(-42)),
+            ("x REAL DEFAULT + 1.25e-2", CellValue::Real(0.0125)),
+            ("x INT DEFAULT true", CellValue::Int(1)),
+            ("x INT DEFAULT FALSE", CellValue::Int(0)),
+            ("x DEFAULT null", CellValue::Null),
+            ("x TEXT DEFAULT 'a),b''c'", text_value(b"a),b'c")),
+            ("x INT CHECK(x <> 'DEFAULT') DEFAULT /* literal */ 7", CellValue::Int(7)),
+        ] {
+            short_record_case(declaration, vec![value], false);
+        }
+        for declaration in ["x TEXT DEFAULT CURRENT_TIMESTAMP", "x DEFAULT (42)", "x DEFAULT (lower('A'))", "x DEFAULT X'zz'"] {
+            short_record_case(declaration, vec![CellValue::Null], true);
+        }
+        assert_eq!(blob_value(&[0, 255], 2), CellValue::Blob { len: 2, sha256_prefix: "06eb7d6a69ee19e5".into() });
+        assert_eq!(literal_default(&sql_tokens("x''")), Some(blob_value(&[], 0)));
+    }
+
+    #[test]
+    fn added_columns_preserve_stored_nulls_and_long_records() {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        let bytes = table_db("CREATE TABLE t(n INT, x INT DEFAULT 42)", &[(1, vec![Val::Int(1), Val::Null]), (2, vec![Val::Int(2), Val::Int(7), Val::Int(9)])]);
+        let page = SqliteDb::parse(&bytes).expect("fixture").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![CellValue::Int(1), CellValue::Null]);
+        assert_eq!(page.rows[1].values, vec![CellValue::Int(2), CellValue::Int(7), CellValue::Int(9)]);
+        assert!(page.notes.is_empty());
+    }
+
+    #[test]
+    fn added_columns_c6_short_rowid_alias() {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        for stored in [vec![Val::Null, Val::Int(10)], vec![]] {
+            let bytes = table_db("CREATE TABLE t(id INTEGER PRIMARY KEY, n INT DEFAULT 10, x INT DEFAULT 42)", &[(7, stored)]);
+            let page = SqliteDb::parse(&bytes).expect("fixture").read_rows(2, 0, 10);
+            assert_eq!(page.rows[0].rowid, Some(7));
+            assert_eq!(page.rows[0].values, vec![CellValue::Int(7), CellValue::Int(10), CellValue::Int(42)]);
+            assert!(page.notes.is_empty());
+        }
+    }
 
     #[test]
     fn version_formatting() {
