@@ -787,6 +787,23 @@ fn compiler_generated(name: &str) -> bool {
     name.contains('<') || name.contains('$') || name.starts_with("CS$")
 }
 
+/// An accessor (`get_P`, `add_E`…) of a property or event in `props`. Explicit interface
+/// implementations keep the qualifier in front: `Iface.get_P` belongs to `Iface.P`.
+fn is_accessor(name: &str, props: &BTreeSet<&str>) -> bool {
+    let (qualifier, local) = match name.rsplit_once('.') {
+        Some((q, l)) => (Some(q), l),
+        None => (None, name),
+    };
+    if !["get_", "set_", "add_", "remove_", "raise_"].iter().any(|p| local.starts_with(p)) {
+        return false;
+    }
+    let Some((_, prop)) = local.split_once('_') else { return false };
+    match qualifier {
+        Some(q) => props.contains(format!("{q}.{prop}").as_str()),
+        None => props.contains(prop),
+    }
+}
+
 /// Check scanned declarations against metadata members.
 pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
     let mut r = Reconciliation::default();
@@ -834,8 +851,7 @@ pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
             } else if compiler_generated(name)
                 || name == ".cctor"
                 || (name == ".ctor" && params.is_empty())
-                || (["get_", "set_", "add_", "remove_", "raise_"].iter().any(|p| name.starts_with(p))
-                    && name.split_once('_').is_some_and(|(_, n)| props.contains(n)))
+                || is_accessor(name, &props)
                 || (ty.kind == "delegate" && ["Invoke", "BeginInvoke", "EndInvoke", ".ctor"].contains(&name))
                 || (ty.kind == "enum" && name == "value__")
             {
@@ -883,6 +899,7 @@ pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dotnet::model::{MethodInfo, PropertyInfo, TypeInfo};
 
     #[test]
     fn scans_declarations() {
@@ -937,6 +954,69 @@ public sealed class Box<T> : IDisposable where T : class
         assert_eq!(norm_type("List<int>"), "List<int>");
         assert_eq!(norm_type("ref int"), "ref int");
         assert_eq!(norm_type_name("Ns.Outer/Inner`1"), ("Ns.Outer.Inner".into(), 1));
+    }
+
+    fn method(name: &str) -> MethodInfo {
+        MethodInfo {
+            token: String::new(),
+            name: name.into(),
+            key: String::new(),
+            signature: name.into(),
+            return_type: String::new(),
+            params: vec![],
+            generic_params: vec![],
+            visibility: "private",
+            modifiers: vec![],
+            code_type: "il",
+            internal_call: false,
+            pinvoke: false,
+            rva: 0,
+            body: None,
+        }
+    }
+
+    fn ty(name: &str, kind: &'static str, methods: &[&str], props: &[&str]) -> TypeInfo {
+        TypeInfo {
+            token: String::new(),
+            full_name: name.into(),
+            namespace: String::new(),
+            name: name.into(),
+            kind,
+            visibility: "internal",
+            modifiers: vec![],
+            extends: None,
+            enclosing_type: None,
+            generic_params: vec![],
+            interfaces: vec![],
+            fields: vec![],
+            methods: methods.iter().map(|m| method(m)).collect(),
+            properties: props.iter().map(|p| PropertyInfo { name: (*p).into(), ty: "int".into() }).collect(),
+            events: vec![],
+        }
+    }
+
+    #[test]
+    fn explicit_interface_property_accessors_are_implicit() {
+        let members = Members {
+            types: vec![
+                ty("Interface", "interface", &["get_Property", "set_Property"], &["Property"]),
+                ty("Class", "class", &["Interface.get_Property", "Interface.set_Property", ".ctor", "Other.get_X"], &["Interface.Property"]),
+            ],
+            total_types: 2,
+            total_methods: 6,
+            total_fields: 0,
+            truncated: false,
+            warnings: vec![],
+        };
+        let s = scan("interface Interface { int Property { get; set; } } class Class : Interface { int Interface.Property { get; set; } }");
+        let r = reconcile(&members, &s);
+        let missing: Vec<&str> = r.missing.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(missing, vec!["Other.get_X"]);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.iter().filter(|m| m.kind == "property").count(), 2);
+        let implicit: Vec<&str> = r.implicit.iter().map(|m| m.name.as_str()).collect();
+        assert!(implicit.contains(&"Interface.get_Property"), "{implicit:?}");
+        assert!(implicit.contains(&"Interface.set_Property"), "{implicit:?}");
     }
 
     #[test]
