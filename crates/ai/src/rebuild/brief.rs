@@ -152,6 +152,21 @@ pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
     }
 }
 
+/// Read the person's latest choices immediately before a builder turn. Never substitute cached
+/// permission when the manifest cannot be read or belongs to a newer application version.
+pub(super) fn current_project_assets_note(root: &Path, assets: bool) -> String {
+    let current = "Current asset policy for this turn (replaces earlier asset instructions):";
+    match Workspace::open(root) {
+        Ok(ws) if !ws.is_read_only() => {
+            let cx = BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None };
+            format!("{current} {}", project_assets_note(&cx))
+        }
+        _ => format!(
+            "{current} The project's current asset choices could not be read safely. Do not generate assets or authorize new spending. Keep existing assets until the settings can be read."
+        ),
+    }
+}
+
 /// Game art guidance and price estimates for the configured picture and 3D models.
 pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>) -> String {
     let folder = match game::Builder::from_stack(&ws.manifest.stack) {

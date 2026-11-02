@@ -653,11 +653,7 @@ impl Worker {
             model_3d: model_3d.as_deref(),
         };
         // The project's settings as they are now, for an agent that carries on its session.
-        let now = || {
-            kind.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>()
-                + &format!("\n\n{}", project_assets_note(&cx))
-                + &pictures_reminder(ws)
-        };
+        let now = || kind.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>() + &pictures_reminder(ws);
         let mut prompt = match &opts.message {
             // An agent with a saved session gets the follow-up; one without (an API loop) starts
             // from the brief with the request added.
@@ -854,7 +850,10 @@ impl Worker {
         let mut prompt = prompt.to_string();
         let mut tries = 0u64;
         loop {
-            let result = self.converse(ws, agent, &prompt);
+            // Sidebar choices can change during a build. Read only the policy from disk, leaving
+            // this worker's unsaved progress untouched; this also covers notes, fixes and retries.
+            let current = current_project_assets_note(&ws.root, self.assets);
+            let result = self.converse(ws, agent, &format!("{prompt}\n\n{current}"));
             let lost = result.is_err() && agent.session_lost();
             if lost {
                 // The id is for a session this computer doesn't have: never ask for it again.

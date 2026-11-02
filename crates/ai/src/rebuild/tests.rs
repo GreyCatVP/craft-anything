@@ -328,6 +328,99 @@ fn pictures_of_the_original_reach_the_builder() {
 }
 
 #[test]
+fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progress() {
+    #[derive(Default)]
+    struct RecordedTurns(Vec<String>);
+    impl Conversation for RecordedTurns {
+        fn send(&mut self, text: &str) {
+            self.0.push(text.into());
+        }
+        fn poll(&mut self) -> Vec<AgentEvent> {
+            vec![AgentEvent::TurnDone { backend: "test".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false }]
+        }
+        fn answer_consent(&mut self, _: &str, _: bool) {}
+        fn stop(&mut self) {}
+        fn is_busy(&self) -> bool {
+            false
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "App", "Make an app", TargetRef::None).unwrap();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut worker = Worker {
+        wake: Default::default(),
+        engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        tx,
+        stop: CancelToken::default(),
+        preview: Arc::default(),
+        seen: HashSet::new(),
+        inbox: Inbox::new(ws.inbox_dir()),
+        editor: None,
+        notes: Arc::default(),
+        feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        assets: true,
+        decompiled: false,
+        usage: None,
+        self_check: None,
+    };
+    let mut agent = RecordedTurns::default();
+    worker.turn(&mut ws, &mut agent, "Build the app").unwrap();
+    assert!(agent.0.last().unwrap().contains("Generated assets are now off"));
+    let mut sidebar = Workspace::open(&ws.root).unwrap();
+    sidebar
+        .set_person(|m| {
+            m.generate_assets = true;
+            m.asset_providers = Some(vec!["scenario".into()]);
+            m.asset_budget_usd = 7.25;
+        })
+        .unwrap();
+    worker.notes.lock().unwrap().push(Note { id: 1, text: "Use generated textures".into(), shown: "Use generated textures".into() });
+    let added = worker.added(&mut ws).unwrap();
+    worker.turn(&mut ws, &mut agent, &added).unwrap();
+    let note = agent.0.last().unwrap();
+    assert!(note.contains("Use generated textures") && note.contains("Current asset policy for this turn (replaces earlier asset instructions)"));
+    assert!(note.contains("scenario: enabled") && note.contains("fal: disabled") && note.contains("$7.25"));
+
+    sidebar
+        .set_person(|m| {
+            m.asset_providers = Some(vec!["elevenlabs".into()]);
+            m.asset_budget_usd = 0.75;
+        })
+        .unwrap();
+    sidebar
+        .record_asset(craft_anything_engine::workspace::AssetRecord {
+            file: "chime.mp3".into(),
+            kind: "sound".into(),
+            prompt: "a chime".into(),
+            cost_usd: 0.25,
+            at_ms: 1,
+        })
+        .unwrap();
+    ws.manifest.note = "Unsaved progress in this worker".into();
+    ws.manifest.status = Status::Checking;
+    let before_turn = ws.manifest.clone();
+    let refinement = refine("app", &CheckResult::new(CheckResult::BUILD, 1, false, "Fix the build"));
+    worker.turn(&mut ws, &mut agent, &refinement).unwrap();
+    let note = agent.0.last().unwrap();
+    assert!(note.contains("Current asset policy for this turn") && note.contains("scenario: disabled") && note.contains("elevenlabs: enabled"));
+    assert!(note.contains("$0.75") && note.contains("estimated spent $0.25, remaining $0.50"));
+    assert_eq!(ws.manifest, before_turn, "policy reads never replace run-owned state");
+
+    let mut future = sidebar.manifest.clone();
+    future.version = craft_anything_engine::workspace::MANIFEST_VERSION + 1;
+    std::fs::write(ws.root.join("craft.json"), serde_json::to_vec(&future).unwrap()).unwrap();
+    worker.turn(&mut ws, &mut agent, "Continue with the future settings").unwrap();
+    assert!(agent.0.last().unwrap().contains("Do not generate assets or authorize new spending"));
+
+    std::fs::write(ws.root.join("craft.json"), "not valid JSON").unwrap();
+    worker.turn(&mut ws, &mut agent, "Try the fix again").unwrap();
+    let note = agent.0.last().unwrap();
+    assert!(note.contains("Do not generate assets or authorize new spending"));
+    assert!(!note.contains("elevenlabs: enabled"), "unreadable choices never fall back to earlier permission");
+    assert_eq!(ws.manifest, before_turn);
+}
+
+#[test]
 fn a_cut_off_turn_is_resumed_unless_the_person_must_act() {
     for resumable in ["Claude Code took longer than 86400 s and was stopped.", "API Error: 529 overloaded", "connection reset by peer"] {
         assert!(worth_retrying(resumable), "{resumable}");
