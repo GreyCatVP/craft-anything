@@ -655,6 +655,41 @@ fn spawn_reader<R: Read + Send + 'static>(
         .ok()
 }
 
+/// How much of a run's log is kept. A chatty program can't grow it without bound.
+const MAX_LOG_BYTES: u64 = 1024 * 1024;
+
+/// Copy a child's pipe into a run's log file, stopping once `bytes` (shared by the stdout and
+/// stderr readers) reaches [`MAX_LOG_BYTES`]. The rest is still read and dropped, so the pipe
+/// always drains.
+fn spawn_log_reader<R: Read + Send + 'static>(mut pipe: R, file: Arc<Mutex<std::fs::File>>, bytes: Arc<AtomicU64>, label: String) -> Option<JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name(format!("log-{label}"))
+        .spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match pipe.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        // Load the count under the file lock so the stdout and stderr readers
+                        // can't both write past the cap.
+                        let mut f = file.lock().unwrap_or_else(PoisonError::into_inner);
+                        let current = bytes.load(Ordering::Relaxed);
+                        if current < MAX_LOG_BYTES {
+                            let to_write = (n as u64).min(MAX_LOG_BYTES - current) as usize;
+                            if to_write > 0 {
+                                let _ = f.write_all(&buf[..to_write]);
+                                bytes.fetch_add(to_write as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                }
+            }
+        })
+        .ok()
+}
+
 fn emit_line(sink: &LineSink, line: &mut Vec<u8>) {
     if line.last() == Some(&b'\r') {
         line.pop();
@@ -868,15 +903,12 @@ impl Launch {
         let mut cmd = std::process::Command::new(&self.program);
         cmd.args(&self.args).stdin(Stdio::null());
         use_search_path(&mut cmd);
-        match &self.log {
-            Some(path) => {
-                let out = std::fs::File::create(path).map_err(|e| ToolError::io(path.display(), e))?;
-                let err = out.try_clone().map_err(|e| ToolError::io(path.display(), e))?;
-                cmd.stdout(out).stderr(err);
-            }
-            None => {
-                cmd.stdout(Stdio::null()).stderr(Stdio::null());
-            }
+        let log_path = self.log.clone();
+
+        if log_path.is_some() {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        } else {
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
         }
         if let Some(dir) = &self.cwd {
             cmd.current_dir(dir);
@@ -887,7 +919,23 @@ impl Launch {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, e, self.remediation.as_deref()))?;
+        let mut child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, e, self.remediation.as_deref()))?;
+
+        // Write what the program prints to the log file, capped at 1 MiB so a chatty run can't
+        // grow it without bound. The file is truncated at the start of the run.
+        if let Some(path) = &log_path {
+            let _ = std::fs::File::create(path);
+            let file = Arc::new(Mutex::new(std::fs::OpenOptions::new().append(true).open(path).map_err(|e| ToolError::io(path.display(), e))?));
+            let bytes_written = Arc::new(AtomicU64::new(0));
+
+            if let Some(stdout) = child.stdout.take() {
+                let _ = spawn_log_reader(stdout, file.clone(), bytes_written.clone(), format!("{name}-out"));
+            }
+            if let Some(stderr) = child.stderr.take() {
+                let _ = spawn_log_reader(stderr, file.clone(), bytes_written.clone(), format!("{name}-err"));
+            }
+        }
+
         let launched = Launched { pid: child.id(), started: Instant::now(), state: Arc::new(Mutex::new(LaunchState { child: Some(child), ended: None })) };
         // Reap it when it closes. If no thread can be made the child still runs (and `ended`
         // stays unknown); on Unix it stays a zombie until we exit, which is harmless.
@@ -1178,6 +1226,25 @@ mod launch_tests {
         assert!(!l.is_running());
         let text = std::fs::read_to_string(&log).unwrap();
         assert!(text.contains("out-line") && text.contains("err-line"), "{text}");
+    }
+
+    /// Both pipes share one cap: a chatty run stops at exactly 1 MiB on disk, and the readers
+    /// keep draining to the end (they would never see EOF if they stopped reading at the cap).
+    #[test]
+    fn a_run_log_stops_at_one_mebibyte_and_both_pipes_keep_draining() {
+        use std::io::Cursor;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.log");
+        let file = Arc::new(Mutex::new(std::fs::File::create(&path).unwrap()));
+        let bytes = Arc::new(AtomicU64::new(0));
+        // Each pipe alone is under the cap; together they are over it.
+        let input = vec![b'x'; (MAX_LOG_BYTES / 2 + 256 * 1024) as usize];
+        let out = spawn_log_reader(Cursor::new(input.clone()), file.clone(), bytes.clone(), "out".into()).unwrap();
+        let err = spawn_log_reader(Cursor::new(input), file, bytes.clone(), "err".into()).unwrap();
+        out.join().unwrap();
+        err.join().unwrap();
+        assert_eq!(bytes.load(Ordering::Relaxed), MAX_LOG_BYTES);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), MAX_LOG_BYTES);
     }
 
     #[test]

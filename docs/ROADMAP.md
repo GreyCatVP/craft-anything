@@ -952,7 +952,7 @@ to the project next. Pins are the engine's (tools), kept in the project's `pinne
 - [ ] Pin a website (a frozen copy of the built site, each served on its own port)
 - [ ] A pin started before the app restarted shows as running (keep its process id and start
       time in the pin, and check both), and can be stopped
-- [ ] Cap a run's log (`last-run.log`, `play.log`): it grows as long as the program prints
+- [x] Cap a run's log (`last-run.log`, `play.log`): it grows as long as the program prints - capped to 1 MiB in `Launch::log_to` (`crates/platform/src/process.rs`)
 - [x] A collapsible Pinned section in the sidebar (icons with a running dot when folded; open,
       open another copy, close, go to the project, rename, remove), Pin this build on the project
       page with the frozen/light choice and each copy's size; the pin tools are in the command
