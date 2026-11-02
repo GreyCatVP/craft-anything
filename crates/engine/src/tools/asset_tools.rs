@@ -345,7 +345,9 @@ fn no_key(provider: &str) -> ToolError {
 impl Job {
     /// The key for `provider`, checked before anything is asked or spent.
     fn key(&self, provider: &dyn AssetProvider) -> Result<String, ToolError> {
-        self.keys.get(provider.id()).map(str::to_string).ok_or_else(|| no_key(provider.name()))
+        let key = self.keys.get(provider.id()).ok_or_else(|| no_key(provider.name()))?;
+        provider.validate_key(key)?;
+        Ok(key.to_string())
     }
 }
 
@@ -900,6 +902,22 @@ mod tests {
             assert!(!path.exists());
             assert!(w.assets().is_empty());
         }
+    }
+
+    #[test]
+    fn malformed_model_credentials_stop_before_spending_on_the_source_picture() {
+        let (_d, mut w) = ws();
+        w.set_person(|m| m.asset_budget_usd = 20.0).unwrap();
+        let (engine, pictures) = recording_engine(&w, "fal", None);
+        engine.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".into(), "sk-test".into()), ("scenario".into(), "sk-test".into())].into())));
+        let result = engine.call(
+            "assets_model_generate",
+            json!({"model":"scenario-meshy", "prompt":"a crate", "save_as":"crate.glb"}),
+            crate::CallOptions::new(crate::Caller::Mcp),
+        );
+        assert!(result.is_err());
+        assert!(pictures.calls.lock().unwrap().is_empty(), "reject a malformed downstream key before the first paid call");
+        assert!(w.assets().is_empty());
     }
 
     #[cfg(unix)]
