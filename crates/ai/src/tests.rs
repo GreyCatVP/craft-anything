@@ -109,6 +109,34 @@ fn a_local_server_is_reachable_only_when_it_lists_models() {
     assert!(of("Real").is_ok(), "{reach:?}");
 }
 
+/// #374: a remote OpenAI-compatible gateway isn't a local model, which costs nothing and gets a
+/// 24K context budget; only a server on this computer or its network is.
+#[test]
+fn only_a_compatible_server_nearby_is_local() {
+    let (h, _d) = hub();
+    let entry = |base: Option<&str>| BackendEntry {
+        config: BackendConfig {
+            name: "Server".into(),
+            kind: BackendKind::OpenaiCompatible,
+            model: "m".into(),
+            base_url: base.map(Into::into),
+            ssh_host: None,
+            enabled: true,
+        },
+        options: BackendOptions::default(),
+    };
+    for (base, local) in [
+        (None, true),
+        (Some("http://127.0.0.1:11434/v1"), true),
+        (Some("http://192.168.1.20:1234/v1"), true),
+        (Some("http://studio.local:1234/v1"), true),
+        (Some("https://api.example.test/api/coding/v4"), false),
+        (Some("http://203.0.113.7:8000/v1"), false),
+    ] {
+        assert_eq!(h.build_model(&entry(base)).unwrap().local, local, "{base:?}");
+    }
+}
+
 fn sse(events: &[Value]) -> String {
     events.iter().map(|e| format!("event: {}\r\ndata: {}\r\n\r\n", e["type"].as_str().unwrap_or("message"), e)).collect()
 }

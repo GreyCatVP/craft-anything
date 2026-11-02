@@ -556,7 +556,9 @@ impl AiHub {
         Ok(ModelSlot {
             name: c.name.clone(),
             model,
-            local: c.kind == BackendKind::OpenaiCompatible,
+            // A server on this computer or its network (or reached over ssh) costs nothing and gets the
+            // small context budget; a remote gateway is billed like any cloud API (#374).
+            local: c.kind == BackendKind::OpenaiCompatible && base.is_none_or(detect::on_this_network),
             effort: e.options.effort,
             max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS),
         })

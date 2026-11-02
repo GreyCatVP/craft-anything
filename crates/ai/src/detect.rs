@@ -135,7 +135,7 @@ pub fn opencode_servers(text: &str) -> Vec<(String, String)> {
 }
 
 /// An http(s) address on this computer or its local network.
-fn on_this_network(url: &str) -> bool {
+pub(crate) fn on_this_network(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")) else { return false };
     let host = rest.split('/').next().unwrap_or_default();
     // `[::1]:1234`, `127.0.0.1:1234` or `name:1234`.
