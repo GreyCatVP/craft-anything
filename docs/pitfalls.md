@@ -49,6 +49,11 @@ Don't close or rewrite other people's work without asking.
 
 ## Tests
 
+**An accepted socket inherited nonblocking mode on another platform.** A local test server
+polled a nonblocking listener, then assumed its accepted streams would block while reading.
+Set each accepted stream's mode explicitly before reading and retain its read timeout; Linux
+and BSD-derived systems differ in whether the listener's flags are inherited.
+
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
 created folders in the real config directory (`Session::default()` uses it).

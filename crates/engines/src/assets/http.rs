@@ -123,6 +123,8 @@ pub(super) mod tests {
                         Err(e) => panic!("local accept failed: {e}"),
                     }
                 };
+                // Accepted sockets inherit the listener's mode differently across platforms.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut head = String::new();
