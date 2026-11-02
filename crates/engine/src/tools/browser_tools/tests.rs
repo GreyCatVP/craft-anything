@@ -946,3 +946,52 @@ fn coverage_records_the_scripts_it_shows() {
         assert_eq!(v["coverage"]["examined"], shown, "{offset}/{limit}");
     }
 }
+
+/// A loopback server that answers every GET with `body` and records the request paths.
+fn map_server(body: &'static str) -> (String, Arc<craft_anything_platform::sync::Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let seen = Arc::new(craft_anything_platform::sync::Mutex::new(Vec::new()));
+    let seen2 = seen.clone();
+    std::thread::spawn(move || {
+        for s in listener.incoming() {
+            let Ok(mut stream) = s else { break };
+            let (line, _) = read_headers(&mut stream);
+            seen2.lock().unwrap().push(line.split_whitespace().nth(1).unwrap_or("").to_string());
+            let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    (origin, seen)
+}
+
+#[test]
+fn same_origin_loopback_source_maps_are_fetched() {
+    const MAP: &str =
+        r#"{"version":3,"file":"app.js","sources":["src/original.js"],"sourcesContent":["export const answer = 42;\n"],"names":[],"mappings":"AAAA"}"#;
+    let (origin, seen) = map_server(MAP);
+    // The CDP endpoint is a different loopback port from the page's origin, as in a real browser.
+    let (cdp_url, _) = fake_cdp();
+    let browser = super::Browser::attached(&super::cdp::parse_endpoint(&cdp_url).unwrap(), "chrome", "1");
+    let dl = super::Deadline::new(std::time::Duration::from_secs(10), crate::tool::CancelToken::default());
+    let script = format!("{origin}/relative.js");
+
+    let abs = super::resolve_source_map(&browser, &format!("{origin}/app.js.map"), &script, &dl);
+    assert_eq!(abs["fetched"], true, "{abs}");
+    assert_eq!(abs["bytes"], MAP.len(), "{abs}");
+    let rel = super::resolve_source_map(&browser, "app.js.map", &script, &dl);
+    assert_eq!(rel["fetched"], true, "{rel}");
+    assert_eq!(rel["bytes"], MAP.len(), "{rel}");
+    assert_eq!(*seen.lock().unwrap(), vec!["/app.js.map".to_string(), "/app.js.map".to_string()]);
+
+    // Another port, another host, or a remote https map is never requested.
+    let (other, other_seen) = map_server(MAP);
+    for declared in [format!("{other}/app.js.map"), "https://example.com/app.js.map".to_string(), "//example.com/app.js.map".to_string()] {
+        let v = super::resolve_source_map(&browser, &declared, &script, &dl);
+        assert_eq!(v["fetched"], false, "{declared}: {v}");
+    }
+    let remote = super::resolve_source_map(&browser, "app.js.map", "https://example.com/app.js", &dl);
+    assert_eq!(remote["fetched"], false, "{remote}");
+    assert!(other_seen.lock().unwrap().is_empty());
+    assert_eq!(seen.lock().unwrap().len(), 2);
+}

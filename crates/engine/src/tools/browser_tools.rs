@@ -988,9 +988,9 @@ fn script_path(url: &str) -> String {
     }
 }
 
-/// Resolve a declared source-map URL: decode inline data: maps; record others (fetched only for
-/// same loopback origin, which real https maps are not).
-fn resolve_source_map(_browser: &Browser, declared: &str, script_url: &str, _dl: &Deadline) -> Value {
+/// Resolve a declared source-map URL: decode inline data: maps; fetch maps on the script's own
+/// loopback origin (literal 127.0.0.1 or [::1] with a port); record others unfetched.
+fn resolve_source_map(_browser: &Browser, declared: &str, script_url: &str, dl: &Deadline) -> Value {
     if declared.starts_with("data:") {
         match craft_anything_formats::sourcemap::decode_data_url(declared) {
             Some(bytes) => {
@@ -998,9 +998,63 @@ fn resolve_source_map(_browser: &Browser, declared: &str, script_url: &str, _dl:
             }
             None => json!({"declared_url": "inline data: URL", "fetched": false, "reason": "not valid base64", "script": web_common::sanitize_url(script_url)}),
         }
+    } else if let Some((ep, path)) = same_loopback_origin_map(declared, script_url) {
+        let effective = web_common::sanitize_url(&format!("{}{path}", ep.origin));
+        match cdp::http_get(&ep, &path, dl) {
+            Ok((status, bytes)) if (200..300).contains(&status) => {
+                json!({"declared_url": web_common::sanitize_url(declared), "effective_url": effective, "fetched": true, "bytes": bytes.len(), "script": web_common::sanitize_url(script_url)})
+            }
+            Ok((status, _)) => {
+                json!({"declared_url": web_common::sanitize_url(declared), "effective_url": effective, "fetched": false, "reason": format!("the page's server answered HTTP {status}"), "script": web_common::sanitize_url(script_url)})
+            }
+            Err(e) => {
+                json!({"declared_url": web_common::sanitize_url(declared), "effective_url": effective, "fetched": false, "reason": e.message, "script": web_common::sanitize_url(script_url)})
+            }
+        }
     } else {
         json!({"declared_url": web_common::sanitize_url(declared), "fetched": false, "reason": "cross-origin or remote maps are not fetched; download and use js_source_locate", "script": web_common::sanitize_url(script_url)})
     }
+}
+
+/// Split an `http://host:port/path` URL into its loopback endpoint and path (query kept, fragment
+/// dropped). `None` unless the host is literal loopback with an explicit port.
+fn loopback_origin_and_path(url: &str) -> Option<(cdp::Endpoint, String)> {
+    let rest = url.strip_prefix("http://")?;
+    let (authority, path) = match rest.find(['/', '?', '#']) {
+        Some(i) => (rest.get(..i)?, rest.get(i..)?),
+        None => (rest, ""),
+    };
+    let ep = cdp::parse_endpoint(&format!("http://{authority}")).ok()?;
+    let path = path.split('#').next().unwrap_or("");
+    let path = if path.starts_with('/') { path.to_string() } else { format!("/{path}") };
+    Some((ep, path))
+}
+
+/// Resolve a declared source-map URL against its script and return the endpoint and request path
+/// only when the map lives on the script's own loopback origin.
+fn same_loopback_origin_map(declared: &str, script_url: &str) -> Option<(cdp::Endpoint, String)> {
+    let declared = declared.trim();
+    if declared.is_empty() || declared.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return None;
+    }
+    let (script_ep, script_path) = loopback_origin_and_path(script_url)?;
+    let lower = declared.to_ascii_lowercase();
+    let absolute = if lower.starts_with("http://") {
+        declared.to_string()
+    } else if declared.starts_with("//") {
+        format!("http:{declared}")
+    } else if declared.starts_with('/') {
+        format!("{}{declared}", script_ep.origin)
+    } else if declared.split(['/', '?', '#']).next().is_some_and(|first| first.contains(':')) {
+        // Another scheme (https:, file:, blob:, …).
+        return None;
+    } else {
+        let dir = script_path.split('?').next().unwrap_or("");
+        let dir = dir.get(..dir.rfind('/').map_or(0, |i| i + 1)).unwrap_or("/");
+        format!("{}{dir}{declared}", script_ep.origin)
+    };
+    let (ep, path) = loopback_origin_and_path(&absolute)?;
+    (ep == script_ep).then_some((ep, path))
 }
 
 // ---------------------------------------------------------------------------------------------
