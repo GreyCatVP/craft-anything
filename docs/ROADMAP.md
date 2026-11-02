@@ -925,7 +925,7 @@ Owner: open · Status: done
 ### R3.3 Frida sessions for real
 Owner: open · Status: todo
 - [ ] Replace the in-memory session bookkeeping with real attach, resume and detach
-- [ ] `frida_devices_find` with `remote`: `frida-ls-devices` has no `-H`, so listing a remote's devices fails
+- [x] `frida_devices_find` with `remote`: `frida-ls-devices` has no `-H`, so listing a remote's devices fails - return a single device entry for the remote instead of calling frida-ls-devices
 
 ### R3.4 Decompilers for managed code (external engines)
 Owner: open · Status: in progress

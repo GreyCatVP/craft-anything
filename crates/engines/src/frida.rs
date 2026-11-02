@@ -159,17 +159,21 @@ impl Frida {
 
     /// `frida-ls-devices`, parsed.
     pub fn list_devices(&self, selector: Option<&Selector>) -> Result<Vec<FridaDevice>, ToolError> {
-        let prog = self.sibling("frida-ls-devices");
-        let mut args: Vec<OsString> = Vec::new();
+        // frida-ls-devices has no -H flag, so a remote address can't be listed with it; report the
+        // remote as a single device instead, the way frida-ps/frida take -H.
         if let Some(sel) = selector {
-            // Only a remote selector affects device listing; a device_id would be meaningless here.
             if let Some(r) = &sel.remote {
                 validate_address(&r.address)?;
-                args.push(OsStr::new("-H").into());
-                args.push(OsStr::new(&r.address).into());
+                return Ok(vec![FridaDevice {
+                    device_id: r.address.clone(),
+                    kind: "remote".into(),
+                    name: format!("Remote ({})", r.address),
+                }]);
             }
         }
-        // On Windows this tool crashes without a real console, then hangs instead of exiting.
+        let prog = self.sibling("frida-ls-devices");
+        let mut args: Vec<OsString> = Vec::new();
+        // Only a remote selector affects device listing; a device_id would be meaningless here.
         #[cfg(windows)]
         {
             if !prog.is_file() {
