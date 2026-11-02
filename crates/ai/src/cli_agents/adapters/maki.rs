@@ -6,6 +6,11 @@
 //! Maki lets its file tools write anywhere under its working folder without asking, and in `-p`
 //! nothing can ask. So outside a build its tools that change something are switched off with
 //! `--disallowed-tools` (names it doesn't know are skipped, so an older Maki still runs).
+//! Anything else that would ask first (an MCP server's tools, in subagents too) is refused at once
+//! in `-p`, since nobody can answer, unless the person allowed it in Maki's own permissions.
+//!
+//! Nothing here asks us, so a Clean room build's reads aren't checked: the same gap as every agent
+//! that never asks us, left to the approval decision in the roadmap (R2.2).
 
 use super::*;
 

@@ -540,8 +540,11 @@ Owner: open · Status: in progress
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
-- [ ] Maki's plain `maki -p` builder doesn't ask us before commands: say so in the approval decision
-      above, or run Maki over ACP by default once that passes
+- [ ] Maki's plain `maki -p` builder doesn't ask us before commands, and in Clean room its reads
+      aren't checked (as with every agent that never asks us): say so in the approval decision
+      above, or run Maki over ACP by default once that passes. Outside a build, tools the person
+      allowed in Maki's own permissions (an MCP server's, or all of them with `always_yolo`) still
+      run; the adapter can't see that config
 - [ ] Maki over ACP writes inside its working folder without a permission request (its built-in
       rule), and that folder is a build's project folder, so writes to our own records (inbox,
       manifest) skip the approval policy; `maki acp` takes no tool flags to stop it (0.7.0). Start
