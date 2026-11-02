@@ -857,6 +857,10 @@ Gaps found while using the app for real projects.
 - [ ] Two engine tests fail on a Mac, on `main` too: `real_binary_end_to_end_if_present` expects
       `/bin/ls` to be Linux, and `auto_mode_keeps_going_but_never_does_the_dangerous_things` is
       refused `rm -rf` in a temp folder under `/var/folders`
+- [ ] Every effort level Claude offers: `xhigh` and `max` next to low, medium and high, for the
+      Claude API and Claude Code, a level a model lacks stepping down to the nearest one it has,
+      and a way to choose it in Settings → AI and `ai effort` (only `config.toml` sets it now)
+      — claimed: zeller-lorenz, branch feature/r2.9-claude-effort-models
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
