@@ -240,8 +240,7 @@ impl RebuildRun {
             feed: feed.clone(),
             asset_keys_available: {
                 let keys = hub.keys.clone();
-                let providers = craft_anything_engines::assets::AssetProviders::built_in();
-                Box::new(move |id| providers.get(id).is_some_and(|p| crate::keys::asset_key(&keys, p.as_ref()).is_some()))
+                Box::new(move |provider| crate::keys::asset_key(&keys, provider).is_some())
             },
             decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
@@ -407,6 +406,9 @@ enum BuilderPrompt {
     ResumedElsewhere { extra: Option<String>, handoff: Option<String> },
 }
 
+/// Whether a usable key is set up for a provider, looked up on the worker without holding the session lock.
+type KeyAvailable = Box<dyn Fn(&dyn craft_anything_engines::assets::AssetProvider) -> bool + Send + Sync>;
+
 struct Worker {
     /// Told after each event.
     wake: Wake,
@@ -422,7 +424,7 @@ struct Worker {
     feed: Arc<Mutex<feed::FeedLog>>,
     /// Resolve current key availability for a provider on the worker, without retaining credentials or holding
     /// the engine session lock during key-store I/O. Tests supply an isolated availability source.
-    asset_keys_available: Box<dyn Fn(&str) -> bool + Send + Sync>,
+    asset_keys_available: KeyAvailable,
     /// The builder has decompiled something this run (Deep mode requires it).
     decompiled: bool,
     /// Where this run adds its working time, tokens and cost (`None` in tests that don't build).
@@ -847,25 +849,27 @@ impl Worker {
         if spent.is_none() {
             snapshot.manifest.generate_assets = false;
         }
-        let (deep, ghidra, image_model, model_3d) = {
+        let (deep, ghidra, image_model, model_3d, providers) = {
             let session = self.engine.session();
             (
                 !session.clean_room(),
                 session.settings.ghidra_launcher().is_some(),
                 session.settings.assets.image_model.clone(),
                 session.settings.assets.model_3d.clone(),
+                // The session's registry, so providers a fork registers are offered and checked too.
+                session.ext.get::<craft_anything_engines::assets::AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default(),
             )
         };
+        // Key lookups can touch the keychain: they run after the session lock is released.
+        let keyed: Vec<(&str, bool)> =
+            providers.ids().into_iter().filter_map(|id| providers.get(id)).map(|p| (p.id(), (self.asset_keys_available)(p.as_ref()))).collect();
         let cx = BriefCx {
             ws: &snapshot,
             deep,
             ghidra,
             editor: self.editor.as_deref(),
-            assets: spent.is_some()
-                && craft_anything_engines::assets::AssetProviders::built_in()
-                    .ids()
-                    .into_iter()
-                    .any(|id| snapshot.manifest.asset_provider_allowed(id) && (self.asset_keys_available)(id)),
+            assets: spent.is_some() && keyed.iter().any(|&(id, has_key)| has_key && snapshot.manifest.asset_provider_allowed(id)),
+            asset_providers: &keyed,
             asset_spent: spent,
             image_model: image_model.as_deref(),
             model_3d: model_3d.as_deref(),

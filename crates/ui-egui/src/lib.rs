@@ -396,6 +396,9 @@ pub struct CraftApp {
     /// Which asset providers have a key set up, by provider id (`None` until checked; the keys
     /// themselves never come into the app).
     pub asset_keys: Option<std::collections::BTreeMap<String, bool>>,
+    /// The asset providers the app lists: the engine session's registry (where a fork registers its
+    /// own), read once at startup so screens never lock the session to list them.
+    pub asset_providers: craft_anything_engines::assets::AssetProviders,
     /// What the open project's files say (built result, pictures, assets, open questions), read
     /// on a worker.
     pub facts: project::Facts,
@@ -436,7 +439,10 @@ impl CraftApp {
     pub fn new(engine: Arc<Engine>, hub: Arc<AiHub>) -> Self {
         // Wait for the engine if it's busy: defaults here would show Clean room and no AI, and the
         // next settings change would save them over the person's own.
-        let settings = engine.session().settings.clone();
+        let (settings, asset_providers) = {
+            let session = engine.session();
+            (session.settings.clone(), session.ext.get::<craft_anything_engines::assets::AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default())
+        };
         i18n::set_language(&settings.language);
         CraftApp {
             engine,
@@ -474,6 +480,7 @@ impl CraftApp {
             kinds: craft_anything_ai::rebuild::KindRegistry::built_in(),
             game_engines: None,
             asset_keys: None,
+            asset_providers,
             facts: Default::default(),
             facts_reader: Default::default(),
             asset_change_job: None,

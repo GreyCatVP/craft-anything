@@ -851,6 +851,7 @@ API secret	Secret API
 Paste your {name} API secret	Collez votre secret API {name}
 Save asset settings	Enregistrer les réglages des ressources
 Key needed	Clé requise
+Off. Turning this on uses the providers chosen below.	Désactivé. L'activer utilise les fournisseurs choisis ci-dessous.
 Manage provider keys	Gérer les clés des fournisseurs
 Assets: {n} · estimated spent ${spent}	Ressources : {n} · dépense estimée ${spent}
 Budget ${budget} · remaining ${remaining}	Budget ${budget} · reste ${remaining}

@@ -610,20 +610,40 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     let t = Tokens::get(ui.ctx());
     widgets::caption(ui, "Generated assets");
     ui.add_space(4.0);
-    let providers = craft_anything_engines::assets::AssetProviders::built_in();
+    // The session's registry, so providers a fork registers can be turned on and off here too.
+    let providers = app.asset_providers.clone();
     let saving = app.asset_change_job.is_some();
+    let running = ws.manifest.generate_assets;
     ui.add_enabled_ui(!saving, |ui| {
-        for provider in providers.ids().into_iter().filter_map(|id| providers.get(id)) {
-            let mut on = ws.manifest.asset_provider_allowed(provider.id());
-            ui.horizontal(|ui| {
-                if widgets::toggle(ui, &mut on, provider.name()).changed() {
-                    app.act("project_assets_allow", serde_json::json!({"project": ws.root, "provider": provider.id(), "allow": on}), tr("Save asset settings"));
-                }
-                if app.asset_keys.as_ref().and_then(|keys| keys.get(provider.id())) == Some(&false) {
-                    ui.label(RichText::new(tr("Key needed")).color(t.text_dim).size(theme::SMALL));
-                }
-            });
+        // The master switch is separate from the provider choices: pausing and resuming keeps them.
+        let mut on = running;
+        if widgets::toggle(ui, &mut on, "Generate pictures, models and audio").changed() {
+            let title = tr(if on { "Allow generated assets" } else { "Stop generated assets" });
+            // Missing keys don't block the choice: each provider says "Key needed" below.
+            app.act("project_assets_allow", serde_json::json!({"project": ws.root, "allow": on}), title);
         }
+        if !running {
+            widgets::caption(ui, "Off. Turning this on uses the providers chosen below.");
+        }
+        // Paused, the toggles show the stored choices without changing them: enabling a provider
+        // while paused starts it alone (project_assets_allow), which would drop the others.
+        ui.add_enabled_ui(running, |ui| {
+            for provider in providers.ids().into_iter().filter_map(|id| providers.get(id)) {
+                let mut chosen = ws.manifest.asset_provider_chosen(provider.id());
+                ui.horizontal(|ui| {
+                    if widgets::toggle(ui, &mut chosen, provider.name()).changed() {
+                        app.act(
+                            "project_assets_allow",
+                            serde_json::json!({"project": ws.root, "provider": provider.id(), "allow": chosen}),
+                            tr("Save asset settings"),
+                        );
+                    }
+                    if app.asset_keys.as_ref().and_then(|keys| keys.get(provider.id())) == Some(&false) {
+                        ui.label(RichText::new(tr("Key needed")).color(t.text_dim).size(theme::SMALL));
+                    }
+                });
+            }
+        });
     });
     if widgets::link(ui, "Manage provider keys").clicked() {
         app.state.modal = Some(Modal::Assets);

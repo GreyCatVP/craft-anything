@@ -1386,6 +1386,7 @@ API secret	API 密钥机密
 Paste your {name} API secret	粘贴你的 {name} API 密钥机密
 Save asset settings	保存素材设置
 Key needed	需要密钥
+Off. Turning this on uses the providers chosen below.	已关闭。打开后将使用下方选择的服务。
 Manage provider keys	管理服务商密钥
 Assets: {n} · estimated spent ${spent}	素材：{n} · 预计已花费 ${spent}
 Budget ${budget} · remaining ${remaining}	预算 ${budget} · 剩余 ${remaining}

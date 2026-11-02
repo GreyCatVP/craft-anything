@@ -12,7 +12,7 @@ place to add yours. Follow `AGENTS.md` (never crash, layers, external programs t
 | A way to judge a build | `crates/ai/src/rebuild/kinds/` | Implement `Check` (`run(&mut CheckCx) -> CheckResult`; `applies` to skip it in some runs, or wrap it in `DeepOnly`); return it from your kind's `checks`. Decide on `passed`/`similarity`, never on text. |
 | A stack | `crates/ai/src/rebuild/stacks.toml` | One `[[stack]]` entry: name, the builder's steps, the phrases that ask for it, its engine, the package.json dependencies that show a build uses it. A component or styling library is a `[[library]]` entry (name, phrases, the stacks it works with, steps). |
 | A coding agent | `crates/ai/src/cli_agents/adapters.rs` | Implement `AgentAdapter` (args, required flags, stream parsing, resume, sign-in check) and register it in `AgentAdapters`. Agents it doesn't know run with the plain adapter. An agent that speaks ACP needs only a row in `cli_agents::acp::ACP_AGENTS` (its id and the arguments that start ACP mode); if its ACP mode takes the backend's model, a row in `ACP_MODEL_FLAGS` too. |
-| An asset provider | `crates/engines/src/assets/` | Implement `AssetProvider` (`key_env` names its environment variable); add its models and prices to `assets.toml`. Its key is its own: `assets_key_set` with `provider`, kept as `assets:<id>`. |
+| An asset provider | `crates/engines/src/assets/` | Implement `AssetProvider` (`key_env` names its environment variable); add its models and prices to `assets.toml`. Its key is its own: `assets_key_set` with `provider`, kept as `assets:<id>`. Return a failure after the provider accepted paid work through `assets::charged` so the charge is recorded. Register it in the session's `AssetProviders` (the tools, builder prompts and app all list that registry). |
 | An external engine | `crates/engines/src/table.rs` | One `ExternalEngine` entry (exes, known paths, what it's for, install pins with SHA-256 checked against the publisher), plus a `tool_paths!` id in `settings.rs` if people can point at their own install. |
 | A front end for builds | anywhere above L5 | Hold a `rebuild::RunSet` (it queues past its limit) and `poll` it; test it with `RunSet::with_starter(StandIns::starter())`, whose runs report only what the test sends. |
 | A persisted file | its owner module | A version field and a migration step; see [file-formats.md](file-formats.md). |
@@ -95,6 +95,14 @@ failure keeps the spending record and any previous destination file, so a record
 intended output location rather than proof that the new bytes were saved. A cost above the approved
 estimate is recorded and reported as an overrun; a precursor overrun stops the 3D stage. Do not
 blindly regenerate after these errors: check the recorded history and provider account first.
+
+A failure after the provider accepted the paid work is recorded too. Scenario reports its quoted
+charge for any failure after the job is submitted (a failed or unknown job status, a polling
+timeout, a missing asset or address, a failed download); ElevenLabs reports the request's estimate
+when the accepted response body can't be read; fal reports it when a finished generation returns
+no usable output. The provider marks the error with `assets::charged`, and the tool records that
+charge for the intended file before returning the error, so a retry is checked against the budget
+it already used. A charge that can't be recorded is reported as such, never dropped.
 
 This is not a reservation journal or a guarantee against process crashes or ambiguous provider
 timeouts. A provider may charge a request whose result never reaches the app, or a ledger write

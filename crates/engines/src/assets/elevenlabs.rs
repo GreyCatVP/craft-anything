@@ -95,8 +95,10 @@ impl AssetProvider for ElevenLabs {
             .send(body)
             .map_err(|_| http::network())?;
         http::status(response.status().as_u16())?;
-        let bytes = http::bytes(response.into_body(), http::MAX_BYTES)?;
-        Ok(Generated { url: String::new(), bytes, cost_usd: req.listed_cost() })
+        // The request was accepted, so a failed body read still reports the charge.
+        let cost = req.listed_cost();
+        let bytes = http::bytes(response.into_body(), http::MAX_BYTES).map_err(|e| super::charged(e, cost))?;
+        Ok(Generated { url: String::new(), bytes, cost_usd: cost })
     }
 }
 
@@ -150,6 +152,17 @@ mod tests {
             let error = provider.generate("sk-test", &req).unwrap_err();
             assert_eq!(error.code, code);
             assert!(!format!("{error:?}").contains("sk-test"));
+            assert_eq!(crate::assets::charged_usd(&error), None, "a refused request is not charged");
         }
+    }
+    /// A body that fails after an accepted request still reports the request's charge.
+    #[test]
+    fn a_failed_body_after_an_accepted_request_reports_its_charge() {
+        let model = Catalogue::built_in().audio_model(AssetKind::SoundEffect, None).unwrap();
+        let req = AssetRequest::SoundEffect { model, prompt: "wind", duration_seconds: 2.0 };
+        let (base, _) = http::tests::serve(|_| vec![(200, String::new())]);
+        let error = ElevenLabs { base }.generate("sk-test", &req).unwrap_err();
+        assert_eq!(error.code, ErrorCode::GarbledOutput);
+        assert_eq!(crate::assets::charged_usd(&error), Some(req.listed_cost()));
     }
 }

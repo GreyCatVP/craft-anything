@@ -395,7 +395,31 @@ pub trait AssetProvider: Send + Sync {
         Ok(req.listed_cost())
     }
     /// Make it with the person's `key`; the result carries the provider's estimated USD cost.
+    /// A failure after the provider accepted the paid work is returned through [`charged`], so the
+    /// caller records the charge even though no output arrived.
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError>;
+}
+
+/// The [`ToolError::details`] field that carries a charge a failed generation already incurred.
+const CHARGED_USD: &str = "charged_usd";
+
+/// Mark a failure that happened after the provider accepted paid work costing about `cost_usd`.
+/// Existing details are kept beside the charge.
+pub fn charged(mut error: ToolError, cost_usd: f64) -> ToolError {
+    let mut details = match error.details.take() {
+        Some(serde_json::Value::Object(map)) => map,
+        Some(other) => serde_json::Map::from_iter([("provider".to_string(), other)]),
+        None => serde_json::Map::new(),
+    };
+    details.insert(CHARGED_USD.into(), serde_json::json!(cost_usd));
+    error.details = Some(serde_json::Value::Object(details));
+    error
+}
+
+/// The charge a failed generation reported through [`charged`], if any. A charge that is present but
+/// not a number reads as NaN, so the caller's cost check refuses it instead of ignoring it.
+pub fn charged_usd(error: &ToolError) -> Option<f64> {
+    error.details.as_ref()?.get(CHARGED_USD).map(|v| v.as_f64().unwrap_or(f64::NAN))
 }
 
 /// The asset providers a project can use.

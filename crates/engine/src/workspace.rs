@@ -466,7 +466,13 @@ impl Manifest {
 
     /// Whether the person allows this provider to generate paid assets in this project.
     pub fn asset_provider_allowed(&self, provider: &str) -> bool {
-        self.generate_assets && self.asset_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
+        self.generate_assets && self.asset_provider_chosen(provider)
+    }
+
+    /// Whether this provider is among the person's stored choices, whatever the master switch says:
+    /// what turning generated assets back on would allow.
+    pub fn asset_provider_chosen(&self, provider: &str) -> bool {
+        self.asset_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
     }
 
     /// Take the fields the person owns from `other` (what's on disk).

@@ -12,16 +12,83 @@ fn choose(request: &str, target: &TargetRef) -> (&'static str, &'static str) {
 fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
+/// Every built-in provider, each with a key set up.
+const ALL_KEYED: &[(&str, bool)] = &[("fal", true), ("scenario", true), ("elevenlabs", true)];
+/// Every built-in provider, none with a key.
+const NO_KEYS: &[(&str, bool)] = &[("fal", false), ("scenario", false), ("elevenlabs", false)];
+
 /// Quote model guidance with one checked ledger snapshot, as a builder prompt does.
 fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>) -> String {
-    super::assets_note(&BriefCx { ws, deep: false, ghidra: false, editor: None, assets: true, asset_spent: ws.try_assets_spent().ok(), image_model, model_3d })
+    super::assets_note(&BriefCx {
+        ws,
+        deep: false,
+        ghidra: false,
+        editor: None,
+        assets: true,
+        asset_providers: ALL_KEYED,
+        asset_spent: ws.try_assets_spent().ok(),
+        image_model,
+        model_3d,
+    })
+}
+
+/// Two enabled providers, one with a key: only the keyed provider's modalities are offered and priced,
+/// so an ElevenLabs key alone never sends the builder to Scenario's picture or 3D tools.
+#[test]
+fn an_enabled_provider_without_a_key_is_not_offered() {
+    use craft_anything_engines::assets::AssetKind;
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+    })
+    .unwrap();
+    let cx = |keys| BriefCx {
+        ws: &ws,
+        deep: false,
+        ghidra: false,
+        editor: None,
+        assets: true,
+        asset_providers: keys,
+        asset_spent: Some(0.0),
+        image_model: Some("scenario-gemini-3-1"),
+        model_3d: Some("scenario-meshy"),
+    };
+    // fal has a key but is disabled; Scenario is enabled without one.
+    let only_audio: &[(&str, bool)] = &[("fal", true), ("scenario", false), ("elevenlabs", true)];
+    let cx_audio = cx(only_audio);
+    assert!(!asset_kind_allowed(&cx_audio, AssetKind::Image) && !asset_kind_allowed(&cx_audio, AssetKind::Model3d));
+    assert!(asset_kind_allowed(&cx_audio, AssetKind::Speech) && asset_kind_allowed(&cx_audio, AssetKind::Music));
+    let note = super::assets_note(&cx_audio);
+    assert!(!note.contains("assets_image_generate") && !note.contains("assets_model_generate"), "{note}");
+    assert!(note.contains("assets_speech_generate") && note.contains("assets_music_generate"), "{note}");
+    let game = kind("game");
+    let brief = game.brief_sections(&cx_audio).join("\n");
+    assert!(!brief.contains("assets_image_generate"), "{brief}");
+    // With Scenario's key, its pictures and models are offered again.
+    let all: &[(&str, bool)] = &[("fal", true), ("scenario", true), ("elevenlabs", true)];
+    let note = super::assets_note(&cx(all));
+    assert!(note.contains("assets_image_generate") && note.contains("assets_model_generate"), "{note}");
+    // A provider missing from the snapshot's registry is never usable.
+    assert!(!asset_kind_allowed(&cx(&[("elevenlabs", true)]), AssetKind::Image));
 }
 
 /// Build a test brief for a built-in kind using the catalogue's default asset models.
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
     super::brief(
         kind(k).as_ref(),
-        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep, ghidra, editor, assets, image_model: None, model_3d: None },
+        &BriefCx {
+            asset_spent: ws.try_assets_spent().ok(),
+            ws,
+            deep,
+            ghidra,
+            editor,
+            assets,
+            asset_providers: if assets { ALL_KEYED } else { NO_KEYS },
+            image_model: None,
+            model_3d: None,
+        },
         extra,
     )
 }
@@ -558,7 +625,7 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
     let engine = worker.engine.clone();
     worker.asset_keys_available = Box::new(move |provider| {
         assert!(engine.try_session().is_some(), "key-store I/O must run without the session lock");
-        provider == "scenario" && current.load(Ordering::SeqCst)
+        provider.id() == "scenario" && current.load(Ordering::SeqCst)
     });
     let game = kind("game");
     let mut agent = RecordedTurns::default();
@@ -599,7 +666,7 @@ fn a_disabled_providers_key_does_not_enable_builder_asset_guidance() {
     let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
     let mut worker = check_worker(&ws, false);
     // The only saved key belongs to fal, whether or not that provider is enabled.
-    worker.asset_keys_available = Box::new(|provider| provider == "fal");
+    worker.asset_keys_available = Box::new(|provider| provider.id() == "fal");
     let game = kind("game");
     let mut agent = RecordedTurns::default();
     for (enabled, has_key) in [("scenario", false), ("fal", true)] {
@@ -823,6 +890,7 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
             ghidra: false,
             editor: None,
             assets: false,
+            asset_providers: NO_KEYS,
             image_model: None,
             model_3d: None,
         },
@@ -970,7 +1038,17 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx { asset_spent: Some(0.0), ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, model_3d: None };
+    let cx = |ws| BriefCx {
+        asset_spent: Some(0.0),
+        ws,
+        deep: false,
+        ghidra: false,
+        editor: None,
+        assets: false,
+        asset_providers: NO_KEYS,
+        image_model: None,
+        model_3d: None,
+    };
     assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
@@ -1611,7 +1689,17 @@ fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     /// Isolate workspace policy and key availability from unrelated brief settings.
     fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
-        BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep: false, ghidra: false, editor: None, assets, image_model: None, model_3d: None }
+        BriefCx {
+            asset_spent: ws.try_assets_spent().ok(),
+            ws,
+            deep: false,
+            ghidra: false,
+            editor: None,
+            assets,
+            asset_providers: if assets { ALL_KEYED } else { NO_KEYS },
+            image_model: None,
+            model_3d: None,
+        }
     }
     assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
     // Turned on after the first build, with a key: the follow-up carries the asset note and budget.

@@ -853,6 +853,7 @@ API secret	API シークレット
 Paste your {name} API secret	{name} の API シークレットを貼り付け
 Save asset settings	素材設定を保存
 Key needed	キーが必要
+Off. Turning this on uses the providers chosen below.	オフです。オンにすると、下で選んだサービスを使います。
 Manage provider keys	プロバイダーのキーを管理
 Assets: {n} · estimated spent ${spent}	素材：{n} · 推定支出 ${spent}
 Budget ${budget} · remaining ${remaining}	予算 ${budget} · 残額 ${remaining}

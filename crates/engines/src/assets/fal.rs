@@ -3,7 +3,7 @@
 //! capped). One key (`Authorization: Key …`), paid per generation; every call reports what it cost.
 //! Which models and what they cost come from the asset table (`assets.toml`).
 
-use super::{AssetProvider, AssetRequest, Generated, Shape, SizeBy};
+use super::{AssetProvider, AssetRequest, Generated, Shape, SizeBy, charged};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Value, json};
 use std::io::Read;
@@ -59,25 +59,32 @@ impl AssetProvider for Fal {
     fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
         self.validate_key(key)?;
         let key = key.trim();
+        let cost = req.listed_cost();
+        // fal answers once the paid generation is done: any failure after that still reports its charge.
         match *req {
             AssetRequest::Image { model, prompt, shape } => {
                 let (field, size) = fal_size(model.size_by, shape);
                 let body = json!({"prompt": prompt, field: size, "num_images": 1, "output_format": "png"});
-                let v = self.post(key, &model.endpoint, &body)?;
-                if v.pointer("/has_nsfw_concepts/0").and_then(Value::as_bool) == Some(true) {
-                    return Err(
-                        ToolError::new(ErrorCode::ProgramFailed, "fal.ai's safety check blocked that picture.").with_remediation("Describe it differently.")
-                    );
-                }
-                let url = image_url(&v).ok_or_else(|| unexpected("picture", &v))?;
-                Ok(Generated { bytes: download(&url)?, url, cost_usd: req.listed_cost() })
+                let v = self.post(key, &model.endpoint, &body, cost)?;
+                let made = || {
+                    if v.pointer("/has_nsfw_concepts/0").and_then(Value::as_bool) == Some(true) {
+                        return Err(ToolError::new(ErrorCode::ProgramFailed, "fal.ai's safety check blocked that picture.")
+                            .with_remediation("Describe it differently."));
+                    }
+                    let url = image_url(&v).ok_or_else(|| unexpected("picture", &v))?;
+                    Ok(Generated { bytes: download(&url)?, url, cost_usd: cost })
+                };
+                made().map_err(|e| charged(e, cost))
             }
             AssetRequest::Model3d { model, image_url, textured, faces } => {
                 let range = model.faces();
                 let faces = faces.clamp(*range.start(), *range.end());
-                let v = self.post(key, &model.endpoint, &json!({"image_url": image_url, "texture": textured, "face_limit": faces}))?;
-                let url = model_url(&v).ok_or_else(|| unexpected("3D model", &v))?;
-                Ok(Generated { bytes: download(&url)?, url, cost_usd: req.listed_cost() })
+                let v = self.post(key, &model.endpoint, &json!({"image_url": image_url, "texture": textured, "face_limit": faces}), cost)?;
+                let made = || {
+                    let url = model_url(&v).ok_or_else(|| unexpected("3D model", &v))?;
+                    Ok(Generated { bytes: download(&url)?, url, cost_usd: cost })
+                };
+                made().map_err(|e| charged(e, cost))
             }
             _ => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai does not support this asset request.")),
         }
@@ -85,7 +92,8 @@ impl AssetProvider for Fal {
 }
 
 impl Fal {
-    fn post(&self, key: &str, model: &str, body: &Value) -> Result<Value, ToolError> {
+    /// Run one paid request; an unreadable success answer still reports the request's `cost`.
+    fn post(&self, key: &str, model: &str, body: &Value, cost: f64) -> Result<Value, ToolError> {
         let url = format!("{}/{model}", self.base);
         // A 3D model takes a minute or two; fal answers once it's done.
         let resp = agent(Duration::from_secs(10 * 60))
@@ -100,7 +108,8 @@ impl Fal {
         let status = resp.status().as_u16();
         let text = resp.into_body().read_to_string().unwrap_or_default();
         match status {
-            200..=299 => serde_json::from_str(&text).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("fal.ai sent an unreadable answer: {e}"))),
+            200..=299 => serde_json::from_str(&text)
+                .map_err(|e| charged(ToolError::new(ErrorCode::GarbledOutput, format!("fal.ai sent an unreadable answer: {e}")), cost)),
             401 | 403 => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai didn't accept the key.")
                 .with_remediation("Check the fal.ai key in Settings → AI → Game assets.")),
             402 => Err(ToolError::new(ErrorCode::OverLimit, "The fal.ai account is out of credit.").with_remediation("Add credit at fal.ai, then try again.")),
@@ -288,9 +297,27 @@ mod tests {
             (200, json!({"images": [{"url": "data:image/png;base64,AA=="}], "has_nsfw_concepts": [true]}).to_string()),
         ]);
         let fal = Fal { base };
-        assert_eq!(image(&fal, "bad", "x", Shape::Wide).unwrap_err().code, ErrorCode::BadSettings);
-        assert_eq!(image(&fal, "bad", "x", Shape::Wide).unwrap_err().code, ErrorCode::OverLimit);
-        assert!(image(&fal, "bad", "x", Shape::Wide).unwrap_err().message.contains("safety check"));
+        for code in [ErrorCode::BadSettings, ErrorCode::OverLimit] {
+            let refused = image(&fal, "bad", "x", Shape::Wide).unwrap_err();
+            assert_eq!(refused.code, code);
+            assert_eq!(super::super::charged_usd(&refused), None, "a refused request is not charged");
+        }
+        let blocked = image(&fal, "bad", "x", Shape::Wide).unwrap_err();
+        assert!(blocked.message.contains("safety check"));
+        assert_eq!(super::super::charged_usd(&blocked), Some(0.025), "a finished generation is charged even when blocked");
+    }
+
+    /// A finished generation that returns no usable output still reports what it cost.
+    #[test]
+    fn a_finished_generation_without_output_reports_its_charge() {
+        let (base, _) = serve(vec![(200, "not json".into()), (200, json!({"model_urls": {}}).to_string())]);
+        let fal = Fal { base };
+        let unreadable = image(&fal, "k", "x", Shape::Square).unwrap_err();
+        assert_eq!(unreadable.code, ErrorCode::GarbledOutput);
+        assert_eq!(super::super::charged_usd(&unreadable), Some(0.05));
+        let missing = model_3d(&fal, "k", "https://v3.fal.media/files/crate.png", true, 2000).unwrap_err();
+        assert_eq!(super::super::charged_usd(&missing), Some(0.50));
+        assert!(missing.details.as_ref().is_some_and(|d| d.get("answer").is_some()), "the provider's answer is kept beside the charge");
     }
 
     #[test]

@@ -229,6 +229,9 @@ checked ledger read; only a missing ledger is empty. Never overwrite an unreadab
 a new row. After a provider returns, record its reported cost before publishing its output:
 rejecting a late cost overrun or deleting an output cannot undo an expense already incurred.
 Surface the error, retain known spending and stop any following paid stage instead of hiding it.
+A failure after the provider accepted the work is an expense too: a failed job or download that
+returned only an error left no receipt, so retries passed the budget check. Mark such failures with
+`assets::charged` and record them like a returned cost.
 
 **Reading literals and skipping the rest.** The Electron window reader skipped a spread inside
 `webPreferences`, so a window whose preferences came partly from another object was reported as

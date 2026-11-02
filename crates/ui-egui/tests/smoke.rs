@@ -335,7 +335,8 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     ws.record_asset(AssetRecord { file: "Assets/Generated/crate.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.51, at_ms: 0 })
         .unwrap();
     let root = ws.root.clone();
-    let mut h = harness(move || {
+    // Tall enough that the whole asset section, master switch included, fits beside the feed.
+    let mut h = harness_sized(egui::vec2(1280.0, 1000.0), move || {
         let mut a = demo::app(demo::engine(Mode::Beginner, true));
         a.asset_keys = Some([("scenario".into(), false), ("elevenlabs".into(), false), ("fal".into(), false)].into());
         a.open_workspace(ws);
@@ -344,8 +345,14 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     assert!(wait(&mut h, |a| a.facts.assets.0 == 1));
     h.get_by_label("Assets: 1 · estimated spent $0.51");
     h.get_by_label("Budget $5.00 · remaining $4.49");
-    h.get_by_label("Scenario").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_provider_allowed("scenario"))));
+    // Off at first, with no choices made yet: turning it on allows every provider, then the person narrows them.
+    h.get_by_label("Generate pictures, models and audio").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.generate_assets)));
+    for (label, id) in [("fal.ai", "fal"), ("ElevenLabs", "elevenlabs")] {
+        h.run_steps(2);
+        h.get_by_label(label).click();
+        assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.asset_provider_allowed(id))));
+    }
     let saved = Workspace::open(&root).unwrap().manifest;
     assert!(saved.asset_provider_allowed("scenario"));
     assert!(!saved.asset_provider_allowed("elevenlabs"));
@@ -407,6 +414,81 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     reopened_ui.get_by_label("ElevenLabs");
     reopened_ui.get_by_label("Assets: 1 · estimated spent $0.51");
     reopened_ui.get_by_label("Budget $0.25 · remaining $0.00");
+}
+
+/// Pausing generated assets keeps the provider choices on screen and on disk, the paused toggles
+/// can't change them, and turning it back on resumes exactly those providers.
+#[test]
+fn pausing_generated_assets_keeps_the_provider_choices() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+    })
+    .unwrap();
+    let root = ws.root.clone();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Generate pictures, models and audio").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.generate_assets)));
+    let chosen = || Workspace::open(&root).unwrap().manifest.asset_providers;
+    assert_eq!(chosen(), Some(vec!["scenario".into(), "elevenlabs".into()]), "pausing keeps the choices");
+    h.run_steps(2);
+    h.get_by_label("Off. Turning this on uses the providers chosen below.");
+    // A paused toggle would start its provider alone and drop the others, so it doesn't respond.
+    h.get_by_label("fal.ai").click();
+    h.run_steps(4);
+    assert!(h.state().workspace.as_ref().is_some_and(|w| !w.manifest.generate_assets), "nothing resumed");
+    assert_eq!(chosen(), Some(vec!["scenario".into(), "elevenlabs".into()]));
+    h.get_by_label("Generate pictures, models and audio").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.generate_assets)));
+    let resumed = Workspace::open(&root).unwrap().manifest;
+    assert!(resumed.asset_provider_allowed("scenario") && resumed.asset_provider_allowed("elevenlabs"));
+    assert!(!resumed.asset_provider_allowed("fal"));
+}
+
+/// A provider registered in the engine session is listed in each project's sidebar and can be turned
+/// off there, beside the built-in ones.
+#[test]
+fn a_registered_asset_provider_is_listed_and_switchable() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    use craft_anything_engines::assets::{AssetProvider, AssetProviders, AssetRequest, Generated};
+    struct Custom;
+    impl AssetProvider for Custom {
+        fn id(&self) -> &'static str {
+            "custom-art"
+        }
+        fn name(&self) -> &'static str {
+            "Custom Art"
+        }
+        fn generate(&self, _key: &str, _req: &AssetRequest) -> Result<Generated, craft_anything_engine::evidence::ToolError> {
+            Err(craft_anything_engine::evidence::ToolError::invalid("not used in this test"))
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
+    ws.set_person(|m| m.generate_assets = true).unwrap();
+    let root = ws.root.clone();
+    let mut h = harness(move || {
+        let engine = demo::engine(Mode::Beginner, true);
+        let mut providers = AssetProviders::built_in();
+        providers.register(std::sync::Arc::new(Custom));
+        engine.session().ext.insert(std::sync::Arc::new(providers));
+        let mut a = demo::app(engine);
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Custom Art").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.asset_provider_allowed("custom-art"))));
+    let saved = Workspace::open(&root).unwrap().manifest;
+    assert!(["fal", "scenario", "elevenlabs"].iter().all(|id| saved.asset_provider_allowed(id)), "{:?}", saved.asset_providers);
 }
 
 /// Projects retain provider and budget controls even before generation is enabled or any assets exist.

@@ -376,10 +376,9 @@ pub fn ghidra_status(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
-/// Which asset providers have a key stored, by id.
-fn stored_keys(hub: &craft_anything_ai::AiHub) -> BTreeMap<String, bool> {
-    let all = AssetProviders::built_in();
-    all.ids().into_iter().map(|id| (id.to_string(), hub.has_asset_key(&all, id))).collect()
+/// Which of the app's asset providers have a key stored, by id.
+fn stored_keys(hub: &craft_anything_ai::AiHub, all: &AssetProviders) -> BTreeMap<String, bool> {
+    all.ids().into_iter().map(|id| (id.to_string(), hub.has_asset_key(all, id))).collect()
 }
 
 impl CraftApp {
@@ -388,8 +387,8 @@ impl CraftApp {
         if self.headless {
             return;
         }
-        let hub = self.hub.clone();
-        self.jobs.spawn("Check the asset keys", false, move |_| Ok(Done::AssetKeys(stored_keys(&hub))));
+        let (hub, all) = (self.hub.clone(), self.asset_providers.clone());
+        self.jobs.spawn("Check the asset keys", false, move |_| Ok(Done::AssetKeys(stored_keys(&hub, &all))));
     }
 
     /// Whether any asset provider has a key. Each tool checks the key for its chosen model.
@@ -399,18 +398,18 @@ impl CraftApp {
 
     /// Save an asset provider's key in the system keychain.
     pub fn save_asset_key(&mut self, provider: String, key: String) {
-        let hub = self.hub.clone();
+        let (hub, all) = (self.hub.clone(), self.asset_providers.clone());
         self.jobs.spawn(tr("Save the key"), true, move |_| {
             hub.set_asset_key(&provider, &key).map_err(|e| e.message)?;
-            Ok(Done::AssetKeys(stored_keys(&hub)))
+            Ok(Done::AssetKeys(stored_keys(&hub, &all)))
         });
     }
 
     pub fn remove_asset_key(&mut self, provider: String) {
-        let hub = self.hub.clone();
+        let (hub, all) = (self.hub.clone(), self.asset_providers.clone());
         self.jobs.spawn(tr("Forget the key"), true, move |_| {
             hub.remove_asset_key(&provider).map_err(|e| e.message)?;
-            Ok(Done::AssetKeys(stored_keys(&hub)))
+            Ok(Done::AssetKeys(stored_keys(&hub, &all)))
         });
     }
 
@@ -517,7 +516,7 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
         .wrap(),
     );
     ui.add_space(10.0);
-    let all = AssetProviders::built_in();
+    let all = app.asset_providers.clone();
     for provider in all.ids().into_iter().filter_map(|id| all.get(id)) {
         ui.push_id(provider.id(), |ui| {
             ui.label(RichText::new(provider.name()).size(theme::SMALL));
@@ -590,7 +589,7 @@ pub fn assets_settings(app: &mut CraftApp, ui: &mut Ui) {
         )
         .wrap(),
     );
-    let all = AssetProviders::built_in();
+    let all = app.asset_providers.clone();
     for provider in all.ids().into_iter().filter_map(|id| all.get(id)) {
         ui.add_space(6.0);
         let stored = app.asset_keys.as_ref().and_then(|k| k.get(provider.id()).copied());

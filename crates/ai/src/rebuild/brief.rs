@@ -129,8 +129,7 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
 
 /// Current provider choices and shared spending limits, for every first brief and follow-up.
 pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
-    let providers = craft_anything_engines::assets::AssetProviders::built_in();
-    let mut ids: Vec<String> = providers.ids().into_iter().map(str::to_owned).collect();
+    let mut ids: Vec<String> = cx.asset_providers.iter().map(|(id, _)| (*id).to_owned()).collect();
     for id in cx.ws.manifest.asset_providers.iter().flatten() {
         if !ids.contains(id) {
             ids.push(id.clone());
@@ -156,14 +155,20 @@ pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
 /// Fail closed when either the manifest or checked spending cannot establish current permission.
 pub(super) const ASSET_POLICY_UNAVAILABLE: &str = "The project's current asset choices or spending could not be read safely. Do not generate assets or authorize new spending. Keep existing assets until the settings can be read.";
 
-/// Whether a model of this kind has effective project permission in the current checked snapshot.
-/// Catalogue provider ids keep new providers data-driven instead of assuming every key unlocks every modality.
+/// Whether the project allows `provider` and a usable key for it is set up in this snapshot.
+fn provider_usable(cx: &BriefCx<'_>, provider: &str) -> bool {
+    cx.ws.manifest.asset_provider_allowed(provider) && cx.asset_providers.iter().any(|&(id, has_key)| has_key && id == provider)
+}
+
+/// Whether a model of this kind is usable in the current checked snapshot: its provider is allowed
+/// and keyed. Catalogue provider ids keep new providers data-driven instead of assuming every key
+/// unlocks every modality.
 pub(super) fn asset_kind_allowed(cx: &BriefCx<'_>, kind: AssetKind) -> bool {
     if !cx.assets || cx.asset_spent.is_none() {
         return false;
     }
     let table = Catalogue::built_in();
-    let allowed = |provider: &str| cx.ws.manifest.asset_provider_allowed(provider);
+    let allowed = |provider: &str| provider_usable(cx, provider);
     match kind {
         AssetKind::Image => table.images().iter().any(|model| allowed(&model.provider)),
         AssetKind::Model3d => table.models_3d().iter().any(|model| allowed(&model.provider)),
@@ -197,8 +202,8 @@ pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
     note.push_str(" Use enabled asset providers and choose models they supply. Each operation requires its own provider key; a key for one provider does not unlock the others.");
     if images || models {
         let table = Catalogue::built_in();
-        let allowed = |provider: &str| ws.manifest.asset_provider_allowed(provider);
-        // Quote only permitted models: a disabled configured default is not a usable estimate.
+        let allowed = |provider: &str| provider_usable(cx, provider);
+        // Quote only usable models: a disabled or unkeyed configured default is not a usable estimate.
         let picture = table
             .image_model(cx.image_model)
             .ok()

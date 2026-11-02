@@ -142,16 +142,25 @@ impl AssetProvider for Scenario {
             return Err(ToolError::new(ErrorCode::OverLimit, "Scenario's current quote exceeds this model's spending ceiling; generation was not started."));
         }
         let submitted = self.call(&auth, &path, Some(&body), remaining(start, self.timeout)?)?;
+        // The job is accepted from here on: every later failure reports the quoted charge.
+        let (url, bytes) = self.finish(&auth, &submitted, start).map_err(|e| super::charged(e, cost))?;
+        Ok(Generated { url, bytes, cost_usd: cost })
+    }
+}
+
+impl Scenario {
+    /// Poll a submitted job, resolve its asset and download it within the workflow deadline.
+    fn finish(&self, auth: &str, submitted: &Value, start: Instant) -> Result<(String, Vec<u8>), ToolError> {
         let job_id = submitted.pointer("/job/jobId").and_then(Value::as_str).ok_or_else(|| http::garbled("Scenario returned no job identifier."))?;
         http::id(job_id)?;
         loop {
-            let job = self.call(&auth, &format!("jobs/{job_id}"), None, remaining(start, self.timeout)?)?;
+            let job = self.call(auth, &format!("jobs/{job_id}"), None, remaining(start, self.timeout)?)?;
             match job.pointer("/job/status").and_then(Value::as_str) {
                 Some("success") => {
                     let asset_id =
                         job.pointer("/job/metadata/assetIds/0").and_then(Value::as_str).ok_or_else(|| http::garbled("Scenario completed without an asset."))?;
                     http::id(asset_id)?;
-                    let asset = self.call(&auth, &format!("assets/{asset_id}"), None, remaining(start, self.timeout)?)?;
+                    let asset = self.call(auth, &format!("assets/{asset_id}"), None, remaining(start, self.timeout)?)?;
                     let url = asset
                         .pointer("/asset/url")
                         .and_then(Value::as_str)
@@ -159,7 +168,7 @@ impl AssetProvider for Scenario {
                         .ok_or_else(|| http::garbled("Scenario returned no asset download address."))?
                         .to_string();
                     let bytes = http::download(&url, remaining(start, self.timeout)?)?;
-                    return Ok(Generated { url, bytes, cost_usd: cost });
+                    return Ok((url, bytes));
                 }
                 Some("failed" | "failure" | "cancelled" | "canceled") => {
                     return Err(ToolError::new(ErrorCode::ProgramFailed, "Scenario could not complete this generation.")
@@ -271,8 +280,41 @@ mod tests {
             });
             let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
             assert!(!format!("{error:?}").contains("test-secret"));
+            assert_eq!(crate::assets::charged_usd(&error), Some(0.01), "a submitted job reports its quoted charge");
         }
-        assert!(image(&Scenario { timeout: Duration::ZERO, ..Scenario::default() }).is_err());
+        let error = image(&Scenario { timeout: Duration::ZERO, ..Scenario::default() }).unwrap_err();
+        assert_eq!(crate::assets::charged_usd(&error), None, "nothing was submitted");
+    }
+    /// Failures after submission (unknown status, missing asset address, failed download) report the
+    /// quoted charge; failures before submission do not.
+    #[test]
+    fn every_failure_after_submission_reports_the_quoted_charge() {
+        // What the server answers after the job is submitted, given its own address.
+        type AfterSubmit = fn(&str) -> Vec<(u16, String)>;
+        let after_submit: Vec<AfterSubmit> = vec![
+            |_| vec![(200, json!({"job":{"status":"mystery"}}).to_string())],
+            |_| vec![(200, json!({"job":{"status":"success","metadata":{"assetIds":["asset_test"]}}}).to_string()), (200, json!({"asset":{}}).to_string())],
+            |base| {
+                vec![
+                    (200, json!({"job":{"status":"success","metadata":{"assetIds":["asset_test"]}}}).to_string()),
+                    (200, json!({"asset":{"url":format!("{base}/media.png")}}).to_string()),
+                    (500, "gone".into()),
+                ]
+            },
+        ];
+        for answers in after_submit {
+            let (base, seen) = http::tests::serve(|base| {
+                let mut all = vec![(269, json!({"creativeUnitsCost":19}).to_string()), (200, json!({"job":{"jobId":"job_test"}}).to_string())];
+                all.extend(answers(base));
+                all
+            });
+            let error = image(&Scenario { base, poll_interval: Duration::ZERO, ..Scenario::default() }).unwrap_err();
+            assert_eq!(crate::assets::charged_usd(&error), Some(0.19));
+            assert!(seen.lock().unwrap().len() >= 3);
+        }
+        let (base, _) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":19}).to_string()), (402, "no credit".into())]);
+        let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
+        assert_eq!(crate::assets::charged_usd(&error), None, "a refused submission is not charged");
     }
     /// Require both credential components and reject control characters during local validation.
     #[test]

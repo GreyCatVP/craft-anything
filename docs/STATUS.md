@@ -48,8 +48,11 @@ sizes. A freshly compiled Bun program and the CLI/MCP transport were not run for
 
 ### Project asset controls
 
-Every project's details panel exposes the registered asset providers, including app projects whose
-recorded stack is Rust + egui. Each provider has its own switch. The panel always shows the asset
+Every project's details panel exposes the registered asset providers (the engine session's
+registry, so a fork's own providers appear too), including app projects whose recorded stack is
+Rust + egui. A master switch turns generated assets on and off; each provider has its own switch,
+which shows the stored choice even while the master switch is off, so pausing and resuming keeps
+the choices (paused switches can't be changed). The panel always shows the asset
 count, estimated spending, shared budget and remaining amount, even when all providers are off.
 An exact budget edit is saved with **Save budget**; changing the default in Settings still affects
 only new projects. Asset spending is separate from the coding agent's AI usage cost.
@@ -61,13 +64,17 @@ tests cover independent provider switches, exact/lowered budgets, existing spend
 migration and disabled-provider no-spend cases. No new live generation was needed for these controls.
 
 Builder prompts refresh provider permissions and live key availability before every turn, including
-retries and session recovery. A key counts only when its provider is enabled for the project. Isolated
-tests cover a disabled provider's saved key and keys added or removed during a run.
+retries and session recovery. A key counts only when its provider is enabled for the project, and a
+modality (pictures, 3D, each audio kind) is offered and priced only through a provider that is both
+enabled and keyed. Isolated tests cover a disabled provider's saved key, keys added or removed during
+a run, and two enabled providers where only one has a key.
 
 Budget authorization and recording now reject unreadable or invalid spending history instead of
 treating it as zero. The sidebar shows unavailable spending until the ledger is repaired. Returned
 costs are recorded before output publication; failed output saves retain their receipt, and late
-cost overruns stop any following paid stage after preserving known spending. This is checked
+cost overruns stop any following paid stage after preserving known spending. A failure after the
+provider accepted the work (a failed Scenario job, a broken download or response) records the charge
+the provider reported before returning the error. This is checked
 receipt accounting, not a crash-safe reservation journal or an invoice reconciliation service.
 
 ### Linux Unreal setup

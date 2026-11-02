@@ -10,7 +10,7 @@ use crate::inbox::Inbox;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use crate::tools::interaction_tools::{Verdict, ask_approval, inbox, inside, resolve, workspace_of};
 use crate::workspace::{AssetRecord, Workspace};
-use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Catalogue, Generated, Shape, about_usd, fal, usd};
+use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Catalogue, Generated, Shape, about_usd, charged_usd, fal, usd};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -319,7 +319,7 @@ fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, re
     let estimate = provider.estimate(&req)?;
     within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
     ctx.report(None, "Generating audio…");
-    let g = provider.generate(&key, &req)?;
+    let g = generate_paid(&j.ws, provider.as_ref(), &key, &req, &rel, kind, prompt)?;
     keep(&j.ws, &path, &rel, kind, prompt, &g)?;
     within_estimate(&rel, g.cost_usd, estimate)?;
     summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id()}))
@@ -419,6 +419,57 @@ fn within_budget(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, cost: f64
     }
 }
 
+/// Run one paid stage. When it fails after the provider accepted the work and reports a charge, that
+/// charge is recorded as spending first, so a retry is checked against the budget it already used.
+fn generate_paid(
+    ws: &Workspace,
+    provider: &dyn AssetProvider,
+    key: &str,
+    req: &AssetRequest<'_>,
+    rel: &str,
+    kind: &str,
+    made_from: &str,
+) -> Result<Generated, ToolError> {
+    provider.generate(key, req).map_err(|e| record_charge(ws, rel, kind, made_from, e))
+}
+
+/// Record the charge a failed generation reported, and say so in its error. An invalid or
+/// unrecordable charge is reported instead of being dropped.
+fn record_charge(ws: &Workspace, rel: &str, kind: &str, made_from: &str, error: ToolError) -> ToolError {
+    let Some(cost) = charged_usd(&error) else { return error };
+    let receipt = || {
+        valid_cost(cost)?;
+        ws.record_asset(AssetRecord {
+            file: rel.to_string(),
+            kind: kind.into(),
+            prompt: made_from.chars().take(1000).collect(),
+            cost_usd: cost,
+            at_ms: crate::inbox::now_ms(),
+        })
+    };
+    match receipt() {
+        Ok(()) => {
+            let note =
+                "The charge already counts against the project's asset budget. Do not blindly regenerate or retry: check the provider's job and account first.";
+            let remediation = Some(error.remediation.as_deref().map_or_else(|| note.to_string(), |r| format!("{r} {note}")));
+            ToolError {
+                message: format!("{} The provider may have charged ${cost:.6}; this was recorded as spending for {rel}, which was not saved.", error.message),
+                remediation,
+                ..error
+            }
+        }
+        Err(e) => {
+            let mut failed = ToolError::new(
+                e.code,
+                format!("{} The provider may have charged ${cost:.6}, but the charge could not be recorded: {}", error.message, e.message),
+            )
+            .with_remediation("Do not blindly regenerate or retry: check the provider charge and repair the asset ledger first.");
+            failed.details = error.details;
+            failed
+        }
+    }
+}
+
 /// Record a paid generation before preparing or saving its output. A failed save keeps the receipt;
 /// a failed receipt leaves the destination untouched. These two files are not a crash-atomic transaction.
 fn keep(ws: &Workspace, path: &Path, rel: &str, kind: &str, made_from: &str, g: &Generated) -> Result<(), ToolError> {
@@ -509,7 +560,7 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let estimate = provider.estimate(&req)?;
     within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
     ctx.report(None, "Making a picture…");
-    let g = provider.generate(&key, &req)?;
+    let g = generate_paid(&j.ws, provider.as_ref(), &key, &req, &rel, "image", prompt)?;
     keep(&j.ws, &path, &rel, "image", prompt, &g)?;
     within_estimate(&rel, g.cost_usd, estimate)?;
     summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id(), "model": model.id}))
@@ -571,7 +622,8 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
             let (image_model, picture_provider, picture_key, pic_path, pic_rel) =
                 picture_maker.ok_or_else(|| ToolError::internal("no picture model was chosen"))?;
             ctx.report(None, "Making a picture of it first…");
-            let g = picture_provider.generate(&picture_key, &AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square })?;
+            let picture_req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
+            let g = generate_paid(&j.ws, picture_provider.as_ref(), &picture_key, &picture_req, &pic_rel, "image", prompt)?;
             keep(&j.ws, &pic_path, &pic_rel, "image", prompt, &g)?;
             within_estimate(&pic_rel, g.cost_usd, picture_estimate)?;
             cost += g.cost_usd;
@@ -580,7 +632,8 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         }
     };
     ctx.report(None, "Turning it into a 3D model (a minute or two)…");
-    let g = provider.generate(&key, &AssetRequest::Model3d { model, image_url: &url, textured, faces })?;
+    let model_job = AssetRequest::Model3d { model, image_url: &url, textured, faces };
+    let g = generate_paid(&j.ws, provider.as_ref(), &key, &model_job, &rel, "model", &made_from)?;
     keep(&j.ws, &path, &rel, "model", &made_from, &g)?;
     within_estimate(&rel, g.cost_usd, model_estimate)?;
     cost += g.cost_usd;
@@ -839,6 +892,86 @@ mod tests {
             self.calls.lock().unwrap().push(req.kind());
             Ok(Generated { url: "https://stand-in/picture.png".into(), bytes: b"generated".to_vec(), cost_usd: req.listed_cost() })
         }
+    }
+
+    /// Fails after accepting the work and reports a charge, like a provider whose download broke.
+    struct ChargedFailure(&'static str, f64);
+
+    impl AssetProvider for ChargedFailure {
+        fn id(&self) -> &'static str {
+            self.0
+        }
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn generate(&self, key: &str, _req: &AssetRequest) -> Result<Generated, ToolError> {
+            assert_eq!(key, "sk-test");
+            let failed = ToolError::new(ErrorCode::ProgramFailed, "The job failed.").with_remediation("Check the job.");
+            Err(craft_anything_engines::assets::charged(failed, self.1))
+        }
+    }
+
+    /// An auto-mode engine whose keyed providers are the given stand-ins.
+    fn engine_with(w: &Workspace, stand_ins: Vec<std::sync::Arc<dyn AssetProvider>>) -> crate::Engine {
+        let mut providers = AssetProviders::built_in();
+        let mut keys = std::collections::BTreeMap::new();
+        for p in stand_ins {
+            keys.insert(p.id().to_string(), "sk-test".to_string());
+            providers.register(p);
+        }
+        let mut session = crate::testing::session();
+        session.settings.auto_mode = true;
+        session.ext.insert(std::sync::Arc::new(InboxDir(w.inbox_dir())));
+        session.ext.insert(std::sync::Arc::new(AssetKeys(keys)));
+        session.ext.insert(std::sync::Arc::new(providers));
+        crate::Engine::new(session)
+    }
+
+    /// A failure after the provider accepted the work reaches the ledger, and later attempts are
+    /// checked against it; a charge that can't be recorded is reported, never dropped.
+    #[test]
+    fn a_charged_failure_is_recorded_and_counts_against_the_budget() {
+        let (_d, mut w) = ws();
+        let engine = engine_with(&w, vec![std::sync::Arc::new(ChargedFailure("elevenlabs", 0.03))]);
+        let call = |e: &crate::Engine| {
+            let params = json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"});
+            e.call("assets_sound_generate", params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err()
+        };
+        let error = call(&engine);
+        assert_eq!(error.code, ErrorCode::ProgramFailed);
+        assert!(error.message.contains("recorded as spending"), "{}", error.message);
+        assert!(error.remediation.as_deref().is_some_and(|r| r.starts_with("Check the job.") && r.contains("asset budget")));
+        let records = w.try_assets().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!((records[0].file.as_str(), records[0].kind.as_str(), records[0].cost_usd), ("audio/chime.mp3", "sound", 0.03));
+        assert!(!w.app_dir().join("audio/chime.mp3").exists(), "no output was saved");
+        // With the budget at what was already charged, the next attempt is refused before spending.
+        w.set_person(|m| m.asset_budget_usd = 0.03).unwrap();
+        assert_eq!(call(&engine).code, ErrorCode::OverLimit);
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+        // An invalid charge is reported as unrecorded, and the ledger is left as it was.
+        w.set_person(|m| m.asset_budget_usd = 5.0).unwrap();
+        let invalid = call(&engine_with(&w, vec![std::sync::Arc::new(ChargedFailure("elevenlabs", f64::NAN))]));
+        assert!(invalid.message.contains("could not be recorded"), "{}", invalid.message);
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+    }
+
+    /// A model stage that fails after its picture was made records both charges.
+    #[test]
+    fn a_charged_model_failure_after_its_picture_records_both() {
+        let (_d, mut w) = ws();
+        // Scenario's mesh ceiling is above the default budget.
+        w.set_person(|m| m.asset_budget_usd = 20.0).unwrap();
+        let picture = std::sync::Arc::new(Recording { id: "fal", calls: Default::default(), estimates: Default::default(), estimate: None });
+        let engine = engine_with(&w, vec![picture.clone(), std::sync::Arc::new(ChargedFailure("scenario", 0.4))]);
+        let params = json!({"prompt":"a crate", "model":"scenario-meshy", "image_model":"flux-schnell", "save_as":"crate.glb"});
+        let error = engine.call("assets_model_generate", params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err();
+        assert!(error.message.contains("recorded as spending for crate.glb"), "{}", error.message);
+        let records = w.try_assets().unwrap();
+        assert_eq!(records.iter().map(|r| (r.file.as_str(), r.kind.as_str())).collect::<Vec<_>>(), [("crate.png", "image"), ("crate.glb", "model")]);
+        assert!((records[1].cost_usd - 0.4).abs() < 1e-9);
+        assert!(w.app_dir().join("crate.png").exists() && !w.app_dir().join("crate.glb").exists());
+        assert_eq!(*picture.calls.lock().unwrap(), [AssetKind::Image]);
     }
 
     /// Build an isolated auto-mode engine with one keyed recording provider and an optional estimate override.
