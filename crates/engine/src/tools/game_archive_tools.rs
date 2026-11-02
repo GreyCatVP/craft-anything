@@ -374,10 +374,7 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         .collect();
     let guid = Some(h.encryption_key_guid.as_str()).filter(|g| g.bytes().any(|b| b != b'0'));
     let (size, stored_size) = match file_count {
-        Some(_) => (
-            Value::from(files.iter().map(|f| f.size).sum::<u64>()),
-            Value::from(files.iter().map(|f| f.stored_size).sum::<u64>()),
-        ),
+        Some(_) => (Value::from(files.iter().map(|f| f.size).sum::<u64>()), Value::from(files.iter().map(|f| f.stored_size).sum::<u64>())),
         None => (Value::Null, Value::Null),
     };
     let result = json!({
