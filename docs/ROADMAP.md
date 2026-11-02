@@ -140,10 +140,10 @@ No `deny.toml` exists. The survey found no GPL, AGPL or SSPL crates, and only MP
 - [x] Add a check to `cargo xtask layers` that fails on `std::process::Command` outside `platform`
 
 ### R0.5 Small correctness items from the survey
-Owner: open · Status: done, except the UI source-root follow-up below
+Owner: open · Status: done (branch chore/r0.5-cleanups)
 - [x] Check complete Rust source items in architectural gates, with visible read errors and scoped test exemptions (#359).
-- [ ] Follow UI module files explicitly included outside `crates/ui-egui/src`; the UI gate currently
-      retains that source-root boundary (process, session and lock checks scan crate roots).
+- [x] Include explicit module files under excluded directories, including UI modules outside `src`;
+      referenced production sources do not inherit an integration-test directory exemption.
 - [x] Decode Objective-C chained pointer offsets past file-empty PAGEZERO mappings (#296).
 - [x] Recognise root-relative macOS bundles and nested XPC services in Apple app graphs (#282).
 - [x] Checked arithmetic on file offsets in `elf.rs`: `va_to_off` adds a segment's file offset to an

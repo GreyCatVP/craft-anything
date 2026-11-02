@@ -57,7 +57,9 @@ isn't enough to exempt it. The source-policy checks follow explicit imports and 
 not macro expansion, globs, re-exports or all Rust name resolution; compiler checks still matter.
 Hidden module directories are source too. Symlinked source directories fail visibly rather than
 being omitted or followed into cycles; ordinary Rust file links are read and checked. Git metadata
-stays out of the scan.
+stays out of the directory walk. Module-level declarations explicitly referencing a file
+include it even under an otherwise-exempt directory; discovery is cycle-safe and bounded to the
+workspace. Missing cfg-dependent files still require compiler validation.
 
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
