@@ -421,7 +421,10 @@ fn native_function_pseudocode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
 /// An address Ghidra can look up: `0x…`, a bare hex address, or a generated name like `FUN_…`.
 fn ghidra_address(function: &str) -> Option<u64> {
     let s = function.trim();
-    let s = ["FUN_", "SUB_", "sub_", "LAB_"].iter().find_map(|p| s.strip_prefix(p)).unwrap_or(s);
+    if let Some(hex) = ["FUN_", "SUB_", "sub_", "LAB_"].iter().find_map(|p| s.strip_prefix(p)) {
+        let hex = hex.strip_prefix("0x").or_else(|| hex.strip_prefix("0X")).unwrap_or(hex);
+        return u64::from_str_radix(hex, 16).ok();
+    }
     super::parse_address(s).ok()
 }
 
@@ -734,10 +737,20 @@ mod tests {
         let err = call_err(&e, "native_function_pseudocode", json!({"function": "main"}));
         assert!(crate::clean_room::is_refusal(&err) && err.remediation.unwrap_or_default().contains("Deep mode"), "{}", err.message);
         e.session().settings.deep_mode = true;
-        assert_eq!(
-            (super::ghidra_address("FUN_145f7f5b0"), super::ghidra_address("0x10"), super::ghidra_address("main")),
-            (Some(0x145f7f5b0), Some(0x10), None)
-        );
+        for (input, expected) in [
+            ("FUN_145f7f5b0", Some(0x145f7f5b0)),
+            ("FUN_00401000", Some(0x401000)),
+            ("FUN_140001000", Some(0x140001000)),
+            ("SUB_00401000", Some(0x401000)),
+            ("sub_00401000", Some(0x401000)),
+            ("LAB_00401000", Some(0x401000)),
+            ("0x10", Some(0x10)),
+            ("401000h", Some(0x401000)),
+            ("4096", Some(4096)),
+            ("main", None),
+        ] {
+            assert_eq!(super::ghidra_address(input), expected, "{input}");
+        }
         let r = call(&e, "native_function_address_show", json!({"function": "dispatch"}));
         assert_eq!(r["result"]["address"], format!("{:#x}", l.code_va + tk::x64::DISPATCH));
         let r = call(&e, "native_function_instructions_list", json!({"function": "helper"}));
