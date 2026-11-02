@@ -620,14 +620,17 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     if widgets::link(ui, "Manage provider keys").clicked() {
         app.state.modal = Some(Modal::Assets);
     }
-    let (n, spent) = app.facts.assets;
+    let assets = (app.facts.root == ws.root).then_some(app.facts.assets);
     ui.add_space(6.0);
     let budget = ws.manifest.asset_budget_usd;
-    let amount = trf("Assets: {n} · estimated spent ${spent}", &[("n", &n.to_string()), ("spent", &format!("{spent:.2}"))]);
-    ui.label(RichText::new(amount).font(theme::mono(12.5)).color(if spent >= budget { t.warning } else { t.text_dim }));
-    let remaining = (budget - spent).max(0.0);
+    let (count, spent, remaining) = assets.map_or_else(
+        || ("…".to_string(), "…".to_string(), "…".to_string()),
+        |(count, spent)| (count.to_string(), format!("{spent:.2}"), format!("{:.2}", (budget - spent).max(0.0))),
+    );
+    let amount = trf("Assets: {n} · estimated spent ${spent}", &[("n", &count), ("spent", &spent)]);
+    ui.label(RichText::new(amount).font(theme::mono(12.5)).color(if assets.is_some_and(|(_, spent)| spent >= budget) { t.warning } else { t.text_dim }));
     ui.label(
-        RichText::new(trf("Budget ${budget} · remaining ${remaining}", &[("budget", &format!("{budget:.2}")), ("remaining", &format!("{remaining:.2}"))]))
+        RichText::new(trf("Budget ${budget} · remaining ${remaining}", &[("budget", &format!("{budget:.2}")), ("remaining", &remaining)]))
             .font(theme::mono(12.5))
             .color(t.text_dim),
     );
@@ -1774,6 +1777,41 @@ impl CraftApp {
 mod tests {
     use super::*;
     use craft_anything_ai::AgentEvent;
+
+    #[test]
+    fn asset_sidebar_never_uses_another_projects_cached_spend() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.facts = Facts { root: dir.path().join("previous-project"), assets: (4, 20.0), ..Default::default() };
+        // Render this component directly to exercise the guard independently of the app's
+        // normal pre-draw reset when the open project changes.
+        let mut setup = false;
+        let mut h = Harness::builder().with_size(egui::vec2(320.0, 700.0)).build_ui_state(
+            move |ui, (app, ws)| {
+                if !setup {
+                    CraftApp::setup_context(ui.ctx());
+                    setup = true;
+                    return;
+                }
+                asset_line(app, ui, ws);
+            },
+            (app, ws),
+        );
+        h.run_steps(2);
+        h.get_by_label("Scenario");
+        h.get_by_label("ElevenLabs");
+        h.get_by_label("Save budget");
+        h.get_by_label("Assets: … · estimated spent $…");
+        h.get_by_label("Budget $5.00 · remaining $…");
+        assert!(h.query_by_label("Assets: 4 · estimated spent $20.00").is_none());
+        let (app, ws) = h.state_mut();
+        app.facts = Facts { root: ws.root.clone(), assets: (1, 0.51), ..Default::default() };
+        h.run_steps(2);
+        h.get_by_label("Assets: 1 · estimated spent $0.51");
+        h.get_by_label("Budget $5.00 · remaining $4.49");
+    }
 
     #[test]
     fn the_app_starts_with_the_persons_settings_while_the_engine_is_busy() {
