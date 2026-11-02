@@ -516,7 +516,7 @@ Owner: maintainers · Status: in progress (built; live runs need keys)
 ### R2.2 More coding agents
 Owner: open · Status: in progress
 - [x] `AcpConversation`: chat with agents that speak ACP (`cli_agents::acp`; agents and their ACP
-      arguments in `ACP_AGENTS`: Gemini CLI, Qwen Code, opencode, goose, Hermes). Opt-in per backend
+      arguments in `ACP_AGENTS`: Gemini CLI, Qwen Code, opencode, goose, Hermes, Maki). Opt-in per backend
       (`acp = true` in its options); one agent process per chat, permission requests become
       consent questions, sessions continue with `session/load`
 - [x] Builder runs over ACP: with `acp = true`, rebuild runs use `AcpConversation`; the agent's
@@ -532,9 +532,16 @@ Owner: open · Status: in progress
 - [ ] Say on each adapter, as typed data, what it can be held to (asks us, its own sandbox, nothing),
       and have runs act on that, once the decision above is made
 - [ ] Check live what Hermes over ACP asks about: whether its file reads reach our approval policy
-- [ ] Maki as a coding agent: one message per `maki -p`, and over ACP (`maki acp`, with the
-      backend's model); verified live as an ACP builder — claimed: zeller-lorenz, branch
-      `feature/r2.2-maki-acp`
+- [x] Maki as a coding agent: one message per `maki -p`, and over ACP (`maki acp -m <cli_model>`);
+      run live as an ACP builder (a page to Ready, a follow-up continued with `session/load`, its
+      requests refused unattended with Auto mode off)
+- [ ] Over ACP, a continued session shows the earlier conversation again: `session/load` replays it
+      as `session/update`s, which we show as new; drop updates until the load answers
+- [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
+      size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
+      under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
+- [ ] Maki's plain `maki -p` builder doesn't ask us before commands: say so in the approval decision
+      above, or run Maki over ACP by default once that passes
 
 ### R2.3 Website coverage and a better visual metric
 Owner: open · Status: done
