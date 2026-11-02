@@ -139,6 +139,17 @@ pub fn project_android(inv: &Inventory) -> Value {
     })
 }
 
+fn apple_bundle_kind(root: &str, inv: &Inventory) -> &'static str {
+    let name = if root.is_empty() && inv.root_kind == "directory" { inv.root.as_str() } else { root };
+    if name.ends_with(".appex") {
+        "extension"
+    } else if name.ends_with(".xpc") {
+        "xpc-service"
+    } else {
+        "bundle"
+    }
+}
+
 /// Apple (.ipa, .app bundle, macOS .app folder).
 pub fn project_apple(inv: &Inventory) -> Value {
     let e = &inv.entries;
@@ -172,11 +183,16 @@ pub fn project_apple(inv: &Inventory) -> Value {
         v.truncate(500);
         v
     };
-    let extensions: Vec<String> = apps.iter().filter(|a| a.ends_with(".appex")).cloned().collect();
-    let services: Vec<String> = apps.iter().filter(|a| a.ends_with(".xpc")).cloned().collect();
+    let extensions: Vec<String> = apps.iter().filter(|a| apple_bundle_kind(a, inv) == "extension").cloned().collect();
+    let services: Vec<String> = apps.iter().filter(|a| apple_bundle_kind(a, inv) == "xpc-service").cloned().collect();
     let executables: Vec<Value> = e
         .iter()
-        .filter(|x| matches!(x.kind.as_str(), "macho" | "macho-fat") && !x.path.contains(".framework/") && !x.path.ends_with(".dylib"))
+        .filter(|x| {
+            matches!(x.kind.as_str(), "macho" | "macho-fat")
+                && !x.path.ends_with(".dylib")
+                && (!x.path.contains(".framework/")
+                    || services.iter().any(|s| x.path.strip_prefix(s).is_some_and(|rest| rest.starts_with('/') && !rest.contains(".framework/"))))
+        })
         .map(|x| json!({"path": x.path, "kind": x.kind, "size": x.size}))
         .take(64)
         .collect();
@@ -191,13 +207,7 @@ pub fn project_apple(inv: &Inventory) -> Value {
     let catalogs: Vec<String> = e.iter().filter(|x| x.role.as_deref() == Some("asset-catalog")).map(|x| x.path.clone()).collect();
     let mut nodes: Vec<(String, &str, String)> = Vec::new();
     for a in &apps {
-        let kind = if a.ends_with(".appex") {
-            "extension"
-        } else if a.ends_with(".xpc") {
-            "xpc-service"
-        } else {
-            "bundle"
-        };
+        let kind = apple_bundle_kind(a, inv);
         nodes.push((format!("bundle:{a}"), kind, a.clone()));
     }
     for f in &frameworks {
@@ -347,6 +357,36 @@ mod tests {
         let bare = project_apple(&inv(&[("Contents/MacOS/Example", &[0xcf, 0xfa, 0xed, 0xfe])]));
         assert_eq!(bare["recognised"], false);
         assert_eq!(bare["shape"], "bare-executable");
+    }
+
+    #[test]
+    fn selected_apple_service_and_extension_keep_their_type() {
+        for (name, field, kind) in [("Helper.xpc", "services", "xpc-service"), ("Share.appex", "extensions", "extension")] {
+            let mut inventory = inv(&[("Contents/Info.plist", b"bplist00"), ("Contents/MacOS/Helper", &[0xcf, 0xfa, 0xed, 0xfe])]);
+            inventory.root = name.into();
+            inventory.root_kind = "directory".into();
+            let p = project_apple(&inventory);
+            assert_eq!(p[field], json!([""]), "{name}");
+            assert_eq!(p["bundles"], json!([""]));
+            assert!(p["graph"]["nodes"].as_array().unwrap().iter().any(|n| n["id"] == "bundle:" && n["kind"] == kind));
+        }
+    }
+
+    #[test]
+    fn framework_hosted_xpc_keeps_only_service_executables() {
+        let service = "Contents/Frameworks/Example.framework/Versions/A/XPCServices/Helper.xpc";
+        let executable = format!("{service}/Contents/MacOS/Helper");
+        let p = project_apple(&inv(&[
+            (&format!("{service}/Contents/Info.plist"), b"bplist00"),
+            (&executable, &[0xcf, 0xfa, 0xed, 0xfe]),
+            ("Contents/Frameworks/Example.framework/Versions/A/Example", &[0xcf, 0xfa, 0xed, 0xfe]),
+            (&format!("{service}/Contents/Frameworks/Private.framework/Private"), &[0xcf, 0xfa, 0xed, 0xfe]),
+            (&format!("{service}/Contents/MacOS/Private.dylib"), &[0xcf, 0xfa, 0xed, 0xfe]),
+            (&format!("{service}-other/Contents/MacOS/Other"), &[0xcf, 0xfa, 0xed, 0xfe]),
+        ]));
+        assert_eq!(p["services"], json!([service]));
+        let paths: Vec<_> = p["executables"].as_array().unwrap().iter().map(|v| v["path"].as_str().unwrap()).collect();
+        assert_eq!(paths, vec![executable.as_str()]);
     }
 
     #[test]
