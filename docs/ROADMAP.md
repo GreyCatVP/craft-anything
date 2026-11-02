@@ -542,6 +542,11 @@ Owner: open · Status: in progress
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
 - [ ] Maki's plain `maki -p` builder doesn't ask us before commands: say so in the approval decision
       above, or run Maki over ACP by default once that passes
+- [ ] Maki over ACP writes inside its working folder without a permission request (its built-in
+      rule), and that folder is a build's project folder, so writes to our own records (inbox,
+      manifest) skip the approval policy; `maki acp` takes no tool flags to stop it (0.7.0). Start
+      it in `app/` (paths in the prompt relative to that), or ask Maki for a way to make those
+      writes ask; part of the approval decision above
 
 ### R2.3 Website coverage and a better visual metric
 Owner: open · Status: done

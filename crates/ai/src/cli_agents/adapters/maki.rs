@@ -2,10 +2,18 @@
 //!
 //! `-p/--print` is a switch: the prompt is Maki's positional argument, so it goes last. Plain
 //! `maki <prompt>` opens its terminal interface instead of answering.
+//!
+//! Maki lets its file tools write anywhere under its working folder without asking, and in `-p`
+//! nothing can ask. So outside a build its tools that change something are switched off with
+//! `--disallowed-tools` (names it doesn't know are skipped, so an older Maki still runs).
 
 use super::*;
 
 pub struct Maki;
+
+/// Maki's tools that change files or run something: writing tools, the shell, and code execution
+/// (its `open()` writes through the write tool, but it can also remove and rename).
+const CHANGES: &str = "write,edit,multiedit,edit_lines,insert_lines,bash,code_execution";
 
 impl AgentAdapter for Maki {
     fn ids(&self) -> &'static [&'static str] {
@@ -16,6 +24,9 @@ impl AgentAdapter for Maki {
         let mut v = Vec::new();
         if let Some(m) = &cx.options.cli_model {
             v.extend(["-m".into(), m.clone()]);
+        }
+        if !cx.builder {
+            v.extend(["--disallowed-tools".into(), CHANGES.into()]);
         }
         v.extend(cx.options.args.iter().cloned());
         v.extend(["-p".into(), format!("{}{}", cx.preamble, cx.prompt)]);
@@ -47,10 +58,20 @@ mod tests {
 
     #[test]
     fn the_prompt_goes_last_after_print_and_the_flags() {
-        assert_eq!(args(false, &BackendOptions::default()), ["-p", "PRE make a game"]);
+        assert_eq!(args(true, &BackendOptions::default()), ["-p", "PRE make a game"]);
         let options =
             BackendOptions { cli_model: Some("anthropic/claude-sonnet-4-6".into()), args: vec!["--max-turns".into(), "40".into()], ..Default::default() };
         assert_eq!(args(true, &options), ["-m", "anthropic/claude-sonnet-4-6", "--max-turns", "40", "-p", "PRE make a game"]);
+    }
+
+    #[test]
+    fn outside_a_build_maki_can_only_read() {
+        let a = args(false, &BackendOptions::default());
+        assert_eq!(a, ["--disallowed-tools", CHANGES, "-p", "PRE make a game"]);
+        for tool in ["write", "edit", "multiedit", "edit_lines", "bash", "code_execution"] {
+            assert!(CHANGES.split(',').any(|t| t == tool), "{tool} is switched off");
+        }
+        assert!(!args(true, &BackendOptions::default()).contains(&"--disallowed-tools".to_string()), "a builder keeps its tools");
     }
 
     #[test]

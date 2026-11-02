@@ -79,8 +79,11 @@ against a stand-in server, not yet a real Cutter). Every tool is listed in `docs
   chat isn't limited to analysing and Clean room's approval rule doesn't reach it. Hermes is opt-in
   and hasn't been run live here.
 - Maki (`maki -p`, or over ACP with `acp = true`) is offered when adding a coding agent and found by
-  Detect. Over ACP it asks us before commands and our own tools, so the approval policy reaches it;
-  plain `maki -p` doesn't ask, and hasn't been run as a builder here.
+  Detect. Over ACP it asks us before commands, our own tools and writes outside its working folder;
+  writes inside that folder (a build's project folder, our own records included) and every read
+  never ask, so the approval policy and Clean room's read rule don't reach those. Plain `maki -p`
+  doesn't ask at all; outside a build it runs with its writing tools, shell and code execution
+  switched off. It hasn't been run as a `maki -p` builder here.
 - Claude Code is fully wired as a builder; Codex works through its own flags but is unverified on
   a real install and doesn't resume; other agent programs get plain text in and out. API-key
   backends (Anthropic, OpenRouter, OpenAI, local; Kimi K3 through OpenRouter is offered by Detect; a backend chosen as the Extractor takes a Deep-mode game's own files out into `app/Original/` after the study) build with our own loop and the Build tools,
