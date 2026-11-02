@@ -327,3 +327,7 @@ Copyright (c) 2026 ArtCraft Team and the Craft Anything contributors。必需的
   <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
   <sub>由 <a href="https://getartcraft.com/">ArtCraft</a> 团队与社区制作。</sub>
 </p>
+
+---
+
+<sub>本页是 [README.md](README.md) 的简体中文翻译。如有出入，以英文版为准。</sub>
