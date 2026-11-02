@@ -348,16 +348,16 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     let h = &toc.header;
     let mut lims = Vec::new();
     let (mount_point, files, file_count) = if !h.flags.encrypted && (!h.flags.indexed || h.version < 2) {
-        (None, Vec::new(), 0)
+        (None, Vec::new(), None)
     } else {
         match unreal_iostore::files(&toc, usize::MAX) {
-            Ok((mount, files, total)) => (Some(mount), files, total),
+            Ok((mount, files, total)) => (Some(mount), files, Some(total)),
             Err(craft_anything_formats::FormatError::Unsupported(why)) => {
                 lims.push(Limitation::new(
                     "encrypted_index",
                     format!("{why}; naming its files needs that key, which only the game has. Keys aren't searched for or guessed."),
                 ));
-                (None, Vec::new(), 0)
+                (None, Vec::new(), Some(0))
             }
             Err(e) => return Err(format_err(e, "an IoStore directory index")),
         }
@@ -373,6 +373,13 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         .map(|f| json!({"path": shown_path(&f.path), "size": f.size, "stored_size": f.stored_size, "compression": f.compression, "chunk": f.chunk}))
         .collect();
     let guid = Some(h.encryption_key_guid.as_str()).filter(|g| g.bytes().any(|b| b != b'0'));
+    let (size, stored_size) = match file_count {
+        Some(_) => (
+            Value::from(files.iter().map(|f| f.size).sum::<u64>()),
+            Value::from(files.iter().map(|f| f.stored_size).sum::<u64>()),
+        ),
+        None => (Value::Null, Value::Null),
+    };
     let result = json!({
         "version": h.version,
         "mount_point": mount_point,
@@ -384,8 +391,8 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         "partition_count": h.partition_count,
         "file_count": file_count,
         "by_compression": by_compression(files.iter().map(|f| f.compression.as_str())),
-        "size": files.iter().map(|f| f.size).sum::<u64>(),
-        "stored_size": files.iter().map(|f| f.stored_size).sum::<u64>(),
+        "size": size,
+        "stored_size": stored_size,
         "matching": matching.len(),
         "offset": p.offset,
         "files": page,
@@ -401,15 +408,19 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
             h.version, h.chunk_count
         )
     } else {
-        format!("{name}: an Unreal IoStore container (version {}) with {file_count} named file(s) in {} chunks.", h.version, h.chunk_count)
+        format!("{name}: an Unreal IoStore container (version {}) with {} named file(s) in {} chunks.", h.version, file_count.unwrap_or(0), h.chunk_count)
     };
     let shown_count = page.len() as u64;
+    let coverage = match file_count {
+        Some(_) => Coverage::page(shown_count, matching.len() as u64, p.offset as u64),
+        None => Coverage::default(),
+    };
     let b = builder(ctx, "game_iostore_list", Subject { kind: "archive".into(), sha256: None, name: Some(name) }, params_json(&p))
         .result(result)
         .summary(summary)
         .confidence(Confidence::Observed)
         .limitations(lims)
-        .coverage(Coverage::page(shown_count, matching.len() as u64, p.offset as u64))
+        .coverage(coverage)
         .location(Location::new("path", path.display().to_string()));
     Ok(ToolOutput::evidence(b.build()?))
 }
@@ -1434,11 +1445,15 @@ mod tests {
         let v = call(json!({"path": utoc})).unwrap().to_json();
         assert!(v["summary"].as_str().unwrap().contains("names are encrypted"), "{v}");
         assert_eq!((v["result"]["files"].as_array().map(Vec::len), v["result"]["chunk_count"].as_u64()), (Some(0), Some(3)));
-        // Unencrypted containers without a directory index still return header metadata and the not_indexed limitation.
+        // Unencrypted containers without a directory index still return header metadata and the not_indexed limitation, with unknown file totals and coverage.
         std::fs::write(&utoc, craft_anything_testkit::games::unreal_utoc(0x1, u32::MAX)).unwrap();
         let v = call(json!({"path": utoc})).unwrap().to_json();
         assert!(v["summary"].as_str().unwrap().contains("no directory index"), "{v}");
         assert_eq!((v["result"]["flags"]["indexed"].as_bool(), v["result"]["chunk_count"].as_u64()), (Some(false), Some(3)));
+        assert!(v["result"]["file_count"].is_null());
+        assert!(v["result"]["size"].is_null());
+        assert!(v["result"]["stored_size"].is_null());
+        assert_eq!(v["coverage"]["status"].as_str(), Some("unknown"));
         assert_eq!(v["limitations"][0]["code"].as_str(), Some("not_indexed"));
         let pak = craft_anything_testkit::temp_file("x.utoc", b"not a table of contents");
         assert!(call(json!({"path": pak})).unwrap_err().message.contains("isn't an IoStore"));
