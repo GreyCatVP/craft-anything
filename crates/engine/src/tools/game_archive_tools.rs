@@ -347,18 +347,22 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     let toc = unreal_iostore::toc(&data).map_err(|e| format_err(e, "an IoStore table of contents"))?;
     let h = &toc.header;
     let mut lims = Vec::new();
-    let (mount_point, files, file_count) = match unreal_iostore::files(&toc, usize::MAX) {
-        Ok((mount, files, total)) => (Some(mount), files, total),
-        Err(craft_anything_formats::FormatError::Unsupported(why)) => {
-            lims.push(Limitation::new(
-                "encrypted_index",
-                format!("{why}; naming its files needs that key, which only the game has. Keys aren't searched for or guessed."),
-            ));
-            (None, Vec::new(), 0)
+    let (mount_point, files, file_count) = if !h.flags.encrypted && (!h.flags.indexed || h.version < 2) {
+        (None, Vec::new(), 0)
+    } else {
+        match unreal_iostore::files(&toc, usize::MAX) {
+            Ok((mount, files, total)) => (Some(mount), files, total),
+            Err(craft_anything_formats::FormatError::Unsupported(why)) => {
+                lims.push(Limitation::new(
+                    "encrypted_index",
+                    format!("{why}; naming its files needs that key, which only the game has. Keys aren't searched for or guessed."),
+                ));
+                (None, Vec::new(), 0)
+            }
+            Err(e) => return Err(format_err(e, "an IoStore directory index")),
         }
-        Err(e) => return Err(format_err(e, "an IoStore directory index")),
     };
-    if !h.flags.indexed {
+    if !h.flags.indexed || h.version < 2 {
         lims.push(Limitation::new("not_indexed", "This container has no directory index, so its chunks are counted but not named."));
     }
     let matching = matching(&files, |f| f.path.as_str(), p.filter.as_deref());
@@ -389,6 +393,11 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     let summary = if h.flags.encrypted {
         format!(
             "{name}: an Unreal IoStore container (version {}, {} chunks) whose names are encrypted; its files can't be named without the game's key.",
+            h.version, h.chunk_count
+        )
+    } else if !h.flags.indexed || h.version < 2 {
+        format!(
+            "{name}: an Unreal IoStore container (version {}, {} chunks) with no directory index; its chunks are counted but not named.",
             h.version, h.chunk_count
         )
     } else {
@@ -1425,6 +1434,12 @@ mod tests {
         let v = call(json!({"path": utoc})).unwrap().to_json();
         assert!(v["summary"].as_str().unwrap().contains("names are encrypted"), "{v}");
         assert_eq!((v["result"]["files"].as_array().map(Vec::len), v["result"]["chunk_count"].as_u64()), (Some(0), Some(3)));
+        // Unencrypted containers without a directory index still return header metadata and the not_indexed limitation.
+        std::fs::write(&utoc, craft_anything_testkit::games::unreal_utoc(0x1, u32::MAX)).unwrap();
+        let v = call(json!({"path": utoc})).unwrap().to_json();
+        assert!(v["summary"].as_str().unwrap().contains("no directory index"), "{v}");
+        assert_eq!((v["result"]["flags"]["indexed"].as_bool(), v["result"]["chunk_count"].as_u64()), (Some(false), Some(3)));
+        assert_eq!(v["limitations"][0]["code"].as_str(), Some("not_indexed"));
         let pak = craft_anything_testkit::temp_file("x.utoc", b"not a table of contents");
         assert!(call(json!({"path": pak})).unwrap_err().message.contains("isn't an IoStore"));
     }

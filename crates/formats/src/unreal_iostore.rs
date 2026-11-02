@@ -217,6 +217,9 @@ pub fn files(toc: &Toc, limit: usize) -> Result<(String, Vec<File>, usize), Form
     if toc.header.flags.encrypted {
         return Err(FormatError::Unsupported("the directory index is encrypted with the game's AES key".into()));
     }
+    if !toc.header.flags.indexed || toc.header.version < 2 {
+        return Ok((String::new(), Vec::new(), 0));
+    }
     let mut c = Cur::new(&toc.directory_index);
     let mount = c.string("mount point")?;
     let dirs = (0..c.count("directories", 16)?)
@@ -288,6 +291,8 @@ mod tests {
             );
             assert_eq!(super::files(&toc, 1).unwrap().1.len(), 1, "never more than asked for");
         }
+        let unindexed = toc(&sample(0x1)).unwrap();
+        assert_eq!(files(&unindexed, 10).unwrap(), (String::new(), Vec::new(), 0));
     }
 
     #[test]
