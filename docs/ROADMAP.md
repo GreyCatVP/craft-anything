@@ -1122,8 +1122,10 @@ against what its original was recorded answering.
       be Linux (it now expects the system it runs on), and Auto mode refused deleting inside a
       project whose path has capitals (`/Users/…`, `/var/folders/…/T/`): the command was lower-cased
       before its paths were compared. Paths keep their case now
-- [ ] Auto mode's delete check splits a command at spaces, quotes included, so deleting inside a
-      project whose path has a space (`rm -rf "D:/Unreal Projects/Game/Build"`) is refused as outside it
+- [x] Auto mode's delete check reads a quoted or escaped path with spaces as one path. It split
+      at every space, so `rm -rf "…/MyGame Backup/report"` read as the project folder plus a
+      relative word and deleted the folder beside the project without asking (and a project under
+      `Unreal Projects` couldn't delete its own build folder)
 - [ ] `waiting_keeps_it_running_until_cancelled_then_stops_it` fails now and then in a full engine run:
       it frees a port, then checks nothing listens there after stopping, and a test beside it may get
       that port; seen once on a Mac, passed 8 runs alone

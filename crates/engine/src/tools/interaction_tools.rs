@@ -555,7 +555,8 @@ const DELETES: &[&str] = &["rm ", "rmdir", "rd /s", "del ", "erase ", "remove-it
 fn deletes_outside(command: &str, ws: Option<&Workspace>) -> bool {
     let temp = std::env::temp_dir();
     let roots: Vec<PathBuf> = ws.map(|w| w.root.clone()).into_iter().chain([temp, PathBuf::from("/tmp"), PathBuf::from("c:/tmp")]).collect();
-    command.split(|c: char| c.is_whitespace() || c == '"' || c == '\'').any(|tok| {
+    shell_words(command).iter().any(|tok| {
+        let tok = tok.as_str();
         let lower = tok.to_ascii_lowercase();
         if tok.contains("..") || tok.starts_with('~') || lower.contains("$home") || lower.contains("%userprofile%") || lower.contains("$env:") {
             return true;
@@ -565,6 +566,47 @@ fn deletes_outside(command: &str, ws: Option<&Workspace>) -> bool {
         let absolute = tok.starts_with('/') || tok.get(1..3).is_some_and(|d| d == ":/" || d == ":\\");
         absolute && !roots.iter().any(|r| inside(r, Path::new(&tok)))
     })
+}
+
+/// A command's arguments the way a shell reads them: quoted text (`"a b"`, `'a b'`) and an escaped
+/// space (`a\ b`) stay in one argument, so a path with spaces is checked whole. A backslash before
+/// anything else is kept as it is (Windows paths).
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quote: Option<char> = None;
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => word.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                started = true;
+            }
+            None if c == '\\' && chars.peek().is_some_and(|n| n.is_whitespace()) => {
+                if let Some(n) = chars.next() {
+                    word.push(n);
+                }
+                started = true;
+            }
+            None if c.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            None => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// What the person said to an approval card.
@@ -882,6 +924,44 @@ mod tests {
         assert!(rm("rm -rf $HOME/stuff".into()).is_some());
         let elsewhere = if cfg!(windows) { "D:/Projects/Other" } else { "/Users/Me/Projects/Other" };
         assert!(rm(format!("rm -rf \"{elsewhere}\"")).is_some(), "a neighbouring folder is still outside");
+    }
+
+    #[test]
+    fn auto_mode_reads_a_quoted_path_with_spaces_as_one_path() {
+        // Regression: arguments were split at every space, quotes included, so the first half of
+        // `"…/MyGame Backup/report"` read as the project folder and the folder beside it was deleted.
+        let (_d, mut w) = ws();
+        let projects = if cfg!(windows) { "D:/Unreal Projects" } else { "/Users/Me/Unreal Projects" };
+        w.root = PathBuf::from(format!("{projects}/MyGame"));
+        let rm = |cmd: String| never_unasked(Some(&w), "Bash", &json!({"command": cmd}));
+        for beside in [
+            format!("rm -rf \"{projects}/MyGame Backup/report\""),
+            format!("rm -rf '{projects}/MyGame Backup'"),
+            format!("rm -rf {}/MyGame\\ Backup", projects.replace(' ', "\\ ")),
+        ] {
+            assert!(rm(beside.clone()).is_some(), "{beside}");
+        }
+        for own in [
+            format!("rm -rf \"{projects}/MyGame/app/Build\""),
+            format!("rm -rf '{projects}/MyGame/Saved Games'"),
+            format!("rm -rf {}/MyGame/app/Build ./Intermediate", projects.replace(' ', "\\ ")),
+        ] {
+            assert_eq!(rm(own.clone()), None, "{own}");
+        }
+        // The case that went through: a parent without spaces, so the first half matched the project.
+        let plain = if cfg!(windows) { "D:/Projects" } else { "/Users/Me/Projects" };
+        w.root = PathBuf::from(format!("{plain}/MyGame"));
+        let beside = format!("rm -rf \"{plain}/MyGame Backup/report\"");
+        assert!(never_unasked(Some(&w), "Bash", &json!({"command": beside})).is_some(), "{beside}");
+    }
+
+    #[test]
+    fn shell_words_keep_quoted_and_escaped_spaces() {
+        assert_eq!(shell_words(r#"rm -rf "a b/c" 'd e' f\ g  h"#), ["rm", "-rf", "a b/c", "d e", "f g", "h"]);
+        assert_eq!(shell_words(r"del C:\x\y.txt"), ["del", r"C:\x\y.txt"], "Windows backslashes stay");
+        assert_eq!(shell_words(r#"rm "" x"#), ["rm", "", "x"]);
+        assert_eq!(shell_words("rm \"unclosed path"), ["rm", "unclosed path"]);
+        assert!(shell_words("   ").is_empty());
     }
 
     #[test]

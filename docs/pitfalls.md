@@ -364,6 +364,10 @@ match keywords, then checked its paths against the project folder with that same
 compares paths without case, so only a Mac showed it: deleting `/Users/…/app/Build` in the
 person's own project was refused. Match keywords on a lower-cased copy and compare paths as
 written; test a path rule with capitals and a folder outside the temp directory.
+The same check split the command at every space, quotes included, so `"…/MyGame Backup/x"`
+began with the project's path and went through; it had been noted as "only refuses too much"
+without trying a folder named like the project. Read arguments as the shell does, and test a
+path rule with the folder beside the target, not only the target.
 
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts
