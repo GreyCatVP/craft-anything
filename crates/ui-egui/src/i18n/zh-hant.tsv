@@ -202,9 +202,11 @@ Capture a website for rebuilding	擷取網站用於重建
 Capture inventories	擷取清單
 Capture menus, dialogs and tabs	擷取選單、對話方塊和分頁
 Change	變更
+Change a project's builder	變更專案的建置助手
 Change a setting	變更設定
 Change an AI's model	變更 AI 的模型
 Change it	變更
+Change who builds this project	變更誰來建置此專案
 Change…	變更…
 Check	檢查
 Check .NET native calls	檢查 .NET 原生呼叫
@@ -574,6 +576,8 @@ Keyed archive	索引鍵封存檔
 Kind	類型
 Language	語言
 Last: {what}	最近：{what}
+Later changes will be built by {name}.	後續修改將由 {name} 建置。
+Later changes will follow the default builder.	後續修改將使用預設建置助手。
 Launch an app	啟動應用程式
 Leave a few GB for the rest of your computer.	請為電腦的其他工作保留幾 GB 記憶體。
 Leave a path empty to use the managed install. We never need environment variables.	路徑留空即可使用受管理的安裝，無須設定環境變數。

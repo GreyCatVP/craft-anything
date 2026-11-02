@@ -202,9 +202,11 @@ Capture a website for rebuilding	采集网站用于重建
 Capture inventories	采集清单
 Capture menus, dialogs and tabs	采集菜单、对话框和标签页
 Change	更改
+Change a project's builder	更改项目的构建助手
 Change a setting	更改设置
 Change an AI's model	更改 AI 的模型
 Change it	更改
+Change who builds this project	更改谁来构建此项目
 Change…	更改…
 Check	检查
 Check .NET native calls	检查 .NET 原生调用
@@ -574,6 +576,8 @@ Keyed archive	键控归档
 Kind	类型
 Language	语言
 Last: {what}	最近：{what}
+Later changes will be built by {name}.	后续修改将由 {name} 构建。
+Later changes will follow the default builder.	后续修改将使用默认构建助手。
 Launch an app	启动应用
 Leave a few GB for the rest of your computer.	请为计算机的其他任务留出几 GB 内存。
 Leave a path empty to use the managed install. We never need environment variables.	路径留空即可使用托管安装，无需设置环境变量。
