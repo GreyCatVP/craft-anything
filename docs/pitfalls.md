@@ -279,6 +279,9 @@ And again inside one process: the engine had its own `write_atomic` whose temp f
 by process only, so two threads saving `craft.json` wrote the same temp file and one rename found
 it gone (#273). There is one atomic writer, `craft_anything_platform::fs::write_atomic`; don't
 write another.
+The UI settings worker also released the session guard after cloning settings, letting that stale
+snapshot overwrite a later model-selection save. Keep the guard through the worker's disk write
+so session-based writers cannot overtake each other between reading and saving.
 
 **Keywords that only some code paths honour.** "…in Rust" picked Rust for apps but not for games, so
 a headless game rebuild stopped at once for want of Unity. It was found only by a live run. Run the

@@ -659,8 +659,10 @@ impl CraftApp {
         let engine = self.engine.clone();
         // What's in the session when it runs, so the newest settings are the ones written.
         self.saving = Some(self.jobs.spawn("Save settings", false, move |_| {
-            let settings = engine.session().settings.clone();
-            settings.save().map_err(|e| e.message)?;
+            // Keep the guard through the write so a model-selection save cannot be overtaken
+            // by an older settings snapshot. This runs on the worker, never the UI thread.
+            let session = engine.session();
+            session.settings.save().map_err(|e| e.message)?;
             Ok(Done::Nothing)
         }));
     }

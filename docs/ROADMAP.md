@@ -318,6 +318,9 @@ Owner: open · Status: in progress
       disk-based selection save between the hub and headless tools, preserving unrelated edits.
 - [x] Rebase onto main after #395's squash merge, preserve extra model arguments without a saved
       selection, and render the remote-host placeholder visibly in the setup instructions.
+- [x] Hold the UI settings worker's session guard through its disk save so it cannot overwrite
+      a newer model selection; reverify the existing terminal-event regression for validation failures.
+- [ ] Synchronize the UI exit-time settings save with the session's latest AI table and other writers.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 
