@@ -185,7 +185,7 @@ pub fn packaged_program(dir: &Path) -> Option<PathBuf> {
                 continue;
             }
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_ascii_lowercase();
-            let helper = ["crash", "-cmd", "unrealpak", "shadercompile"].iter().any(|s| name.contains(s));
+            let helper = ["crashreport", "crashhandler", "crashpad", "-cmd", "unrealpak", "shadercompile"].iter().any(|s| name.contains(s));
             let at = e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
             if is_program(&p) && !helper && best.as_ref().is_none_or(|(b, _)| at > *b) {
                 best = Some((at, p));
@@ -193,6 +193,29 @@ pub fn packaged_program(dir: &Path) -> Option<PathBuf> {
         }
     }
     best.map(|(_, p)| p)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::packaged_program;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn packaged_program_finds_executable_with_crash_in_name() {
+        let build = tempfile::tempdir().unwrap();
+        let reporter = build.path().join("CrashReportClient");
+        let game = build.path().join("CrashSample");
+        std::fs::write(&reporter, b"reporter").unwrap();
+        std::fs::write(&game, b"game").unwrap();
+        for path in [&reporter, &game] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::File::open(&reporter).unwrap().set_times(std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1))).unwrap();
+        std::fs::File::open(&game).unwrap().set_times(std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(2))).unwrap();
+
+        assert_eq!(packaged_program(build.path()), Some(game));
+    }
 }
 
 /// Whether `p` is a program this computer can start.
