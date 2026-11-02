@@ -1076,17 +1076,26 @@ fn prologue_scan(img: &Image, mode: Mode, covered: &BTreeMap<u64, u64>) -> Vec<u
         _ => return out,
     };
     let is_covered = |a: u64| covered.range(..=a).next_back().is_some_and(|(_, &end)| a < end);
-    for s in img.bin.sections.iter().filter(|s| s.alloc && s.exec && s.file_offset.is_some()) {
-        if s.name.starts_with(".plt") || s.name == "__stubs" || s.name == ".init" || s.name == ".fini" {
-            continue;
-        }
-        let Some(mut a) = s.addr.checked_add(step - 1).map(|a| a & !(step - 1)) else { continue };
-        let end = s.addr.saturating_add(s.file_size);
+    // (start, bytes in the file) of each executable range: sections, or the segments when the file has none.
+    let mut ranges: Vec<(u64, u64)> = img
+        .bin
+        .sections
+        .iter()
+        .filter(|s| s.alloc && s.exec && s.file_offset.is_some())
+        .filter(|s| !(s.name.starts_with(".plt") || s.name == "__stubs" || s.name == ".init" || s.name == ".fini"))
+        .map(|s| (s.addr, s.file_size))
+        .collect();
+    if img.bin.sections.is_empty() {
+        ranges.extend(img.bin.segments.iter().filter(|s| s.exec && s.file_size > 0).map(|s| (s.addr, s.file_size)));
+    }
+    for (start, size) in ranges {
+        let Some(mut a) = start.checked_add(step - 1).map(|a| a & !(step - 1)) else { continue };
+        let end = start.saturating_add(size);
         while a.checked_add(4).is_some_and(|e| e <= end) && out.len() < 200_000 {
             if !is_covered(a)
                 && let Some(b) = img.read(a, 8)
             {
-                let prev_ok = a == s.addr || img.read(a - 1, 1).is_some_and(|p| matches!(p.first(), Some(0xc3 | 0xcc | 0x90 | 0x00 | 0xc2)));
+                let prev_ok = a == start || img.read(a - 1, 1).is_some_and(|p| matches!(p.first(), Some(0xc3 | 0xcc | 0x90 | 0x00 | 0xc2)));
                 let hit = match mode {
                     Mode::X64 => {
                         prev_ok
@@ -1295,6 +1304,32 @@ mod tests {
         assert_eq!(p.function_containing(l.code_va + 0x45).unwrap().entry, helper.entry);
         let asm = p.instructions(&img, main, true);
         assert_eq!(asm.first().unwrap().text(), "push rbp");
+    }
+
+    #[test]
+    fn a_program_with_no_section_headers_is_found_by_its_dynamic_symbols() {
+        for table in [tk::flutter::SymbolTable::DynamicHash, tk::flutter::SymbolTable::DynamicGnuHash] {
+            let names = ["inflate", "deflate", "adler32"];
+            let (img, p) = analyze(tk::sectionless::sectionless_elf(true, false, &names, table));
+            assert!(img.bin.sections.is_empty());
+            for name in names {
+                let f = p.function_by_name(name).unwrap_or_else(|| panic!("{name} not found"));
+                assert_eq!(f.discovered_by, "symbol");
+            }
+            assert_eq!(p.functions.len(), 3);
+        }
+    }
+
+    #[test]
+    fn the_prologue_scan_walks_executable_segments_when_there_are_no_sections() {
+        let (mut elf, l) = tk::elf64(tk::ElfArch::X86_64, false);
+        // Remove the section header table: offset, count and name-table index.
+        elf[40..48].fill(0);
+        elf[60..64].fill(0);
+        let (img, p) = analyze(elf);
+        assert!(img.bin.sections.is_empty());
+        let hidden = p.functions.get(&(l.code_va + tk::x64::HIDDEN)).expect("the scan finds it without sections");
+        assert_eq!(hidden.discovered_by, "prologue");
     }
 
     #[test]

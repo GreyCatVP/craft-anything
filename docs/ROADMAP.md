@@ -171,6 +171,11 @@ Owner: open · Status: done (branch chore/r0.5-cleanups)
 - [x] `macho.rs` `method_list`: `list + 8 + i * entsize` adds to a pointer read from the file, so a
       segment that ends at `u64::MAX` overflowed it (found by a lint scan; now reproduced by a
       regression test, and the entry addresses are checked)
+- [x] ELF files whose section headers were removed (common in NAS and router firmware, also big-endian
+      MIPS) show their dynamic symbols: `elf::dynamic_table` reads `DT_SYMTAB`/`DT_STRTAB` and the count
+      from `DT_HASH` or `DT_GNU_HASH` (moved out of `dart.rs`), `Binary` symbols, imports and exports are
+      filled from it, `elf::dynamic_symbols` reads versions through `DT_VERSYM`/`DT_VERDEF`/`DT_VERNEED`,
+      and the prologue scan walks executable segments (#223)
 
 ### R0.8 Tests never touch the real machine
 Owner: open · Status: done, except protecting `main` (a maintainer setting)

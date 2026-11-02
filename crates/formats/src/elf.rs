@@ -1,7 +1,7 @@
 //! ELF details `object` leaves to us: program headers, the dynamic section, mitigations, and
 //! core-file notes (registers, signal, mapped files) for crash inspection.
 
-use crate::binary::{Arch, Binary};
+use crate::binary::{Arch, Binary, Export, Import, MAX_IMPORTS, MAX_SYMBOLS, Symbol, SymbolKind, demangle};
 use crate::bytes::Reader;
 use crate::{FormatError, hex_addr};
 use object::Object;
@@ -10,7 +10,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 const MAX_PHDRS: usize = 4096;
-const MAX_DYN: usize = 8192;
+const MAX_DYN: usize = 65_536;
 const MAX_NOTES: usize = 100_000;
 
 /// Endian/class-aware reads over an ELF image.
@@ -104,7 +104,8 @@ pub fn program_headers(data: &[u8]) -> Result<Vec<ProgramHeader>, FormatError> {
     }
     let mut out = Vec::new();
     for i in 0..phnum {
-        let Some(o) = i.checked_mul(phentsize).and_then(|x| x.checked_add(phoff)) else { break };
+        // The fields below sit within `phentsize` bytes of `o`, so their offsets can't overflow either.
+        let Some(o) = i.checked_mul(phentsize).and_then(|x| x.checked_add(phoff)).filter(|&o| o.checked_add(phentsize).is_some()) else { break };
         let ph = if e.is64 {
             (e.u32(o), e.u32(o + 4), e.u64(o + 8), e.u64(o + 16), e.u64(o + 32), e.u64(o + 40), e.u64(o + 48))
         } else {
@@ -182,6 +183,24 @@ fn va_to_off(phdrs: &[ProgramHeader], va: u64) -> Option<u64> {
     phdrs.iter().filter(|p| p.p_type == 1).find(|p| va >= p.vaddr && va - p.vaddr < p.file_size).and_then(|p| p.offset.checked_add(va - p.vaddr))
 }
 
+/// The (tag, value) pairs of the dynamic section, up to its `DT_NULL`.
+fn dynamic_entries(e: &E<'_>, phdrs: &[ProgramHeader]) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let Some(d) = phdrs.iter().find(|p| p.p_type == 2) else { return out };
+    let ent = 2 * e.word_size();
+    let n = usize::try_from(d.file_size).unwrap_or(0) / ent;
+    let start = usize::try_from(d.offset).unwrap_or(usize::MAX);
+    for i in 0..n.min(MAX_DYN) {
+        let Some(o) = i.checked_mul(ent).and_then(|x| start.checked_add(x)) else { break };
+        let (Some(tag), Some(val)) = (e.word(o), o.checked_add(e.word_size()).and_then(|v| e.word(v))) else { break };
+        if tag == 0 {
+            break;
+        }
+        out.push((tag, val));
+    }
+    out
+}
+
 /// Add ELF facts to a parsed binary: image base, interpreter, needed libraries, RELRO, NX, PIE.
 pub fn enrich(data: &[u8], file: &object::File<'_>, b: &mut Binary) {
     let Ok(e) = E::new(data) else { return };
@@ -196,21 +215,7 @@ pub fn enrich(data: &[u8], file: &object::File<'_>, b: &mut Binary) {
     if let Some(base) = phdrs.iter().filter(|p| p.p_type == 1).map(|p| p.vaddr).min() {
         b.image_base = base;
     }
-    // Dynamic section.
-    let mut dyns: Vec<(u64, u64)> = Vec::new();
-    if let Some(d) = phdrs.iter().find(|p| p.p_type == 2) {
-        let ent = 2 * e.word_size();
-        let n = usize::try_from(d.file_size).unwrap_or(0) / ent.max(1);
-        let start = usize::try_from(d.offset).unwrap_or(usize::MAX);
-        for i in 0..n.min(MAX_DYN) {
-            let Some(o) = start.checked_add(i * ent) else { break };
-            let (Some(tag), Some(val)) = (e.word(o), e.word(o + e.word_size())) else { break };
-            if tag == 0 {
-                break;
-            }
-            dyns.push((tag, val));
-        }
-    }
+    let dyns = dynamic_entries(&e, &phdrs);
     let strtab = dyns.iter().find(|(t, _)| *t == 5).and_then(|(_, v)| va_to_off(&phdrs, *v));
     let dstr = |v: u64| -> Option<String> {
         let off = usize::try_from(strtab?.checked_add(v)?).ok()?;
@@ -296,6 +301,43 @@ pub fn enrich(data: &[u8], file: &object::File<'_>, b: &mut Binary) {
         "dt_flags": format!("{flags:#x}"),
         "dt_flags_1": format!("{flags1:#x}"),
     });
+    // With no section headers `object` finds no symbols; the dynamic section still points at them.
+    if b.sections.is_empty()
+        && let Some(ds) = dynamic_symbols(data, b)
+    {
+        add_dynamic_symbols(b, ds);
+    }
+}
+
+/// Put symbols read from `PT_DYNAMIC` into the binary's symbols, imports and exports.
+fn add_dynamic_symbols(b: &mut Binary, ds: DynamicSymbols) {
+    b.warnings.extend(ds.warnings.into_iter().map(|w| format!("dynamic symbols: {w}")));
+    b.symbols_truncated |= ds.truncated;
+    for (s, defined) in ds.exports.iter().map(|s| (s, true)).chain(ds.imports.iter().map(|s| (s, false))) {
+        if b.symbols.len() >= MAX_SYMBOLS {
+            b.symbols_truncated = true;
+            break;
+        }
+        let kind = match s.kind {
+            "function" | "ifunc" => SymbolKind::Function,
+            "object" | "tls" | "common" => SymbolKind::Data,
+            _ => SymbolKind::Other,
+        };
+        b.symbols.push(Symbol {
+            name: s.name.clone(),
+            demangled: demangle(&s.name),
+            addr: s.addr,
+            size: s.size,
+            kind,
+            global: s.binding != "weak",
+            weak: s.binding == "weak",
+            defined,
+            dynamic: true,
+        });
+    }
+    b.exports.extend(ds.exports.iter().take(MAX_IMPORTS).map(|s| Export { name: s.name.clone(), addr: s.addr }));
+    let room = MAX_IMPORTS.saturating_sub(b.imports.len());
+    b.imports.extend(ds.imports.into_iter().take(room).map(|s| Import { name: s.name, library: s.library, ordinal: None, slot: None }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -369,8 +411,11 @@ fn version_defs(e: &E<'_>, base: usize, strs: &[u8]) -> BTreeMap<u16, String> {
     out
 }
 
+/// Version needs by index: (name, library).
+type Needs = BTreeMap<u16, (String, String)>;
+
 /// Version needs: index → (name, library).
-fn version_needs(e: &E<'_>, base: usize, strs: &[u8]) -> BTreeMap<u16, (String, String)> {
+fn version_needs(e: &E<'_>, base: usize, strs: &[u8]) -> Needs {
     let mut out = BTreeMap::new();
     let mut pos = 0usize;
     let mut budget = MAX_VERSIONS;
@@ -408,30 +453,204 @@ fn version_needs(e: &E<'_>, base: usize, strs: &[u8]) -> BTreeMap<u16, (String, 
     out
 }
 
-/// Read `.dynsym` with its version tables. `None` when the file isn't ELF or has no named
-/// dynamic symbol section (a file with its section headers removed; use [`Binary`]'s lists then).
+/// Where the dynamic symbol table sits, as `PT_DYNAMIC` describes it (no section headers needed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynTable {
+    /// File offset of the symbol table.
+    pub symtab: u64,
+    /// How many entries it has.
+    pub count: u64,
+    /// File offset of the string table.
+    pub strtab: u64,
+    /// `DT_STRSZ`; 0 when the file doesn't say.
+    pub strsz: u64,
+    /// How `count` was found: `DT_HASH`, `DT_GNU_HASH` or `estimated`.
+    pub count_source: &'static str,
+}
+
+/// The result of [`dynamic_table`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DynTableScan {
+    pub table: Option<DynTable>,
+    pub warnings: Vec<String>,
+}
+
+const DT_HASH: u64 = 4;
+const DT_STRTAB: u64 = 5;
+const DT_SYMTAB: u64 = 6;
+const DT_STRSZ: u64 = 10;
+const DT_SYMENT: u64 = 11;
+const DT_GNU_HASH: u64 = 0x6fff_fef5;
+const DT_VERSYM: u64 = 0x6fff_fff0;
+const DT_VERDEF: u64 = 0x6fff_fffc;
+const DT_VERNEED: u64 = 0x6fff_fffe;
+/// Most symbols a `DT_GNU_HASH` chain walk counts.
+const MAX_HASH_SYMS: u64 = 4_000_000;
+
+/// How many symbols a `DT_GNU_HASH` table at file offset `off` covers: past the last bucket's
+/// start, to the end of its chain.
+fn gnu_hash_count(e: &E<'_>, off: u64) -> Option<u64> {
+    let o = usize::try_from(off).ok()?;
+    let nbuckets = u64::from(e.u32(o)?);
+    let symoffset = u64::from(e.u32(o.checked_add(4)?)?);
+    let bloom_size = u64::from(e.u32(o.checked_add(8)?)?);
+    if nbuckets > (1 << 24) || bloom_size > (1 << 24) {
+        return None;
+    }
+    let buckets = off.checked_add(16)?.checked_add(bloom_size.checked_mul(e.word_size() as u64)?)?;
+    let mut max = 0u64;
+    for i in 0..nbuckets {
+        let b = u64::from(e.u32(usize::try_from(buckets.checked_add(i * 4)?).ok()?)?);
+        max = max.max(b);
+    }
+    if max < symoffset {
+        return Some(symoffset);
+    }
+    let chains = buckets.checked_add(nbuckets * 4)?;
+    let mut idx = max;
+    loop {
+        let v = e.u32(usize::try_from(chains.checked_add(idx.checked_sub(symoffset)?.checked_mul(4)?)?).ok()?)?;
+        idx = idx.checked_add(1)?;
+        if v & 1 == 1 || idx > MAX_HASH_SYMS {
+            return Some(idx);
+        }
+    }
+}
+
+/// Find the dynamic symbol table through `PT_DYNAMIC`: `DT_SYMTAB` and `DT_STRTAB`, with the
+/// entry count from `DT_HASH`, else `DT_GNU_HASH`, else estimated from where the string table
+/// starts (with a warning). For images whose section headers were removed.
+pub fn dynamic_table(data: &[u8]) -> DynTableScan {
+    let mut scan = DynTableScan::default();
+    let Ok(e) = E::new(data) else { return scan };
+    let Ok(phdrs) = program_headers(data) else { return scan };
+    let dynv = dynamic_entries(&e, &phdrs);
+    let get = |tag: u64| dynv.iter().find(|(t, _)| *t == tag).map(|(_, v)| *v);
+    let (Some(symtab), Some(strtab)) = (get(DT_SYMTAB).and_then(|v| va_to_off(&phdrs, v)), get(DT_STRTAB).and_then(|v| va_to_off(&phdrs, v))) else {
+        return scan;
+    };
+    let sym_size = e.sym_size();
+    let syment = get(DT_SYMENT).unwrap_or(sym_size);
+    if syment != sym_size {
+        scan.warnings.push(format!("unexpected DT_SYMENT {syment}"));
+        return scan;
+    }
+    let mut found: Option<(u64, &'static str)> = None;
+    if let Some(n) = get(DT_HASH).and_then(|v| va_to_off(&phdrs, v)).and_then(|o| usize::try_from(o).ok()).and_then(|o| e.u32(o.checked_add(4)?)) {
+        found = Some((u64::from(n), "DT_HASH"));
+    }
+    if found.is_none()
+        && let Some(n) = get(DT_GNU_HASH).and_then(|v| va_to_off(&phdrs, v)).and_then(|o| gnu_hash_count(&e, o))
+    {
+        found = Some((n, "DT_GNU_HASH"));
+    }
+    if found.is_none() && strtab > symtab {
+        found = Some(((strtab - symtab) / sym_size, "estimated"));
+        scan.warnings.push("no hash table: the symbol count was estimated from the table layout".into());
+    }
+    if let Some((count, count_source)) = found {
+        scan.table = Some(DynTable { symtab, count, strtab, strsz: get(DT_STRSZ).unwrap_or(0), count_source });
+    }
+    scan
+}
+
+/// One raw symbol table entry.
+struct RawSym {
+    name: u32,
+    info: u8,
+    other: u8,
+    shndx: u16,
+    value: u64,
+    size: u64,
+}
+
+fn raw_sym(e: &E<'_>, at: usize) -> Option<RawSym> {
+    let f = |d: usize| at.checked_add(d);
+    Some(if e.is64 {
+        RawSym { name: e.u32(at)?, info: e.r.u8(f(4)?)?, other: e.r.u8(f(5)?)?, shndx: e.u16(f(6)?)?, value: e.u64(f(8)?)?, size: e.u64(f(16)?)? }
+    } else {
+        RawSym {
+            name: e.u32(at)?,
+            info: e.r.u8(f(12)?)?,
+            other: e.r.u8(f(13)?)?,
+            shndx: e.u16(f(14)?)?,
+            value: u64::from(e.u32(f(4)?)?),
+            size: u64::from(e.u32(f(8)?)?),
+        }
+    })
+}
+
+impl E<'_> {
+    /// Bytes in one symbol table entry.
+    fn sym_size(&self) -> u64 {
+        if self.is64 { 24 } else { 16 }
+    }
+}
+
+/// Read `.dynsym` with its version tables; with no such section, the table `PT_DYNAMIC` points
+/// at, with its version tables. `None` when the file isn't ELF or has neither.
 pub fn dynamic_symbols(data: &[u8], b: &Binary) -> Option<DynamicSymbols> {
     let e = E::new(data).ok()?;
-    let syms = section_bytes(data, b, ".dynsym")?;
-    let strs = section_bytes(data, b, ".dynstr")?;
+    let ent = usize::try_from(e.sym_size()).ok()?;
+    let (Some(syms), Some(strs)) = (section_bytes(data, b, ".dynsym"), section_bytes(data, b, ".dynstr")) else {
+        return segment_dynamic_symbols(data, &e);
+    };
     let off_of = |name: &str| b.sections.iter().find(|s| s.name == name).and_then(|s| s.file_offset).and_then(|o| usize::try_from(o).ok());
     let defs = off_of(".gnu.version_d").map(|o| version_defs(&e, o, strs)).unwrap_or_default();
     let needs = off_of(".gnu.version_r").map(|o| version_needs(&e, o, strs)).unwrap_or_default();
     let versym = off_of(".gnu.version");
     let syms_off = off_of(".dynsym")?;
-    let ent = if e.is64 { 24usize } else { 16 };
-    let count = syms.len() / ent;
     let mut out = DynamicSymbols::default();
+    read_dynsyms(&e, (syms_off, syms.len() / ent), strs, versym, &defs, &needs, &mut out);
+    Some(out)
+}
+
+/// [`dynamic_symbols`] for a file without section headers.
+fn segment_dynamic_symbols(data: &[u8], e: &E<'_>) -> Option<DynamicSymbols> {
+    let scan = dynamic_table(data);
+    let t = scan.table?;
+    let phdrs = program_headers(data).ok()?;
+    let dynv = dynamic_entries(e, &phdrs);
+    let off_of = |tag: u64| dynv.iter().find(|(t, _)| *t == tag).and_then(|(_, v)| va_to_off(&phdrs, *v)).and_then(|o| usize::try_from(o).ok());
+    // A string table with no DT_STRSZ runs to the end of the file (each name is capped).
+    let strs = data.get(usize::try_from(t.strtab).ok()?..)?;
+    let strs = if t.strsz == 0 { strs } else { strs.get(..usize::try_from(t.strsz).unwrap_or(usize::MAX).min(strs.len()))? };
+    let defs = off_of(DT_VERDEF).map(|o| version_defs(e, o, strs)).unwrap_or_default();
+    let needs = off_of(DT_VERNEED).map(|o| version_needs(e, o, strs)).unwrap_or_default();
+    let ent = usize::try_from(e.sym_size()).ok()?;
+    let symtab = usize::try_from(t.symtab).ok()?;
+    // The count comes from the file's own tables: only the entries that lie inside the file are read.
+    let room = data.len().saturating_sub(symtab) / ent;
+    let count = usize::try_from(t.count).unwrap_or(usize::MAX);
+    let mut out = DynamicSymbols { warnings: scan.warnings, ..DynamicSymbols::default() };
+    if count > room {
+        out.truncated = true;
+        out.warnings.push(format!("the symbol table ends early: {room} of {count} entries are in the file"));
+    }
+    read_dynsyms(e, (symtab, count.min(room)), strs, off_of(DT_VERSYM), &defs, &needs, &mut out);
+    Some(out)
+}
+
+/// Read `count` symbols of the table at `syms_off` into `out`, naming each from `strs` and its
+/// version from the version tables.
+fn read_dynsyms(
+    e: &E<'_>,
+    (syms_off, count): (usize, usize),
+    strs: &[u8],
+    versym: Option<usize>,
+    defs: &BTreeMap<u16, String>,
+    needs: &Needs,
+    out: &mut DynamicSymbols,
+) {
+    let ent = e.sym_size() as usize;
     if count > MAX_DYNSYMS {
         out.truncated = true;
         out.warnings.push(format!("only the first {MAX_DYNSYMS} of {count} dynamic symbols were read"));
     }
     for i in 0..count.min(MAX_DYNSYMS) {
-        let at = syms_off.checked_add(i.checked_mul(ent)?)?;
-        let (name, info, other, shndx, value, size) = if e.is64 {
-            (e.u32(at)?, e.r.u8(at + 4)?, e.r.u8(at + 5)?, e.u16(at + 6)?, e.u64(at + 8)?, e.u64(at + 16)?)
-        } else {
-            (e.u32(at)?, e.r.u8(at + 12)?, e.r.u8(at + 13)?, e.u16(at + 14)?, u64::from(e.u32(at + 4)?), u64::from(e.u32(at + 8)?))
+        let Some(RawSym { name, info, other, shndx, value, size }) = i.checked_mul(ent).and_then(|d| syms_off.checked_add(d)).and_then(|at| raw_sym(e, at))
+        else {
+            break;
         };
         let binding = match info >> 4 {
             1 => "global",
@@ -471,7 +690,6 @@ pub fn dynamic_symbols(data: &[u8], b: &Binary) -> Option<DynamicSymbols> {
             out.imports.push(row);
         }
     }
-    Some(out)
 }
 
 /// Name of an ELF dynamic relocation type.
@@ -891,5 +1109,90 @@ mod tests {
         put(&mut d, dynamic + 8, &0x1001u64.to_le_bytes());
         let b = crate::parse_binary(&d).expect("the header and program headers are valid");
         assert!(b.libraries.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod sectionless_tests {
+    use super::*;
+    use crate::binary::SymbolKind;
+    use craft_anything_testkit::flutter::SymbolTable;
+    use craft_anything_testkit::sectionless::sectionless_elf;
+
+    const NAMES: [&str; 3] = ["inflate", "deflate", "adler32"];
+    const TABLES: [(SymbolTable, &str); 2] = [(SymbolTable::DynamicHash, "DT_HASH"), (SymbolTable::DynamicGnuHash, "DT_GNU_HASH")];
+
+    #[test]
+    fn symbols_come_from_the_dynamic_segment_in_every_class_and_byte_order() {
+        for (is64, big) in [(true, false), (false, false), (false, true), (true, true)] {
+            for (table, source) in TABLES {
+                let d = sectionless_elf(is64, big, &NAMES, table);
+                let b = crate::parse_binary(&d).unwrap();
+                assert!(b.sections.is_empty(), "{is64} {big}");
+                let scan = dynamic_table(&d);
+                let t = scan.table.unwrap();
+                assert_eq!((t.count, t.count_source), (5, source), "{is64} {big}");
+                assert!(scan.warnings.is_empty());
+                let funcs: Vec<_> = b.symbols.iter().filter(|s| s.defined && s.kind == SymbolKind::Function && s.dynamic).map(|s| s.name.as_str()).collect();
+                assert_eq!(funcs, NAMES, "{is64} {big} {source}");
+                let exports: Vec<_> = b.exports.iter().map(|e| e.name.as_str()).collect();
+                assert_eq!(exports, NAMES);
+                assert!(b.exports.iter().all(|e| e.addr != 0));
+                assert_eq!(b.imports.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), ["puts"]);
+                let ds = dynamic_symbols(&d, &b).unwrap();
+                assert_eq!((ds.exports.len(), ds.imports.len()), (3, 1));
+            }
+        }
+    }
+
+    #[test]
+    fn the_section_stripped_flutter_libraries_name_their_symbols() {
+        for (table, source) in TABLES {
+            let d = craft_anything_testkit::flutter::libapp_so(table);
+            let b = crate::parse_binary(&d).unwrap();
+            assert!(b.sections.is_empty());
+            assert_eq!(dynamic_table(&d).table.unwrap().count_source, source);
+            let mut names: Vec<_> = b.symbols.iter().filter(|s| s.dynamic && s.defined).map(|s| s.name.as_str()).collect();
+            names.sort_unstable();
+            assert_eq!(names, ["_kDartIsolateSnapshotData", "_kDartIsolateSnapshotInstructions", "_kDartVmSnapshotData", "_kDartVmSnapshotInstructions"]);
+            assert_eq!(b.exports.len(), 4);
+        }
+    }
+
+    #[test]
+    fn a_damaged_sectionless_file_never_panics() {
+        for (is64, big) in [(true, false), (false, true)] {
+            for (table, _) in TABLES {
+                let d = sectionless_elf(is64, big, &NAMES, table);
+                for sample in craft_anything_testkit::mutations(&d) {
+                    let _ = dynamic_table(&sample);
+                    if let Ok(b) = crate::parse_binary(&sample) {
+                        let _ = dynamic_symbols(&sample, &b);
+                    }
+                }
+                for n in (0..d.len()).step_by(7) {
+                    let _ = dynamic_table(&d[..n]);
+                    let _ = crate::parse_binary(&d[..n]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_symbol_count_past_the_end_of_the_file_reads_only_what_is_there() {
+        let mut d = sectionless_elf(true, false, &NAMES, SymbolTable::DynamicHash);
+        // Patch the DT_HASH table's nchain to the largest count.
+        let hash = {
+            let phdrs = program_headers(&d).unwrap();
+            let e = E::new(&d).unwrap();
+            let dynv = dynamic_entries(&e, &phdrs);
+            va_to_off(&phdrs, dynv.iter().find(|(tag, _)| *tag == DT_HASH).unwrap().1).unwrap() as usize
+        };
+        d[hash + 4..hash + 8].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(dynamic_table(&d).table.unwrap().count, u64::from(u32::MAX));
+        let b = crate::parse_binary(&d).unwrap();
+        let ds = dynamic_symbols(&d, &b).unwrap();
+        assert!(ds.truncated && !ds.warnings.is_empty());
+        assert_eq!(ds.exports.len(), 3);
     }
 }

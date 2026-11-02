@@ -25,6 +25,7 @@ pub mod packed;
 pub mod pcap;
 pub mod program_facts;
 pub mod sbpf;
+pub mod sectionless;
 pub mod sqlite;
 pub mod wasm_plugin;
 

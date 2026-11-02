@@ -26,22 +26,13 @@ pub const DART_SYMBOLS: [(&str, &str); 4] = [
 
 const MAX_PHDRS: usize = 4096;
 const MAX_SYMBOL_SCAN: u64 = 4_000_000;
-const MAX_DYNAMIC: usize = 65_536;
 const MAX_NAME: usize = 4096;
 const MAX_REGION: usize = 64 << 20;
 
 const PT_LOAD: u32 = 1;
-const PT_DYNAMIC: u32 = 2;
 const PT_NOTE: u32 = 4;
 const SHT_DYNSYM: u32 = 11;
 const SHT_NOTE: u32 = 7;
-const DT_NULL: u64 = 0;
-const DT_HASH: u64 = 4;
-const DT_STRTAB: u64 = 5;
-const DT_SYMTAB: u64 = 6;
-const DT_STRSZ: u64 = 10;
-const DT_SYMENT: u64 = 11;
-const DT_GNU_HASH: u64 = 0x6fff_fef5;
 
 /// One dynamic symbol of interest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -267,57 +258,6 @@ impl<'a> Elf<'a> {
         self.r.cstr(o, max)
     }
 
-    fn dynamic(&self) -> Vec<(u64, u64)> {
-        let mut out = Vec::new();
-        let Some(d) = self.phdrs.iter().find(|p| p.ty == PT_DYNAMIC) else { return out };
-        let ent = if self.is64 { 16u64 } else { 8 };
-        let n = d.filesz / ent;
-        for i in 0..n.min(MAX_DYNAMIC as u64) {
-            let Some(o) = d.offset.checked_add(i * ent).and_then(to_usize) else { break };
-            let e = if self.is64 {
-                (self.r.u64_le(o), o.checked_add(8).and_then(|x| self.r.u64_le(x)))
-            } else {
-                (self.r.u32_le(o).map(u64::from), o.checked_add(4).and_then(|x| self.r.u32_le(x)).map(u64::from))
-            };
-            let (Some(tag), Some(val)) = e else { break };
-            if tag == DT_NULL {
-                break;
-            }
-            out.push((tag, val));
-        }
-        out
-    }
-
-    fn gnu_hash_count(&self, off: u64) -> Option<u64> {
-        let r = self.r;
-        let o = to_usize(off)?;
-        let nbuckets = u64::from(r.u32_le(o)?);
-        let symoffset = u64::from(r.u32_le(o.checked_add(4)?)?);
-        let bloom_size = u64::from(r.u32_le(o.checked_add(8)?)?);
-        if nbuckets > (1 << 24) || bloom_size > (1 << 24) {
-            return None;
-        }
-        let word = if self.is64 { 8 } else { 4 };
-        let buckets = off.checked_add(16)?.checked_add(bloom_size.checked_mul(word)?)?;
-        let mut max = 0u64;
-        for i in 0..nbuckets {
-            let b = u64::from(r.u32_le(to_usize(buckets.checked_add(i * 4)?)?)?);
-            max = max.max(b);
-        }
-        if max < symoffset {
-            return Some(symoffset);
-        }
-        let chains = buckets.checked_add(nbuckets * 4)?;
-        let mut idx = max;
-        loop {
-            let v = r.u32_le(to_usize(chains.checked_add(idx.checked_sub(symoffset)?.checked_mul(4)?)?)?)?;
-            idx = idx.checked_add(1)?;
-            if v & 1 == 1 || idx > MAX_SYMBOL_SCAN {
-                return Some(idx);
-            }
-        }
-    }
-
     fn notes(&self, off: u64, size: u64, out: &mut Option<String>) {
         let mut pos = 0u64;
         let r = self.r;
@@ -384,36 +324,12 @@ pub fn parse_elf(data: &[u8]) -> Result<DartElf, FormatError> {
         }
     }
     if table.is_none() {
-        let dynv = elf.dynamic();
-        let get = |tag: u64| dynv.iter().find(|(t, _)| *t == tag).map(|(_, v)| *v);
-        let (symtab, strtab) = (get(DT_SYMTAB).and_then(|v| elf.va_to_off(v)), get(DT_STRTAB).and_then(|v| elf.va_to_off(v)));
-        if let (Some(symtab), Some(strtab)) = (symtab, strtab) {
-            let syment = get(DT_SYMENT).unwrap_or(elf.sym_size());
-            if syment != elf.sym_size() {
-                warnings.push(format!("unexpected DT_SYMENT {syment}"));
-            } else {
-                let strsz = get(DT_STRSZ).unwrap_or(0);
-                let mut count = None;
-                if let Some(n) = get(DT_HASH).and_then(|v| elf.va_to_off(v)).and_then(to_usize).and_then(|o| r.u32_le(o.checked_add(4)?)) {
-                    count = Some(u64::from(n));
-                    count_source = "DT_HASH";
-                }
-                if count.is_none()
-                    && let Some(n) = get(DT_GNU_HASH).and_then(|v| elf.va_to_off(v)).and_then(|o| elf.gnu_hash_count(o))
-                {
-                    count = Some(n);
-                    count_source = "DT_GNU_HASH";
-                }
-                if count.is_none() && strtab > symtab {
-                    count = Some((strtab - symtab) / elf.sym_size());
-                    count_source = "estimated";
-                    warnings.push("no hash table: the symbol count was estimated from the table layout".into());
-                }
-                if let Some(c) = count {
-                    table = Some((symtab, c, strtab, strsz));
-                    symbol_source = "dynamic-segment";
-                }
-            }
+        let scan = crate::elf::dynamic_table(data);
+        warnings.extend(scan.warnings);
+        if let Some(t) = scan.table {
+            table = Some((t.symtab, t.count, t.strtab, t.strsz));
+            symbol_source = "dynamic-segment";
+            count_source = t.count_source;
         }
     }
     let mut dart_symbols = Vec::new();
