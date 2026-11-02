@@ -868,13 +868,14 @@ to the project next. Pins are the engine's (tools), kept in the project's `pinne
 - [ ] Pin a website (a frozen copy of the built site, each served on its own port)
 - [ ] A pin started before the app restarted shows as running (keep its process id and start
       time in the pin, and check both), and can be stopped
-- [ ] Cap a run's log (`last-run.log`, `play.log`): it grows as long as the program prints
+- [x] Cap a run's log (`last-run.log`, `play.log`): it grows as long as the program prints — capped to the last 1 MiB on disk when it's read (`pins::tail`)
 - [x] A collapsible Pinned section in the sidebar (icons with a running dot when folded; open,
       open another copy, close, go to the project, rename, remove), Pin this build on the project
       page with the frozen/light choice and each copy's size; the pin tools are in the command
       palette with every other tool
 - [ ] Opening a pin that's already running brings its window to the front, instead of a message
-- [ ] Show a pin's folder (the right-click menu), and how much space pins take in Settings
+- [ ] How much space pins take in Settings. Showing a pin's folder is done in the right-click menu,
+      through `project_open_folder` with `pin` — claimed: muraa-p, branch bugfix/r2.10-pin-folder
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't blocked
 
 ## M3 Engine depth
