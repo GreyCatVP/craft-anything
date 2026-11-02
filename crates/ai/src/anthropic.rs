@@ -2,7 +2,7 @@
 //! server-side fallbacks.
 
 use crate::http::{self, SseEvent};
-use crate::model::{Block, ChatModel, Delta, Msg, Speaker, Stop, StopReason, ToolDef, TurnRequest, TurnResult, Usage};
+use crate::model::{Block, ChatModel, Delta, Effort, Msg, Speaker, Stop, StopReason, ToolDef, TurnRequest, TurnResult, Usage};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Value, json};
 
@@ -10,6 +10,19 @@ pub const DEFAULT_BASE: &str = "https://api.anthropic.com";
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 /// Offered in the model dropdown when the live list can't be fetched.
 pub const MODELS: &[&str] = &["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+/// Models that offer fewer effort levels than all five (Claude's effort guide), by model id
+/// prefix; any other model is sent the level as chosen.
+pub const EFFORT_LEVELS: &[(&str, &[Effort])] = &[
+    ("claude-opus-4-6", &[Effort::Low, Effort::Medium, Effort::High, Effort::Max]),
+    ("claude-sonnet-4-6", &[Effort::Low, Effort::Medium, Effort::High, Effort::Max]),
+    ("claude-opus-4-5", &[Effort::Low, Effort::Medium, Effort::High]),
+];
+
+/// The effort level `model` is sent: `effort`, or the nearest level below it the model has.
+pub fn effort_for(model: &str, effort: Effort) -> Effort {
+    let model = model.trim().trim_start_matches("anthropic/").trim_start_matches("anthropic.");
+    EFFORT_LEVELS.iter().find(|(prefix, _)| model.starts_with(prefix)).map_or(effort, |(_, levels)| effort.within(levels))
+}
 pub const API_VERSION: &str = "2023-06-01";
 pub const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 pub const MAX_TOKENS: u32 = 64_000;
@@ -58,7 +71,7 @@ impl Anthropic {
             "system": [{"type": "text", "text": req.system, "cache_control": {"type": "ephemeral"}}],
             "messages": req.messages.iter().map(message_json).collect::<Vec<_>>(),
             "thinking": {"type": "adaptive", "display": "summarized"},
-            "output_config": {"effort": req.effort.as_str()},
+            "output_config": {"effort": effort_for(&self.model, req.effort).as_str()},
         });
         if !req.tools.is_empty() {
             let n = req.tools.len();
@@ -352,6 +365,24 @@ mod tests {
         off.fallbacks = false;
         assert!(off.body(&TurnRequest { system: "s", messages: &msgs, tools: &[], effort: Effort::Low, max_tokens: 10 }).get("fallbacks").is_none());
         assert!(off.headers().iter().all(|(k, _)| *k != "anthropic-beta"));
+    }
+
+    /// Every level goes to a model that has it; one that lacks it gets the nearest level below.
+    #[test]
+    fn effort_steps_down_to_a_level_the_model_has() {
+        for e in Effort::ALL {
+            assert_eq!(effort_for("claude-opus-5-5", e), e);
+            assert_eq!(Effort::parse(&e.as_str().to_uppercase()), Some(e));
+        }
+        assert_eq!(effort_for("claude-sonnet-4-6", Effort::Xhigh), Effort::High);
+        assert_eq!(effort_for("anthropic/claude-opus-4-6", Effort::Max), Effort::Max);
+        assert_eq!(effort_for("claude-opus-4-5-20251101", Effort::Max), Effort::High);
+        assert_eq!(Effort::Low.within(&[Effort::Medium, Effort::High]), Effort::Medium, "none below: the lowest it has");
+        assert_eq!(Effort::Max.within(&[]), Effort::Max);
+        assert_eq!(Effort::parse("extreme"), None);
+        let a = Anthropic::new(None, "k".into(), "claude-sonnet-4-6");
+        let b = a.body(&TurnRequest { system: "s", messages: &[], tools: &[], effort: Effort::Xhigh, max_tokens: 10 });
+        assert_eq!(b["output_config"]["effort"], "high");
     }
 
     #[test]

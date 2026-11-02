@@ -81,32 +81,44 @@ pub struct ToolDef {
     pub schema: Value,
 }
 
-/// How hard the model should think.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// How hard the model should think: Claude's effort levels, least to most (the order counts: a
+/// level a model lacks steps down to the nearest one below).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Effort {
     Low,
     #[default]
     Medium,
     High,
+    /// Longer-horizon work than `high`.
+    Xhigh,
+    /// The deepest reasoning, with no limit on tokens spent.
+    Max,
 }
 
 impl Effort {
+    /// Every level, least to most.
+    pub const ALL: [Effort; 5] = [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Effort::Low => "low",
             Effort::Medium => "medium",
             Effort::High => "high",
+            Effort::Xhigh => "xhigh",
+            Effort::Max => "max",
         }
     }
 
     pub fn parse(s: &str) -> Option<Effort> {
-        match s {
-            "low" => Some(Effort::Low),
-            "medium" => Some(Effort::Medium),
-            "high" => Some(Effort::High),
-            _ => None,
-        }
+        let s = s.trim();
+        Effort::ALL.into_iter().find(|e| e.as_str().eq_ignore_ascii_case(s))
+    }
+
+    /// This level on a model that offers only `levels`: the nearest one at or below it (as Claude
+    /// Code does), else the lowest it has. Unchanged when `levels` is empty.
+    pub fn within(self, levels: &[Effort]) -> Effort {
+        levels.iter().copied().filter(|l| *l <= self).max().or_else(|| levels.iter().copied().min()).unwrap_or(self)
     }
 }
 

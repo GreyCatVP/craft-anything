@@ -224,6 +224,29 @@ fn an_ais_model_is_changed() {
     assert!(h.set_model("Box", " ").is_err());
 }
 
+/// Every Claude effort level can be chosen for the Claude API and Claude Code, and only for them.
+#[test]
+fn a_claude_ais_effort_is_changed() {
+    let (h, _d) = hub();
+    let b = |name: &str, kind, model: &str| BackendConfig { name: name.into(), kind, model: model.into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend(b("Claude Code", BackendKind::AgentCli, "claude-code"), None).unwrap();
+    h.add_backend(b("Codex", BackendKind::AgentCli, "codex"), None).unwrap();
+    let effort = |h: &AiHub, name: &str| {
+        let config = h.backends().into_iter().find(|b| b.name == name).unwrap();
+        crate::effort_in_use(&config, h.options().get(name))
+    };
+    assert_eq!(effort(&h, "Claude Code"), Some(Effort::High), "high until it's chosen");
+    for level in Effort::ALL {
+        assert!(h.set_effort("Claude Code", Some(level)).unwrap());
+        assert_eq!(effort(&h, "Claude Code"), Some(level));
+    }
+    assert!(h.set_effort("Claude Code", None).unwrap());
+    assert_eq!(effort(&h, "Claude Code"), Some(Effort::High), "back to the usual level");
+    assert_eq!(effort(&h, "Codex"), None, "an agent that doesn't take Claude's levels");
+    assert!(h.set_effort("Codex", Some(Effort::Max)).is_err());
+    assert!(!h.set_effort("Nobody", Some(Effort::Low)).unwrap());
+}
+
 /// #54, #98: a server on another computer is added by its address, with a model that can chat
 /// when none is named; one that doesn't answer with its models isn't added.
 #[test]

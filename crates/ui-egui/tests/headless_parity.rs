@@ -109,6 +109,7 @@ const ACTIONS: &[Action] = &[
     a("add_server",          "connect an AI server by its address",            Cli("ai add <name> --kind --base-url --key-env --key-stdin")),
     a("pick_model",          "list the models an AI can use",                  Cli("ai model <name>")),
     a("set_model",           "change the model an AI uses",                    Cli("ai model <name> <model>")),
+    a("set_effort",          "change how hard a Claude AI thinks",             Cli("ai effort <name> <level>")),
     a("choose_backend",      "pick the AI brain",                              Cli("chat <question> --backend")),
     a("set_role",            "choose which AI builds or extracts",             Cli("ai extractor <name>")),
 

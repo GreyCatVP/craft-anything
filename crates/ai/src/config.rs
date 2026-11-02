@@ -30,7 +30,8 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BackendOptions {
-    /// Thinking depth for investigations (`low`/`medium`/`high`); quick explanations use `low`.
+    /// Thinking depth (`low`/`medium`/`high`/`xhigh`/`max`) for the Claude API and Claude Code;
+    /// `high` unless set. A model without the level gets the nearest one below it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
     /// Anthropic server-side fallbacks (default on).

@@ -317,6 +317,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
+    let mut chosen_effort = None;
     // The AI whose Remove was pressed once: asked again before its key is deleted.
     let confirm_id = egui::Id::new("remove-ai");
     let confirming: Option<String> = ui.data(|d| d.get_temp(confirm_id));
@@ -351,6 +352,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                             }
                         });
                     }
+                    // How hard it thinks: the Claude API and Claude Code take every Claude level.
+                    let effort = craft_anything_ai::effort_in_use(b, app.backend_options.get(&b.name));
                     // Which model it uses, and the ones it can be set to (#123).
                     if let Some(current) = model_in_use {
                         ui.horizontal_wrapped(|ui| {
@@ -381,6 +384,16 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                         close_picker = true;
                                     }
                                 }
+                            }
+                            if let Some(current) = effort {
+                                ui.label(RichText::new(tr("Effort:")).color(t.text_faint).size(theme::CAPTION));
+                                egui::ComboBox::from_id_salt(("effort", &b.name)).icon(widgets::combo_icon).selected_text(current.as_str()).show_ui(ui, |ui| {
+                                    for e in craft_anything_ai::Effort::ALL {
+                                        if ui.selectable_label(e == current, e.as_str()).clicked() && e != current {
+                                            chosen_effort = Some((b.name.clone(), e));
+                                        }
+                                    }
+                                });
                             }
                         });
                     }
@@ -457,6 +470,9 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     if let Some((name, model)) = chosen_model {
         app.set_model(&name, &model);
+    }
+    if let Some((name, effort)) = chosen_effort {
+        app.set_effort(&name, effort);
     }
     if close_picker {
         app.model_picker = None;

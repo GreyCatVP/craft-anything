@@ -857,10 +857,15 @@ Gaps found while using the app for real projects.
 - [ ] Two engine tests fail on a Mac, on `main` too: `real_binary_end_to_end_if_present` expects
       `/bin/ls` to be Linux, and `auto_mode_keeps_going_but_never_does_the_dangerous_things` is
       refused `rm -rf` in a temp folder under `/var/folders`
-- [ ] Every effort level Claude offers: `xhigh` and `max` next to low, medium and high, for the
+- [x] Every effort level Claude offers: `xhigh` and `max` next to low, medium and high, for the
       Claude API and Claude Code, a level a model lacks stepping down to the nearest one it has,
       and a way to choose it in Settings → AI and `ai effort` (only `config.toml` sets it now)
-      — claimed: zeller-lorenz, branch feature/r2.9-claude-effort-models
+- [ ] Claude Code's own extras: its Ultracode switch (a setting, not an effort level; the
+      effort environment variable we use can't turn it on) and its model names beyond the list
+      (`opusplan`, `[1m]` variants) offered in Settings → AI; `ai model` already takes any name
+- [ ] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes fails when several crates'
+      tests run at once and passes alone: it writes a script and runs it straight away, which a
+      busy machine can refuse while another test's child still holds the file open
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

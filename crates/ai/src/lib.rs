@@ -98,6 +98,17 @@ fn yes() -> bool {
     true
 }
 
+/// The effort an AI thinks at, when it can be chosen (Settings → AI): the Claude API and Claude
+/// Code, which take every level in [`Effort::ALL`]. `None` for the others, which don't use it.
+pub fn effort_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -> Option<Effort> {
+    let claude = match config.kind {
+        BackendKind::Anthropic => true,
+        BackendKind::AgentCli => config.model == "claude-code",
+        _ => false,
+    };
+    claude.then(|| prompt::choose_effort(options.and_then(|o| o.effort)))
+}
+
 /// The model an AI uses, when it can be chosen (Settings → AI, #123): an API's own, or the one
 /// Claude Code is asked for. `None` for an agent app that picks its own.
 pub fn model_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -> Option<String> {
@@ -447,6 +458,19 @@ impl AiHub {
             BackendKind::AgentCli => b.options.cli_model = Some(model.to_string()),
             _ => b.config.model = model.to_string(),
         }
+        self.save_config(&cfg)?;
+        Ok(true)
+    }
+
+    /// How hard a backend thinks (`None`: the usual level again). Only the Claude API and Claude
+    /// Code take one ([`effort_in_use`]). Returns false when there was no such backend.
+    pub fn set_effort(&self, name: &str, effort: Option<Effort>) -> Result<bool, ToolError> {
+        let mut cfg = self.config_to_change()?;
+        let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
+        if effort.is_some() && effort_in_use(&b.config, Some(&b.options)).is_none() {
+            return Err(ToolError::invalid(format!("{name} doesn't take an effort level.")).with_remediation("Effort is for the Claude API and Claude Code."));
+        }
+        b.options.effort = effort;
         self.save_config(&cfg)?;
         Ok(true)
     }

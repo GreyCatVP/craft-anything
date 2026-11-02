@@ -1024,6 +1024,36 @@ fn an_agent_apps_program_is_set_in_settings() {
     assert!(wait(&mut h, |a| program(a).is_none()));
 }
 
+/// Claude Code's effort is chosen in Settings → AI, from every level Claude offers.
+#[test]
+fn a_claude_ais_effort_is_set_in_settings() {
+    use craft_anything_ai::{BackendConfig, BackendKind, Effort};
+    let mut h = harness(|| {
+        let a = demo::app(demo::engine(Mode::Experienced, true));
+        let cfg = BackendConfig {
+            name: "Claude Code".into(),
+            kind: BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        a.hub.add_backend(cfg, None).unwrap();
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code")));
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    h.get_by_label("Effort:");
+    assert!(h.state().backend_options.get("Claude Code").and_then(|o| o.effort).is_none(), "the usual level until one is chosen");
+    h.state_mut().set_effort("Claude Code", Effort::Max);
+    assert!(wait(&mut h, |a| a.backend_options.get("Claude Code").and_then(|o| o.effort) == Some(Effort::Max)));
+    h.run_steps(2);
+    h.get_by_label("Effort:");
+}
+
 #[test]
 fn settings_window_tabs_draw() {
     let mut h = harness(|| {
