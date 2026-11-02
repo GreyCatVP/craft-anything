@@ -580,7 +580,7 @@ const BLUEPRINT_JS: &str = r#"(() => {
   const fonts = {}, sizes = {}, weights = {}, colors = {}, backgrounds = {}, radii = {}, shadows = {}, bgImages = {}, spacing = {}, maxWidths = {};
   // Colours as #rrggbb(aa), whatever notation the CSS used (oklch, hsl, named…): painted on a 1×1 canvas and read back.
   const cv = document.createElement('canvas'); cv.width = cv.height = 1; const g = cv.getContext('2d', {willReadFrequently: true}); const seenHex = {};
-  const hex = c => { if (!c || !g) return c; if (c in seenHex) return seenHex[c]; g.clearRect(0, 0, 1, 1); g.fillStyle = '#000'; g.fillStyle = c; g.fillRect(0, 0, 1, 1); const d = g.getImageData(0, 0, 1, 1).data; const h2 = x => x.toString(16).padStart(2, '0'); return seenHex[c] = '#' + h2(d[0]) + h2(d[1]) + h2(d[2]) + (d[3] < 255 ? h2(d[3]) : ''); };
+  const hex = c => { if (!c || !g) return c; if (c in seenHex) return seenHex[c]; const s = String(c).trim().toLowerCase(); const hm = s.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/); if (hm) { let h = hm[1]; if (h.length === 3 || h.length === 4) h = h.split('').map(x => x + x).join(''); return seenHex[c] = '#' + (h.length === 8 ? h.slice(0, 6) + (parseInt(h.slice(6, 8), 16) < 255 ? h.slice(6, 8) : '') : h); } g.clearRect(0, 0, 1, 1); g.fillStyle = '#000'; g.fillStyle = c; g.fillRect(0, 0, 1, 1); const d = g.getImageData(0, 0, 1, 1).data; const h2 = x => x.toString(16).padStart(2, '0'); return seenHex[c] = '#' + h2(d[0]) + h2(d[1]) + h2(d[2]) + (d[3] < 255 ? h2(d[3]) : ''); };
   const els = [document.documentElement, document.body, ...Array.from(document.querySelectorAll('body *')).slice(0, 12000)].filter(Boolean);
   for (const el of els) {
     if (!shown(el)) continue;
@@ -707,7 +707,7 @@ const LAYOUT_JS: &str = r#"(() => {
   const shown = el => { const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return false; const s = getComputedStyle(el); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; };
   const size = sel => { const el = Array.from(document.querySelectorAll(sel)).slice(0, 50).find(shown); return el ? px(getComputedStyle(el).fontSize) : 0; };
   const cv = document.createElement('canvas'); cv.width = cv.height = 1; const g = cv.getContext('2d', {willReadFrequently: true});
-  const hex = c => { if (!g) return c; g.clearRect(0, 0, 1, 1); g.fillStyle = '#000'; g.fillStyle = c; g.fillRect(0, 0, 1, 1); const d = g.getImageData(0, 0, 1, 1).data; const h2 = x => x.toString(16).padStart(2, '0'); return '#' + h2(d[0]) + h2(d[1]) + h2(d[2]) + (d[3] < 255 ? h2(d[3]) : ''); };
+  const hex = c => { if (!g) return c; const s = String(c).trim().toLowerCase(); const hm = s.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/); if (hm) { let h = hm[1]; if (h.length === 3 || h.length === 4) h = h.split('').map(x => x + x).join(''); return '#' + (h.length === 8 ? h.slice(0, 6) + (parseInt(h.slice(6, 8), 16) < 255 ? h.slice(6, 8) : '') : h); } g.clearRect(0, 0, 1, 1); g.fillStyle = '#000'; g.fillStyle = c; g.fillRect(0, 0, 1, 1); const d = g.getImageData(0, 0, 1, 1).data; const h2 = x => x.toString(16).padStart(2, '0'); return '#' + h2(d[0]) + h2(d[1]) + h2(d[2]) + (d[3] < 255 ? h2(d[3]) : ''); };
   // Items side by side: the most children of one box sharing a top edge, counting only children at
   // least 15% of the block's width (cards and columns, not inline links or logo strips).
   const perRow = (root, width) => {
