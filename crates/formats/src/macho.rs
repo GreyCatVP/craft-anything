@@ -26,6 +26,7 @@ pub struct FatSlice {
 pub fn cpu_name(cputype: u32, sub: u32) -> String {
     match cputype {
         7 => "i386".into(),
+        0x0100_0007 if sub & 0x00ff_ffff == 8 => "x86_64h".into(),
         0x0100_0007 => "x86_64".into(),
         12 => "arm".into(),
         0x0100_000c => {
@@ -584,6 +585,28 @@ pub fn objc_metadata(data: &[u8], b: &Binary) -> ObjcMetadata {
 mod tests {
     use super::*;
     use craft_anything_testkit as tk;
+
+    #[test]
+    fn a_haswell_request_selects_the_haswell_slice() {
+        use crate::macho_deps::{pick_slice, slice_bytes, slices};
+        let mut generic = tk::apple::macho_min(tk::apple::CPU_X86_64, 1, &[], &[("__text", &[0xc3])]);
+        generic[8..12].copy_from_slice(&3u32.to_le_bytes());
+        let mut haswell = generic.clone();
+        haswell[8..12].copy_from_slice(&8u32.to_le_bytes());
+        for order in [vec![generic.clone(), haswell.clone()], vec![haswell.clone(), generic.clone()]] {
+            let fat = tk::macho_fat(&order);
+            let all = slices(&fat).unwrap();
+            let selected = pick_slice(&all, Some("x86_64h")).unwrap();
+            assert_eq!(selected.cpusubtype, 8);
+            assert_eq!(slice_bytes(&fat, &selected).unwrap(), haswell);
+            assert_eq!(pick_slice(&all, Some("x86_64")).unwrap().cpusubtype, 3);
+            assert!(pick_slice(&all, Some("unknown-architecture")).is_none());
+        }
+        assert_eq!(slices(&haswell).unwrap()[0].arch, "x86_64h");
+        assert_eq!(pick_slice(&slices(&generic).unwrap(), Some("x86_64h")).unwrap().cpusubtype, 3);
+        assert_eq!(cpu_name(tk::apple::CPU_X86_64, 0x8000_0008), "x86_64h");
+        assert_eq!(cpu_name(tk::apple::CPU_X86_64, 0x108), "x86_64");
+    }
 
     #[test]
     fn thin_macho_facts() {
