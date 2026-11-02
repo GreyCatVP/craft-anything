@@ -26,9 +26,11 @@ the selected model. Changing the draft model resets its draft thinking depth. **
 refreshes both lists after provider or configuration changes. A missing saved model or variant
 is marked unavailable; there is no fallback catalogue or silent downgrade.
 
-Discovery runs in the background with deadlines and output limits. Local queries explicitly
-use the current project directory; SSH queries use the remote shell's working directory, as
-the existing remote runner does. Local model lists are never substituted for a remote one.
+Discovery runs in the background with deadlines and output limits. Listing models launches
+the selected OpenCode process, may start its background service, and may update its cache;
+discovery is not read-only. Local queries explicitly use the current project directory;
+SSH queries use the remote shell's working directory, as the existing remote runner does.
+Local model lists are never substituted for a remote one.
 Changing the program, backend settings or project invalidates an open picker. Saving an explicit
 choice checks it against the selected installation's live catalogue.
 If another task holds the session, opening or reloading the picker asks you to retry rather
