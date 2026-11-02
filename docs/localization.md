@@ -1,7 +1,7 @@
 # Chinese UI localisation
 
 The desktop app offers **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
-alongside English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
+alongside English, German, French and Japanese, in **Settings → General → Language**. The choice is saved in the
 existing `language` setting. **System** uses the operating system's preferred
 supported language; if none matches, it uses English. An explicit choice takes
 precedence over the system language.
@@ -10,6 +10,16 @@ Chinese locales without a script, including `zh`, `zh-CN` and `zh-SG`, select
 Simplified Chinese. `zh-TW`, `zh-HK` and `zh-MO` select Traditional Chinese.
 An explicit `Hans` or `Hant` script takes precedence over the region. Locale
 matching accepts underscores, case differences and Unix encoding suffixes.
+
+## German
+
+**Deutsch** (`de`) uses the informal "du". `de`, `de-DE`, `de-AT` and `de-CH` select it, as does the
+system language when it is German. `crates/ui-egui/src/i18n/de.tsv` has the same keys as the Chinese
+catalogs (a unit test compares them), written from the English source strings, not from the Chinese.
+It was drafted with an AI and not yet reviewed by a native speaker; corrections are welcome.
+Product and technology names, tool ids and shortcuts keep their spelling. The kind detection that reads
+a request ("a game", "a website") also knows the German words *Spiel*, *Webseite* and *Internetseite*,
+so a translated suggestion keeps its project kind.
 
 ## Scope and format
 

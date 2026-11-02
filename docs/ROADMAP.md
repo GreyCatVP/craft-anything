@@ -830,8 +830,9 @@ Gaps found while using the app for real projects.
 - [x] Simplified and Traditional Chinese UI catalogs, system-locale selection and translated
       tool-title search; catalog integrity, coverage checks and isolated language-switch tests
       ([localisation](localization.md))
-- [ ] German UI catalog (`i18n/de.tsv`, informal "du"), selectable in Settings → General → Language and by the
-      system locale — claimed: Ilor29, branch feature/german-ui
+- [x] German UI catalog (`i18n/de.tsv`, informal "du"), selectable in Settings → General → Language and by the
+      system locale; German words for the game/website kind detection ([localisation](localization.md))
+- [ ] A native speaker reviews `de.tsv` (it was drafted with an AI), and `README.de.md` is translated from `README.md`
 - [ ] A Simplified Chinese README (`README.zh.md`) translated from `README.md`, linked from the
       language switcher in `README.md` and `README.ja.md` — claimed: maple323, branch docs/readme-zh
 - [x] A Korean README (`README.ko.md`) was translated from `README.md` and linked from the
