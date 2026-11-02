@@ -393,7 +393,7 @@ fn game_iostore_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         "by_compression": by_compression(files.iter().map(|f| f.compression.as_str())),
         "size": size,
         "stored_size": stored_size,
-        "matching": matching.len(),
+        "matching": file_count.map(|_| matching.len()),
         "offset": p.offset,
         "files": page,
     });
@@ -1453,6 +1453,7 @@ mod tests {
         assert!(v["result"]["file_count"].is_null());
         assert!(v["result"]["size"].is_null());
         assert!(v["result"]["stored_size"].is_null());
+        assert!(v["result"]["matching"].is_null());
         assert_eq!(v["coverage"]["status"].as_str(), Some("unknown"));
         assert_eq!(v["limitations"][0]["code"].as_str(), Some("not_indexed"));
         let pak = craft_anything_testkit::temp_file("x.utoc", b"not a table of contents");
