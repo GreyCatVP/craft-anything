@@ -221,10 +221,27 @@ GitHub의 [최신 릴리스](https://github.com/storytold/craft-anything/release
 
 ### <a id="macos"></a>macOS
 
-| 빌드                               | 파일                                           | 참고           |
-| ---------------------------------- | ---------------------------------------------- | -------------- |
-| 앱, 유니버설(Apple 실리콘 + Intel) | `craft-anything-<ver>-macos-universal.dmg`     | 서명 및 공증됨 |
-| 명령줄 도구, 유니버설              | `craft-anything-cli-<ver>-macos-universal.zip` | 서명 및 공증됨 |
+| 빌드                               | 파일                                           | 참고                                                   |
+| ---------------------------------- | ---------------------------------------------- | ------------------------------------------------------ |
+| 앱, 유니버설(Apple 실리콘 + Intel) | `craft-anything-<ver>-macos-universal.dmg`     | 서명 및 공증됨                                         |
+| 명령줄 도구, 유니버설              | `craft-anything-cli-<ver>-macos-universal.zip` | 서명 및 공증됨. macOS가 막으면 아래를 참고하세요 |
+
+0.2.0 이후 버전은 앱 안에 명령줄 도구가 들어 있어서, 빌드할 때 별도 zip이 필요 없습니다. 앱 없이 명령줄만 쓰려는 경우에만 필요합니다.
+
+브라우저로 zip을 내려받으면 "Apple could not verify craft-anything-cli"라며 멈출 수 있습니다(단독 프로그램은 공증 정보를 함께 담을 수 없어서, macOS가 온라인으로 확인해야 하기 때문입니다). 터미널로 내려받으면 이 확인을 거치지 않으므로, 대신 다음을 사용하세요:
+
+```sh
+ver=0.2.0   # change this to the version you want
+curl -fLO "https://github.com/storytold/craft-anything/releases/download/v$ver/craft-anything-cli-$ver-macos-universal.zip"
+ditto -x -k "craft-anything-cli-$ver-macos-universal.zip" .
+mkdir -p ~/.local/bin
+mv "craft-anything-cli-$ver-macos-universal/craft-anything-cli" ~/.local/bin/
+~/.local/bin/craft-anything-cli --version
+```
+
+`craft-anything-cli`만으로 실행하려면 `~/.local/bin`을 `PATH`에 추가하세요.
+
+이미 막힌 파일이 있다면 휴지통으로 이동(Move to Bin) 대신 완료(Done)를 누른 뒤 `xattr -d com.apple.quarantine <path to craft-anything-cli>`를 실행하거나, 시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기(Open Anyway)에서 허용하세요.
 
 ### <a id="linux"></a>Linux
 
