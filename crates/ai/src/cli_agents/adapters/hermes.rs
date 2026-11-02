@@ -23,7 +23,12 @@ impl AgentAdapter for Hermes {
     }
 
     fn required_flags(&self) -> (&'static [&'static str], &'static [&'static str]) {
-        (&["--help"], &["-z, --oneshot"])
+        (&["--help"], &["--oneshot"])
+    }
+
+    /// Plain `hermes <prompt>` opens the interactive session; a failed flag check keeps this adapter.
+    fn plain_fallback(&self) -> bool {
+        false
     }
 
     fn streams_json(&self) -> bool {
@@ -46,5 +51,7 @@ mod tests {
         let options = BackendOptions { cli_model: Some("custom/qwen-2.5-coder".into()), args: vec!["-t".into(), "0.2".into()], ..Default::default() };
         assert_eq!(args(true, &options), ["-m", "custom/qwen-2.5-coder", "-t", "0.2", "-z", "PRE make a game"]);
         assert!(AgentAdapters::built_in().for_agent("hermes").ids().contains(&"hermes"), "registered, not the plain adapter");
+        assert_eq!(Hermes.required_flags(), (&["--help"][..], &["--oneshot"][..]));
+        assert!(!Hermes.plain_fallback());
     }
 }
