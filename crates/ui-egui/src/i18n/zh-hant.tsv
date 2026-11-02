@@ -1,4 +1,4 @@
-# zh-hant: original Chinese UI translations. Licensed MIT OR Apache-2.0.
+﻿﻿# zh-hant: original Chinese UI translations. Licensed MIT OR Apache-2.0.
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
  GB	 GB
  and {n} more	，另有 {n} 項
@@ -977,12 +977,14 @@ Set up a builder	設定建置助手
 Settings	設定
 Show a build's activity	顯示建置活動
 Show a project	顯示專案
+Show folder	顯示資料夾
 Show me everything	顯示全部內容
 Show me the proof	檢視證據
 Show pinned builds	顯示釘選的建置
 Show settings	顯示設定
 Show the answer	顯示回答
 Show the console	顯示主控台
+Show the folder	顯示該資料夾
 Show the ones that are met	顯示已滿足的要求
 Show the sidebar	顯示側邊欄
 Show the welcome again	再次顯示歡迎畫面
