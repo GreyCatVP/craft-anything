@@ -1793,7 +1793,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         usage: None,
         self_check: None,
     };
-    let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply);
+    let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply, None);
     let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
     assert_eq!(reply.trim(), "Carried on: yes");
     let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
@@ -1850,4 +1850,95 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
     let e = w.turn(&mut ws, &mut agent, "Carry on.", None).unwrap_err();
     assert!(e.message.contains("isn't on this computer"), "{e:?}");
     assert!(ws.manifest.agent_session.is_none());
+}
+
+/// #451: after each turn the project keeps a copy of the builder's session, and a new session on
+/// another computer is handed the conversation it kept.
+#[test]
+fn the_builders_conversation_travels_with_the_project() {
+    struct KeepsSessions(PathBuf);
+    impl crate::cli_agents::AgentAdapter for KeepsSessions {
+        fn ids(&self) -> &'static [&'static str] {
+            &["keeps"]
+        }
+        fn args(&self, _cx: &crate::cli_agents::ArgsCx) -> Vec<String> {
+            Vec::new()
+        }
+        fn session_file(&self, id: &str) -> Option<PathBuf> {
+            Some(self.0.join(format!("{id}.jsonl"))).filter(|p| p.is_file())
+        }
+        fn handoff(&self, saved: &str, max: usize) -> Option<String> {
+            crate::cli_agents::adapters::claude_handoff(saved, max)
+        }
+        fn restore_session(&self, id: &str, saved: &[u8], _cwd: &Path) -> Result<bool, ToolError> {
+            let path = self.0.join(format!("{id}.jsonl"));
+            if path.is_file() {
+                return Ok(false);
+            }
+            std::fs::write(path, saved).map(|_| true).map_err(|e| ToolError::invalid(e.to_string()))
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let session = [
+        serde_json::json!({"type":"user","message":{"content":"Make a notes app."}}),
+        serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":"Built it with a sidebar."}]}}),
+    ]
+    .iter()
+    .map(|v| v.to_string())
+    .collect::<Vec<_>>()
+    .join("\n");
+    std::fs::write(store.path().join("s-1.jsonl"), &session).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let w = Worker {
+        wake: Default::default(),
+        engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        tx,
+        stop: CancelToken::default(),
+        preview: Arc::default(),
+        seen: HashSet::new(),
+        inbox: Inbox::new(ws.inbox_dir()),
+        editor: None,
+        notes: Arc::default(),
+        feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        assets: false,
+        decompiled: false,
+        usage: None,
+        self_check: None,
+    };
+    let adapter = KeepsSessions(store.path().to_path_buf());
+    // No session yet, or one this computer doesn't have: nothing to keep, nothing said.
+    w.keep_session(&ws, &adapter);
+    ws.manifest.agent_session = Some("gone".into());
+    w.keep_session(&ws, &adapter);
+    assert!(!ws.agent_session_path().exists() && rx.try_iter().next().is_none());
+    ws.manifest.agent_session = Some("s-1".into());
+    w.keep_session(&ws, &adapter);
+    assert_eq!(std::fs::read_to_string(ws.agent_session_path()).unwrap(), session);
+
+    // On the other computer: the session is put back from the project, and the person is told.
+    std::fs::remove_file(store.path().join("s-1.jsonl")).unwrap();
+    w.restore_session(&ws, &adapter);
+    assert_eq!(std::fs::read_to_string(store.path().join("s-1.jsonl")).unwrap(), session);
+    let said: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Agent(AgentEvent::Status { text }) = e { Some(text) } else { None }).collect();
+    assert!(said.iter().any(|t| t.contains("Brought the builder's earlier conversation over")), "{said:?}");
+    w.restore_session(&ws, &adapter);
+    assert!(rx.try_iter().next().is_none(), "nothing to say when it's already there");
+
+    // Where it can't be, the new session's first message carries the kept conversation.
+    let handoff = crate::cli_agents::AgentAdapter::handoff(&adapter, &kept_session(&ws).unwrap(), HANDOFF_CHARS);
+    let first = resumed_elsewhere("THE BRIEF", "Last summary.", handoff.as_deref());
+    assert!(first.starts_with("THE BRIEF") && first.contains("isn't on this computer"), "{first}");
+    assert!(first.contains("Craft Anything asked you: Make a notes app.") && first.contains("You answered: Built it with a sidebar."), "{first}");
+    // Without a kept conversation, the last summary stands in for it.
+    let bare = resumed_elsewhere("THE BRIEF", "Last summary.", None);
+    assert!(bare.contains("Last summary.") && !bare.contains("as the project kept it"), "{bare}");
+
+    // A copy that can't be written is said, and the build goes on.
+    std::fs::remove_file(ws.agent_session_path()).unwrap();
+    std::fs::create_dir_all(ws.agent_session_path()).unwrap();
+    w.keep_session(&ws, &adapter);
+    let said: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Agent(AgentEvent::Status { text }) = e { Some(text) } else { None }).collect();
+    assert!(said.iter().any(|t| t.contains("Couldn't keep a copy")), "{said:?}");
 }

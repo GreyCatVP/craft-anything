@@ -90,6 +90,23 @@ pub trait AgentAdapter: Send + Sync {
     fn check_tool_server(&self, _stop: &CancelToken) -> Result<(), ToolError> {
         Ok(())
     }
+    /// The file in which this computer keeps the agent's saved session `id`, so the project can
+    /// keep a copy that travels with it. `None`: it keeps none we can copy, or not here.
+    fn session_file(&self, _id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+    /// What a new session needs to know of an earlier one, read from a kept copy of its
+    /// [`session_file`](AgentAdapter::session_file): what it was asked and what it said, the
+    /// newest kept, within `max` characters. `None`: nothing to tell.
+    fn handoff(&self, _saved: &str, _max: usize) -> Option<String> {
+        None
+    }
+    /// Put a kept copy of session `id` back where the agent looks for it, for a run in `cwd`,
+    /// when this computer doesn't have it, so the same session carries on. `Ok(true)`: put
+    /// back; `Ok(false)`: nothing to do (it's here already, or this agent keeps none).
+    fn restore_session(&self, _id: &str, _saved: &[u8], _cwd: &std::path::Path) -> Result<bool, ToolError> {
+        Ok(false)
+    }
 }
 
 /// The adapters a run can use.
@@ -335,6 +352,118 @@ impl AgentAdapter for ClaudeCode {
     fn sign_in_fix(&self) -> Option<String> {
         sign_in_hint("login")
     }
+
+    fn session_file(&self, id: &str) -> Option<std::path::PathBuf> {
+        claude_session_file(&claude_config_dir()?, id)
+    }
+
+    fn handoff(&self, saved: &str, max: usize) -> Option<String> {
+        claude_handoff(saved, max)
+    }
+
+    fn restore_session(&self, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
+        let config = claude_config_dir().ok_or_else(|| ToolError::new(ErrorCode::BadSettings, "Couldn't find Claude Code's folder on this computer."))?;
+        claude_restore(&config, id, saved, cwd)
+    }
+}
+
+/// Claude Code's own folder: `CLAUDE_CONFIG_DIR` when it's set (the person's choice, which the
+/// agent we start keeps too), else `~/.claude`.
+fn claude_config_dir() -> Option<std::path::PathBuf> {
+    let set = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    set.or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+}
+
+/// Claude Code's name for the folder a session ran in: the path with everything but letters and
+/// digits made `-`. It finds a session by its id in any of these folders (2.1), so a long path
+/// cut short still works.
+fn claude_project_folder(cwd: &std::path::Path) -> String {
+    cwd.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(200).collect()
+}
+
+/// Put a kept Claude Code session back under `config` (see [`AgentAdapter::restore_session`]).
+/// Only a copy of that same session is put back, and never over one that's there.
+pub fn claude_restore(config: &std::path::Path, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
+    let valid = !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !valid {
+        return Err(ToolError::invalid("The project names its builder's session with an id Claude Code doesn't use."));
+    }
+    if claude_session_file(config, id).is_some() {
+        return Ok(false);
+    }
+    let named = format!("\"sessionId\":\"{id}\"");
+    if !saved.windows(named.len()).any(|w| w == named.as_bytes()) {
+        return Err(ToolError::invalid("The conversation kept in the project is of another session."));
+    }
+    let path = config.join("projects").join(claude_project_folder(cwd)).join(format!("{id}.jsonl"));
+    craft_anything_platform::fs::write_atomic_private(&path, saved)?;
+    Ok(true)
+}
+
+/// Folders under Claude Code's `projects/` looked through for a session.
+const SESSION_FOLDERS: usize = 10_000;
+
+/// Claude Code keeps each session as `projects/<the folder it ran in>/<id>.jsonl` under its
+/// config folder. An id is a UUID: anything else (a hand-edited manifest) names no file.
+pub fn claude_session_file(config: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let name = format!("{id}.jsonl");
+    std::fs::read_dir(config.join("projects")).ok()?.flatten().take(SESSION_FOLDERS).map(|e| e.path().join(&name)).find(|p| p.is_file())
+}
+
+/// Longest single request or reply in a handoff; a first brief runs to many thousands.
+const HANDOFF_ENTRY: usize = 1500;
+
+/// A Claude Code session read back as a handoff: the messages Craft Anything sent and the text
+/// the builder answered with, oldest first, leaving out tool calls, their results, thinking and
+/// side tasks. The newest are kept when it's longer than `max` characters.
+pub fn claude_handoff(saved: &str, max: usize) -> Option<String> {
+    let clip = |t: &str| {
+        let t = t.trim();
+        if t.chars().count() > HANDOFF_ENTRY { format!("{}…", t.chars().take(HANDOFF_ENTRY).collect::<String>()) } else { t.to_string() }
+    };
+    let mut entries = Vec::new();
+    for v in saved.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let content = v.pointer("/message/content");
+        match v.get("type").and_then(Value::as_str) {
+            Some("user") => {
+                if let Some(t) = content.and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
+                    entries.push(format!("Craft Anything asked you: {}", clip(t)));
+                }
+            }
+            Some("assistant") => {
+                let text: String = content
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !text.trim().is_empty() && text.trim() != "No response requested." {
+                    entries.push(format!("You answered: {}", clip(&text)));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut kept = Vec::new();
+    let mut used = 0usize;
+    for e in entries.iter().rev() {
+        let n = e.chars().count().saturating_add(2);
+        if used.saturating_add(n) > max {
+            break;
+        }
+        used = used.saturating_add(n);
+        kept.push(e.as_str());
+    }
+    kept.reverse();
+    (!kept.is_empty()).then(|| kept.join("\n\n"))
 }
 
 /// Codex (`codex exec --json`). Flags are checked against `codex exec --help` before use.

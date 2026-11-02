@@ -1088,6 +1088,80 @@ mod tests {
         assert!(matches!(events.as_slice(), [AgentEvent::Error { message, .. }] if message.contains("error_during_execution")), "{events:?}");
     }
 
+    /// #451: Claude Code's session is found wherever it ran, and only by a real id.
+    #[test]
+    fn a_claude_code_session_is_found_by_its_id_alone() {
+        let config = tempfile::tempdir().unwrap();
+        let folder = config.path().join("projects").join("-Users-someone-Documents-Craft-Anything-notes");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("0e4a6b1c-1111-4222-8333-944455556666.jsonl"), "{}\n").unwrap();
+        std::fs::write(config.path().join("projects").join("stray.jsonl"), "{}\n").unwrap();
+        let found = adapters::claude_session_file(config.path(), "0e4a6b1c-1111-4222-8333-944455556666");
+        assert_eq!(found, Some(folder.join("0e4a6b1c-1111-4222-8333-944455556666.jsonl")));
+        assert_eq!(adapters::claude_session_file(config.path(), "1b70e5c4-0000-0000-0000-000000000000"), None);
+        for bad in ["", "../stray", "a/b", &"a".repeat(65)] {
+            assert_eq!(adapters::claude_session_file(config.path(), bad), None, "{bad:?}");
+        }
+        assert_eq!(adapters::claude_session_file(&config.path().join("nowhere"), "0e4a6b1c-1111-4222-8333-944455556666"), None);
+    }
+
+    /// #451: a session kept in the project is put back where Claude Code finds it, once, and
+    /// only as the session it was.
+    #[test]
+    fn a_kept_claude_code_session_is_put_back_on_another_computer() {
+        let config = tempfile::tempdir().unwrap();
+        let id = "0e4a6b1c-1111-4222-8333-944455556666";
+        let saved = format!("{{\"type\":\"user\",\"sessionId\":\"{id}\",\"message\":{{\"content\":\"Make a notes app.\"}}}}\n");
+        let cwd = Path::new("/home/someone/Craft Anything/notes.app");
+        assert!(adapters::claude_restore(config.path(), id, saved.as_bytes(), cwd).unwrap());
+        let put = config.path().join("projects").join("-home-someone-Craft-Anything-notes-app").join(format!("{id}.jsonl"));
+        assert_eq!(std::fs::read_to_string(&put).unwrap(), saved);
+        assert_eq!(adapters::claude_session_file(config.path(), id), Some(put.clone()), "Claude Code finds it by its id");
+        // There already: left as it is (it may have moved on since the copy was kept).
+        std::fs::write(&put, "newer").unwrap();
+        assert!(!adapters::claude_restore(config.path(), id, saved.as_bytes(), cwd).unwrap());
+        assert_eq!(std::fs::read_to_string(&put).unwrap(), "newer");
+        // A copy of another session, or an id that isn't one, puts nothing back.
+        let other = "1b70e5c4-0000-0000-0000-000000000000";
+        assert!(adapters::claude_restore(config.path(), other, saved.as_bytes(), cwd).unwrap_err().message.contains("another session"));
+        assert!(adapters::claude_restore(config.path(), "../../x", saved.as_bytes(), cwd).is_err());
+        assert_eq!(adapters::claude_session_file(config.path(), other), None);
+        assert!(!adapter_for("codex").restore_session(id, saved.as_bytes(), cwd).unwrap());
+    }
+
+    /// #451: a kept session read back as a handoff: what was asked and answered, nothing else.
+    /// The line shapes are Claude Code 2.1's.
+    #[test]
+    fn a_kept_claude_code_session_reads_back_as_its_requests_and_replies() {
+        let lines = [
+            json!({"type":"queue-operation","operation":"enqueue","content":"queued copy"}),
+            json!({"type":"user","isSidechain":false,"message":{"role":"user","content":"Make a notes app."}}),
+            json!({"type":"assistant","isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"secret plan"}]}}),
+            json!({"type":"assistant","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}),
+            json!({"type":"user","isSidechain":false,"message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"app/"}]}}),
+            json!({"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"side task"}]}}),
+            json!({"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"Built a notes app with a sidebar."}]}}),
+            json!({"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"No response requested."}]}}),
+            json!({"type":"user","isSidechain":false,"message":{"content":"The person asks: \"make it blue\""}}),
+            json!({"type":"assistant","isSidechain":false,"message":{"content":[{"type":"text","text":"Made it blue."}]}}),
+        ];
+        let saved = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n") + "\nnot json\n";
+        let all = adapters::claude_handoff(&saved, 10_000).unwrap();
+        assert_eq!(
+            all,
+            "Craft Anything asked you: Make a notes app.\n\nYou answered: Built a notes app with a sidebar.\n\nCraft Anything asked you: The person asks: \"make it blue\"\n\nYou answered: Made it blue."
+        );
+        // Short of room, the newest is kept.
+        let short = adapters::claude_handoff(&saved, 80).unwrap();
+        assert!(short.ends_with("You answered: Made it blue.") && !short.contains("notes app"), "{short}");
+        // A first brief runs long: it's cut short.
+        let long = json!({"type":"user","message":{"content":"x".repeat(10_000)}}).to_string();
+        assert!(adapters::claude_handoff(&long, 10_000).unwrap().chars().count() < 1600);
+        assert_eq!(adapters::claude_handoff("", 10_000), None);
+        assert_eq!(adapters::claude_handoff("\u{0}garbage", 10_000), None);
+        assert!(adapter_for("claude-code").handoff(&saved, 10_000).is_some() && adapter_for("codex").handoff(&saved, 10_000).is_none());
+    }
+
     #[test]
     fn parses_codex_and_gemini_streams() {
         let mut p = StreamParser::new(adapter_for("codex"));

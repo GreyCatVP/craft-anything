@@ -613,6 +613,11 @@ impl Worker {
         // A coding agent resumes its own session; our loop resumes its kept transcript.
         let resumable = api.as_ref().is_none_or(crate::agent::ApiConversation::resumed);
         let api_loop = api.is_some();
+        // A coding agent on this computer whose session the project keeps a copy of (#451).
+        let keeper = (!api_loop && !remote).then(|| opts.adapters.for_agent(&entry.config.model));
+        if let Some(a) = &keeper {
+            self.restore_session(ws, a.as_ref());
+        }
         // A coding agent that never saved a session starts over, so it needs the brief.
         let has_history = resumable && (api_loop || ws.manifest.agent_session.is_some());
         self.step(ws, Step::Build, Status::Building, "Getting the builder ready…")?;
@@ -646,8 +651,10 @@ impl Worker {
         }
         // A saved session may not be on this computer (the project was copied here): then a new
         // one starts from the brief and what the project already has.
-        let mut fresh =
-            (!api_loop && ws.manifest.agent_session.is_some()).then(|| resumed_elsewhere(&brief(kind, &cx, opts.message.as_deref()), &ws.manifest.last_reply));
+        let mut fresh = (!api_loop && ws.manifest.agent_session.is_some()).then(|| {
+            let handoff = keeper.as_ref().and_then(|a| a.handoff(&kept_session(ws)?, HANDOFF_CHARS));
+            resumed_elsewhere(&brief(kind, &cx, opts.message.as_deref()), &ws.manifest.last_reply, handoff.as_deref())
+        });
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
@@ -664,7 +671,12 @@ impl Worker {
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
                 ws.manifest.awaiting_check = false;
-                let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take())?;
+                let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take());
+                // Kept even when the turn failed: the conversation is still worth carrying.
+                if let Some(a) = &keeper {
+                    self.keep_session(ws, a.as_ref());
+                }
+                let reply = reply?;
                 if !reply.trim().is_empty() {
                     ws.manifest.last_reply = reply.trim().to_string();
                 }
@@ -779,6 +791,37 @@ impl Worker {
             ToolError::new(e.code, format!("The build is finished, but it couldn't be checked: {}", e.message))
                 .with_remediation("Press Try again to check it again. Nothing needs building again.")
         })
+    }
+
+    /// A copy of the builder's session in the project, so the conversation travels with the
+    /// folder (#451). A copy that can't be made doesn't stop the build, but it's said.
+    fn keep_session(&self, ws: &Workspace, adapter: &dyn crate::cli_agents::AgentAdapter) {
+        let Some(from) = ws.manifest.agent_session.as_deref().and_then(|id| adapter.session_file(id)) else { return };
+        let kept = match std::fs::metadata(&from) {
+            Ok(m) if m.len() > MAX_KEPT_SESSION => Err(format!("it's over {} MB", MAX_KEPT_SESSION / 1_000_000)),
+            Ok(_) => std::fs::read(&from)
+                .map_err(|e| e.to_string())
+                .and_then(|b| craft_anything_platform::fs::write_atomic_private(&ws.agent_session_path(), &b).map_err(|e| e.message)),
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(why) = kept {
+            let text =
+                format!("Couldn't keep a copy of the builder's conversation in the project ({why}), so it won't go with the folder to another computer.");
+            self.emit(RunEvent::Agent(AgentEvent::Status { text }));
+        }
+    }
+
+    /// The project came from another computer with its builder's session kept in it: put it back
+    /// where the agent looks, so the same conversation carries on (#451). If that fails, a new one
+    /// starts from what the project has when the turn finds the session missing.
+    fn restore_session(&self, ws: &Workspace, adapter: &dyn crate::cli_agents::AgentAdapter) {
+        let (Some(id), Some(saved)) = (ws.manifest.agent_session.as_deref(), kept_session_bytes(ws)) else { return };
+        let text = match adapter.restore_session(id, &saved, &ws.root) {
+            Ok(false) => return,
+            Ok(true) => "Brought the builder's earlier conversation over from the project folder.".to_string(),
+            Err(e) => format!("Couldn't bring the builder's earlier conversation over from the project folder ({}).", e.message),
+        };
+        self.emit(RunEvent::Agent(AgentEvent::Status { text }));
     }
 
     /// `fresh`: what to send instead when the agent's saved session turns out not to be on this
@@ -916,6 +959,24 @@ impl Worker {
             }
         }
     }
+}
+
+/// Largest builder session the project keeps a copy of.
+const MAX_KEPT_SESSION: u64 = 64_000_000;
+/// How much of a kept session a new one is handed when the old one isn't on this computer.
+const HANDOFF_CHARS: usize = 16_000;
+
+/// The builder's session as the project kept it, if it did.
+fn kept_session_bytes(ws: &Workspace) -> Option<Vec<u8>> {
+    let path = ws.agent_session_path();
+    if std::fs::metadata(&path).ok()?.len() > MAX_KEPT_SESSION {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
+fn kept_session(ws: &Workspace) -> Option<String> {
+    kept_session_bytes(ws).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 /// What an API-backend builder is told first: its tools differ from an agent app's.

@@ -528,10 +528,14 @@ Owner: maintainers · Status: in progress (built; live runs need keys)
 - [x] A project moved to another computer (or folder) keeps building with Claude Code: when the saved
       `agent_session` isn't there (`Conversation::session_lost`), a fresh session starts from the brief,
       the builder's last summary and what's in `app/` instead of failing, and questions about the build
-      are answered from the files (#446)
-- [ ] A live run of a project copied between two computers with Claude Code (#446)
-- [ ] Keep enough of a coding agent's conversation in the project that it travels with the folder, as
-      `transcript.json` does for API builders (#446)
+      are answered from the files (#452)
+- [x] The coding agent's conversation travels with the project folder (#451): after every turn the
+      project keeps a copy of Claude Code's session (`agent-session.jsonl`, `AgentAdapter::session_file`);
+      on a computer without it, the copy is put back where Claude Code finds it (`restore_session`) so
+      the same session carries on, and if that fails the new session is handed the kept requests and
+      replies (`handoff`, up to 16k characters)
+- [ ] A live run of a project copied between two computers with Claude Code (#451, #452)
+- [ ] Session copies for other agents that keep sessions (ACP agents' `session/load`) (#451)
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
