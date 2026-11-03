@@ -14,22 +14,24 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | Apple app graphs | Selecting a macOS bundle recognises its root-relative `Contents/Info.plist` and retains its service/extension type; nested XPC bundles appear in `services` and as `xpc-service` graph nodes, including their executables when hosted in frameworks | Synthetic inventory tests, including parent-directory and flat bundle layouts, selected services/extensions, framework-hosted service executables, and bare-program controls. Ordinary selected directories with `Contents/Info.plist` need an Apple bundle suffix; archives retain layout-based recognition. Framework libraries and dylibs stay excluded from executables. Real app bundles were not checked for this correction |
 | Chinese UI | Simplified (`zh-hans`) and Traditional (`zh-hant`) Chinese in Settings → General → Language; System chooses a supported OS language, otherwise English. Both catalogs cover UI controls and tool titles; translated titles are searchable. Raw tool data, AI text, logs, CLI/MCP and the separate browser viewer keep their original text. See [localisation](localization.md). | Catalog integrity and locale-resolution tests; `cargo xtask i18n-coverage`; isolated UI language-switch test. Platform visual checks are recorded separately. |
 | Engine | 298 engine tools (314 with the AI and setup layers') across native, managed, Java, Android, Apple, JS/Electron, web, firmware, packets, databases, game archives and assets; see [tools.md](tools.md) and [tool-status.md](tool-status.md). A saved result can be narrowed without running again (`core_evidence_browse` keeps the rows matching given field values, cut to chosen fields) | A functional audit that ran every tool on real inputs on Windows, plus 600+ unit and integration tests |
+| Tool argument correction | Shared parameter parsing keeps schema types strict and reports the rejected value's JSON Pointer when known, the original type error and guidance to correct the call. Unknown locations are null; a root failure uses the empty pointer | Parser regressions cover string/array mismatches, nested indices, escaped keys, oversized paths, enum locations, defaults and strict fields. Shared engine dispatch is checked for Agent, MCP and CLI callers: rejected arrays create no record, and corrected input creates one. No live Qwen or Ollama build was run for this correction |
 | Java class usage | `java_class_users_find` includes the component class of multidimensional object arrays; primitive-array descriptors do not match an unrelated class with the same descriptor letter | Synthetic class files parsed by the built-in reader: one- and two-dimensional allocations, class names beginning with `L`, primitive arrays, hit limits and method filters; formats tests. This correction was not checked with javac output or a JVM |
 | Single-file apps and game files | `core_packed_files_list` and `core_packed_files_unpack` read Bun and Node.js single-file programs, .NET single-file apps, PyInstaller and Godot packs through one seam (`formats::packed`); `formats_bytecode_show` reads Python bytecode, `game_unity_code_names_show` Unity IL2CPP metadata, `formats_ai_weights_show` GGUF and safetensors headers. `app_folder_explain` says what an install folder is made with and what to run next | Unit tests with damaged files. Real files: a 279 MB Bun program, Node blobs, PyInstaller programs (Python 3.9, 3.14), .NET 8 single-file apps (macOS, Linux, Windows, compressed), Godot 3.6, 4.3 and 4.5 packs, 214 Python modules against CPython's own reader, a GGUF and a safetensors file, about 25 installed Mac apps. IL2CPP on synthetic files only |
 | esbuild module dependencies | Recognised CommonJS and ESM wrappers keep their dependency edges after identifier minification; semantic bindings distinguish shadowed and reused names, and repeated calls produce one edge | 44 JS unit tests pass. New synthetic regressions cover short names, forward declarations, both wrapper kinds, shadowed parameters, reused names, unrelated calls and duplicates. No real minified application was run for this correction; sources above the existing semantic-analysis size limit retain name-based resolution |
 | Program facts across builds | `native_library_calls_list` (delay-load too), `native_offered_symbols_list`, `native_publisher_show` (checks the file hash and the signature, not Windows trust), `app_builds_line_up` pairs functions across two builds and says how, `native_source_folder_write` writes pseudo-C to a folder and picks up where it stopped, `android_components_list` | Unit tests. Real PE, ELF and Mach-O files; two builds of a 276 MB program; a signed Microsoft DLL; Android components from one real APK, spot-checked |
 | ARM32 value flow | A32 and Thumb calls define ARM scratch registers, and word results flow through `r0` into returns in `native_value_flow_show` | Synthetic instruction fixtures for leaf results and indirect calls in both modes, with AArch64 and x86-64 controls; disassembler tests. This correction was not checked on real ARM binaries or devices |
-| Stand-in backends | `web_standin_build` turns a HAR into `standin.json` (secrets dropped, varying path parts templated); `web_standin_start` answers from it on loopback; `web_standin_show` lists what it had no answer for. Writes replay what was recorded and don't change later reads. App maps list GraphQL and tRPC operations; `web_walkthrough_check` checks a scripted session without a browser | Unit tests, real loopback requests, and a run with curl on a hand-written HAR. No browser-made recording or real front end yet |
+| Stand-in backends | `web_standin_build` turns a HAR into `standin.json` (secrets dropped, varying path parts templated); `web_standin_start` answers from it on loopback; `web_standin_show` lists what it had no answer for. A 304 without a usable cached body is counted at build time and skipped during replay; if its matching group has no usable answer, requests get a 404 with `cached_body_unavailable`, also shown in the request log. Writes replay what was recorded and don't change later reads. App maps list GraphQL and tRPC operations; `web_walkthrough_check` checks a scripted session without a browser | Unit tests, real loopback requests, and a run with curl on a hand-written HAR. The 304 correction passes 99 analysis tests and a real-loopback regression, covering mixed samples, omitted bodies, matching boundaries and existing v1 files. [Hosted CI for #543](https://github.com/storytold/craft-anything/actions/runs/41585168291) also passed the full engine tests and workspace gates. No browser-made recording or real front end yet |
 | Websites as targets | `web_site_open` keeps a private browser for the session and every browser tool inspects that page; `web_site_capture` records screenshots at each width (desktop, tablet and phone), rendered HTML, design tokens (colours in hex, spacing, content widths), the CSS breakpoints, the layout at each width (page width, heading sizes, each section's padding, gap, content column and items per row), page health (script and console errors, failed requests) and an accessibility outline, layout outline, assets with font files and requests, links and form outlines. In Clean room the capture keeps only what a visitor sees (no HTML, CSS rules, scripts, requests or errors), and opening a site reports no load errors | Live run on example.com; unit tests |
 | Electron window comparisons | `app_graphs_compare` retains every unassigned window and every construction with a reused local binding. Windows are paired by module, binding and occurrence, so inserting comments does not hide preference changes | Synthetic application graphs exercise changes in either anonymous window, unique and reused bindings, shifted source lines and unequal counts. Pairing remains positional within each binding group; reordered constructions and real application releases were not checked for this correction |
-| Rebuild workflow (Study → Build → Check → Refine) | `crates/ai/src/rebuild/` (kinds, checks and stacks are pluggable: docs/extending.md). Three kinds: website, app, game (a project whose stack is a game engine is always a game). The request decides how to build: a language, framework, engine or platform it names wins over the kind's default stack (Rust + egui for apps, Unity for games, the original's for websites), and the build check, the recorded stack and Play follow what was built (an Electron app opens in its own Electron). Websites: Study also captures up to 4 other pages of the site; menus are opened on a computer and on a phone; the check serves the build on loopback and compares every page at 1440, 768 and 390 px (likeness = mean of layout and perceptual detail, SSIM, averaged over pages, leaving out the parts of the original that change by themselves, found by photographing it three times; the note adds text, page structure, the colours, font, text sizes and spacing the build misses, and per width a page that scrolls sideways, heading sizes and sections whose padding, items per row or content column differ, the errors, failed requests and accessibility gaps the build adds, and the opened menus and pop-ups). A stack or library named in the request (Next.js, shadcn/ui, Tailwind CSS…, `stacks.toml`) is what the builder uses; with none named, a website's stack is the builder's choice (told to match what the original is built with) and the stack it used is recorded from app/package.json. The builder leads: it studies, asks the tools follow-up questions, records what it can't find out as unknowns (`core_unknown_add`; the run reports the open ones), and tests its own build mid-turn with `rebuild_check` (the same checks, for every kind); a check with anything it couldn't compare, or any claim that fails (a website page that scrolls sideways, logs new errors, fails to load a file, lacks a landmark, or a menu that doesn't open; for games each self-test step, for Deep-mode sheets each original number in the code, for console apps the same exit and output as the original's runs), isn't good enough; apps and games by whether they build. Up to 6 refinement rounds, or until a website reaches 90% likeness. A turn cut off by a time limit, crash or dropped connection resumes (up to 3 times); builder turns may run 24 h. A project copied from another computer (or moved to another folder) keeps building with Claude Code: the project keeps a copy of the builder's session (`agent-session.jsonl`) after every turn and puts it back where Claude Code finds it on a computer without it, so the same conversation carries on (#451); when the session still isn't there, a new one starts from the brief, what's in app/ and the kept requests and replies (or the last summary), and questions about the build put the kept session back too, else are answered from the files and forget the missing session (#452). Live runs with Claude Code 2.1.316 on one Mac (2026-11-02), a second computer stood in for by a separate signed-in `CLAUDE_CONFIG_DIR`: a copied project's session was put back and resumed (the builder recalled its first reply from memory); a kept copy of another session was refused and the new session used the handoff; a real project synced from Windows whose session was missing started afresh and reached Ready. Not yet run between two real computers | Unit tests for prompts, stack choice, site detection, feed folding; live runs reached Build and decompiling (below) |
+| Rebuild workflow (Study → Build → Check → Refine) | `crates/ai/src/rebuild/` (kinds, checks and stacks are pluggable: docs/extending.md). Three kinds: website, app, game (a project whose stack is a game engine is always a game). The request decides how to build: a language, framework, engine or platform it names wins over the kind's default stack (Rust + egui for apps, Unity for games, the original's for websites), and the build check, the recorded stack and Play follow what was built (an Electron app opens in its own Electron; a plain static site has nothing to build and passes the build check as it is). Websites: Study also captures up to 4 other pages of the site; menus are opened on a computer and on a phone; the check serves the build on loopback and compares every page at 1440, 768 and 390 px (likeness = mean of layout and perceptual detail, SSIM, averaged over pages, leaving out the parts of the original that change by themselves, found by photographing it three times; the note adds text, page structure, the colours, font, text sizes and spacing the build misses, and per width a page that scrolls sideways, heading sizes and sections whose padding, items per row or content column differ, the errors, failed requests and accessibility gaps the build adds, and the opened menus and pop-ups). A stack or library named in the request (Next.js, shadcn/ui, Tailwind CSS…, `stacks.toml`) is what the builder uses; with none named, a website's stack is the builder's choice (told to match what the original is built with) and the stack it used is recorded from app/package.json. The builder leads: it studies, asks the tools follow-up questions, records what it can't find out as unknowns (`core_unknown_add`; the run reports the open ones), and tests its own build mid-turn with `rebuild_check` (the same checks, for every kind); a check with anything it couldn't compare, or any claim that fails (a website page that scrolls sideways, logs new errors, fails to load a file, lacks a landmark, or a menu that doesn't open; for games each self-test step, for Deep-mode sheets each original number in the code, for console apps the same exit and output as the original's runs), isn't good enough; apps and games by whether they build. Up to 6 refinement rounds, or until a website reaches 90% likeness. A turn cut off by a time limit, crash or dropped connection resumes (up to 3 times); builder turns may run 24 h. A project copied from another computer (or moved to another folder) keeps building with Claude Code: the project keeps a copy of the builder's session (`agent-session.jsonl`) after every turn and puts it back where Claude Code finds it on a computer without it, so the same conversation carries on (#451); when the session still isn't there, a new one starts from the brief, what's in app/ and the kept requests and replies (or the last summary), and questions about the build put the kept session back too, else are answered from the files and forget the missing session (#452). Live runs with Claude Code 2.1.316 on one Mac (2026-11-02), a second computer stood in for by a separate signed-in `CLAUDE_CONFIG_DIR`: a copied project's session was put back and resumed (the builder recalled its first reply from memory); a kept copy of another session was refused and the new session used the handoff; a real project synced from Windows whose session was missing started afresh and reached Ready. Not yet run between two real computers | Unit tests for prompts, stack choice, site detection, feed folding; live runs reached Build and decompiling (below) |
 | Context-summary usage | Successful API context summaries contribute to the message totals consumed by build usage and receive a `model_turn` journal entry with `purpose: context_summary`. Cached-token pricing is retained; an unknown summary price makes the total unknown, and a failed call adds no invented usage | Scripted-model tests exercise the real `ApiConversation`, transcript resumption, exact input/output and cache-price totals, journal entries, empty summaries, local zero cost, unknown prices and failed summaries. No live provider or end-to-end rebuild was used for this correction |
+| Backend context budgets | `context_tokens` in `[[ai.backends]]` controls when an API conversation is trimmed and summarised. Zero or omission retains local/cloud defaults; a nonzero conversation override takes priority. Before each attempt, including a fallback, fitting adds estimated history growth since the last successful request to its reported input size. Trimming resets that reference, and successful requests refresh it; summary usage remains in message totals | Regressions cover settings and model construction, defaults/overrides, smaller fallback budgets, large-budget arithmetic and new tool output growing beyond a fallback budget even when the history estimate alone is below the reported input. The latest tool results are preserved, and a short follow-up does not count already-sent history twice. This does not set server context parameters or guarantee that a complete request fits; no live provider was used |
 | Games | Engine detection for 12 engines (Unreal, Unity, Godot, Source, GameMaker, RPG Maker, Ren'Py, MonoGame, LÖVE, CryEngine, Cocos, Cube) with versions. Unreal and Godot games are rebuilt in the same engine, others in Unity; installed engines are found, Godot installs itself, others get guided installs. Picking an inner folder (Engine, Binaries, Paks…) finds the game's folder. Just look inside a game shows what it's made of (`core_target_triage` on its folder: engine and version, how its code ships, the libraries its Unity assembly names give away, its own code, scenes and size) and opens it in the chat to ask about it. The builder keeps `app/MECHANICS.md` and its structured twin `app/mechanics.json` (checked after each build), in Deep mode only, may reuse the original's readable files for private use (never decrypting; generated pictures and 3D models replace its art when the person turns them on; Clean room copies none of its files), lists them in `CREDITS.md` (checked, with the private-use line in `README.md`); a game is ready only when its `--self-test` shows the player moving, acting and the HUD drawn, and the result can be started from the project page | Unit tests; live runs on Windows |
 | Clean room and Deep mode | Clean room (the default) runs only the tools in `engine/src/clean_room.rs`: ones that touch no target or watch from outside (the website as a visitor sees it, pictures of a window, its controls, recorded runs, a phone's screen). Every other tool, a plugin's included, is refused in the app, CLI, MCP and agents, with a way to turn on Deep mode. A Clean room build studies an app or a game only from the person's pictures and words (and a picture of its window when runtime study is on); its builder's reads and commands go through an approval rule that keeps it out of the original's folder and site (with Claude Code, and with ACP agents for what they ask about; other agents aren't held to it, see roadmap R2.2). Deep mode (`deep_mode` in Settings, `--deep` for one CLI run) uses every tool: the builder sees them all, and a website's study also reads its JavaScript and watches its start page for ten seconds (capture/how-it-works.md). Ghidra adds its decompiler in Deep mode when it's installed: it is found, or installed after asking. Study starts one analysis of the main program, saved and shared with the builder's tool server through a lock file (up to 8 h, Java gets half the machine's memory or the amount set in Settings → Engines, 4 to 31 GB, four slow passes skipped). The builder must decompile before the build is checked; addresses the built-in analysis can't place go to Ghidra, which makes a function on demand (for this run only) where its analysis has none, e.g. code reached only through tables of pointers. Without Ghidra, Deep mode uses the built-in engines | Live runs with Ghidra 12.1.4 on Windows (a shared analysis, and a decompile in seconds on a large program). Live runs with Ghidra 12.2 on Linux x86-64 (decompiles by name in position-independent programs and shared libraries, whose addresses Ghidra moves). The guided install of Ghidra and its Java is offered on Linux and macOS too, but has only been tried on Windows. Clean room and Deep mode: engine, AI, MCP, CLI and app tests; no live Clean room build run yet |
 | Auto mode | Settings → Safety, on by default. Builder actions go ahead without asking, except a fixed set that is never done unasked (deleting outside the project, system changes, publishing…); questions get "decide yourself"; asset spending stops at the budget | Unit tests |
 | Generated assets | Off until the person turns them on for a game (the switch on Make and on the project, `project_assets_allow`, `rebuild --generate-assets`, saved in craft.json; turning it on without a fal.ai key asks for one); the brief and the asset tools need both that and a key. `assets_image_generate` (Nano Banana Pro by default) and `assets_model_generate` (picture → Tripo P1 low-poly GLB with a face limit) through the person's key for each asset provider (fal.ai today); per-project budget, $5 by default (`[assets] budget_usd` in config.toml); models and prices from the `assets.toml` table (picture model selectable: Nano Banana Pro, FLUX dev or schnell; priced per picture or per megapixel); every call reports its cost | Unit tests; a live 3D generation with a real key (picture, then model) with FLUX dev; Nano Banana Pro not yet run with a real key |
 | Claude Code builder | Runs the person's own `claude` in headless mode (Opus 5.5, high effort unless configured) with our MCP server, a permission-prompt tool and `core_person_ask`; preflights for our CLI (a build stops plainly if it's missing or won't start) and sign-in | Argument and stream-parser tests; live preflight; live builder turns; see [claude-code.md](claude-code.md) |
-| Agents over ACP | Opt-in per backend (`acp = true`): Gemini CLI, Qwen Code, opencode, goose, Hermes and Maki in their ACP mode, one agent process per chat or build with our MCP server; Maki's ACP mode takes the backend's model (`cli_model`). In chat, permission requests become consent questions; in builds they go through the same approval policy as Claude Code's (inbox, Auto mode) | Protocol unit tests against scripted agent messages and an approval-policy test. Run live with Maki 0.7.0 only (2026-11-02, Linux, headless CLI): a static page built to Ready in 38 s, a follow-up continued the same session with `session/load`, and with Auto mode off its command and tool requests were refused in an unattended run. Turns report 0 tokens over ACP, and a continued session shows the earlier conversation again |
+| Agents over ACP | Opt-in per backend (`acp = true`): Gemini CLI, Qwen Code, opencode, goose, Hermes and Maki in their ACP mode, one agent process per chat or build with our MCP server; Maki's ACP mode takes the backend's model (`cli_model`). In chat, permission requests become consent questions; in builds they go through the same approval policy as Claude Code's (inbox, Auto mode). While a saved session loads, replayed updates are withheld from the new turn | Protocol unit tests against scripted agent messages and an approval-policy test. Run live with Maki 0.7.0 only (2026-11-02, Linux, headless CLI): a static page built to Ready in 38 s, a follow-up continued the same session with `session/load`, and with Auto mode off its command and tool requests were refused in an unattended run. Replay suppression passes scripted load-history, success/error and cancellation tests; this correction has not been rerun with a live agent. Turns report 0 tokens over ACP |
 | WASM plugins | With `--features wasm-plugins`: `[[plugins.wasm]]` components exporting `craft-anything:plugin/tools` add tools, and ones exporting `craft-anything:plugin/checks` add checks run after each kind's own (they get the build's file list as JSON) (added, listed, turned on or off and removed in Settings → Plugins or with `plugins_add`/`plugins_remove`/`plugins_list`); no imports, fresh instance per call, fuel and memory limits | Tests with components written in WAT (describe, call, checks, a looping call stopped, imports refused, end to end through the engine); `examples/wasm-plugin-wordcount` built from Rust and loaded |
 | WebAssembly tag interfaces | `formats_wasm_compare` resolves retained imported and defined tag exports to their declared parameter types. Identical unresolved or invalid diagnostics may still count as unchanged; those counts do not establish interface compatibility, and invalid/partial limitations remain present | Synthetic core modules with tag changes and re-exports, mixed index spaces, import/tag limits, and missing or non-function type references; formats and engine tests. No real module corpus or WebAssembly execution was used for this correction |
 | Questions and approvals | A file inbox per project; `core_person_ask`, `core_action_approve` and MCP consent requests become cards in the app | Cross-handle round-trip tests, a full approval round trip through the engine |
@@ -39,12 +41,61 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | SQLite database files (`db_sqlite_show`) | A rowid alias column (`INTEGER PRIMARY KEY`, including the table-constraint form) shows the rowid; `DESC`, non-`INTEGER` and composite keys keep their stored values | Hand-built fixtures; generated files compared with the official SQLite library |
 | SQLite WITHOUT ROWID tables | Read from the index b-tree, interior records and overflow included; rows in primary-key order, values in declaration order, `rowid` null | Hand-built fixtures; generated files compared with the official SQLite library |
 
+### Builder retry policy
+
+Builder failures carry a typed reason through `Conversation::last_failure`. Typed authentication,
+billing, missing programs, unavailable tools, configuration and unknown protocol failures stop
+for attention. Transport interruptions, rate limits and nonzero process exits without a typed
+error get at most three retries; the decision no longer searches English error messages.
+Structured provider waits win; the earlier numeric “retry in”
+hint is only a delay fallback after a failure has already been classified as retryable. All waits
+remain cancellable and bounded to fifteen minutes.
+Local inbox and workspace write failures are not retried using a concurrent backend failure's
+retry advice; the original local error is returned.
+A missing saved session starts afresh only when a fresh request is available; otherwise the run
+stops without retrying the unavailable session.
+
+Claude Code's failed or unauthenticated `craft-anything` MCP server in its init event stops the
+owned CLI process. Pending servers and failures in unrelated optional servers do not stop it.
+Claude assistant error codes, HTTP status/provider errors and ACP authentication errors retain
+their typed meanings. A later generic result does not erase a more specific error.
+
+API retries continue the existing history without inserting the user's message again or replaying
+completed tools. Stateless CLI retries receive the whole original request. OpenCode now uses
+`run --format json`: its API error status and retry flag decide retryability while text, tools and
+usage still reach the feed. Missing or invalid step costs keep the turn's cost unknown; explicit
+zero remains a known cost. A CLI that fails with only a numeric exit also uses bounded retries;
+its display error remains available if recovery fails. The process wrapper sends one final turn
+event and becomes available for the next request.
+
+Protocol fixtures, a loopback HTTP server, scripted API turns and executable CLI stand-ins cover
+these paths, including cancellation and the retry cap. An executable that exits 1 without a
+structured error resumes its saved session, while typed setup errors retain priority over the
+same exit status. No live provider or paid-model run was performed. The separate source of #64's
+41 attempts remains unverified.
+
 ### Bun stored-text encoding
 
 Packed Bun members with encoding value 2 are labelled `utf16le`, matching their stored UTF-16LE
 bytes. Reading or unpacking preserves those bytes. Synthetic graphs cover UTF-16LE (including a
 surrogate pair), Latin1 and binary members across both supported module-record and offsets-block
 sizes. A freshly compiled Bun program and the CLI/MCP transport were not run for this correction.
+
+### Native tool-call stop reasons
+
+Native OpenAI-compatible tool calls retain a reported output limit or refusal instead of
+replacing it with a tool-use stop. The conversation can therefore reject those calls before
+running a tool, including calls whose arguments happen to be valid JSON. A normal `stop`
+with tool calls still works for servers that omit `tool_calls` as the finish reason.
+Calls retained after a pause or another terminal stop get matching non-execution results,
+so subsequent requests keep valid tool-call history. A pause continues the same turn;
+terminal stops wait for the next user message.
+Checked with streamed-call fixtures and HTTP/SSE stand-ins through the real conversation
+and engine loop. Three history-pairing regressions fail without the follow-up and pass with
+it. The affected crate's 223 tests and Clippy checks passed locally. The initial stop-reason
+correction also passed [hosted CI](https://github.com/storytold/craft-anything/actions/runs/41587580930)
+in PR #544. This correction concerns reported finish reasons; handling of a missing finish
+reason is unchanged. No live provider or local-model build was run.
 
 ### Linux Unreal setup
 
@@ -60,6 +111,18 @@ Checked with isolated registry and SDK fixtures and with a native Fedora install
 5.8.4. Readiness is a tool-presence check; a complete Unreal game build and SDK compatibility
 validation have not been run for this change. Windows and macOS detection retain their existing
 tests, without new live runs on those platforms.
+
+### Provider error messages
+
+HTTP failures include the provider's message from `error.metadata.raw`, when it contains a
+message, detail or string error. Object payloads, JSON-encoded strings and plain-text reasons
+are supported, with the provider's name when supplied. A repeated outer message does not hide a
+distinct nested detail. JSON-string wrappers are decoded to a bounded depth before reading message
+fields; arbitrary, malformed or excessively wrapped structured metadata is not dumped. HTTP status
+classification and remediation are retained, and displayed details are bounded by Unicode characters.
+Checked with synthetic response bodies, repeated messages, encoded payloads with adjacent headers,
+malformed metadata and Unicode length controls. The affected crate's 222 tests and all-target Clippy
+checks passed locally for PR #542. No live API-key build or account-specific diagnosis was performed.
 
 ### Fixed during the audit
 
@@ -83,6 +146,38 @@ The filesystem reader recovers the same files and bytes from basic and extended 
 Synthetic images cover an extended root, a nested extended directory with a nonzero listing offset,
 and both together; the results are compared with the existing basic-directory fixture. Compressed
 metadata, directory indexes and a real firmware extraction were not newly checked for this fix.
+
+### Keep-awake helper cleanup
+
+Rebuilds release their keep-awake guard before emitting `Finished` and clearing the running flag.
+The guard waits up to five seconds for the owned helper's supervised cleanup, logging a warning
+if that deadline passes. Cleanup runs on the rebuild worker, with a bounded shutdown wait.
+
+Checked on Linux with real subprocess stand-ins: dropping a guard closes the helper's listener,
+a stand-in CLI can drop it and exit immediately without leaving the helper running, and an
+already-finished helper releases promptly. The immediate-exit case fails with the earlier
+asynchronous cleanup. The intermittent Windows report and Windows/macOS sleep inhibition have
+not been rechecked for this change; Windows runtime validation remains on the roadmap.
+
+The full workspace gates (`cargo xtask ci`) passed in [hosted CI for #541](https://github.com/storytold/craft-anything/actions/runs/41584228995).
+
+### Tool calls written as JSON
+
+The text fallback accepts complete bare or fenced JSON calls with `name` and `arguments`
+(`parameters` also accepted), including a `function` wrapper and JSON-encoded arguments.
+Automatic recovery also handles these responses when native tool calling was offered. A call
+must name a tool offered in that turn; ordinary JSON answers and JSON examples surrounded by
+prose are left as text. Native calls are kept once; text-call recovery skips truncated or refused replies.
+Complete backtick-fenced legacy ReAct steps remain supported when their body begins with an explicit
+protocol marker. Both parsers use the same fence boundaries: at least three opening backticks and a
+standalone closing line of at least that length, with no earlier matching closing fence. Shorter
+backtick lines inside a longer fence remain content. Ordinary fenced code, malformed fences and non-call
+JSON objects or examples containing protocol markers remain text; valid call arguments may contain those markers.
+The parser regressions failed on the previous guards and passed with their corrections.
+Fenced JSON calls also use these boundaries during automatic recovery and accept only an empty or `json` info string.
+Checked with parser fixtures, HTTP/SSE stand-ins exercising real engine tool execution in both
+protocols, and non-action, stop-reason and duplicate-call controls. No live local-model build
+was run; other text-call formats remain unsupported.
 
 ## Known limits
 
@@ -111,8 +206,8 @@ metadata, directory indexes and a real firmware extraction were not newly checke
   with its writing tools, shell and code execution switched off, and Maki refuses anything else
   that would ask (an MCP server's tools, in subagents too) unless the person allowed it in Maki's
   own permissions. It hasn't been run as a `maki -p` builder here.
-- Claude Code is fully wired as a builder; Codex works through its own flags but is unverified on
-  a real install and doesn't resume; other agent programs get plain text in and out. API-key
+- Claude Code is fully wired as a builder; Codex works through its own flags (our tools are pre-approved for
+  `codex exec`, see `docs/codex.md`) but is unverified on a real install and doesn't resume; other agent programs get plain text in and out. API-key
   backends (Anthropic, OpenRouter, OpenAI, local; Kimi K3 through OpenRouter is offered by Detect; a backend chosen as the Extractor takes a Deep-mode game's own files out into `app/Original/` after the study) build with our own loop and the Build tools,
   trim and summarise long conversations and keep them in `transcript.json`; no live API build has
   been run yet.
@@ -143,3 +238,45 @@ metadata, directory indexes and a real firmware extraction were not newly checke
 ## Next
 
 See [ROADMAP.md](ROADMAP.md) for the ordered plan.
+
+## Build progress across runs
+
+When app files can be compared, a build stops after two consecutive completed builder turns leave them unchanged.
+The versioned `inbox/build-progress.json` record keeps that count when the project is reopened or
+Try again is pressed. File contents and executable permissions decide progress, so rewriting
+identical bytes does not reset it. An actual app edit or a new nonempty request starts another
+attempt, including notes queued during a turn or check and notes consumed by a builder hook.
+Empty notes and plain Try again keep the saved count. Dependency/build caches,
+git metadata and Craft's own records, including checks in a project edited in place, do not count.
+Symlinks are recorded without following their targets. A successful check may still finish the
+second unchanged turn, and a run waiting only for checks does not start the builder again.
+Within a run, file digests are reused while size, modification time and executable bits match;
+Unix file identity and change time also invalidate a cached read. The first scan reads content,
+but unchanged imported assets are not read again before and after every turn. The metadata is
+only a cache key: rewriting identical bytes still produces the same content fingerprint.
+The cache is isolated by project root, drops deleted or retyped paths, and is discarded after
+scan errors or cancellation. It is not persisted, and the version-1 fingerprint/schema is unchanged.
+Sockets, pipes and devices contribute their names and types without opening their contents.
+If a scan cannot finish because of limits, permissions or changing files, the feed says why the
+unchanged-turn limit is skipped for that run. The saved fingerprint and count are cleared so a
+later readable run starts a fresh comparison. Checks and the existing round limit still apply.
+Cancellation still stops the run; completed builder replies are saved as awaiting checks before
+the post-turn scan. Broken or newer progress records and record-write failures remain errors.
+
+Scripted API turns and executable CLI stand-ins cover the stop, persistence, fresh requests and
+check recovery. This change has not been verified with a paid model or a live provider. Copying a
+whole project keeps its progress record; Duplicate creates a new attempt with a fresh conversation
+and count, as it already does for usage.
+An existing root-level file or directory named `build-progress.json` remains app data: it is
+fingerprinted, copied by Duplicate and kept when Craft's project records are removed. Its JSON
+shape does not make it a Craft record, and it is never migrated into the inbox.
+
+Notes consumed by builder hooks now only queue a progress reset while the turn is running.
+The reset is saved after the successful turn and its `awaiting_check` recovery state are
+persisted. Multiple consumed notes coalesce into one reset; blank notes do not reset the count.
+A broken or inaccessible progress record still returns its actual error at that safe boundary,
+without starting another provider request or losing the finished builder reply.
+If the turn fails or is cancelled after consuming a note, its reset is saved before the run ends
+so reopening keeps the new request's full allowance. The original failure or cancellation remains
+the result; a reset that cannot be saved is reported separately and never overwrites a broken
+or newer record. Scripted turns cover both outcomes, blank notes and unreadable records.

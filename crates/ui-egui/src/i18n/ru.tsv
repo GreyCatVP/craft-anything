@@ -1,0 +1,1368 @@
+# ru: Russian UI translations. Licensed MIT OR Apache-2.0.
+# UTF-8: English source<TAB>Russian text. Keep placeholders and escapes intact.
+ GB	 ГБ
+ and {n} more	 и ещё {n}
+ {ascii}	 {ascii}
+ · ${c:.2}	 · ${c:.2}
+ · ssh {h}	 · ssh {h}
+(1 picture attached)	(прикреплено 1 изображение)
+({n} pictures attached)	(прикреплено изображений: {n})
+, ${c:.4}	, ${c:.4}
+.NET application graph	граф приложения .NET
+.NET apps	приложения .NET
+.NET assembly overview	обзор сборки .NET
+.NET native calls	вызовы из .NET в нативный код
+.NET types and methods	типы и методы .NET
+/btw {}	/btw {}
+0x… or number	0x… или число
+A .NET program (C#, F# or VB)	Программа .NET (C#, F# или VB)
+A DOS program	Программа DOS
+A Java program	Программа Java
+A Linux (or Unix) program	Программа Linux (или Unix)
+A Mac or iPhone program	Программа для Mac или iPhone
+A SQLite database (how an app stores its data)	База данных SQLite (как приложение хранит данные)
+A WebAssembly module (code that runs in a browser)	Модуль WebAssembly (код, который работает в браузере)
+A Windows program	Программа Windows
+A ZIP archive	Архив ZIP
+A bundle of ready-made code that many programs share.	Набор готового кода, который используют многие программы.
+A coding agent such as Claude Code builds it, and an AI answers your questions in plain words. Change this any time in Settings → AI.	Его строит агент кодирования, например Claude Code, а ИИ отвечает на ваши вопросы простыми словами. Изменить это можно в любой момент в Настройки → ИИ.
+A command's output shows here when it finishes.	Вывод команды появляется здесь после завершения.
+A copy to try something else from here.	Копия, чтобы попробовать что-то другое отсюда.
+A file of machine code that a computer can run directly, like an .exe or an app.	Файл машинного кода, который компьютер может запустить напрямую, например .exe или приложение.
+A file that a computer can run as a program.	Файл, который компьютер может запустить как программу.
+A file that links packed web code back to the original, readable source files.	Файл, который связывает упакованный веб-код с исходным читаемым исходным кодом.
+A file we don't recognise yet	Файл, который мы пока не распознали
+A first look at a file you're unsure about, without running it.	Первый взгляд на файл, в котором вы не уверены, без его запуска.
+A folder	Папка
+A folder has no bytes of its own	У папки нет собственных байтов
+A free reverse-engineering tool from the NSA. Deep mode uses it for extra detail; Clean room mode never does.	Бесплатный инструмент обратной разработки от АНБ. Режим «Глубокий» использует его для дополнительных деталей; режим «Чистая комната» — никогда.
+A frozen copy (recommended)	Замороженная копия (рекомендуется)
+A frozen copy takes {size}. That's a lot of space: a light copy takes {light}.	Замороженная копия занимает {size}. Это много места: лёгкая копия занимает {light}.
+A frozen copy takes {size}; a light copy takes {light}.	Замороженная копия занимает {size}; лёгкая копия занимает {light}.
+A game	Игра
+A game's files	Файлы игры
+A light copy	Лёгкая копия
+A locked room for running a program so it can't touch the rest of your computer.	Изолированная среда для запуска программы, чтобы она не могла затронуть остальную часть компьютера.
+A map of which functions call which other functions.	Карта того, какие функции вызывают какие другие функции.
+A name the program's author gave to a function or variable that survived in the file.	Имя, которое автор программы дал функции или переменной и которое сохранилось в файле.
+A named piece of a program that does one job, like "add two numbers" or "save the file".	Именованная часть программы, которая выполняет одну задачу, например «сложить два числа» или «сохранить файл».
+A number that says where something is in a program's memory, like a house number.	Число, указывающее, где что-то находится в памяти программы, как номер дома.
+A piece of text stored inside a program, like a message, a web address or a file name.	Фрагмент текста, хранящийся внутри программы, например сообщение, веб-адрес или имя файла.
+A program, an app bundle, an APK, a JavaScript bundle, a folder… or drop it on the window.	Программа, набор приложения, APK, набор JavaScript, папка… или перетащите на окно.
+A recording of network traffic	Запись сетевого трафика
+A region of a program as it sits in memory while running.	Регион программы в том виде, в котором она находится в памяти во время работы.
+A region of a program file with one purpose: code, text, pictures, settings.	Регион файла программы с одной целью: код, текст, изображения, настройки.
+A rule of thumb. Usually right, sometimes wrong, so we label the result as a best guess.	Правило большого пальца. Обычно верно, иногда ошибочно, поэтому мы помечаем результат как лучшее предположение.
+A saved, checkable record of something we found, with how sure we are and where we found it.	Сохранённая проверяемая запись о том, что мы нашли, с указанием степени уверенности и места находки.
+A script or web page	Скрипт или веб-страница
+A set of commands a program offers to other programs.	Набор команд, который программа предоставляет другим программам.
+A simple snake game	Простая игра «Змейка»
+A small download (under 200 MB). Free, no account needed.	Небольшая загрузка (до 200 МБ). Бесплатно, аккаунт не нужен.
+A small file that lists what an app is called, what it needs and what it's allowed to do.	Небольшой файл, в котором указано, как называется приложение, что ему нужно и что ему разрешено делать.
+A smart contract (EVM bytecode)	Смарт-контракт (байт-код EVM)
+A way of writing bytes as two-character codes (00 to FF). The rawest view of a file.	Способ записи байтов в виде двухсимвольных кодов (от 00 до FF). Самый «сырой» вид файла.
+A way to build desktop apps out of web pages. The app is basically a website with its own browser.	Способ создавать настольные приложения из веб-страниц. Приложение по сути — веб-сайт со своим браузером.
+A website	Веб-сайт
+A website for my bakery	Веб-сайт для моей пекарни
+AI	ИИ
+AI cost	Стоимость ИИ
+AI cost (estimate)	Стоимость ИИ (оценка)
+AI cost (part estimate)	Стоимость ИИ (частичная оценка)
+AI model file	Файл модели ИИ
+AI name	Название ИИ
+AI use this session	Использование ИИ в этой сессии
+API boundary	Граница API
+API key	Ключ API
+API key (stored in your system keychain)	Ключ API (хранится в системной связке ключей)
+API key, if it needs one	Ключ API, если он нужен
+About 10 GB. Free for personal use with a Unity account.	Около 10 ГБ. Бесплатно для личного использования с аккаунтом Unity.
+About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Около 60 ГБ, аккаунт Epic Games и инструменты C++ Visual Studio.
+Add	Добавить
+Add Visual Studio's C++ tools	Добавить инструменты C++ Visual Studio
+Add a brain	Добавить «мозг»
+Add a fal.ai key	Добавить ключ fal.ai
+Add a folder…	Добавить папку…
+Add a plugin	Добавить плагин
+Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Добавьте «мозг» ИИ, и я прочитаю для вас эти доказательства, отвечу на дополнительные вопросы и укажу на доказательства.
+Add an AI by its address	Добавить ИИ по адресу
+Add more info. The builder reads it at its next step.	Добавьте больше информации. Конструктор прочитает её на следующем шаге.
+Add pictures	Добавить изображения
+Add pictures of the original	Добавить изображения оригинала
+Add pictures of the original (optional: screenshots help it look right)	Добавить изображения оригинала (необязательно: скриншоты помогут сделать правильно)
+Add to a running build	Добавить к запущенной сборке
+Added	Добавлено
+Added {n} picture(s). The builder uses them from your next change.	Добавлено изображений: {n}. Конструктор использует их при следующем изменении.
+Address to file offset	Адрес в смещение файла
+Adds its decompiler to Deep mode. Craft Anything can download and set it up for you.	Добавляет свой декомпилятор в режим «Глубокий». Craft Anything может скачать и настроить его для вас.
+Advanced	Расширенный
+After installing one, look for it again.	После установки одного из них повторите поиск.
+Agent	Агент
+Allow generated assets	Разрешить генерируемые ресурсы
+Allow once	Разрешить один раз
+Allowed for this project	Разрешено для этого проекта
+Allowed for this project.	Разрешено для этого проекта.
+Allowed in	Разрешено в
+Allowed once	Разрешено один раз
+Allowed once.	Разрешено один раз.
+Also list projects from	Также показывать проекты из
+Always for this project	Всегда для этого проекта
+An Android app	Приложение Android
+An Android app package: the file you install on a phone.	Пакет приложения Android: файл, который устанавливается на телефон.
+An Apple settings file (plist)	Файл настроек Apple (plist)
+An app	Приложение
+An app or a file	Приложение или файл
+Analyse a JavaScript app	Проанализировать приложение JavaScript
+Analyse a page's JavaScript	Проанализировать JavaScript страницы
+Android app code (DEX)	Код приложения Android (DEX)
+Android app components	Компоненты приложения Android
+Android app package	Пакет приложения Android
+Android apps	Приложения Android
+Android class	Класс Android
+Android method bytecode	Байт-код метода Android
+Android resources	Ресурсы Android
+Annotate function	Аннотировать функцию
+Another build is working, so this one waits its turn.	Выполняется другая сборка, поэтому эта ждёт своей очереди.
+Answer a project's question	Ответить на вопрос проекта
+Answer any of them in a message below.	Ответьте на любой из них сообщением ниже.
+Answered by {name}	Отвечено: {name}
+Answers come from {brain}. To build, set up a coding agent in Settings → AI.	Ответы поступают от {brain}. Чтобы собирать, настройте агент кодирования в Настройки → ИИ.
+App	Приложение
+App details on device	Сведения о приложении на устройстве
+Apple apps	Приложения Apple
+Approve an agent action	Одобрить действие агента
+Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Приложения и игры: продолжать уточнение, пока они не станут похожи на ваши изображения настолько. Выключено — сходство только сообщается.
+Architectures	Архитектуры
+Archive	Архив
+Archives	Архивы
+Ask a question	Задать вопрос
+Ask about a build	Спросить о сборке
+Ask about the build	Спросить о сборке
+Ask about the build, e.g. "where are the latest files?" Nothing changes and no build starts.	Спросить о сборке, например «где последние файлы?». Ничего не меняется и сборка не запускается.
+Ask about this game	Спросить об этой игре
+Ask anything, e.g. "What does this program do?"	Спросите что угодно, например «Что делает эта программа?»
+Ask before running anything	Спрашивать перед запуском чего-либо
+Ask each time	Спрашивать каждый раз
+Ask first	Сначала спросить
+Ask for a change	Попросить об изменении
+Ask for a change, e.g. "bigger buttons" or "add a dark mode"	Попросить об изменении, например «кнопки побольше» или «добавить тёмный режим»
+Ask for a change, e.g. "make it faster" or "add a high-score table"	Попросить об изменении, например «сделать быстрее» или «добавить таблицу рекордов»
+Ask for a change, e.g. "make the header blue" or "add a contact form"	Попросить об изменении, например «сделать шапку синей» или «добавить форму контактов»
+Ask in your own words. Every answer shows how sure we are, and the proof.	Спросите своими словами. Каждый ответ показывает, насколько мы уверены, и доказательство.
+Ask me	Спросите меня
+Ask the agent about this	Спросить агента об этом
+Ask the agent about this target. It cites evidence for every claim.	Спросить агента об этой цели. Он приводит доказательства для каждого утверждения.
+Ask the agent…	Спросить агента…
+Ask the person	Спросить человека
+Ask: "How does the % key work?"	Спросите: «Как работает клавиша %?»
+Ask: "Is it safe to run?"	Спросите: «Безопасно ли запускать?»
+Ask: "What does it send over the internet?"	Спросите: «Что она отправляет в интернет?»
+Asking for its models…	Запрашиваем его модели…
+Asset catalog	Каталог ресурсов
+At most this many rounds of fixes after the first build.	Не более такого числа раундов исправлений после первой сборки.
+Attach pictures	Прикрепить изображения
+Attach pictures (or drop them here)	Прикрепить изображения (или перетащить их сюда)
+Auto mode	Авторежим
+Automatic	Автоматически
+Automatic ({name})	Автоматически ({name})
+Back	Назад
+Best guess	Лучшее предположение
+Best guess: a reasonable reading, but not proven.	Лучшее предположение: разумное прочтение, но не доказанное.
+Binary layout	Бинарная структура
+Blocked	Заблокировано
+Bookmark	Закладка
+Budget for a new project	Бюджет нового проекта
+Bug report	Отчёт об ошибке
+Build	Собрать
+Build a rebuild ledger	Собрать журнал пересборки
+Build a stand-in backend	Собрать подставной бэкенд
+Build with	Собрать с помощью
+Build with this	Собрать с этим
+Build with {name}	Собрать с помощью {name}
+Build with {name} instead	Собрать с помощью {name} вместо этого
+Build without it	Собрать без этого
+Builder's questions:	Вопросы конструктора:
+Building	Сборка
+Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	Для сборки нужен агент кодирования на этом компьютере (Claude Code, Codex или Gemini CLI: установите его и один раз войдите в нём в отдельном окне) или ИИ с ключом API. Craft Anything никогда не видит ваш аккаунт.
+Building needs a coding agent such as Claude Code, or an AI with an API key.	Для сборки нужен агент кодирования, например Claude Code, или ИИ с ключом API.
+Builds	Сборки
+Builds and answers may use it again.	Сборки и ответы могут использовать его снова.
+Builds at once	Сборок одновременно
+Builds keep going without stopping to ask you before an action. The builder still never deletes outside its project, changes system settings or publishes anything, and stays within each project's asset budget.	Сборки продолжаются, не останавливаясь, чтобы спросить вас перед действием. Конструктор всё равно никогда не удаляет ничего вне проекта, не меняет системные настройки и не публикует ничего, а также остаётся в рамках бюджета ресурсов каждого проекта.
+Builds use this one. Click to choose automatically again.	Сборки используют этот. Нажмите, чтобы снова выбрать автоматически.
+Built by	Собрано
+Built with	Собрано с помощью
+Built with {stack}, as you asked, so no game engine is needed.	Собрано с помощью {stack}, как вы просили, поэтому игровой движок не нужен.
+Call graph	Граф вызовов
+Call path	Путь вызова
+Call the build done	Объявить сборку завершённой
+Called done. A new message carries on from here.	Объявлено завершённым. Новое сообщение продолжает отсюда.
+Cancel	Отмена
+Cancel: don't use this folder	Отмена: не использовать эту папку
+Capture a website for rebuilding	Захватить веб-сайт для пересборки
+Capture inventories	Захватить инвентари
+Capture menus, dialogs and tabs	Захватить меню, диалоги и вкладки
+Change	Изменить
+Change a setting	Изменить настройку
+Change an AI's model	Изменить модель ИИ
+Change how hard an AI thinks	Изменить, насколько сильно думает ИИ
+Change it	Изменить
+Change…	Изменить…
+Check	Проверить
+Check .NET native calls	Проверить вызовы из .NET в нативный код
+Check a rebuild claim	Проверить утверждение о пересборке
+Check a scripted web session	Проверить записанную веб-сессию
+Check an answer	Проверить ответ
+Check decompiled C#	Проверить декомпилированный C#
+Check my build	Проверить мою сборку
+Check the JEB connection	Проверить соединение с JEB
+Check the asset keys	Проверить ключи ресурсов
+Check the setup	Проверить настройку
+Check {n}	Проверить {n}
+Check {n}: about {s}% like the original	Проверить {n}: примерно {s}% сходства с оригиналом
+Checked against Godot's official checksums before it's used.	Проверено по официальным контрольным суммам Godot перед использованием.
+Checking	Проверка
+Choose a file	Выбрать файл
+Choose a folder…	Выбрать папку…
+Choose a function, string or section to see it here.	Выберите функцию, строку или раздел, чтобы увидеть их здесь.
+Choose an AI's job	Выбрать задачу ИИ
+Choose the folder Ghidra is installed in.	Выберите папку, в которую установлен Ghidra.
+Choose what the builder's questions get	Выберите, что получают вопросы конструктора
+Choose what to recreate, say what you want, then press Start.	Выберите, что пересоздать, скажите, что хотите, затем нажмите «Старт».
+Choose…	Выбрать…
+Classes	Классы
+Clean room	Чистая комната
+Clean room / Deep	Чистая комната / Глубокий
+Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Режим «Чистая комната» никогда не читает код, файлы или исходник страницы оригинала. Режим «Глубокий» читает их всеми инструментами Craft Anything.
+Clean room never reads the original's code, files or page source: it works from what you can see. Deep reads them with every tool, and with Ghidra when it's installed. Every finding records which was used.	Режим «Чистая комната» никогда не читает код, файлы или исходник страницы оригинала: он работает с тем, что вы можете увидеть. «Глубокий» читает их всеми инструментами, а также Ghidra, если он установлен. Каждая находка записывает, что использовалось.
+Clean room on	Включена чистая комната
+Clean room or Deep	Чистая комната или Глубокий
+Clean room: nothing inside the original is read. We work from what you can see: pictures, the page as a visitor sees it, and watching it run.	Чистая комната: ничего внутри оригинала не читается. Мы работаем с тем, что вы можете увидеть: изображениями, страницей глазами посетителя и наблюдением за её работой.
+Clear finished	Очистить завершённые
+Close	Закрыть
+Close a Frida session	Закрыть сессию Frida
+Close a GDB session	Закрыть сессию GDB
+Close a Rizin debug session	Закрыть отладочную сессию Rizin
+Close a pinned build	Закрыть закреплённую сборку
+Close it	Закрыть
+Close it first.	Сначала закройте её.
+Close the website	Закрыть веб-сайт
+Code reconstructed from a program that looks like the C language. Close to what the program does, but not its original source.	Код, восстановленный из программы и выглядящий как язык C. Близок к тому, что делает программа, но не её оригинальный исходный код.
+Code signature	Подпись кода
+Coding agent app	Приложение агента кодирования
+Command palette (Ctrl/⌘ K)	Палитра команд (Ctrl/⌘ K)
+Commands:	Команды:
+Compare WebAssembly interfaces	Сравнить интерфейсы WebAssembly
+Compare module exports	Сравнить экспорты модулей
+Compare two .NET builds	Сравнить две сборки .NET
+Compare two app versions	Сравнить две версии приложения
+Compare two artifacts	Сравнить два артефакта
+Compare two evidence bundles	Сравнить два набора доказательств
+Compare two functions	Сравнить две функции
+Compare two page captures	Сравнить два захвата страницы
+Compare two runs	Сравнить два запуска
+Compare two screenshots	Сравнить два скриншота
+Comparing and rebuilding	Сравнение и пересборка
+Compiled Python file	Скомпилированный файл Python
+Connect	Подключить
+Connect agent apps	Подключить приложения-агенты
+Connect to a browser	Подключиться к браузеру
+Connect {name}	Подключить {name}
+Connected devices	Подключённые устройства
+Connected phone	Подключённый телефон
+Continue	Продолжить
+Contradicted	Опровергнуто
+Control-flow graph: a map of every path a function can take, like a flowchart.	Граф потока управления: карта всех путей, по которым может пройти функция, как блок-схема.
+Copies share the files it saves beside itself.	Копии делят файлы, которые она сохраняет рядом с собой.
+Copy a file off the phone	Скопировать файл с телефона
+Copy a file to the phone	Скопировать файл на телефон
+Copy an app off the phone	Скопировать приложение с телефона
+Copy the command	Скопировать команду
+Copy the evidence id	Скопировать идентификатор доказательства
+Couldn't add the pictures:	Не удалось добавить изображения:
+Couldn't answer:	Не удалось ответить:
+Couldn't attach the pictures:	Не удалось прикрепить изображения:
+Couldn't look through that folder.	Не удалось просмотреть эту папку.
+Couldn't open it.	Не удалось открыть.
+Couldn't open the folder.	Не удалось открыть папку.
+Couldn't open {}: {}	Не удалось открыть {}: {}
+Couldn't start a worker thread: {e}	Не удалось запустить рабочий поток: {e}
+Couldn't start it.	Не удалось запустить.
+Coverage unknown	Покрытие неизвестно
+Craft Anything	Craft Anything
+Craft Anything can't build with {engine}, so Unity is the closest match.	Craft Anything не может собирать с помощью {engine}, поэтому Unity — ближайшее совпадение.
+Craft Anything or the computer closed while it was working. Everything so far is kept; Continue picks up where it stopped.	Craft Anything или компьютер закрылись во время работы. Всё сделанное до сих пор сохранено; «Продолжить» продолжит с того места, где остановилось.
+Craft Anything reads its code and files with every tool it has. For your private use.	Craft Anything читает его код и файлы всеми имеющимися инструментами. Для вашего личного использования.
+Craft Anything reads the original's code, files and page source with every tool it has, and with Ghidra when it's installed.	Craft Anything читает код, файлы и исходник страницы оригинала всеми имеющимися инструментами, а также Ghidra, если он установлен.
+Craft Anything report.md	Craft Anything report.md
+Craft Anything's records, checks and anything it built in app/ are deleted. Your own files in the folder stay as they are.	Записи Craft Anything, проверки и всё, что он собрал в app/, удалены. Ваши собственные файлы в папке остаются как есть.
+Crash dump	Дамп сбоя
+Create the project	Создать проект
+Critical	Критический
+Cross-reference: a place in the program that uses or calls the thing you're looking at.	Перекрёстная ссылка: место в программе, которое использует или вызывает объект, на который вы смотрите.
+Cross-references	Перекрёстные ссылки
+Cross-references: the places in the program that use or call the thing you're looking at.	Перекрёстные ссылки: места в программе, которые используют или вызывают объект, на который вы смотрите.
+Current document	Текущий документ
+Cursor address	Адрес курсора
+Cursor function	Функция курсора
+Custom	Пользовательский
+Cutter command	Команда Cutter
+DOS load image	Образ загрузки DOS
+Databases	Базы данных
+Decide yourself	Решайте сами
+Decode a radio recording	Декодировать радиозапись
+Decompile	Декомпилировать
+Decompile Java with Vineflower	Декомпилировать Java с помощью Vineflower
+Decompile many	Декомпилировать много
+Decompile with JEB	Декомпилировать с помощью JEB
+Deep	Глубокий
+Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	Режим «Глубокий» теперь декомпилирует с помощью Ghidra. Первый просмотр большой программы может занять несколько минут.
+Deep mode on	Включён режим «Глубокий»
+Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Глубокий: мы читаем его код, файлы и исходник страницы всеми имеющимися инструментами, а также Ghidra, если он установлен. Нажмите, чтобы переключить.
+Delete a project	Удалить проект
+Delete it	Удалить
+Delete the project	Удалить проект
+Delete {name}?	Удалить {name}?
+Deleted.	Удалено.
+Deleted. Your own files are still in the folder.	Удалено. Ваши собственные файлы всё ещё в папке.
+Delete…	Удалить…
+Deliberately scrambled to make it hard to read, without changing what it does.	Намеренно запутано, чтобы было трудно прочитать, не меняя того, что оно делает.
+Demangle Swift symbols	Распутать символы Swift
+Details	Подробности
+Details about the selected item appear here.	Сведения о выбранном элементе появляются здесь.
+Detect	Определить
+Device details	Сведения об устройстве
+Device features	Возможности устройства
+Device folder	Папка устройства
+Device log	Журнал устройства
+Disassemble sBPF code	Дизассемблировать код sBPF
+Disassembly	Дизассемблирование
+Disconnect agent apps	Отключить приложения-агенты
+Dismiss	Отклонить
+Dispatch metadata	Метаданные отправки
+Display info	Сведения о дисплее
+Do you have permission?	У вас есть разрешение?
+Does it talk to the internet?	Общается ли оно с интернетом?
+Does it track me?	Отслеживает ли оно меня?
+Don't allow	Не разрешать
+Don't ask again (you can change this in Settings)	Не спрашивать снова (можно изменить в Настройках)
+Done	Готово
+Download	Загрузить
+Download Godot {v}	Загрузить Godot {v}
+Download Unity Hub	Загрузить Unity Hub
+Download and use Ghidra	Загрузить и использовать Ghidra
+Download it from unity.com and install it.	Загрузите с unity.com и установите.
+Download it from unrealengine.com and install it.	Загрузите с unrealengine.com и установите.
+Download the Epic Games Launcher	Загрузить Epic Games Launcher
+Downloads keep going in the background.	Загрузки продолжаются в фоне.
+Drive an app's screen	Управлять экраном приложения
+Drop a calculator app (or any small program) on the window.	Перетащите приложение-калькулятор (или любую небольшую программу) на окно.
+Drop a file or app anywhere in this window.	Перетащите файл или приложение в любое место этого окна.
+Drop the file on the window. We only read it; nothing runs.	Перетащите файл на окно. Мы только читаем его; ничего не запускается.
+Drop to attach	Перетащить для прикрепления
+Drop to open it	Перетащить для открытия
+Duplicate	Дублировать
+Duplicate a project	Дублировать проект
+Duplicate the project	Дублировать проект
+Each answer says how sure we are: Seen it, Worked it out or Best guess.	Каждый ответ указывает, насколько мы уверены: «Видели», «Разобрались» или «Лучшее предположение».
+Edit a project file	Редактировать файл проекта
+Edit them in place	Редактировать на месте
+Effort:	Усилие:
+Electron and JavaScript	Electron и JavaScript
+Electron fuses	Предохранители Electron
+Engines	Движки
+Engines and settings	Движки и настройки
+Enter a full web address, like example.com or https://example.com/page.	Введите полный веб-адрес, например example.com или https://example.com/page.
+Enter to send · Shift+Enter for a new line	Enter — отправить · Shift+Enter — новая строка
+Epic's own installer. It only opens if Epic's signature checks out.	Собственный установщик Epic. Он открывается только если подпись Epic проходит проверку.
+Essentials	Основы
+Every build of this project.	Все сборки этого проекта.
+Every finding is saved here with how sure we are.	Каждая находка сохраняется здесь с указанием степени нашей уверенности.
+Every tool as well: a workbench with functions, bytes, references and evidence.	А также все инструменты: рабочее место с функциями, байтами, ссылками и доказательствами.
+Everything found so far, as a Markdown file.	Всё найденное до сих пор, в виде файла Markdown.
+Everything so far is kept. Continue picks up where it stopped.	Всё сделанное до сих пор сохранено. «Продолжить» продолжит с того места, где остановилось.
+Evidence	Доказательства
+Evidence ledger	Журнал доказательств
+Evidence so far	Доказательства на данный момент
+Explain a function	Объяснить функцию
+Explain like I'm new	Объяснить как новичку
+Export a report	Экспортировать отчёт
+Export a report (Markdown)	Экспортировать отчёт (Markdown)
+Export captured scripts	Экспортировать записанные скрипты
+Export evidence	Экспортировать доказательства
+Export report	Экспортировать отчёт
+Extract an archive	Распаковать архив
+Extract firmware	Извлечь прошивку
+Extract with this	Извлечь с помощью этого
+Extracts	Извлечения
+File formats	Форматы файлов
+Files packed inside a file	Файлы, упакованные внутри файла
+Filter	Фильтр
+Filter by name	Фильтровать по имени
+Filter the files	Фильтровать файлы
+Filter…	Фильтр…
+Find Android classes	Найти классы Android
+Find Java classes	Найти классы Java
+Find a call path	Найти путь вызова
+Find a game's files	Найти файлы игры
+Find an app	Найти приложение
+Find in-page MCP tools	Найти MCP-инструменты на странице
+Find it automatically	Найти автоматически
+Find out how any software works, then craft your own.	Узнайте, как работает любое программное обеспечение, а затем создайте своё.
+Find the original source line	Найти исходную строку исходного кода
+Firmware regions	Регионы прошивки
+Fold the sidebar	Свернуть боковую панель
+Folders of projects, and projects started in a folder you picked. Removing one only takes it off the list.	Папки проектов, а также проекты, начатые в выбранной вами папке. Удаление только убирает их из списка.
+Follow the installer that opened. Come back here when it's done.	Следуйте открывшемуся установщику. Вернитесь сюда, когда он завершится.
+Follow the steps on rustup.rs, then come back here.	Следуйте шагам на rustup.rs, затем вернитесь сюда.
+For everything you make, like the switch in the title bar.	Для всего, что вы создаёте, например переключатель в заголовке.
+For example: a website for my bakery	Например: веб-сайт для моей пекарни
+For example: recreate this website	Например: пересоздать этот веб-сайт
+For example: the same app, but simpler	Например: то же приложение, но проще
+For example: the same game, with a high-score table	Например: та же игра с таблицей рекордов
+Force-stop an app	Принудительно остановить приложение
+Forget the key	Забыть ключ
+Found on this computer	Найдено на этом компьютере
+Found {} AI option(s) on this computer	Найдено вариантов ИИ на этом компьютере: {}
+Frida devices	Устройства Frida
+Frida instrumentation	Инструментация Frida
+Frida processes	Процессы Frida
+Frida session status	Состояние сессии Frida
+From	От
+Frozen copy	Замороженная копия
+Function address	Адрес функции
+Function assembly	Ассемблер функции
+Function dossier	Досье функции
+Function info	Сведения о функции
+Function instructions	Инструкции функции
+Function references	Ссылки на функцию
+Functions	Функции
+GDB command	Команда GDB
+GDB session status	Состояние сессии GDB
+Game assets	Ресурсы игры
+Game engines	Игровые движки
+Game files	Файлы игры
+General	Общие
+Generate a 3D model	Сгенерировать 3D-модель
+Generate a picture	Сгенерировать изображение
+Generate custom pictures and models	Сгенерировать пользовательские изображения и модели
+Generated art (games)	Сгенерированная графика (игры)
+Generated assets	Сгенерированные ресурсы
+Generated pictures and 3D models are made with fal.ai.	Сгенерированные изображения и 3D-модели создаются с помощью fal.ai.
+Get Ghidra	Получить Ghidra
+Get Ghidra for Deep mode	Получить Ghidra для режима «Глубокий»
+Get Unity Hub	Получить Unity Hub
+Get a key at {name}	Получить ключ на {name}
+Get the Epic Games Launcher	Получить Epic Games Launcher
+Get {name}	Получить {name}
+Getting Ghidra	Получение Ghidra
+Getting Godot	Получение Godot
+Getting Unity Hub	Получить Unity Hub
+Getting the Epic Games Launcher	Получить Epic Games Launcher
+Ghidra	Ghidra
+Ghidra folder	Папка Ghidra
+Ghidra is ready	Ghidra готов
+Ghidra is ready. Deep mode uses it from now on.	Ghidra готов. Режим «Глубокий» использует его с этого момента.
+Ghidra isn't installed, so the built-in decompiler stands in. Get it in Settings → Engines.	Ghidra не установлен, поэтому используется встроенный декомпилятор. Получите его в Настройки → Движки.
+Ghidra isn't on this computer yet, so the built-in decompiler stands in.	Ghidra ещё нет на этом компьютере, поэтому используется встроенный декомпилятор.
+Ghidra will use half of this computer's memory (up to {gb} GB).	Ghidra будет использовать половину памяти этого компьютера (до {gb} ГБ).
+Ghidra will use up to {gb} GB of memory.	Ghidra будет использовать до {gb} ГБ памяти.
+Ghidra, a free reverse-engineering tool from the NSA, gives Deep mode richer decompiled code and types.	Ghidra — бесплатный инструмент обратной разработки от АНБ, даёт режиму «Глубокий» более богатый декомпилированный код и типы.
+Go home	На главную
+Go program details	Сведения о программе Go
+Go to address	Перейти к адресу
+Go to offset (0x…)	Перейти к смещению (0x…)
+Go to the project	Перейти к проекту
+Good enough	Достаточно хорошо
+Got it	Понятно
+Graph	Граф
+Half of this computer's memory, up to {gb} GB.	Половина памяти этого компьютера, до {gb} ГБ.
+Here's a first look:	Вот первый взгляд:
+Here's what I found on that page:	Вот что я нашёл на этой странице:
+Hex	Шестнадцатеричный вид
+Hide pinned builds	Скрыть закреплённые сборки
+Hide the answer	Скрыть ответ
+Hide the console	Скрыть консоль
+High	Высокий
+Home	Главная
+How alike a rebuild must look to the original before refining stops.	Насколько похожей пересборка должна быть на оригинал, прежде чем уточнение остановится.
+How closely may Craft Anything look at it?	Насколько подробно Craft Anything может его изучать?
+How complete is the rebuild	Насколько полна пересборка
+How do I open an app?	Как открыть приложение?
+How do the window and the page talk to each other?	Как общаются окно и страница?
+How does the % key work?	Как работает клавиша %?
+How is this app built?	Как построено это приложение?
+How is this app put together?	Как устроено это приложение?
+How many projects may build at the same time. More wait their turn.	Сколько проектов может собираться одновременно. Остальные ждут своей очереди.
+How should the builder use them?	Как конструктор должен их использовать?
+I have Ghidra	У меня есть Ghidra
+I have permission	У меня есть разрешение
+I want to make things work together	Я хочу заставить вещи работать вместе
+I'm checking whether it's safe	Я проверяю, безопасно ли это
+I'm keeping old software alive	Я поддерживаю старое ПО в рабочем состоянии
+I'm learning how things work	Я учусь, как всё работает
+I'm new to this	Я новичок в этом
+ILSpy decompile	Декомпилировать с помощью ILSpy
+Ideas:	Идеи:
+Identify a Flutter build	Определить сборку Flutter
+Import a source folder	Импортировать папку исходного кода
+Import evidence	Импортировать доказательства
+Imports / Exports	Импорты / Экспорты
+In Deep mode this one takes a game's own files out after the study. Click to stop.	В режиме «Глубокий» этот вариант забирает собственные файлы игры после изучения. Нажмите, чтобы остановить.
+In Unity Hub: sign in (or make a free account) and accept the free Personal licence. Then open Installs, press Install Editor and choose the recommended version. About 10 GB.	В Unity Hub: войдите (или создайте бесплатный аккаунт) и примите бесплатную лицензию Personal. Затем откройте Installs, нажмите Install Editor и выберите рекомендуемую версию. Около 10 ГБ.
+In the launcher: sign in, open Unreal Engine, then Library, and press + next to Engine Versions to install one. About 60 GB.	В лаунчере: войдите, откройте Unreal Engine, затем Library, и нажмите + рядом с Engine Versions, чтобы установить одну из них. Около 60 ГБ.
+In use	Используется
+Inside	Внутри
+Inspect a Dart AOT snapshot	Исследовать снимок Dart AOT
+Inspect a network recording	Исследовать запись сети
+Inspect a web page	Исследовать веб-страницу
+Inspect an Electron page	Исследовать страницу Electron
+Inspect data	Исследовать данные
+Inspect instruction	Исследовать инструкцию
+Inspector	Инспектор
+Install Rust	Установить Rust
+Install Unity Hub	Установить Unity Hub
+Install Visual Studio Community (free) and tick "Game development with C++".	Установите Visual Studio Community (бесплатно) и отметьте «Разработка игр на C++».
+Install Xcode	Установить Xcode
+Install an app	Установить приложение
+Install an engine	Установить движок
+Install the launcher	Установить лаунчер
+Installed	Установлено
+Installed apps	Установленные приложения
+Inter-process communication: how two parts of an app (or two apps) send messages to each other.	Межпроцессное взаимодействие: как две части приложения (или два приложения) отправляют сообщения друг другу.
+Interface Builder documents	Документы Interface Builder
+Interrupted	Прервано
+Inventory an archive or app bundle	Инвентаризировать архив или набор приложения
+Investigating	Расследование
+Investigation so far	Расследование на данный момент
+Is Apktool available?	Доступен ли Apktool?
+Is adb available?	Доступен ли adb?
+Is an asset key set up?	Настроен ли ключ ресурсов?
+Is anything in here a program?	Есть ли здесь что-нибудь, являющееся программой?
+Is anything sensitive saved in plain text?	Сохранено ли что-нибудь чувствительное в открытом виде?
+Is it safe to look inside programs?	Безопасно ли заглядывать внутрь программ?
+Is it safe to run?	Безопасно ли запускать?
+Is there any readable text inside?	Есть ли внутри читаемый текст?
+Is this file safe to open?	Безопасно ли открывать этот файл?
+It closed straight away.	Оно сразу закрылось.
+It closed straight away. It said:	Оно сразу закрылось. Оно сказало:
+It isn't on this computer yet. Craft Anything can download Ghidra {version} and the Java runtime it needs (about {mb} MB), check both against their publishers' checksums, and set them up in its own folder. Nothing else on your computer changes.	Его ещё нет на этом компьютере. Craft Anything может скачать Ghidra {version} и нужную ей среду выполнения Java (около {mb} МБ), проверить обе по контрольным суммам издателей и настроить их в собственной папке. Ничего другого на вашем компьютере не изменится.
+It isn't on this computer yet. Install Ghidra {version} from its release page, then choose its folder.	Его ещё нет на этом компьютере. Установите Ghidra {version} со страницы релиза, затем выберите его папку.
+It's already open.	Оно уже открыто.
+It's already open. Right-click it to open another copy.	Оно уже открыто. Щёлкните правой кнопкой, чтобы открыть ещё одну копию.
+It's done	Готово
+It's mine, or I'm allowed to look	Это моё, или мне разрешено смотреть
+Its copy is deleted, with anything it saved there. The project itself stays as it is.	Его копия удалена вместе со всем, что там было сохранено. Сам проект остаётся как есть.
+Its folder is deleted with everything in it: what was built, the checks and the conversation.	Его папка удалена со всем содержимым: тем, что было собрано, проверками и перепиской.
+Its own code	Его собственный код
+Java archive overview	Обзор архива Java
+Java class	Класс Java
+Java method bytecode and pseudo-Java	Байт-код метода Java и псевдо-Java
+Java program code (one class)	Код программы Java (один класс)
+Java programs	Программы Java
+Java runtime	Среда выполнения Java
+Jobs	Задания
+Jobs ({n_jobs})	Задания ({n_jobs})
+Jobs ({n})	Задания ({n})
+Just a question: nothing was changed. Answered by	Просто вопрос: ничего не изменилось. Отвечено:
+Just ask	Просто спросите
+Just look inside	Просто загляните внутрь
+Keep going without asking	Продолжать без вопросов
+Keep it	Сохранить
+Keep it in the sidebar to open any time, whatever later builds change.	Оставить в боковой панели, чтобы открывать в любое время, несмотря на изменения в последующих сборках.
+Keep the build as it is and stop offering to carry on.	Оставить сборку как есть и перестать предлагать продолжать.
+Keep this version in the sidebar to open any time.	Оставить эту версию в боковой панели для открытия в любое время.
+Keeps this version exactly as it is now. Later builds can't change or break it, and anything it saves stays with the copy.	Сохраняет эту версию именно такой, какая она есть сейчас. Последующие сборки не могут её изменить или сломать, а всё, что она сохраняет, остаётся с копией.
+Key saved	Ключ сохранён
+Keyed archive	Архив с ключом
+Kind	Тип
+Language	Язык
+Last: {what}	Последнее: {what}
+Launch an app	Запустить приложение
+Leave a few GB for the rest of your computer.	Оставьте несколько ГБ для остальной части компьютера.
+Leave a path empty to use the managed install. We never need environment variables.	Оставьте путь пустым, чтобы использовать управляемую установку. Переменные среды нам не нужны.
+Leave empty to use the one Craft Anything sets up.	Оставьте пустым, чтобы использовать тот, который настраивает Craft Anything.
+Let a project generate assets	Разрешить проекту генерировать ресурсы
+Let's go	Поехали
+Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Позволяет конструктору создавать реалистичные 3D-модели и текстуры для игр, {model} модель, с бюджетом {budget} на проект.
+Library resolution	Разрешение библиотек
+Light copy: shares big files with the project	Лёгкая копия: делит большие файлы с проектом
+Likeness	Сходство
+Line up code and behaviour	Сопоставить код и поведение
+Line up source with the bundle	Сопоставить исходный код с набором
+List Electron pages	Список страниц Electron
+List JEB units	Список единиц JEB
+List JS runtime targets	Список целей среды выполнения JS
+List a Unity assets file	Список файла ресурсов Unity
+List a Unity bundle	Список набора Unity
+List a game's archives	Список архивов игры
+List a node's event listeners	Список слушателей событий узла
+List an AI's models	Список моделей ИИ
+List an Unreal IoStore container	Список контейнера Unreal IoStore
+List an Unreal pak	Список пака Unreal
+List bookmarks	Список закладок
+List browser pages	Список страниц браузера
+List documents	Список документов
+List engines	Список движков
+List functions	Список функций
+List names	Список имён
+List open targets	Список открытых целей
+List pinned builds	Список закреплённых сборок
+List plugins	Список плагинов
+List project files	Список файлов проекта
+List projects	Список проектов
+List questions about a build	Список вопросов о сборке
+List radio decoders	Список радиодекодеров
+List segments	Список сегментов
+List shared Cutter sessions	Список общих сессий Cutter
+List strings	Список строк
+Live: the project's latest build	В реальном времени: последняя сборка проекта
+Load a screenshot	Загрузить скриншот
+Loading…	Загрузка…
+Log	Журнал
+Look again	Искать снова
+Look at a game	Изучить игру
+Look at a website	Изучить веб-сайт
+Look at the game	Изучить игру
+Look for AI on this computer	Искать ИИ на этом компьютере
+Look for game engines	Искать игровые движки
+Look for projects again	Искать проекты снова
+Looked at everything	Изучено всё
+Looked at part of it	Изучена часть
+Looked at {a} of {b}	Изучено {a} из {b}
+Looking for AI on this computer…	Поиск ИИ на этом компьютере…
+Looking for game engines on this computer…	Поиск игровых движков на этом компьютере…
+Looking for the game's files…	Поиск файлов игры…
+Looking inside needs Deep mode	Для изучения изнутри нужен режим «Глубокий»
+Looking inside software you own or are allowed to examine is normal and often protected (learning, compatibility, security). Saying why helps you keep to it; it stays on this computer.	Заглядывать внутрь ПО, которым вы владеете или которое вам разрешено исследовать, — нормально и часто защищено (обучение, совместимость, безопасность). Объяснение причины помогает придерживаться этого; это остаётся на этом компьютере.
+Looking on this computer…	Поиск на этом компьютере…
+Low	Низкий
+Mach-O structure	Структура Mach-O
+Made a copy: {name}	Создана копия: {name}
+Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Создано с помощью fal.ai и оплачено с вашего аккаунта: {model} 3D-модель, {picture} изображение. Выключено — игра собирается без них.
+Made with {engine}	Сделано с помощью {engine}
+Made without looking inside the original.	Сделано без просмотра оригинала изнутри.
+Make a game that plays like this	Сделать игру, которая играется как эта
+Make a simpler version of this game	Сделать упрощённую версию этой игры
+Make my own version	Сделать свою версию
+Make my own version of this app	Сделать свою версию этого приложения
+Making my own thing talk to something else.	Заставить мою вещь общаться с чем-то другим.
+Many source files packed into one big file so an app or web page loads faster.	Множество исходных файлов, упакованных в один большой файл, чтобы приложение или веб-страница загружались быстрее.
+Map a HarmonyOS app	Составить карту приложения HarmonyOS
+Map a page's module graph	Составить карту графа модулей страницы
+Map an Android app	Составить карту приложения Android
+Map an Apple app	Составить карту приложения Apple
+Markdown	Markdown
+Match functions between two builds	Сопоставить функции между двумя сборками
+Match my pictures	Сопоставить мои изображения
+Match static code to what ran	Сопоставить статический код с тем, что выполнялось
+Maximise	Развернуть
+May I run "{title}"?	Можно запустить «{title}»?
+May I {action}?	Можно {action}?
+Measure which code ran	Измерить, какой код выполнялся
+Medium	Средний
+Memory for Ghidra	Память для Ghidra
+Minimise	Свернуть
+Mode	Режим
+Model	Модель
+Model: {model}	Модель: {model}
+Modules	Модули
+More detail	Подробнее
+More makes a big program's first look faster.	Больше ускоряет первый просмотр большой программы.
+More memory makes Ghidra's first look at a big program faster; leave some for the rest of the computer. Used from the next time Ghidra starts.	Больше памяти ускоряет первый просмотр большой программы в Ghidra; оставьте немного для остальной части компьютера. Используется со следующего запуска Ghidra.
+Name (optional)	Имя (необязательно)
+Name an address	Назвать адрес
+Name at address	Имя по адресу
+Name many addresses	Назвать много адресов
+Names the program's author gave to functions or variables that survived in the file.	Имена, которые автор программы дал функциям или переменным и которые сохранились в файле.
+Needs a fal.ai key. Until then the game is built without them.	Нужен ключ fal.ai. До этого игра собирается без них.
+Needs you	Требует вас
+Network	Сеть
+New	Новый
+New project	Новый проект
+New projects go in	Новые проекты помещаются в
+Next address	Следующий адрес
+No AI (built-in engines only)	Без ИИ (только встроенные движки)
+No AI brain is set up, so answers come straight from the built-in engines. Add one any time for plain-words explanations.	«Мозг» ИИ не настроен, поэтому ответы поступают прямо из встроенных движков. Добавьте его в любой момент для объяснений простыми словами.
+No AI for now	Пока без ИИ
+No AI is set up yet. The built-in engines still work; an AI adds plain-words answers.	ИИ ещё не настроен. Встроенные движки всё ещё работают; ИИ добавляет ответы простыми словами.
+No Unreal or Unity archives were found. Pick the folder the game is installed in.	Архивы Unreal или Unity не найдены. Выберите папку, в которую установлена игра.
+No coding agent was found on this computer yet.	Агент кодирования на этом компьютере пока не найден.
+No evidence yet	Доказательств пока нет
+No game files here	Файлов игры здесь нет
+No jobs yet. Long tasks show their progress here, and you can cancel them.	Заданий пока нет. Долгие задачи показывают здесь свой прогресс, их можно отменить.
+No matches	Совпадений нет
+No open questions	Открытых вопросов нет
+No plugins yet.	Плагинов пока нет.
+No result yet	Результата пока нет
+No targets	Целей нет
+No tool named {tool}	Инструмента с именем {tool} нет
+None	Нет
+None yet. Screenshots help it look right.	Пока ничего. Скриншоты помогут сделать правильно.
+Not allowed	Не разрешено
+Not allowed.	Не разрешено.
+Not available yet	Пока недоступно
+Not compared yet: {what}	Пока не сравнено: {what}
+Not installed	Не установлено
+Not now	Не сейчас
+Nothing allowed yet.	Пока ничего не разрешено.
+Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below.	Пока ничего нельзя собрать: установите Claude Code (и один раз войдите в него) или добавьте ИИ с ключом API ниже.
+Nothing found	Ничего не найдено
+Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have.	Пока ничего не найдено. Мы ищем ключи API, локальные серверы моделей (Ollama, LM Studio) и приложения-агенты, которые у вас уже есть.
+Nothing inside it is read.	Внутри ничего не читается.
+Nothing inside it is read; Craft Anything works from what you can see. Your version gets its own art.	Внутри ничего не читается; Craft Anything работает с тем, что вы можете увидеть. Ваша версия получит собственную графику.
+Nothing inside the original is read: not its code, files or page source. Craft Anything works from what you can see: pictures, the page as a visitor sees it, and watching it run.	Внутри оригинала ничего не читается: ни код, ни файлы, ни исходник страницы. Craft Anything работает с тем, что вы можете увидеть: изображениями, страницей глазами посетителя и наблюдением за её работой.
+Nothing made yet. What you make shows up here.	Пока ничего не сделано. То, что вы создаёте, появляется здесь.
+Nothing matches the filter.	Ничего не совпадает с фильтром.
+Nothing matches.	Совпадений нет.
+Nothing new for {time}. Long steps can be quiet; if it stays like this, press Pause.	Ничего нового за {time}. Долгие шаги могут быть тихими; если так продолжается, нажмите «Пауза».
+Nothing open	Ничего не открыто
+Nothing open yet	Пока ничего не открыто
+Nothing selected	Ничего не выбрано
+Nothing to show	Нечего показать
+Nothing uses it until it's on again; it keeps its key.	Пока оно снова не включено, ничего его не использует; ключ сохраняется.
+Nothing — start fresh	Ничего — начать заново
+Now	Сейчас
+Now: {what} ({time})	Сейчас: {what} ({time})
+Objective-C classes	Классы Objective-C
+Objective-C protocols	Протоколы Objective-C
+Observe a JS runtime	Наблюдать за средой выполнения JS
+Of this, {cost} was charged to an API key.	Из этого {cost} списано с ключа API.
+Off	Выкл
+Ollama or LM Studio on another computer, or any service that speaks the OpenAI API.	Ollama или LM Studio на другом компьютере, или любой сервис, говорящий на API OpenAI.
+On	Вкл
+One line, in plain words. It stays on this computer and is never sent anywhere.	Одна строка, простыми словами. Она остаётся на этом компьютере и никуда не отправляется.
+One-shot instrumentation	Одноразовая инструментация
+Only for Ghidra. Empty = managed.	Только для Ghidra. Пусто = управляемый.
+Only its name changes; its folder stays where it is.	Меняется только имя; его папка остаётся на месте.
+Only take pictures out of games you made, or whose owner allows it. A game's art is usually protected by copyright and by the game's licence.	Берите изображения из игр только из тех, что вы сделали сами, или чей владелец это разрешает. Графика игры обычно защищена авторским правом и лицензией игры.
+Only the pin goes; the project and its app stay as they are.	Удаляется только закрепление; проект и его приложение остаются как есть.
+Open	Открыть
+Open "Show me the proof" to see the exact code we found, and how sure we are.	Откройте «Покажи мне доказательство», чтобы увидеть точный код, который мы нашли, и насколько мы уверены.
+Open Ghidra's release page	Открыть страницу релиза Ghidra
+Open Unity Hub	Открыть Unity Hub
+Open a calculator app and find the code behind one button.	Откройте приложение-калькулятор и найдите код за одной кнопкой.
+Open a file in JEB	Открыть файл в JEB
+Open a file or drop one here.	Откройте файл или перетащите его сюда.
+Open a file…	Открыть файл…
+Open a folder or app bundle	Открыть папку или набор приложения
+Open a folder or app bundle…	Открыть папку или набор приложения…
+Open a folder…	Открыть папку…
+Open a pinned build	Открыть закреплённую сборку
+Open a project's folder	Открыть папку проекта
+Open a website	Открыть веб-сайт
+Open an app or file	Открыть приложение или файл
+Open an engine's app	Открыть приложение движка
+Open another copy	Открыть ещё одну копию
+Open another target	Открыть другую цель
+Open files, folders or apps; you can have several open at once.	Открывайте файлы, папки или приложения; можно иметь несколько открытых одновременно.
+Open folder	Открыть папку
+Open in the workbench	Открыть в рабочем месте
+Open it	Открыть
+Open log	Открыть журнал
+Open one of the files inside it to see its bytes.	Откройте один из файлов внутри, чтобы увидеть его байты.
+Open questions	Открытые вопросы
+Open something	Открыть что-нибудь
+Open something first: drop a file or app here, or choose "Just look inside" on New project. Then I can look inside it.	Сначала откройте что-нибудь: перетащите файл или приложение сюда или выберите «Просто заглянуть внутрь» в «Новый проект». Тогда я смогу заглянуть внутрь.
+Open something to start	Откройте что-нибудь, чтобы начать
+Open the Epic Games Launcher	Открыть Epic Games Launcher
+Open the app	Открыть приложение
+Open the app you're curious about.	Откройте приложение, которое вас интересует.
+Open the download page	Открыть страницу загрузки
+Open the folder	Открыть папку
+Open the installer app	Открыть приложение-установщик
+Open the website	Открыть веб-сайт
+Open {name}	Открыть {name}
+Opened {name}	Открыто: {name}
+Opened {name}. Taking a first look…	Открыто: {name}. Делаем первый взгляд…
+Opened {}	Открыто: {}
+Opening {name}…	Открываем {name}…
+Open…	Открыть…
+Or type your answer…	Или введите свой ответ…
+Original	Оригинал
+Other pages of a website studied and compared besides the one you gave.	Другие страницы веб-сайта, изученные и сравнённые помимо той, которую вы дали.
+Overview	Обзор
+Packet capture overview	Обзор захвата пакетов
+Packet fields	Поля пакета
+Page through evidence	Листать доказательства
+Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	Часть приложения зависла, поэтому она была остановлена, а остальное продолжило работу. Ваша работа сохранена.
+Part of the app is stuck. Restarting clears it, and your work is kept.	Часть приложения зависла. Перезапуск очистит её, а ваша работа сохранена.
+Part of this screen hit a bug and was skipped. Your work is safe.	Часть этого экрана столкнулась с ошибкой и была пропущена. Ваша работа в безопасности.
+Paste your API key (kept in your system keychain)	Вставьте ключ API (хранится в системной связке ключей)
+Paste your {name} key	Вставьте ключ {name}
+Path	Путь
+Pause	Пауза
+Pausing…	Приостановка…
+Pause the build first, then delete the project.	Сначала приостановите сборку, затем удалите проект.
+Pause the build first.	Сначала приостановите сборку.
+Paused	Приостановлено
+Paused.	Приостановлено.
+Pick a folder with projects in it	Выберите папку с проектами
+Pick a game's folder	Выберите папку игры
+Pick another folder…	Выберите другую папку…
+Pick another game	Выберите другую игру
+Pick something on the left	Выберите что-нибудь слева
+Pick the app or game folder	Выберите папку приложения или игры
+Pick the app, game or file to rebuild	Выберите приложение, игру или файл для пересборки
+Pick the folder for this project	Выберите папку для этого проекта
+Pick the game's folder	Выберите папку игры
+Picture a program's window	Представить окно программы
+Picture model	Модель изображений
+Pictures	Изображения
+Pictures can't be saved from IoStore containers yet; you can see what's inside.	Изображения пока нельзя сохранить из контейнеров IoStore; вы можете посмотреть, что внутри.
+Pictures of the original	Изображения оригинала
+Pieces of text stored inside a program, like messages, web addresses or file names.	Фрагменты текста, хранящиеся внутри программы, например сообщения, веб-адреса или имена файлов.
+Pin a build	Закрепить сборку
+Pin a project's build	Закрепить сборку проекта
+Pin it	Закрепить
+Pin name	Имя закрепления
+Pin removed.	Закрепление удалено.
+Pin this build	Закрепить эту сборку
+Pinned	Закреплено
+Pinned builds	Закреплённые сборки
+Pinned: {name}. Open it from the sidebar any time.	Закреплено: {name}. Открывайте из боковой панели в любое время.
+Plain words, big buttons, and I'll explain everything.	Простые слова, большие кнопки, и я объясню всё.
+Plain words, short sentences, and every technical word explained.	Простые слова, короткие предложения, и каждое техническое слово объяснено.
+Plan	План
+Plan connecting agent apps	Планировать подключение приложений-агентов
+Play a project's result	Запустить результат проекта
+Play the game	Запустить игру
+Plugin added. Read its tools to start using them.	Плагин добавлен. Прочитайте его инструменты, чтобы начать ими пользоваться.
+Plugin arguments	Аргументы плагина
+Plugin command or address	Команда или адрес плагина
+Plugin id	Идентификатор плагина
+Plugin removed.	Плагин удалён.
+Plugins	Плагины
+Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	Плагины добавляют инструменты, которые Craft Anything предлагает как свои: MCP-серверы (команда или адрес; прочитайте их инструменты после добавления) или компоненты WebAssembly (файл .wasm, который не может обращаться к вашим файлам или сети).
+Plugins added here always ask before each call.	Плагины, добавленные здесь, всегда спрашивают перед каждым вызовом.
+Plugins read. Their new tools are offered from the next start.	Плагины прочитаны. Их новые инструменты будут предложены со следующего запуска.
+Preserving software that's no longer supported.	Сохранение программного обеспечения, которое больше не поддерживается.
+Preview a project's website	Предпросмотр веб-сайта проекта
+Preview the website	Предпросмотр веб-сайта
+Previous address	Предыдущий адрес
+Program: found automatically	Программа: найдена автоматически
+Program: {path}	Программа: {path}
+Programs (native code)	Программы (нативный код)
+Progress	Прогресс
+Project details	Сведения о проекте
+Project name	Название проекта
+Projects	Проекты
+Projects and builds	Проекты и сборки
+Property list	Список свойств
+Pseudo-C	Псевдо-C
+Purpose	Назначение
+Raise the asset budget	Увеличить бюджет ресурсов
+Raise the budget by {amount}	Увеличить бюджет на {amount}
+Raw machine code	Сырой машинный код
+Read AI settings	Читать настройки ИИ
+Read a Unity game's IL2CPP metadata	Читать метаданные IL2CPP игры Unity
+Read a game's files	Читать файлы игры
+Read a project file	Читать файл проекта
+Read a setting	Читать настройку
+Read an app's screen	Читать экран приложения
+Read bytes	Читать байты
+Read comment	Читать комментарий
+Read inline comment	Читать встроенный комментарий
+Read its tools	Прочитать его инструменты
+Read pinned builds	Читать закреплённые сборки
+Read projects	Читать проекты
+Read the journal	Читать журнал
+Read the plugin's tools	Прочитать инструменты плагина
+Read the project	Читать проект
+Reading what's inside…	Чтение того, что внутри…
+Ready	Готово
+Ready: {what} is on this computer.	Готово: {what} есть на этом компьютере.
+Rebuild status	Состояние пересборки
+Record a finding	Записать находку
+Record a hypothesis	Записать гипотезу
+Record an open question	Записать открытый вопрос
+Recover readable sources	Восстановить читаемые исходники
+Recreate it with darker colours	Пересоздать с более тёмными цветами
+Recreate just its main feature	Пересоздать только его главную функцию
+Recreate this website	Пересоздать этот веб-сайт
+Recreated games are built with the original's own engine when it's here (Unity, Unreal or Godot), else Unity, and Rust as the last resort.	Пересозданные игры собираются с помощью собственного движка оригинала, если он есть (Unity, Unreal или Godot), иначе Unity, и Rust в качестве последнего варианта.
+References to a name	Ссылки на имя
+Refining rounds	Раунды уточнения
+Refresh plugins	Обновить плагины
+Regions of a program file, each with one purpose: code, text, pictures, settings.	Регионы файла программы, каждый с одной целью: код, текст, изображения, настройки.
+Reload	Перезагрузить
+Remember permission	Запомнить разрешение
+Remove	Удалить
+Remove a pin	Удалить закрепление
+Remove a pinned build	Удалить закреплённую сборку
+Remove a plugin	Удалить плагин
+Remove an AI	Удалить ИИ
+Remove an app	Удалить приложение
+Remove an asset key	Удалить ключ ресурсов
+Remove bookmark	Удалить закладку
+Remove it	Удалить
+Remove it and its key	Удалить его и ключ
+Remove {name}	Удалить {name}
+Remove {name}?	Удалить {name}?
+Remove…	Удалить…
+Rename	Переименовать
+Rename a pinned build	Переименовать закреплённую сборку
+Rename a project	Переименовать проект
+Rename the pin	Переименовать закрепление
+Rename the project	Переименовать проект
+Rename…	Переименовать…
+Reset	Сбросить
+Resolve a call	Разрешить вызов
+Resolved	Разрешено
+Resources	Ресурсы
+Restart	Перезапустить
+Restore	Восстановить
+Result	Результат
+Resume a Frida session	Возобновить сессию Frida
+Rizin command	Команда Rizin
+Rizin debug command	Команда отладки Rizin
+Rizin debug session status	Состояние отладочной сессии Rizin
+Rough guide:	Грубое руководство:
+Run	Запустить
+Run a Frida script	Запустить скрипт Frida
+Run a build command	Запустить команду сборки
+Run a scripted Electron session	Запустить записанную сессию Electron
+Run a scripted web session	Запустить записанную веб-сессию
+Run a tool from the command palette (Ctrl/⌘ K), or pick a finding in the Evidence panel.	Запустите инструмент из палитры команд (Ctrl/⌘ K) или выберите находку на панели «Доказательства».
+Run and watch a program	Запустить и наблюдать за программой
+Run to study	Запустить для изучения
+Running	Выполняется
+Running processes	Выполняющиеся процессы
+Running programs	Запущенные программы
+Running {id}	Выполняется {id}
+Runs its tools without asking	Запускает свои инструменты без вопросов
+Runs the first-run steps next time.	Выполнит шаги первого запуска в следующий раз.
+Rust program details	Сведения о программе Rust
+SHA-256	SHA-256
+SQLite database contents	Содержимое базы данных SQLite
+Safety	Безопасность
+Save	Сохранить
+Save a picture	Сохранить изображение
+Save a report	Сохранить отчёт
+Save an asset key	Сохранить ключ ресурсов
+Save picture	Сохранить изображение
+Save settings	Сохранить настройки
+Save the key	Сохранить ключ
+Save the picture	Сохранить изображение
+Save the report	Сохранить отчёт
+Saved	Сохранено
+Saved in	Сохранено в
+Saves space: copies the program and code, and shares dependencies and media with the project. A shared file rewritten in place changes here too.	Экономит место: копирует программу и код, а зависимости и медиа делит с проектом. Общий файл, перезаписанный на месте, меняется и здесь.
+Say what you want	Скажите, что хотите
+Say what you want first.	Сначала скажите, что хотите.
+Say what you want to make, or drop an app or file on the window to look inside it. Everything runs in Clean room mode unless you switch on Deep.	Скажите, что хотите создать, или перетащите приложение или файл на окно, чтобы заглянуть внутрь. Всё выполняется в режиме «Чистая комната», пока вы не включите «Глубокий».
+Screenshot	Скриншот
+Screenshot a page	Сделать скриншот страницы
+Screenshots of how it should look. The builder opens each one and matches it.	Скриншоты того, как должно выглядеть. Конструктор открывает каждый и сопоставляет.
+Search for bytes	Искать байты
+Search functions	Искать функции
+Search strings	Искать строки
+Sections	Секции
+Security research on software I'm allowed to examine.	Исследование безопасности ПО, которое мне разрешено исследовать.
+See how a page is built: its layout, styles, scripts and the requests it makes.	Посмотрите, как построена страница: её макет, стили, скрипты и запросы, которые она делает.
+See how a program works: what it does, what it talks to, what's inside.	Посмотрите, как работает программа: что она делает, с чем общается, что внутри.
+See what a game packs and save its pictures as PNG files. Only for games you made, or whose owner lets you.	Посмотрите, что содержит игра, и сохраните её изображения как файлы PNG. Только для игр, которые вы сделали сами, или чей владелец разрешает.
+See what a game packs, and save its pictures as PNG files.	Посмотрите, что содержит игра, и сохраните её изображения как файлы PNG.
+See what a stand-in was asked	Посмотрите, что спрашивали у подставного
+See which servers an app talks to, and what it says.	Посмотрите, с какими серверами общается приложение и что оно говорит.
+Seen it	Видели
+Seen it: read directly from the file, page or capture.	Видели: прочитано непосредственно из файла, страницы или захвата.
+Selected	Выбрано
+Selection	Выделение
+Send	Отправить
+Send (Enter)	Отправить (Enter)
+Send now	Отправить сейчас
+Server address	Адрес сервера
+Session status	Состояние сессии
+Set a project's asset budget	Установить бюджет ресурсов проекта
+Set an AI's program	Установить программу ИИ
+Set one up	Настроить
+Set up a brain…	Настроить «мозг»…
+Set up a builder	Настроить конструктор
+Settings	Настройки
+Show a build's activity	Показать активность сборки
+Show a project	Показать проект
+Show folder	Показать папку
+Show me everything	Показать всё
+Show me the proof	Покажи мне доказательство
+Show pinned builds	Показать закреплённые сборки
+Show settings	Показать настройки
+Show the answer	Показать ответ
+Show the console	Показать консоль
+Show the folder	Показать папку
+Show the ones that are met	Показать выполненные
+Show the sidebar	Показать боковую панель
+Show the welcome again	Показать приветствие снова
+Showing	Показано
+Sign in and add the Unity Editor	Войдите и добавьте Unity Editor
+Sign in and install Unreal Engine	Войдите и установите Unreal Engine
+Simple	Простой
+Simple: say what you want and it's handled for you. Advanced: every tool, the evidence and the logs.	Простой: скажите, что хотите, и это сделают за вас. Расширенный: все инструменты, доказательства и журналы.
+Since Craft Anything opened.	С момента открытия Craft Anything.
+Size	Размер
+Skip setup	Пропустить настройку
+Smart contract interface	Интерфейс смарт-контракта
+Software I made, bought, or have permission to examine.	ПО, которое я сделал, купил или имею разрешение исследовать.
+Solana program (sBPF)	Программа Solana (sBPF)
+Some plugins couldn't be read:	Некоторые плагины не удалось прочитать:
+Something a program borrows from the operating system or a library, like "open a file".	То, что программа берёт взаймы у операционной системы или библиотеки, например «открыть файл».
+Something a program or library offers for other programs to use.	То, что программа или библиотека предлагает другим программам для использования.
+Source	Источник
+Start	Старт
+Start a Frida session	Запустить сессию Frida
+Start a GDB session	Запустить сессию GDB
+Start a Rizin debug session	Запустить отладочную сессию Rizin
+Start a rebuild	Запустить пересборку
+Start a stand-in backend	Запустить подставной бэкенд
+Start an activity	Запустить активность
+Start building	Начать сборку
+Start from them	Начать с них
+Start it	Запустить
+Start with Simple mode; you can set up AI later in Settings.	Начните с простого режима; ИИ можно настроить позже в Настройках.
+Starting…	Запуск…
+Starting… it opens in its own window.	Запуск… он открывается в отдельном окне.
+Still working. Bigger jobs can take a few minutes.	Всё ещё работает. Большие задачи могут занять несколько минут.
+Stop	Остановить
+Stop a pinned build	Остановить закреплённую сборку
+Stop a rebuild	Остановить пересборку
+Stop a stand-in backend	Остановить подставной бэкенд
+Stop generated assets	Остановить генерируемые ресурсы
+Stop listing {folder}	Остановить список {folder}
+Stopped here	Остановлено здесь
+Stops the current step and sends your notes straight away.	Останавливает текущий шаг и сразу отправляет ваши заметки.
+Strings	Строки
+Studio	Студия
+Studio (dark)	Студия (тёмная)
+Studio Light	Студия (светлая)
+Study	Изучить
+Study apps by running them	Изучать приложения, запуская их
+Studying	Изучение
+Studying software to understand it.	Изучение ПО, чтобы понять его.
+Summarise what changed	Подвести итог изменений
+Swift types	Типы Swift
+Switch Beginner / Experienced	Переключить Новичок / Опытный
+Switch Clean room / Deep	Переключить Чистая комната / Глубокий
+Switch light / dark theme	Переключить светлую / тёмную тему
+Switch target	Переключить цель
+System	Система
+System services	Системные службы
+Take a texture out of an Unreal game	Извлечь текстуру из игры Unreal
+Take an asset out of a Unity game	Извлечь ресурс из игры Unity
+Take back a note	Вернуть заметку
+Take back: puts it in the box again	Вернуть: кладёт обратно в коробку
+Take files out of an Unreal pak	Извлечь файлы из пака Unreal
+Take out packed files	Извлечь упакованные файлы
+Target	Цель
+Targets	Цели
+That folder already has {names}, where Craft Anything keeps its own files. Pick another folder, or move those out first.	В этой папке уже есть {names}, где Craft Anything хранит свои файлы. Выберите другую папку или сначала переместите их.
+That folder is already a project, so it's open now.	Эта папка уже является проектом, поэтому она сейчас открыта.
+The Rust toolchain (rustup.rs).	Инструментарий Rust (rustup.rs).
+The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	Конструктор отвечает на свои вопросы и сообщает, что выбрал («Я решил: …»), чтобы вы могли это изменить.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Конструктор создаёт 3D-модели и текстуры игры по описаниям оригинальных дизайнов, оплачивая с вашего аккаунта fal.ai. Модели низкополигональные, чтобы игра работала быстро. Текстурированная модель стоит {model}, а изображение {picture}. У каждого проекта бюджет {budget}, и вас спрашивают, прежде чем его превысить. Ключ хранится в системной связке ключей.
+The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	Конструктор читает их (код, заметки, изображения) и собирает приложение в новой папке приложения рядом с ними. Ваши файлы остаются как есть.
+The builder will decide its questions and tell you what it chose.	Конструктор сам решит свои вопросы и сообщит, что выбрал.
+The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	Конструктор работает с этими файлами напрямую и сохраняет то, что работает. Craft Anything добавляет рядом несколько собственных записей.
+The builder's questions	Вопросы конструктора
+The builder's questions come to you as cards, and it waits for your answer.	Вопросы конструктора приходят к вам в виде карточек, и он ждёт вашего ответа.
+The builder's questions will come to you.	Вопросы конструктора придут к вам.
+The built-in engines still show you everything they find.	Встроенные движки по-прежнему показывают вам всё, что находят.
+The code	Код
+The code format Android apps use.	Формат кода, который используют приложения Android.
+The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	Оценка агента кодирования по ценам API, а не ваш счёт. По подписке это не списывается.
+The download keeps going in the background.	Загрузка продолжается в фоне.
+The first instruction a program runs when it starts.	Первая инструкция, которую программа выполняет при запуске.
+The full toolset, evidence and logs.	Полный набор инструментов, доказательства и журналы.
+The installer is open. Follow its steps, then come back here.	Установщик открыт. Следуйте его шагам, затем вернитесь сюда.
+The lowest-level human-readable form of machine code: one small instruction per line.	Самая низкоуровневая форма машинного кода, читаемая человеком: одна небольшая инструкция на строку.
+The names were removed from the program before it was shipped, so we have to work them out.	Имена были удалены из программы до её выпуска, поэтому нам приходится их вычислять.
+The packed contents of an Electron app (a website inside a desktop app)	Упакованное содержимое приложения Electron (веб-сайт внутри настольного приложения)
+The program's machine code written out as one tiny instruction per line.	Машинный код программы, записанный в виде одной крошечной инструкции на строку.
+The project's name and round	Название проекта и раунд
+The raw result	Сырой результат
+The smallest unit of data in a file: a number from 0 to 255.	Наименьшая единица данных в файле: число от 0 до 255.
+The smallest units of data in a file: numbers from 0 to 255.	Наименьшие единицы данных в файле: числа от 0 до 255.
+The {name} view isn't available yet in this build.	Вид «{name}» пока недоступен в этой сборке.
+The {} view isn't available yet in this build.	Вид «{}» пока недоступен в этой сборке.
+Theme	Тема
+There's no /{name} command. You can use {commands}.	Команды /{name} нет. Можно использовать {commands}.
+There's no AI brain set up yet, so here's what the built-in engines found:	«Мозг» ИИ ещё не настроен, поэтому вот что нашли встроенные движки:
+They're my app: edit them in place	Это моё приложение: редактировать на месте
+Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	То, что программа берёт у операционной системы или библиотек, например «открыть файл» или «нарисовать окно».
+Things a program or library offers for other programs to use.	То, что программа или библиотека предлагает другим программам для использования.
+Things we couldn't establish yet are listed here, with what would settle them.	То, что мы пока не смогли установить, перечислено здесь вместе с тем, что помогло бы это разрешить.
+This answer won't be there after a restart:	Этот ответ не сохранится после перезапуска:
+This build stopped part-way	Эта сборка остановилась на полпути
+This can't be undone.	Это нельзя отменить.
+This folder already has files	В этой папке уже есть файлы
+This is a big one. You can leave this open and come back later.	Это большой объём. Вы можете оставить это открытым и вернуться позже.
+This is outside what the builder may do on its own. Nothing happens until you say so.	Это выходит за рамки того, что конструктор может делать самостоятельно. Ничего не произойдёт, пока вы не разрешите.
+This keeps going in the background, and each download is checked against its publisher's checksum before it's used.	Это продолжается в фоне, и каждая загрузка проверяется по контрольной сумме издателя перед использованием.
+This project is waiting its turn. Send your message once it starts.	Этот проект ждёт своей очереди. Отправьте сообщение, когда он начнётся.
+This runs code from the target or changes a device. Clicking Run is your OK.	Это запускает код из цели или меняет устройство. Нажатие «Запустить» — ваше согласие.
+This runs code from the target or changes a device. Nothing runs until you say so.	Это запускает код из цели или меняет устройство. Ничего не запускается, пока вы не разрешите.
+This tool takes no settings.	У этого инструмента нет настроек.
+This updates by itself when it's done.	Это обновится само, когда завершится.
+This view arrives with the next engines. The Hex and Result views work today.	Этот вид появится со следующими движками. Виды «Шестнадцатеричный» и «Результат» работают уже сегодня.
+Those aren't pictures we can use (PNG, JPEG, WebP or GIF, up to 20 MB).	Это не изображения, которые мы можем использовать (PNG, JPEG, WebP или GIF, до 20 МБ).
+Time spent	Затраченное время
+Tip: press Ctrl/⌘ K to run any tool.	Подсказка: нажмите Ctrl/⌘ K, чтобы запустить любой инструмент.
+Tokens	Токены
+Tools may now run code from what you open without asking. Turn this back on unless you're sure.	Инструменты теперь могут запускать код из того, что вы открыли, без вопросов. Включите это обратно, если не уверены.
+Tools that run code from a target or change a phone always ask first, unless you allowed them for a project.	Инструменты, запускающие код из цели или меняющие телефон, всегда спрашивают сначала, если вы не разрешили их для проекта.
+Trace a UI action	Отследить действие в интерфейсе
+Trace a feature	Отследить функцию
+Try again	Попробовать снова
+Try asking	Попробуйте спросить
+Try it out, then ask below for any changes.	Попробуйте, затем попросите ниже о любых изменениях.
+Turn a program's machine code back into something that reads like source code. It's a reconstruction, not the original.	Превратить машинный код программы обратно во что-то, читающееся как исходный код. Это реконструкция, а не оригинал.
+Turn off	Выключить
+Turn off an AI	Выключить ИИ
+Turn on	Включить
+Turn on Deep mode	Включить режим «Глубокий»
+Turn on an AI	Включить ИИ
+Turning a plugin on or off takes effect from the next start.	Включение или выключение плагина вступает в силу со следующего запуска.
+Type a command or tool…	Введите команду или инструмент…
+Type the website's address:	Введите адрес веб-сайта:
+Type your question after /btw.	Введите вопрос после /btw.
+Unity assets	Ресурсы Unity
+Unity bundle	Набор Unity
+Unity's own installer. It only opens if Unity's signature checks out.	Собственный установщик Unity. Он открывается только если подпись Unity проходит проверку.
+Unknown	Неизвестно
+Unknown: we couldn't establish this yet.	Неизвестно: мы пока не смогли это установить.
+Unknowns	Неизвестные
+Unload a Frida script	Выгрузить скрипт Frida
+Unreal IoStore	IoStore Unreal
+Unreal builds games with Apple's Xcode, free in the App Store.	Unreal собирает игры с помощью Xcode от Apple, бесплатного в App Store.
+Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal есть здесь, но ему также нужны инструменты C++ Visual Studio.
+Unreal pak	Пак Unreal
+Update a hypothesis	Обновить гипотезу
+Update an open question	Обновить открытый вопрос
+Update the checklist	Обновить контрольный список
+Update the plan	Обновить план
+Use	Использовать
+Use an API key…	Использовать ключ API…
+Use as a goal	Использовать как цель
+Use the projects folder	Использовать папку проектов
+Use this	Использовать это
+Use {name}	Использовать {name}
+Value flow	Поток значений
+Version	Версия
+Waiting	Ожидание
+Waiting for another build to finish: this one starts next.	Ожидание завершения другой сборки: эта начнётся следующей.
+Waiting for other builds to finish: {n} in line.	Ожидание завершения других сборок: {n} в очереди.
+Waiting: the builder reads it at its next step. Up arrow to edit.	Ожидание: конструктор прочитает это на следующем шаге. Стрелка вверх — редактировать.
+Waiting: the builder reads these at its next step. Up arrow to edit the last.	Ожидание: конструктор прочитает их на следующем шаге. Стрелка вверх — редактировать последнее.
+Want answers in plain words?	Хотите ответы простыми словами?
+Watch a Mac app's calls	Смотреть вызовы приложения Mac
+Watch a page over time	Смотреть страницу со временем
+We didn't find an AI on this computer yet	Мы пока не нашли ИИ на этом компьютере
+We list the web addresses and messages we can see inside it. Watching it live needs your OK first.	Мы перечисляем веб-адреса и сообщения, которые можем увидеть внутри. Наблюдение в реальном времени требует вашего согласия.
+We only read it; nothing runs. Every answer shows how sure we are.	Мы только читаем его; ничего не запускается. Каждый ответ показывает, насколько мы уверены.
+WebAssembly module	Модуль WebAssembly
+WebAssembly: fast compiled code that runs inside web browsers.	WebAssembly: быстрый скомпилированный код, который работает внутри веб-браузеров.
+Website address	Адрес веб-сайта
+Website pages	Страницы веб-сайта
+Websites	Веб-сайты
+Welcome	Добро пожаловать
+What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Сколько новая игра может потратить на сгенерированные изображения и 3D-модели до того, как вас спросят. Каждый проект хранит свой лимит.
+What a program exports	Что экспортирует программа
+What a program imports	Что импортирует программа
+What are its main parts?	Каковы его основные части?
+What brings you here?	Что привело вас сюда?
+What can Craft Anything do?	Что может Craft Anything?
+What data was sent?	Какие данные были отправлены?
+What do you want to look inside?	Что вы хотите изучить изнутри?
+What do you want to make?	Что вы хотите создать?
+What do you want to recreate?	Что вы хотите пересоздать?
+What does it need from the page?	Что ему нужно от страницы?
+What does it send over the internet?	Что оно отправляет в интернет?
+What does this app do?	Что делает это приложение?
+What does this app store?	Что хранит это приложение?
+What does this contract do?	Что делает этот контракт?
+What does this module do?	Что делает этот модуль?
+What does this program do?	Что делает эта программа?
+What does {what} do?	Что делает {what}?
+What happened in this build	Что произошло в этой сборке
+What is it	Что это
+What is this?	Что это?
+What it calls	Что оно вызывает
+What kind of file is this?	Какой это тип файла?
+What permissions does it ask for?	Какие разрешения оно запрашивает?
+What pictures and textures are made with.	Из чего создаются изображения и текстуры.
+What settings are in here?	Какие настройки здесь?
+What tables are in here?	Какие таблицы здесь?
+What we couldn't check	Что мы не смогли проверить
+What would you like to find out?	Что бы вы хотели узнать?
+What would you like to know about {name}?	Что бы вы хотели узнать о {name}?
+What's at this address	Что находится по этому адресу
+What's in this folder?	Что в этой папке?
+What's inside this archive?	Что внутри этого архива?
+Whatever Settings → AI builds with.	То, что указано в Настройки → ИИ для сборки.
+When a folder you pick has files	Когда выбранная вами папка содержит файлы
+When the builder needs a choice made: show it to you and wait, or let it decide and say what it chose. Each project can choose for itself under its prompt box.	Когда конструктору нужно сделать выбор: показать его вам и ждать, или решить самому и сообщить, что он выбрал. Каждый проект может выбрать сам под полем ввода.
+When you rebuild an app or game, start it once to picture its window and compare the rebuild with it. It runs that program.	Когда вы пересобираете приложение или игру, запустите её один раз, чтобы запечатлеть её окно и сравнить пересборку с ним. Она запускает эту программу.
+Where am I	Где я
+Where is Ghidra installed?	Где установлен Ghidra?
+Where is the program?	Где находится программа?
+Where should new projects go?	Куда должны помещаться новые проекты?
+Where we found it	Где мы это нашли
+Whether they're the app to edit in place, or material the app starts from beside them.	Являются ли они приложением для редактирования на месте или материалом, с которого приложение начинает работу рядом с ними.
+Which AI answers your questions	Какой ИИ отвечает на ваши вопросы
+Which file is the main program?	Какой файл является основной программой?
+Which files does it read or write?	Какие файлы оно читает или записывает?
+Which function is this in	В какой функции это находится
+Which servers does it talk to?	С какими серверами оно общается?
+Which servers were contacted?	С какими серверами связывались?
+Which websites does it load?	Какие веб-сайты оно загружает?
+Who builds what you make	Кто собирает то, что вы создаёте
+Who calls it	Кто его вызывает
+Who can move funds?	Кто может перемещать средства?
+Who signed this Windows program	Кто подписал эту программу Windows
+Who uses this Android class?	Кто использует этот класс Android?
+Who uses this Java class?	Кто использует этот класс Java?
+Why we ask	Зачем мы спрашиваем
+Window / focus info	Сведения об окне / фокусе
+Windows resources	Ресурсы Windows
+Wireshark tools check	Проверка инструментов Wireshark
+Without it, Deep mode uses Craft Anything's own decompiler, which is rougher.	Без него режим «Глубокий» использует собственный декомпилятор Craft Anything, который грубее.
+Work out a copy's size	Вычислить размер копии
+Work out what an installed app is built on	Выяснить, на чём построено установленное приложение
+Workbench	Рабочее место
+Worked it out	Разобрались
+Worked it out: computed step by step from things we saw.	Разобрались: вычислено шаг за шагом из того, что мы видели.
+Worked through {n} steps	Пройдено шагов: {n}
+Working on it	Работаем над этим
+Working on your answer	Работаем над вашим ответом
+Working out how much space a copy takes…	Вычисляем, сколько места занимает копия…
+Working…	Работаем…
+Working… ({n} steps so far)	Работаем… (шагов пока: {n})
+Write a project file	Записать файл проекта
+Write a readable report	Написать читаемый отчёт
+Write comment	Написать комментарий
+Write inline comment	Написать встроенный комментарий
+Write pseudo-C to a folder	Записать псевдо-C в папку
+Write the brief	Написать краткое описание
+Write the handoff	Написать передачу
+Wrote {what} to {}	Записано {what} в {}
+You answered: {a}	Вы ответили: {a}
+You can add a Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studio) or an agent you already use, later in Settings → AI.	Вы можете добавить ключ Claude, ChatGPT или OpenRouter, локальную модель (Ollama, LM Studio) или агент, который уже используете, позже в Настройки → ИИ.
+You chose:	Вы выбрали:
+You're all set	Всё готово
+Your app is ready	Ваше приложение готово
+Your brains	Ваши «мозги»
+Your fal.ai key	Ваш ключ fal.ai
+Your game is ready	Ваша игра готова
+Your message wasn't sent: another project was opened while its pictures were copied.	Ваше сообщение не отправлено: другой проект был открыт, пока копировались его изображения.
+Your own tool installs (optional)	Ваши собственные установки инструментов (необязательно)
+Your project starts as soon as it's done.	Ваш проект начнётся, как только это завершится.
+Your version	Ваша версия
+Your website is ready	Ваш веб-сайт готов
+a new folder in {dir}	новая папка в {dir}
+a picture	изображение
+about ${n}	примерно ${n}
+address, e.g. http://192.168.1.20:11434/v1	адрес, например http://192.168.1.20:11434/v1
+and {n} more	и ещё {n}
+arguments (optional)	аргументы (необязательно)
+call graph	граф вызовов
+clean room	чистая комната
+command, https:// address or .wasm file	команда, https:// адрес или .wasm файл
+deep mode	глубокий режим
+entry point	точка входа
+files	файлы
+findings	находки
+first run	первый запуск
+found on this computer; set up when you start	найдено на этом компьютере; настраивается при запуске
+from the builder's own memory of the build	из собственной памяти конструктора о сборке
+from the project's files	из файлов проекта
+id, e.g. docs	идентификатор, например docs
+is required	обязательно
+isn't available yet	пока недоступно
+job result	результат задания
+job {title} panicked: {what}	задание {title} завершилось паникой: {what}
+just now	только что
+managed	управляемый
+model (optional)	модель (необязательно)
+must be a number	должно быть числом
+must be a whole number	должно быть целым числом
+name, e.g. Studio box	имя, например Studio box
+number	число
+objdump output	вывод objdump
+or start with /btw to just ask	или начните с /btw, чтобы просто спросить
+pinned builds couldn't be read: {}	не удалось прочитать закреплённые сборки: {}
+say how to use the files there	скажите, как использовать файлы там
+scene	сцена
+scenes	сцены
+source map	карта исходного кода
+start page	стартовая страница
+the app is built beside your files, starting from them	приложение собирается рядом с вашими файлами, начиная с них
+the built-in engines	встроенные движки
+the prompt box changed height	поле ввода изменило высоту
+title bar	заголовок
+under $0.01	менее $0.01
+yesterday	вчера
+your files there are the app, edited in place	ваши файлы там — это приложение, редактируемое на месте
+{:.1} GB	{:.1} ГБ
+{:.1}M	{:.1}M
+{backend}: {input_tokens} in / {output_tokens} out{cost}	{backend}: {input_tokens} вход / {output_tokens} выход{cost}
+{cost} (estimate)	{cost} (оценка)
+{c} · {size}	{c} · {size}
+{done} of {all} done	{done} из {all} готово
+{gb} GB for bigger ones	{gb} ГБ для больших
+{gb} GB for programs up to {size}	{gb} ГБ для программ до {size}
+{gb} GB up to {size}	{gb} ГБ до {size}
+{held} of {n} requirements met	{held} из {n} требований выполнено
+{id} · {summary}	{id} · {summary}
+{in} in, {out} out.	{in} вход, {out} выход.
+{k}: {s}	{k}: {s}
+{lbl}  {}	{lbl}  {}
+{line}, and {n} more	{line}, и ещё {n}
+{mb} MB	{mb} МБ
+{name} builds what you make.	{name} собирает то, что вы создаёте.
+{name} builds what you make; answers come from {brain}.	{name} собирает то, что вы создаёте; ответы поступают от {brain}.
+{name} is ready	{name} готов
+{name} is ready.	{name} готов.
+{name} isn't available yet in this build.	{name} пока недоступен в этой сборке.
+{name} isn't on this computer yet.	{name} ещё нет на этом компьютере.
+{name} key	Ключ {name}
+{n} actions done so far	Выполнено действий: {n}
+{n} days ago	{n} дн. назад
+{n} h ago	{n} ч назад
+{n} item(s)	Элементов: {n}
+{n} job(s) running	Заданий выполняется: {n}
+{n} min ago	{n} мин назад
+{n} picture(s) to match.	Изображений для сопоставления: {n}.
+{n} step(s) didn't work and were retried or skipped.	Шагов, которые не сработали и были повторены или пропущены: {n}.
+{n} tokens	Токенов: {n}
+{n} · ${spent:.2} of ${budget:.2}	{n} · ${spent:.2} из ${budget:.2}
+{n} · ${spent} of ${budget}	{n} · ${spent} из ${budget}
+{scenes} {}	{scenes} {}
+{text}, {}	{text}, {}
+{title} hit a bug and stopped safely. ({what})	{title} столкнулся с ошибкой и безопасно остановился. ({what})
+{title} {id}	{title} {id}
+{title} · {:.0}%	{title} · {:.0}%
+{tool} finished	{tool} завершён
+{tool}: {}	{tool}: {}
+{what} panicked: {msg}	{what} завершился паникой: {msg}
+{} GB	{} ГБ
+{} isn't available yet in this build.	{} пока недоступен в этой сборке.
+{} item(s)	Элементов: {}
+{} key	Ключ {}
+{} report.md	{} report.md
+{} {name}	{} {name}
+{} {said}	{} {said}
+{} {then}	{} {then}
+{} {v}	{} {v}
+{} {why}	{} {why}
+{} {} · {}{cost}	{} {} · {}{cost}
+{} · {mode}	{} · {mode}
+{}: {e}	{}: {e}
+{}: {some}{more}.	{}: {some}{more}.
+{}: {state}	{}: {state}
+{}h {:02}m	{}ч {:02}м
+{}m {:02}s	{}м {:02}с
+— use the filter to find the rest.	— используйте фильтр, чтобы найти остальное.
+… {n} more	… ещё {n}
+… {n} older	… {n} старых
+… {} more	… ещё {}
+… {} older	… {} старых
+← Back	← Назад
+↑↓ to move · Enter to run · Esc to close	↑↓ для перемещения · Enter для запуска · Esc для закрытия

@@ -193,8 +193,8 @@ fn main() {
                 let root = ws.root.clone();
                 let _ = a.runs.start(&a.hub, ws, RunOptions::default());
                 if let Some(run) = a.runs.get(&root) {
-                    run.add_note("Make the header blue".into(), "Make the header blue".into());
-                    run.add_note("And add a contact form".into(), "And add a contact form".into());
+                    run.add_note("Make the header blue".into(), "Make the header blue".into(), Vec::new());
+                    run.add_note("And add a contact form".into(), "And add a contact form".into(), Vec::new());
                 }
             }
             a
@@ -391,7 +391,7 @@ fn main() {
             render(&out, "project-game", w, h, scale, move || {
                 let mut a = demo::app(demo::engine(Mode::Beginner, true));
                 a.state.feed = vec![
-                    craft_anything_ui_egui::state::FeedItem::User("A snake game".into()),
+                    craft_anything_ui_egui::state::FeedItem::User(craft_anything_ui_egui::state::UserItem::Text("A snake game".into())),
                     craft_anything_ui_egui::state::FeedItem::Agent {
                         text: "Your snake game is ready: arrow keys to steer, eat the dots to grow, and the speed goes up as you score.".into(),
                         streaming: false,
@@ -422,11 +422,9 @@ fn main() {
         render(&out, "project-long-prompt", w, h, scale, || {
             let mut a = demo::app(demo::engine(Mode::Beginner, true));
             demo::fill_project(&mut a);
-            a.state.feed.push(craft_anything_ui_egui::state::FeedItem::User(format!(
-                "{}https://example.com/{}",
-                "Make it exactly like the original, with the same menus, weapons and maps. ".repeat(6),
-                "a".repeat(160)
-            )));
+            let text =
+                format!("{}https://example.com/{}", "Make it exactly like the original, with the same menus, weapons and maps. ".repeat(6), "a".repeat(160));
+            a.state.feed.push(craft_anything_ui_egui::state::FeedItem::User(craft_anything_ui_egui::state::UserItem::Text(text)));
             a
         });
     }

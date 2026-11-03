@@ -315,6 +315,8 @@ pub(crate) fn safe_components(name: &str) -> Result<Vec<String>, &'static str> {
             "" | "." => {}
             ".." => return Err("path climbs out of the folder (..)"),
             c if c.len() == 2 && c.ends_with(':') => return Err("drive-letter path"),
+            c if c.contains(':') => return Err("name contains ':' (a Windows stream or drive separator)"),
+            c if c.ends_with('.') || c.ends_with(' ') => return Err("name ends with a dot or space, which Windows drops"),
             c => out.push(c.to_string()),
         }
     }
@@ -565,10 +567,19 @@ fn core_archive_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
             "A size, count or depth limit stopped the inventory early; raise max_entries, max_total_bytes or max_depth to see more.",
         ));
     }
+    if inv.unopened_nested > 0 {
+        lims.push(Limitation::new(
+            "nested_not_opened",
+            format!(
+                "{} nested archive(s) were not opened (depth or size limit; each entry's note says which); raise max_depth to open deeper ones.",
+                inv.unopened_nested
+            ),
+        ));
+    }
     lims.extend(unlisted_limitation(&unlisted));
     lims.push(Limitation::new("no_disk_images", "Disk images (DMG), installers (PKG/MSI) and compressed tarballs are listed as single files, not opened."));
     let mut coverage = Coverage::page(page.len() as u64, total as u64, p.offset as u64);
-    if !unlisted.is_empty() {
+    if !unlisted.is_empty() || inv.unopened_nested > 0 {
         coverage.status = craft_anything_evidence::CoverageStatus::Partial;
     }
     let ev = EvidenceBuilder::new("core_archive_show", subject, env(ctx))
@@ -578,6 +589,7 @@ fn core_archive_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
             "root": inv.root, "root_kind": inv.root_kind, "content_id": inv.content_id(),
             "files": files, "entries_total": total, "by_kind": inv.by_kind(), "hashed_bytes": inv.hashed_bytes,
             "containers": inv.containers, "contradictions": inv.contradictions, "truncated": inv.truncated,
+            "unopened_nested": inv.unopened_nested,
             "entries": page,
         }))
         .summary(summary)
@@ -674,11 +686,23 @@ fn core_archive_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         "zip" | "apk" | "ipa" | "jar" | "hap" | "msix" => {
             let z = zip::parse(&bytes, p.max_files.saturating_mul(2)).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, e.to_string()))?;
             for e in z.entries.iter().filter(|e| !e.is_dir) {
+                if let Some(kind) = e.special_kind() {
+                    members.push((e.name.clone(), Member::Skip(format!("{kind} member is not a regular file"))));
+                    continue;
+                }
                 match zip::read_entry(&bytes, e, p.max_bytes) {
                     Ok(d) => members.push((e.name.clone(), Member::Owned(d))),
                     Err(err @ zip::ZipError::CrcMismatch { .. }) => {
                         contradictions.push(json!({"path": e.name, "reason": err.to_string()}));
-                        members.push((e.name.clone(), Member::Skip(err.to_string())));
+                        let m = if p.if_tampered == IntegrityPolicy::Continue {
+                            match zip::read_entry_unverified(&bytes, e, p.max_bytes) {
+                                Ok(d) => Member::Owned(d),
+                                Err(read_err) => Member::Skip(read_err.to_string()),
+                            }
+                        } else {
+                            Member::Skip(err.to_string())
+                        };
+                        members.push((e.name.clone(), m));
                     }
                     Err(err) => members.push((e.name.clone(), Member::Skip(err.to_string()))),
                 }
@@ -816,6 +840,26 @@ mod tests {
     }
 
     #[test]
+    fn unopened_nested_archives_are_disclosed_in_coverage() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = Engine::new(crate::testing::session());
+        for depth in [2, 5] {
+            let mut bytes = fx::zip_stored(&[("leaf.txt", b"leaf")]);
+            for _ in 0..depth {
+                bytes = fx::zip_stored(&[("inner.zip", &bytes)]);
+            }
+            let path = dir.path().join(format!("nested-{depth}.zip"));
+            std::fs::write(&path, bytes).unwrap();
+            let inv = call(&e, "core_archive_show", json!({"path": path})).unwrap();
+            let unopened = depth == 5;
+            assert_eq!(inv["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "nested_not_opened"), unopened);
+            assert_eq!(inv["coverage"]["status"], if unopened { "partial" } else { "complete" });
+            assert_eq!(inv["result"]["entries"].as_array().unwrap().iter().any(|entry| entry["note"] == "nested archive not opened: depth limit"), unopened);
+            assert_eq!(inv["result"]["truncated"], false);
+        }
+    }
+
+    #[test]
     fn inventory_and_extract_asar() {
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("app.asar");
@@ -847,6 +891,47 @@ mod tests {
         let out = PathBuf::from(x["result"]["output_directory"].as_str().unwrap());
         assert!(out.join("ok/fine.txt").exists());
         assert!(!out.parent().unwrap().join("escape.txt").exists());
+        std::fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn extraction_refuses_names_windows_would_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let z = dir.path().join("names.zip");
+        std::fs::write(&z, fx::zip_stored(&[("dot.txt.", b"wrong"), ("dot.txt", b"real"), ("ads.txt:hidden", b"hidden")])).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let x = call(&e, "core_archive_extract", json!({"path": z})).unwrap();
+        let out = PathBuf::from(x["result"]["output_directory"].as_str().unwrap());
+        let real = std::fs::read(out.join("dot.txt")).unwrap();
+        let ads_exists = out.join("ads.txt").exists();
+        std::fs::remove_dir_all(out).unwrap();
+        assert_eq!(real, b"real");
+        let skipped = x["result"]["skipped"].as_array().unwrap();
+        assert!(skipped.iter().any(|s| s["path"] == "dot.txt."));
+        assert!(skipped.iter().any(|s| s["path"] == "ads.txt:hidden"));
+        assert!(!ads_exists);
+        assert_eq!(x["result"]["files_written"], 1);
+    }
+
+    #[test]
+    fn zip_symlink_member_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let z = dir.path().join("link.zip");
+        let mut b = fx::zip_stored(&[("good.txt", b"regular\n"), ("link_out", b"../../target.txt")]);
+        let at = (0..b.len().saturating_sub(54)).find(|&i| b.get(i..i + 4) == Some(b"PK\x01\x02") && b.get(i + 46..i + 54) == Some(b"link_out")).unwrap();
+        b[at + 5] = 3;
+        b[at + 38..at + 42].copy_from_slice(&((0o120777u32) << 16).to_le_bytes());
+        std::fs::write(&z, b).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let x = call(&e, "core_archive_extract", json!({"path": z})).unwrap();
+        assert_eq!(x["result"]["files_written"], 1);
+        let sk = x["result"]["skipped"].as_array().unwrap();
+        assert_eq!(sk.len(), 1);
+        assert_eq!(sk[0]["path"], "link_out");
+        assert!(sk[0]["reason"].as_str().unwrap().contains("symlink"));
+        let out = PathBuf::from(x["result"]["output_directory"].as_str().unwrap());
+        assert!(out.join("good.txt").exists());
+        assert!(!out.join("link_out").exists());
         std::fs::remove_dir_all(out).unwrap();
     }
 
@@ -931,11 +1016,37 @@ mod tests {
     }
 
     #[test]
+    fn extract_if_tampered_continue_writes_the_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut z = fx::zip_stored(&[("a.txt", b"hello")]);
+        let pos = z.windows(5).position(|w| w == b"hello").unwrap();
+        z[pos] = b'j';
+        let p = dir.path().join("bad.zip");
+        std::fs::write(&p, &z).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let err = call(&e, "core_archive_extract", json!({"path": p})).unwrap_err();
+        assert_eq!(err.code, ErrorCode::FileHashMismatch);
+        let ok = call(&e, "core_archive_extract", json!({"path": p, "if_tampered": "continue"})).unwrap();
+        let r = &ok["result"];
+        assert_eq!(r["files_written"], 1, "{r}");
+        assert_eq!(r["contradictions"].as_array().unwrap().len(), 1);
+        let out = std::path::PathBuf::from(r["output_directory"].as_str().unwrap());
+        assert_eq!(std::fs::read(out.join("a.txt")).unwrap(), b"jello");
+    }
+
+    #[test]
     fn safe_components_rules() {
         assert!(safe_components("../x").is_err());
         assert!(safe_components("/x").is_err());
         assert!(safe_components("a\\..\\..\\x").is_err());
-        assert!(safe_components("C:\\x").is_err());
+        assert_eq!(safe_components("C:\\x"), Err("drive-letter path"));
+        assert_eq!(safe_components("C:x"), Err("name contains ':' (a Windows stream or drive separator)"));
+        for name in ["ads.txt:hidden", "dir/a:b", "dot.txt.", "space.txt ", "dir./x"] {
+            assert!(safe_components(name).is_err(), "{name:?} must be refused");
+        }
+        assert_eq!(safe_components("a.b.txt").unwrap(), vec!["a.b.txt"]);
+        assert_eq!(safe_components(".hidden").unwrap(), vec![".hidden"]);
+        assert_eq!(safe_components("dir/file.txt").unwrap(), vec!["dir", "file.txt"]);
         assert_eq!(safe_components("./a//b").unwrap(), vec!["a", "b"]);
         assert!(safe_components("").is_err());
     }

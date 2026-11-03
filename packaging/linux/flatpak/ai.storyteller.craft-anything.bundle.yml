@@ -28,6 +28,9 @@ finish-args:
   # through the document portal, so picked files work anywhere. Home is readable (never writable)
   # so files passed by path (the command line, recent targets) can be inspected.
   - --filesystem=home:ro
+  # The default folder for new projects (`default_projects_dir`), writable and made if missing;
+  # the rest of home stays read-only (#505).
+  - --filesystem=xdg-documents/Craft Anything:create
   # AI backends (Anthropic, OpenAI, OpenRouter, local servers) and optional engine downloads.
   - --share=network
 modules:

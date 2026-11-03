@@ -305,5 +305,121 @@ pub fn empty_schema() -> Value {
 /// Parse tool params; `null` is treated as `{}` so programmatic callers can omit them.
 pub fn parse_params<T: DeserializeOwned>(v: Value) -> Result<T, ToolError> {
     let v = if v.is_null() { Value::Object(Default::default()) } else { v };
-    serde_json::from_value(v).map_err(|e| ToolError::invalid(format!("invalid params: {e}")))
+    serde_path_to_error::deserialize(v).map_err(|error| {
+        let pointer = parameter_pointer(error.path());
+        let location = pointer.as_deref().filter(|p| !p.is_empty()).map(|p| format!(" at {p:?}")).unwrap_or_default();
+        ToolError::invalid(format!("invalid params{location}: {}", error.inner()))
+            .with_remediation("Correct the parameter to match the tool's input schema, then call the tool again.")
+            .with_details(serde_json::json!({"parameter_path": pointer}))
+    })
+}
+
+/// A JSON Pointer to the rejected value, without guessing when Serde cannot locate it.
+fn parameter_pointer(path: &serde_path_to_error::Path) -> Option<String> {
+    const LIMIT: usize = 1024;
+    let mut pointer = String::new();
+    for segment in path {
+        pointer.push('/');
+        match segment {
+            serde_path_to_error::Segment::Map { key } if key.len() <= LIMIT => {
+                pointer.push_str(&key.replace('~', "~0").replace('/', "~1"));
+            }
+            serde_path_to_error::Segment::Seq { index } => pointer.push_str(&index.to_string()),
+            // Enum variants need not be object keys (for example, internally tagged enums).
+            _ => return None,
+        }
+        if pointer.len() > LIMIT {
+            return None;
+        }
+    }
+    Some(pointer)
+}
+
+#[cfg(test)]
+mod parameter_tests {
+    use super::*;
+    use craft_anything_evidence::ErrorCode;
+    use serde_json::json;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    struct Question {
+        question: String,
+        #[serde(default)]
+        probes: Vec<String>,
+    }
+
+    #[test]
+    fn an_array_for_a_string_identifies_the_parameter_to_correct() {
+        for input in [json!({"question": ["Where?"]}), json!({"question": ["Where?", "Why?"]})] {
+            let error = parse_params::<Question>(input).unwrap_err();
+            assert_eq!(error.code, ErrorCode::BadInput);
+            assert!(error.message.contains("question") && error.message.contains("expected a string"), "{error:?}");
+            assert_eq!(error.details.as_ref().unwrap()["parameter_path"], "/question");
+            assert!(error.remediation.as_deref().unwrap().contains("call the tool again"));
+            assert!(!error.message.contains("Where?"), "the parameter value is not needed to locate the error");
+        }
+        let valid = parse_params::<Question>(json!({"question": "Where?", "probes": ["inspect"]})).unwrap();
+        assert_eq!(valid, Question { question: "Where?".into(), probes: vec!["inspect".into()] });
+    }
+
+    #[test]
+    fn a_nested_parameter_error_keeps_the_array_index() {
+        let error = parse_params::<Question>(json!({"question": "Where?", "probes": ["inspect", ["trace"]]})).unwrap_err();
+        assert_eq!(error.details.as_ref().unwrap()["parameter_path"], "/probes/1");
+        assert!(error.message.contains("expected a string"), "{error:?}");
+    }
+
+    #[test]
+    fn a_parameter_path_escapes_json_pointer_keys() {
+        #[derive(Debug, Deserialize)]
+        struct Envelope {
+            #[serde(rename = "a~/b")]
+            _questions: Vec<Question>,
+        }
+        let error = parse_params::<Envelope>(json!({"a~/b": [{"question": ["Where?"]}]})).unwrap_err();
+        assert_eq!(error.details.as_ref().unwrap()["parameter_path"], "/a~0~1b/0/question");
+    }
+
+    #[test]
+    fn oversized_parameter_paths_are_not_reported_as_complete_pointers() {
+        let input = json!({"x".repeat(2048): {"question": ["Where?"]}});
+        let error = parse_params::<std::collections::BTreeMap<String, Question>>(input).unwrap_err();
+        assert!(error.details.as_ref().unwrap()["parameter_path"].is_null());
+        assert!(error.message.len() < 200);
+        assert!(error.message.contains("expected a string"));
+    }
+
+    #[test]
+    fn an_enum_path_does_not_guess_a_json_object_location() {
+        #[derive(Debug, Deserialize)]
+        enum Choice {
+            Question(Question),
+        }
+        let error = parse_params::<Choice>(json!({"Question": {"question": ["Where?"]}})).unwrap_err();
+        assert!(error.details.as_ref().unwrap()["parameter_path"].is_null());
+        assert!(error.message.contains("expected a string"));
+        let Choice::Question(valid) = parse_params::<Choice>(json!({"Question": {"question": "Where?"}})).unwrap();
+        assert_eq!(valid.question, "Where?");
+    }
+
+    #[test]
+    fn parameter_defaults_and_strictness_are_preserved() {
+        #[derive(Debug, Default, Deserialize, PartialEq)]
+        struct Defaults {
+            #[serde(default)]
+            count: u32,
+        }
+        assert_eq!(parse_params::<Defaults>(Value::Null).unwrap(), Defaults::default());
+        assert_eq!(parse_params::<Defaults>(json!({"count": 4})).unwrap().count, 4);
+        for input in [json!({"count": -1}), json!({"count": "4"}), json!({"count": u64::MAX})] {
+            let error = parse_params::<Defaults>(input).unwrap_err();
+            assert_eq!(error.details.as_ref().unwrap()["parameter_path"], "/count");
+        }
+        let missing = parse_params::<Question>(json!({"probes": []})).unwrap_err();
+        assert!(missing.message.contains("missing field `question`"));
+        assert_eq!(missing.details.as_ref().unwrap()["parameter_path"], "", "the known location is the parent object, not an invented missing value");
+        let extra = parse_params::<Question>(json!({"question": "Where?", "surprise": true})).unwrap_err();
+        assert!(extra.message.contains("unknown field `surprise`"));
+    }
 }

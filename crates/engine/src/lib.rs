@@ -6,6 +6,12 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod clean_room;
+
+/// Tools an agent app may be told to approve on its own side (Codex's `approval_mode`): each one
+/// asks the person itself (`Effects::needs_consent`), so approving it there skips nothing.
+/// Everything else keeps the app's own policy; a test in the AI crate checks each is registered
+/// and asks for consent.
+pub const AGENT_APP_PREAPPROVED_TOOLS: &[&str] = &["rebuild_start"];
 pub mod feed;
 pub mod inbox;
 pub mod journal;

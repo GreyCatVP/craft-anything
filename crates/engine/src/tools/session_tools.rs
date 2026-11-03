@@ -689,6 +689,21 @@ mod tests {
         assert_eq!(v["result"]["valid"], false, "cites no evidence");
     }
 
+    /// #498: the bad field must be identifiable, and rejected input must not create an unknown.
+    #[test]
+    fn an_unknown_can_be_recorded_after_correcting_its_parameter_type() {
+        let e = Engine::new(crate::testing::session());
+        for caller in [Caller::Agent, Caller::Mcp, Caller::Cli] {
+            let error = e.call("core_unknown_add", json!({"question": ["Where is the loop?"]}), CallOptions::new(caller)).unwrap_err();
+            assert_eq!(error.code, craft_anything_evidence::ErrorCode::BadInput);
+            assert_eq!(error.details.as_ref().unwrap()["parameter_path"], "/question");
+            assert!(error.message.contains("expected a string"));
+            assert_eq!(e.session().unknowns().count(), 0);
+        }
+        e.call("core_unknown_add", json!({"question": "Where is the loop?"}), CallOptions::new(Caller::Agent)).unwrap();
+        assert_eq!(e.session().unknowns().count(), 1);
+    }
+
     #[test]
     fn project_evidence_is_loaded_in_a_new_session() {
         use crate::project::{Project, Purpose};

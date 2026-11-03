@@ -634,22 +634,24 @@ fn transport(proto: u8, p: &[u8], d: &mut Decoded) {
     };
     match proto {
         6 => {
-            let (Some(sp), Some(dp), Some(seq), Some(ack), Some(off), Some(flags), Some(win)) =
-                (r.u16_be(0), r.u16_be(2), r.u32_be(4), r.u32_be(8), r.u8(12), r.u8(13), r.u16_be(14))
-            else {
+            let (Some(sp), Some(dp)) = (r.u16_be(0), r.u16_be(2)) else {
                 d.note = Some("TCP header cut short".into());
                 return;
             };
             d.protocols.push("tcp");
-            let payload = p.get(usize::from(off >> 4) * 4..).unwrap_or(&[]);
+            let (seq, ack, off, flags, win) = (r.u32_be(4), r.u32_be(8), r.u8(12), r.u8(13), r.u16_be(14));
+            if win.is_none() {
+                d.note = Some("TCP header cut short".into());
+            }
+            let payload = off.map_or(&[][..], |off| p.get(usize::from(off >> 4) * 4..).unwrap_or(&[]));
             d.transport = Some(Transport {
                 protocol: "tcp",
                 src_port: Some(sp),
                 dst_port: Some(dp),
-                tcp_flags: Some(tcp_flags(flags)),
-                seq: Some(seq),
-                ack: Some(ack),
-                window: Some(win),
+                tcp_flags: flags.map(tcp_flags),
+                seq,
+                ack,
+                window: win,
                 payload_len: payload.len(),
                 ..empty
             });
@@ -996,6 +998,8 @@ pub struct Flow {
     pub bytes: u64,
     pub packets_a_to_b: u64,
     pub packets_b_to_a: u64,
+    pub bytes_a_to_b: u64,
+    pub bytes_b_to_a: u64,
     pub first_frame: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_ts_ns: Option<u64>,
@@ -1032,6 +1036,9 @@ pub struct Summary {
     pub dns_queries: Vec<Count>,
     /// "name TYPE value" from DNS responses.
     pub dns_answers: Vec<Count>,
+    /// "question A|AAAA address" from DNS responses: each address answered, keyed by the response's first
+    /// question (so CNAME chains end at the name that was asked), as Wireshark's fields report them.
+    pub dns_addresses: Vec<Count>,
     /// "METHOD host target" from HTTP/1.x requests.
     pub http_requests: Vec<Count>,
     /// Server names from TLS ClientHellos.
@@ -1080,6 +1087,7 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
     let mut flow_rows: Vec<Flow> = Vec::new();
     let (mut protocols, mut stacks, mut endpoints) = (Tally::default(), Tally::default(), Tally::default());
     let (mut queries, mut answers, mut http, mut sni, mut alpn) = (Tally::default(), Tally::default(), Tally::default(), Tally::default(), Tally::default());
+    let mut addresses = Tally::default();
     for f in cap.by_ref() {
         if f.number % 4096 == 0 && cancelled() {
             return Err(FormatError::Malformed("cancelled".into()));
@@ -1091,8 +1099,10 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
             s.last_ts_ns = Some(s.last_ts_ns.map_or(t, |x| x.max(t)));
         }
         let d = decode(f.link_type, f.data);
-        for p in &d.protocols {
-            protocols.add((*p).to_string());
+        for (i, p) in d.protocols.iter().enumerate() {
+            if !d.protocols[..i].contains(p) {
+                protocols.add((*p).to_string());
+            }
         }
         stacks.add(d.stack());
         let Some(ip) = &d.ip else {
@@ -1116,6 +1126,8 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
                     bytes: 0,
                     packets_a_to_b: 0,
                     packets_b_to_a: 0,
+                    bytes_a_to_b: 0,
+                    bytes_b_to_a: 0,
                     first_frame: f.number,
                     first_ts_ns: f.ts_ns,
                     last_ts_ns: f.ts_ns,
@@ -1127,8 +1139,10 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
                 row.bytes += u64::from(f.original_len);
                 if forward {
                     row.packets_a_to_b += 1;
+                    row.bytes_a_to_b += u64::from(f.original_len);
                 } else {
                     row.packets_b_to_a += 1;
+                    row.bytes_b_to_a += u64::from(f.original_len);
                 }
                 if f.ts_ns.is_some() {
                     row.last_ts_ns = f.ts_ns;
@@ -1146,6 +1160,13 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
             }
             for a in &dns.answers {
                 answers.add(format!("{} {} {}", a.name, a.rtype, a.value));
+            }
+            if dns.response
+                && let Some(q) = dns.questions.first()
+            {
+                for a in dns.answers.iter().filter(|a| matches!(a.rtype.as_str(), "A" | "AAAA") && a.value.parse::<IpAddr>().is_ok()) {
+                    addresses.add(format!("{} {} {}", q.name, a.rtype, a.value));
+                }
             }
         }
         if let Some(h) = &d.http
@@ -1171,6 +1192,7 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
     s.endpoints = endpoints.done("endpoints", &mut capped);
     s.dns_queries = queries.done("dns_queries", &mut capped);
     s.dns_answers = answers.done("dns_answers", &mut capped);
+    s.dns_addresses = addresses.done("dns_addresses", &mut capped);
     s.http_requests = http.done("http_requests", &mut capped);
     s.tls_sni = sni.done("tls_sni", &mut capped);
     s.tls_alpn = alpn.done("tls_alpn", &mut capped);
@@ -1203,6 +1225,24 @@ pub fn iso8601(ns: u64) -> String {
 mod tests {
     use super::*;
     use craft_anything_testkit::pcap::{dns_query, eth, ipv4_pkt, pcap, pcapng, sample_frames, udp};
+
+    #[test]
+    fn tcp_cut_inside_header_keeps_ports() {
+        // Ports sit in the first 4 bytes; a cut later in the header must not drop them (as UDP).
+        let mut tcp = Vec::new();
+        tcp.extend(41000u16.to_be_bytes());
+        tcp.extend(9000u16.to_be_bytes());
+        tcp.extend([0, 0, 0, 1, 0, 0, 0, 0, 0x50, 0x18, 4, 0, 0, 0, 0, 0]);
+        let mut frame = eth(0x0800, &ipv4_pkt(6, [10, 0, 0, 1], [10, 0, 0, 2], &tcp));
+        frame.truncate(14 + 20 + 11);
+        let d = decode(1, &frame);
+        let t = d.transport.unwrap();
+        assert_eq!((t.src_port, t.dst_port), (Some(41000), Some(9000)));
+        assert_eq!(t.seq, Some(1));
+        assert_eq!(t.ack, None);
+        assert_eq!(t.window, None);
+        assert!(d.protocols.contains(&"tcp"));
+    }
 
     /// One-answer DNS response for `example.com` with a TXT answer carrying `rdata`.
     fn txt_response(rdata: &[u8]) -> Vec<u8> {
@@ -1305,6 +1345,18 @@ mod tests {
     }
 
     #[test]
+    fn fcs_bits_are_masked_in_big_endian_nanosecond_files() {
+        classic_link_word(0x24000001, false, true, 4);
+        classic_link_word(1, false, true, 0);
+    }
+
+    #[test]
+    fn fcs_bits_do_not_change_big_endian_nanosecond_raw_ip() {
+        classic_link_word(0x24000065, false, true, 4);
+        classic_link_word(101, false, true, 0);
+    }
+
+    #[test]
     fn a_one_word_fcs_length_is_masked() {
         classic_link_word(0x14000001, true, false, 2);
     }
@@ -1375,6 +1427,30 @@ mod tests {
         assert_eq!(summarize(&pcap(&frames), &|| false).unwrap().format, "pcap");
         assert_eq!(iso8601(1_700_000_000_000_000_500), "2023-11-14T22:13:20.000000500Z");
         assert_eq!(iso8601(0), "1970-01-01T00:00:00.000000000Z");
+    }
+
+    #[test]
+    fn qinq_frames_count_vlan_once_per_frame() {
+        let mut payload = vec![0x00, 0x0a, 0x81, 0x00, 0x00, 0x14, 0x08, 0x00];
+        payload.extend(ipv4_pkt(17, [10, 0, 0, 1], [10, 0, 0, 2], &udp(40000, 9999, b"ping")));
+        let frame = eth(0x88a8, &payload);
+        let s = summarize(&pcap(&[frame.clone(), frame.clone(), frame]), &|| false).unwrap();
+        let count = |name: &str| s.protocols.iter().find(|c| c.value == name).map(|c| c.count);
+        assert_eq!(s.stacks[0].value, "eth:vlan:vlan:ipv4:udp");
+        assert_eq!(count("vlan"), Some(3));
+        assert_eq!(count("eth"), Some(3));
+        assert_eq!(count("ipv4"), Some(3));
+    }
+
+    #[test]
+    fn flows_count_bytes_per_direction() {
+        let req = eth(0x0800, &ipv4_pkt(17, [10, 0, 0, 1], [10, 0, 0, 2], &udp(40000, 9999, &[b'q'; 10])));
+        let rep = eth(0x0800, &ipv4_pkt(17, [10, 0, 0, 2], [10, 0, 0, 1], &udp(9999, 40000, &[b'r'; 300])));
+        let s = summarize(&pcap(&[req, rep]), &|| false).unwrap();
+        let flow = serde_json::to_value(&s.flows[0]).unwrap();
+        assert_eq!(flow["bytes"], 394);
+        assert_eq!(flow["bytes_a_to_b"], 52);
+        assert_eq!(flow["bytes_b_to_a"], 342);
     }
 
     #[test]

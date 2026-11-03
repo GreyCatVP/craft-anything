@@ -71,6 +71,11 @@ pub trait AgentAdapter: Send + Sync {
     fn prompt_on_stdin(&self) -> bool {
         false
     }
+    /// What goes in on stdin when [`prompt_on_stdin`](AgentAdapter::prompt_on_stdin) says so:
+    /// the message, with the preamble in front for an agent that takes no separate one.
+    fn stdin_text(&self, _preamble: &str, prompt: &str) -> String {
+        prompt.to_string()
+    }
     /// The process for a local run of `program` (an adapter may clean its environment).
     fn process(&self, program: &str) -> Process {
         Process::new(program)
@@ -282,7 +287,39 @@ impl AgentAdapter for ClaudeCode {
             p.session_id = Some(id.to_string());
         }
         match s("type").as_str() {
+            "system" if s("subtype") == "init" => {
+                let failed = v.get("mcp_servers").and_then(Value::as_array).and_then(|servers| {
+                    servers.iter().find(|server| {
+                        server.get("name").and_then(Value::as_str) == Some(MCP_NAME)
+                            && matches!(server.get("status").and_then(Value::as_str), Some("failed" | "needs-auth"))
+                    })
+                });
+                if let Some(server) = failed {
+                    p.failure = Some(TurnFailure::new(FailureKind::ToolsUnavailable));
+                    let status = server.get("status").and_then(Value::as_str).unwrap_or_default();
+                    out.push(AgentEvent::Error {
+                        message: format!("Craft Anything's tools did not start in Claude Code (server status: {status})."),
+                        remediation: Some(
+                            "Check the Craft Anything CLI and the agent failure log, then start a new build attempt after fixing the tool connection.".into(),
+                        ),
+                        log: None,
+                    });
+                }
+            }
             "assistant" => {
+                if let Some(code) = v.get("error").and_then(Value::as_str) {
+                    let failure = TurnFailure::claude(code);
+                    p.failure = Some(failure);
+                    let why = v.pointer("/message/content").map(content_text).unwrap_or_else(|| code.to_string());
+                    let (message, hint) = claude_code_failure(&why);
+                    let remediation = hint.or_else(|| match failure.kind {
+                        FailureKind::Authentication => self.sign_in_fix(),
+                        FailureKind::Billing => Some("Check the account's credits, plan and spending limit before trying again.".into()),
+                        FailureKind::Configuration => Some("Check the chosen model and Claude Code settings before trying again.".into()),
+                        _ => None,
+                    });
+                    return vec![AgentEvent::Error { message, remediation, log: None }];
+                }
                 for b in v.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default() {
                     match b.get("type").and_then(Value::as_str).unwrap_or_default() {
                         "text" => out.push(AgentEvent::TextDelta { text: b.get("text").and_then(Value::as_str).unwrap_or_default().to_string() }),
@@ -327,6 +364,7 @@ impl AgentAdapter for ClaudeCode {
                         log: None,
                     });
                 } else if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+                    p.failure.get_or_insert(TurnFailure::new(FailureKind::Unknown));
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
                     let (message, remediation) = claude_code_failure(&why);
                     out.push(AgentEvent::Error { message, remediation, log: None });
@@ -375,10 +413,31 @@ impl AgentAdapter for ClaudeCode {
 }
 
 /// Claude Code's own folder: `CLAUDE_CONFIG_DIR` when it's set (the person's choice, which the
-/// agent we start keeps too), else `~/.claude`.
+/// agent we start keeps too), else our own under a Flatpak (see [`flatpak_claude_dir`]), else
+/// `~/.claude`.
 fn claude_config_dir() -> Option<std::path::PathBuf> {
     let set = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-    set.or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+    set.or_else(flatpak_claude_dir).or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+}
+
+/// Whether this app runs in a Flatpak sandbox (it sets `FLATPAK_ID` and makes `/.flatpak-info`).
+pub fn in_flatpak() -> bool {
+    static IN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IN.get_or_init(|| std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists())
+}
+
+/// Where Claude Code keeps its conversations when we start it under a Flatpak and the person
+/// hasn't chosen a folder: its own is `~/.claude`, which the sandbox only lets us read, so a
+/// conversation was never saved and `--resume` found nothing (#506). A folder of ours in the
+/// app's data folder is writable, and kept with the app. `None` outside a Flatpak, or when
+/// `CLAUDE_CONFIG_DIR` is set.
+pub fn flatpak_claude_dir() -> Option<std::path::PathBuf> {
+    let chosen = std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty());
+    flatpak_claude_dir_in(in_flatpak(), chosen, dirs::data_dir())
+}
+
+pub fn flatpak_claude_dir_in(flatpak: bool, chosen: bool, data: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    (flatpak && !chosen).then_some(data?.join("craft-anything").join("claude"))
 }
 
 /// Claude Code's name for the folder a session ran in: the path with everything but letters and
@@ -481,6 +540,16 @@ impl AgentAdapter for Codex {
         &["codex"]
     }
 
+    /// `codex exec -` reads the message from stdin, so a long one can't pass Windows'
+    /// command-line limit (os error 206, #528).
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
+    }
+
     fn check_tool_server(&self, stop: &CancelToken) -> Result<(), ToolError> {
         cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop)
     }
@@ -499,11 +568,18 @@ impl AgentAdapter for Codex {
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.command={}", toml_string(&cx.mcp.command))]);
         let args_toml = format!("[{}]", cx.mcp.args.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "));
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.args={args_toml}")]);
+        // `codex exec` can't ask, so without this it refuses a tool not marked read-only, such as
+        // rebuild_start, before our server sees the call (#540). Only tools that ask the person
+        // themselves are approved; every other tool keeps the person's own Codex policy.
+        for tool in craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS {
+            v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.tools.{tool}.approval_mode=\"approve\"")]);
+        }
         if let Some(m) = &cx.options.cli_model {
             v.extend(["-m".into(), m.clone()]);
         }
         v.extend(cx.options.args.iter().cloned());
-        v.push(format!("{}{}", cx.preamble, cx.prompt));
+        // The message itself goes in on stdin (see `stdin_text`).
+        v.push("-".into());
         v
     }
 
@@ -540,7 +616,9 @@ impl AgentAdapter for Codex {
                     out.push(p.started(&id, &name, item.get("arguments").cloned().unwrap_or(Value::Null)));
                 }
                 let failed = item.get("status").and_then(Value::as_str) == Some("failed") || item.get("error").is_some_and(|e| !e.is_null());
-                let text = item.get("result").or_else(|| item.get("error")).map(|r| r.to_string()).unwrap_or_default();
+                let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
+                let ours = item.get("server").and_then(Value::as_str) == Some(MCP_NAME);
+                let text = codex_tool_text(&item, tool, ours);
                 out.push(p.finished(&id, !failed, &text));
             }
             ("item.started", "command_execution") => {
@@ -563,6 +641,30 @@ impl AgentAdapter for Codex {
     }
 }
 
+/// What a finished Codex tool call says. A failed call carries `"result": null` beside its
+/// `error`, which showed as "null" (#540), so null fields are skipped and an error's message is
+/// used as written. Codex's refusal to run one of our tools it can't ask about gets the way out.
+fn codex_tool_text(item: &Value, tool: &str, ours: bool) -> String {
+    let field = |k: &str| item.get(k).filter(|v| !v.is_null());
+    let error = field("error").map(|e| e.get("message").and_then(Value::as_str).map_or_else(|| e.to_string(), str::to_string));
+    let text = match (field("result"), error) {
+        (_, Some(e)) => e,
+        (Some(r), None) => r.to_string(),
+        (None, None) => String::new(),
+    };
+    // Another MCP server's refusal isn't fixed by our setup: it keeps Codex's own words.
+    if ours && text.contains(CODEX_NEEDS_APPROVAL) {
+        // The feed keeps 200 characters of a result, so the fix comes first and fits.
+        return format!(
+            "Codex blocked {tool}: it can't ask for approval here. Fix: run `craft-anything-cli setup --client codex --yes`, then retry. See docs/codex.md."
+        );
+    }
+    text
+}
+
+/// Codex's wording when a tool needs approval and its policy is `never` (#540).
+const CODEX_NEEDS_APPROVAL: &str = "requires approval, but approval policy is never";
+
 /// Gemini CLI (`--output-format stream-json`). Flags are checked against `gemini --help`.
 pub struct GeminiCli;
 
@@ -571,12 +673,23 @@ impl AgentAdapter for GeminiCli {
         &["gemini-cli", "gemini"]
     }
 
+    /// Gemini CLI reads its message from stdin and appends `-p` to it, so a long one can't pass
+    /// Windows' command-line limit, which is 8,191 characters through npm's `gemini.cmd`.
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
+    }
+
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = cx.options.args.clone();
         if let Some(m) = &cx.options.cli_model {
             a.extend(["-m".into(), m.clone()]);
         }
-        a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), format!("{}{}", cx.preamble, cx.prompt)]);
+        // An empty `-p` keeps it headless and adds nothing to the message on stdin (see `stdin_text`).
+        a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), String::new()]);
         a
     }
 

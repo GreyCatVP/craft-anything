@@ -695,25 +695,35 @@ fn collect_strings(img: &Image, limits: &Limits) -> Vec<ProgString> {
     let mut out = Vec::new();
     let raw = matches!(bin.format, Format::Raw | Format::DosCom | Format::DosMz);
     let mut budget = limits.max_data_scan;
-    for s in &bin.sections {
+    // (name, address, file offset, bytes in the file) of each region to read strings from.
+    let regions: Vec<(&str, u64, Option<u64>, u64)> = if bin.sections.is_empty() {
+        // No section headers (firmware, or headers removed): every loaded segment, code ones too,
+        // as for a raw image, because read-only data often shares the code's segment then.
+        // Bytes past the segment's size in memory are not mapped, so they are not read.
+        bin.segments.iter().map(|g| (g.name.as_str(), g.addr, Some(g.file_offset), g.file_size.min(g.size))).filter(|&(_, _, _, n)| n > 0).collect()
+    } else {
+        bin.sections
+            .iter()
+            .filter(|s| !((s.exec && !raw) || !s.alloc || matches!(s.kind, "debug" | "bss")))
+            .map(|s| (s.name.as_str(), s.addr, s.file_offset, s.file_size))
+            .collect()
+    };
+    for (name, addr, file_offset, file_size) in regions {
         if out.len() >= limits.max_strings || budget == 0 {
             break;
         }
-        if (s.exec && !raw) || !s.alloc || matches!(s.kind, "debug" | "bss") {
-            continue;
-        }
-        let Some(off) = s.file_offset.and_then(|o| usize::try_from(o).ok()) else { continue };
-        let n = usize::try_from(s.file_size).unwrap_or(0).min(budget);
+        let Some(off) = file_offset.and_then(|o| usize::try_from(o).ok()) else { continue };
+        let n = usize::try_from(file_size).unwrap_or(0).min(budget);
         budget -= n;
         let Some(bytes) = img.data.get(off..off.saturating_add(n).min(img.data.len())) else { continue };
         for f in craft_anything_formats::strings::extract(bytes, 0, limits.string_min_len, limits.max_strings - out.len()) {
             out.push(ProgString {
-                addr: s.addr.wrapping_add(f.offset),
+                addr: addr.wrapping_add(f.offset),
                 file_offset: off as u64 + f.offset,
                 byte_len: f.byte_len,
                 encoding: f.encoding,
                 text: f.text,
-                section: s.name.clone(),
+                section: name.to_string(),
             });
         }
     }
@@ -818,7 +828,12 @@ fn scan_function(ctx: &Ctx<'_>, entry: u64, known: &BTreeSet<u64>) -> Scan {
                     if let Some(name) = ctx.stubs.get(&target).filter(|_| a == first) {
                         sc.thunk_of = Some(name.clone());
                     }
-                    if target != entry && (known.contains(&target) || !img.is_exec(target)) {
+                    // An unconditional jump below the entry, to code this function hasn't
+                    // reached another way, leaves it: a tail call to a function nothing else
+                    // names (a stripped program's `frame_dummy` jumping to `register_tm_clones`,
+                    // or a jump to a `.cold` part). Its target is analysed as a function of its own.
+                    let below = target < entry && !sc.leaders.contains(&target) && !sc.insns.contains_key(&target);
+                    if target != entry && (known.contains(&target) || !img.is_exec(target) || below) {
                         sc.tails.push(target);
                     } else {
                         sc.leaders.insert(target);
@@ -1307,6 +1322,53 @@ mod tests {
     }
 
     #[test]
+    fn a_jump_below_the_entry_is_a_tail_call_to_a_function_of_its_own() {
+        // `start` (the entry point) at 0x1000; an unnamed function at 0x1010 with no prologue
+        // (`lea rax, [rip]; ret`) that nothing calls; `thunk` at 0x1020 (`endbr64; jmp 0x1010`).
+        let below = vec![0x48, 0x8d, 0x05, 0x00, 0x00, 0x00, 0x00, 0xc3];
+        let thunk = vec![0xf3, 0x0f, 0x1e, 0xfa, 0xe9, 0xe7, 0xff, 0xff, 0xff];
+        let (_, p) = analyze(tk::program_facts::elf_with_functions(&[("start", vec![0xc3]), ("", below), ("thunk", thunk)]));
+        let t = p.function_by_name("thunk").unwrap();
+        assert_eq!(t.size(), 9, "{:?}", t.blocks);
+        assert_eq!(t.tail_calls, [0x1010]);
+        let f = p.functions.get(&0x1010).expect("the jump target is a function");
+        assert_eq!(f.size(), 8);
+        assert_eq!(p.function_containing(0x1010).unwrap().entry, 0x1010);
+        assert!(!t.contains(0x1010) && !f.contains(0x1020));
+    }
+
+    #[test]
+    fn a_branch_back_below_the_entry_stays_in_the_function() {
+        // A conditional branch to a block below the entry keeps it in the body, as before; so
+        // does a later jump back to it.
+        let below = vec![0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3];
+        // push rbp; mov rbp, rsp; test edi, edi; je 0x1010; jmp 0x1010
+        let hot = vec![0x55, 0x48, 0x89, 0xe5, 0x85, 0xff, 0x0f, 0x84, 0xe4, 0xff, 0xff, 0xff, 0xe9, 0xdf, 0xff, 0xff, 0xff];
+        let (_, p) = analyze(tk::program_facts::elf_with_functions(&[("start", vec![0xc3]), ("", below), ("hot", hot)]));
+        let h = p.function_by_name("hot").unwrap();
+        assert!(h.contains(0x1010), "{:?}", h.blocks);
+        assert!(h.tail_calls.is_empty(), "{:?}", h.tail_calls);
+        assert!(!p.functions.contains_key(&0x1010));
+    }
+
+    #[test]
+    fn a_jump_into_a_block_below_the_entry_already_in_the_function_stays_in_it() {
+        // `mov eax, 1; ret` at 0x1010, reached first by `je 0x1010`; the later `jmp 0x1015`
+        // lands on its `ret`, which is already part of the body.
+        let below = vec![0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3];
+        // push rbp; mov rbp, rsp; test esi, esi; je 0x1035; test edi, edi; je 0x1010; ret; jmp 0x1015
+        let hot = vec![
+            0x55, 0x48, 0x89, 0xe5, 0x85, 0xf6, 0x0f, 0x84, 0x09, 0x00, 0x00, 0x00, 0x85, 0xff, 0x0f, 0x84, 0xdc, 0xff, 0xff, 0xff, 0xc3, 0xe9, 0xdb, 0xff,
+            0xff, 0xff,
+        ];
+        let (_, p) = analyze(tk::program_facts::elf_with_functions(&[("start", vec![0xc3]), ("", below), ("hot", hot)]));
+        let h = p.function_by_name("hot").unwrap();
+        assert!(h.contains(0x1010) && h.contains(0x1015), "{:?}", h.blocks);
+        assert!(h.tail_calls.is_empty(), "{:?}", h.tail_calls);
+        assert!(!p.functions.contains_key(&0x1015) && !p.functions.contains_key(&0x1010));
+    }
+
+    #[test]
     fn a_program_with_no_section_headers_is_found_by_its_dynamic_symbols() {
         for table in [tk::flutter::SymbolTable::DynamicHash, tk::flutter::SymbolTable::DynamicGnuHash] {
             let names = ["inflate", "deflate", "adler32"];
@@ -1317,6 +1379,36 @@ mod tests {
                 assert_eq!(f.discovered_by, "symbol");
             }
             assert_eq!(p.functions.len(), 3);
+        }
+    }
+
+    #[test]
+    fn strings_are_found_in_the_segments_when_there_are_no_sections() {
+        let (mut elf, l) = tk::elf64(tk::ElfArch::X86_64, false);
+        let (_, sectioned) = analyze(elf.clone());
+        let hello = |p: &Program| p.strings.iter().find(|s| s.text == "Hello, Craft!").map(|s| (s.addr, s.file_offset));
+        assert_eq!(hello(&sectioned), Some((l.rodata_va, l.rodata_va - tk::ELF_BASE)));
+        // Remove the section header table: offset, count and name-table index.
+        elf[40..48].fill(0);
+        elf[60..64].fill(0);
+        let (img, p) = analyze(elf.clone());
+        assert!(img.bin.sections.is_empty());
+        assert_eq!(hello(&p), hello(&sectioned), "the same string at the same address");
+        let s = p.strings.iter().find(|s| s.text == "Hello, Craft!").unwrap();
+        assert!(img.bin.segments.iter().any(|g| g.name == s.section), "named after its segment: {}", s.section);
+        // A code segment that claims more file bytes than the file has, and than it has in memory:
+        // only the bytes it maps are read. Its header is the second one; the first is PT_INTERP.
+        let phoff = usize::try_from(u64::from_le_bytes(elf[32..40].try_into().unwrap())).unwrap();
+        let load = phoff + 56;
+        assert_eq!(elf[load..load + 4], [1, 0, 0, 0], "PT_LOAD");
+        elf[load + 32..load + 40].copy_from_slice(&u64::MAX.to_le_bytes());
+        let (img, p) = analyze(elf);
+        let code = img.bin.segments.iter().find(|g| g.exec).unwrap();
+        assert!(code.file_size > code.size, "file size {} is clamped to the file, not to memory {}", code.file_size, code.size);
+        assert_eq!(hello(&p), hello(&sectioned));
+        for s in &p.strings {
+            let g = img.bin.segments.iter().find(|g| g.name == s.section).unwrap();
+            assert!(s.addr >= g.addr && s.addr + s.byte_len <= g.addr + g.size, "{s:?} is inside {} as mapped", g.name);
         }
     }
 

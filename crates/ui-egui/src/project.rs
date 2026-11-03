@@ -5,7 +5,7 @@
 
 use crate::i18n::{tr, trf};
 use crate::make::{self, resolve_target};
-use crate::state::{FeedItem, MakeDraft, Modal, PlanStatus, PlanStep, Screen};
+use crate::state::{FeedItem, MakeDraft, Modal, PlanStatus, PlanStep, Screen, UserItem};
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, Done, chat, icons, prompt_box, widgets};
 use craft_anything_ai::AgentEvent;
@@ -112,11 +112,11 @@ impl CraftApp {
         if self.state.make.request.trim() == request {
             self.state.make = MakeDraft::default();
         }
-        self.state.feed = vec![FeedItem::User(request)];
-        self.start_run(ws, Some(backend), None, None);
+        self.state.feed = vec![FeedItem::User(UserItem::Text(request))];
+        self.start_run(ws, Some(backend), None, None, Vec::new());
     }
 
-    fn run_options(&self, backend: Option<String>, message: Option<String>, shown: Option<String>) -> RunOptions {
+    fn run_options(&self, backend: Option<String>, message: Option<String>, shown: Option<String>, pictures: Vec<PathBuf>) -> RunOptions {
         let build = &self.settings.build;
         // Each event repaints the window, so a build needs no timer to show its progress.
         let wake = self.jobs.repaint_ctx().cloned().map_or_else(Default::default, |ctx| rebuild::Wake::new(move || ctx.request_repaint()));
@@ -125,6 +125,7 @@ impl CraftApp {
             backend,
             message,
             shown,
+            shown_pictures: pictures,
             beginner: self.beginner(),
             kinds: self.kinds.clone(),
             max_rounds: build.max_rounds,
@@ -139,9 +140,10 @@ impl CraftApp {
         self.runs.start(&self.hub, ws, opts)
     }
 
-    /// `shown`: the person's message as the feed shows it (already in the app's feed).
-    fn start_run(&mut self, ws: Workspace, backend: Option<String>, message: Option<String>, shown: Option<String>) {
-        let opts = self.run_options(backend, message, shown);
+    /// `shown`: the person's message as the feed shows it (already in the app's feed), and the
+    /// pictures attached to it (their copies in the project).
+    fn start_run(&mut self, ws: Workspace, backend: Option<String>, message: Option<String>, shown: Option<String>, pictures: Vec<PathBuf>) {
+        let opts = self.run_options(backend, message, shown, pictures);
         self.start_run_with(ws, opts);
     }
 
@@ -190,10 +192,10 @@ impl CraftApp {
             return;
         }
         if let Some(t) = &text {
-            self.state.feed.push(FeedItem::User(t.clone()));
+            self.state.feed.push(FeedItem::User(UserItem::Text(t.clone())));
         }
         let shown = text.clone();
-        self.resume(text, shown);
+        self.resume(text, shown, Vec::new());
     }
 
     /// Carry on where the open project's last run stopped (paused, or the app or the computer
@@ -205,14 +207,18 @@ impl CraftApp {
         let Some(ws) = self.workspace.clone() else { return };
         let Some(backend) = self.builder_backend(ws.manifest.builder.as_deref()) else { return self.need_builder(false) };
         let ws = Workspace::open(&ws.root).unwrap_or(ws);
-        let opts = RunOptions { continuing: true, ..self.run_options(Some(backend), None, None) };
+        let opts = RunOptions { continuing: true, ..self.run_options(Some(backend), None, None, Vec::new()) };
         self.start_run_with(ws, opts);
     }
 
     pub fn pause(&mut self) {
         let Some(root) = self.workspace.as_ref().map(|w| w.root.clone()) else { return };
-        if self.runs.stop(&root) == Stopped::Unqueued {
-            apply(&mut self.state.feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
+        match self.runs.stop(&root) {
+            Stopped::Unqueued => apply(&mut self.state.feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true }),
+            Stopped::Stopping => {
+                self.pausing.insert(root);
+            }
+            Stopped::Nothing => {}
         }
     }
 
@@ -290,6 +296,7 @@ impl CraftApp {
             let left = self.runs.get(&root).map(RebuildRun::take_notes).unwrap_or_default();
             let join = |part: fn(&Note) -> &str| left.iter().map(part).collect::<Vec<_>>().join("\n\n");
             let (message, shown) = (join(|n| &n.text), join(|n| &n.shown));
+            let pictures: Vec<PathBuf> = left.iter().flat_map(|n| n.pictures.clone()).collect();
             if open.as_ref() == Some(&root) {
                 if let Some(ws) = self.workspace.as_mut() {
                     let _ = ws.reload();
@@ -298,14 +305,14 @@ impl CraftApp {
                     if matches!(self.state.feed.last(), Some(FeedItem::Paused)) {
                         self.state.feed.pop();
                     }
-                    self.state.feed.push(FeedItem::User(shown.clone()));
-                    self.resume(Some(message), Some(shown));
+                    self.state.feed.push(FeedItem::User(UserItem::new(shown.clone(), pictures.clone())));
+                    self.resume(Some(message), Some(shown), pictures);
                 }
             } else if !left.is_empty() {
                 // Another project's notes start its next run in the background.
                 let Ok(ws) = Workspace::open(&root) else { continue };
                 let Some(backend) = self.builder_backend(ws.manifest.builder.as_deref()) else { continue };
-                let opts = self.run_options(Some(backend), Some(message), Some(shown));
+                let opts = self.run_options(Some(backend), Some(message), Some(shown), pictures);
                 if let Err(e) = self.launch(ws, opts) {
                     self.toast(e.message, true);
                 }
@@ -1109,7 +1116,7 @@ fn draw_items(
     for (i, item) in items.iter().enumerate() {
         questions_up_to(app, ui, i);
         ui.push_id(i, |ui| match item {
-            FeedItem::User(text) => chat::user_bubble(ui, text, false),
+            FeedItem::User(text) => chat::user_bubble(ui, text.text(), false),
             FeedItem::Step { text, .. } => chat::activity_row(ui, RichText::new(text).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Paused => chat::activity_row(ui, RichText::new(tr("Paused.")).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Agent { text, streaming } => {
@@ -1505,6 +1512,12 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
     if let Some(id) = take_back {
         app.unsend(id);
     }
+    // Pause was pressed and the build hasn't stopped yet: the button says so until it does.
+    let open_root = app.workspace.as_ref().map(|w| w.root.clone());
+    if !running && let Some(root) = &open_root {
+        app.pausing.remove(root);
+    }
+    let pausing = running && open_root.is_some_and(|r| app.pausing.contains(&r));
     let hint = if app.state.just_ask {
         tr("Ask about the build, e.g. \"where are the latest files?\" Nothing changes and no build starts.")
     } else if running {
@@ -1532,6 +1545,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
                 attach: Some("Attach pictures (or drop them here)"),
                 // The one way to pause (Continue picks up where it stopped).
                 stop_button: running.then_some("Pause"),
+                stopping: pausing,
                 send: true,
                 recall: !waiting.is_empty(),
                 history: Some(&history),
@@ -1546,6 +1560,10 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
         }
         if let Some(i) = out.remove {
             app.state.project_attachments.remove(i);
+        }
+        // A past prompt brought back with Up (or the draft with Down) holds its own pictures.
+        if let Some(pictures) = out.restore {
+            app.state.project_attachments = pictures;
         }
         if out.attach {
             app.pick(crate::Pick::Attach);
@@ -1665,12 +1683,12 @@ impl CraftApp {
         match self.open_run() {
             Some(run) if run.is_running() => {
                 // It joins the feed when the builder reads it; until then it can be taken back.
-                let id = run.add_note(message, shown);
+                let id = run.add_note(message, shown, files.clone());
                 self.drafts.insert(id, Draft { root: ws.root.clone(), text, attachments });
             }
             _ => {
-                self.state.feed.push(FeedItem::User(shown.clone()));
-                self.resume(Some(message), Some(shown));
+                self.state.feed.push(FeedItem::User(UserItem::new(shown.clone(), files.clone())));
+                self.resume(Some(message), Some(shown), files);
             }
         }
     }
@@ -1686,12 +1704,12 @@ impl CraftApp {
     }
 
     /// Start another run on the open project: with a message (already shown in the app's feed;
-    /// `shown` puts it in the saved one), or none to try again.
-    fn resume(&mut self, message: Option<String>, shown: Option<String>) {
+    /// `shown` puts it in the saved one, with `pictures`), or none to try again.
+    fn resume(&mut self, message: Option<String>, shown: Option<String>, pictures: Vec<PathBuf>) {
         let Some(ws) = self.workspace.clone() else { return };
         let ws = Workspace::open(&ws.root).unwrap_or(ws);
         let Some(backend) = self.builder_backend(ws.manifest.builder.as_deref()) else { return self.need_builder(false) };
-        self.start_run(ws, Some(backend), message, shown);
+        self.start_run(ws, Some(backend), message, shown, pictures);
     }
 }
 

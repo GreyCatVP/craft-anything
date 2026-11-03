@@ -53,6 +53,7 @@ fn main() -> eframe::Result {
         // starting Vulkan loads Intel's Vulkan driver (igvk64.dll, #394) and crashes before any
         // window. DX12 (with WARP) covers all Windows systems; `WGPU_BACKEND` still asks for others.
         setup.instance_descriptor.backends = windows_backends(eframe::wgpu::Backends::from_env());
+        setup.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(eframe::wgpu::Dx12Compiler::from_env());
         setup.native_adapter_selector = Some(Arc::new(pick_adapter));
     }
     let run = eframe::run_native(
@@ -79,7 +80,8 @@ fn main() -> eframe::Result {
                 .set_level(rfd::MessageLevel::Error)
                 .set_title("Craft Anything couldn't open its window")
                 .set_description(format!(
-                    "{e}\n\nUpdating your graphics driver often fixes this. What happened is written to {}; please attach it if you report this.",
+                    "{e}\n\n{} What happened is written to {}; please attach it if you report this.",
+                    graphics_advice(&e.to_string()),
                     log.display()
                 ))
                 .set_buttons(rfd::MessageButtons::Ok)
@@ -89,15 +91,42 @@ fn main() -> eframe::Result {
     run
 }
 
+/// The DX12 shader compiler. wgpu's own choice (`Auto`) takes a `dxcompiler.dll` it finds on the
+/// PATH, and one without its `dxil.dll` makes unsigned shaders: on some drivers (an RTX 5060 Ti,
+/// #522) the device is lost the moment the window opens. FXC comes with Windows and needs no extra
+/// files; `WGPU_DX12_COMPILER` still asks for another.
+#[cfg_attr(all(not(windows), not(test)), expect(dead_code, reason = "only Windows draws with DX12"))]
+fn dx12_compiler(from_env: Option<eframe::wgpu::Dx12Compiler>) -> eframe::wgpu::Dx12Compiler {
+    from_env.unwrap_or(eframe::wgpu::Dx12Compiler::Fxc)
+}
+
+/// Whether the software renderer (WARP) is asked for: `CRAFT_ANYTHING_RENDERER=software`.
+#[cfg_attr(all(not(windows), not(test)), expect(dead_code, reason = "only Windows picks its own graphics adapter"))]
+fn wants_software(setting: Option<&str>) -> bool {
+    setting.is_some_and(|s| s.trim().eq_ignore_ascii_case("software"))
+}
+
+/// What to try when the window can't start: a lost graphics device gets the way to the software
+/// renderer, and anything else the usual driver advice.
+fn graphics_advice(error: &str) -> &'static str {
+    if error.to_lowercase().contains("device is lost") {
+        "The graphics driver stopped while the window opened. Update it, then try again. If it keeps happening, set the environment variable CRAFT_ANYTHING_RENDERER=software to draw without the graphics card (slower), and start the app again."
+    } else {
+        "Updating your graphics driver often fixes this."
+    }
+}
+
 /// Windows: the adapter that draws the window. GL is the last resort, Windows' own software
 /// renderer (WARP) included: in a VMware VM, GL is the way to the virtual GPU and drew a black
 /// window (#27). The fastest device wins, and between same-class devices DX12 comes before Vulkan
 /// (#33). `WGPU_BACKEND` still narrows the choice.
 #[cfg(windows)]
 fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgpu::Surface<'_>>) -> Result<eframe::wgpu::Adapter, String> {
+    let software = wants_software(std::env::var("CRAFT_ANYTHING_RENDERER").ok().as_deref());
     let picked = adapters.iter().filter(|a| surface.is_none_or(|s| a.is_surface_supported(s))).min_by_key(|a| {
         let info = a.get_info();
-        adapter_rank(info.backend, info.device_type)
+        // Asked for software: WARP first, and the usual order among the rest.
+        (software && info.device_type != eframe::wgpu::DeviceType::Cpu, adapter_rank(info.backend, info.device_type))
     });
     match picked {
         Some(a) => {
@@ -209,4 +238,25 @@ fn log_to_file() {
         default_hook(info);
     }));
     craft_anything_platform::sync::start_watchdog(craft_anything_engine::settings::config_dir().join("logs"));
+}
+
+#[cfg(test)]
+mod graphics_tests {
+    use super::*;
+    use eframe::wgpu::Dx12Compiler;
+
+    /// #522: wgpu's `Auto` found a `dxcompiler.dll` without `dxil.dll`, and the device was lost on
+    /// an RTX 5060 Ti. FXC is the default; the environment variable still decides when set.
+    #[test]
+    fn dx12_draws_with_the_compiler_windows_ships_unless_asked_otherwise() {
+        assert!(matches!(dx12_compiler(None), Dx12Compiler::Fxc));
+        assert!(matches!(dx12_compiler(Some(Dx12Compiler::StaticDxc)), Dx12Compiler::StaticDxc));
+    }
+
+    #[test]
+    fn a_lost_device_says_how_to_draw_without_the_graphics_card() {
+        assert!(graphics_advice("WGPU error: Parent device is lost").contains("CRAFT_ANYTHING_RENDERER=software"));
+        assert!(!graphics_advice("No adapter").contains("software"));
+        assert!(wants_software(Some(" Software ")) && !wants_software(Some("gpu")) && !wants_software(None));
+    }
 }

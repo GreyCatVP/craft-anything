@@ -1,0 +1,63 @@
+# Using Codex with Craft Anything
+
+Craft Anything reaches Codex in two ways, and both have to get past Codex's own tool approval.
+
+## Why a tool can be refused
+
+`codex exec` is non-interactive: it has no one to ask, so its approval policy is `never`. A tool
+that an MCP server doesn't mark read-only (such as `rebuild_start`, which runs a coding agent) is
+refused before our server sees the call, with `requires approval, but approval policy is never`.
+Codex's own settings decide this; Craft Anything's consent is a second, separate check.
+
+## What we set
+
+Only tools that ask the person themselves are approved on Codex's side
+(`AGENT_APP_PREAPPROVED_TOOLS` in the engine, today just `rebuild_start`; a test checks each one
+asks for consent). Every other tool keeps whatever approval policy you set in Codex.
+
+- **Connecting Codex to Craft Anything** (`craft-anything-cli setup --client codex --yes`, or the
+  Connect screen) writes the entry in `~/.codex/config.toml` (`$CODEX_HOME/config.toml` if set):
+
+  ```toml
+  [mcp_servers.craft-anything]
+  command = "…/craft-anything-cli"
+  args = ["mcp"]
+  startup_timeout_sec = 30
+  tools = { rebuild_start = { approval_mode = "approve" } }
+  ```
+
+  Your other entries and comments stay as they are, the old file is kept as
+  `config.toml.craft-anything.backup`, and settings you added to our entry (`env`,
+  `enabled_tools`, approvals for other tools) are kept when setup updates it. Setting
+  `approval_mode` for `rebuild_start` yourself is overwritten by the next setup run.
+  `craft-anything-cli doctor --client codex` reports an entry without the approval as "a different
+  copy or shape of the command"; running setup again fixes it.
+- **Building with Codex from the app** starts `codex exec` with the same setting on its `-c`
+  flags, so nothing in your config is needed.
+
+## Who still asks
+
+Approving `rebuild_start` in Codex doesn't remove Craft Anything's own consent: it runs a coding
+agent, so our server asks before it runs. Who can answer depends on how the server was started:
+
+- **Builds started from the app** run the server with the project's inbox, so the person answers
+  in the app (Allow / Don't allow).
+- **The entry from `setup`** starts `craft-anything-cli mcp` on its own, with no app attached, so
+  there is no approval card: the call returns `consent_required` and nothing runs. To let Codex
+  start builds this way, add `"--allow-run"` to the entry's `args` (every tool that runs code is
+  then treated as allowed, so only do it for a Codex you trust), or start the build from the app.
+
+In Clean room mode the tools that touch the original stay refused either way.
+
+## If it still fails
+
+A refusal for one of our tools now says what was blocked and how to fix it, instead of showing
+`null`; another MCP server's refusal keeps Codex's own words, because our setup can't change
+that server's policy. To approve more of our tools by hand, add
+`[mcp_servers.craft-anything.tools.<tool>]` with `approval_mode = "approve"` and start the chat
+again. Approving all of them (`default_tools_approval_mode = "approve"`) also approves tools with
+no consent check of their own, such as `project_inbox_answer`, which can answer a pending approval,
+so we don't do it.
+
+Not yet verified on a real Codex install (this was written from Codex's published configuration
+keys, tested with stand-in output).

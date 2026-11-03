@@ -399,7 +399,7 @@ fn rebuild_note(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErro
     refresh(ctx, &mut set);
     match set.get(&ws.root).filter(|r| r.is_running()) {
         Some(run) => {
-            let id = run.add_note(p.text.clone(), p.text);
+            let id = run.add_note(p.text.clone(), p.text, Vec::new());
             Ok(ToolOutput::Value(json!({"id": id, "queued": run.queued()})))
         }
         None => Err(ToolError::new(ErrorCode::BadInput, "No build is running for this project in this session.")

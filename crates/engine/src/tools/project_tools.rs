@@ -580,7 +580,7 @@ mod tests {
         assert_eq!((ws.manifest.status, ws.manifest.note.as_str()), (Status::Ready, CALLED_DONE));
         let items = feed::load(&ws);
         assert!(
-            matches!(items.as_slice(), [feed::FeedItem::User(a), feed::FeedItem::Step { step: Step::Done, text }] if a == "A website" && text == CALLED_DONE),
+            matches!(items.as_slice(), [feed::FeedItem::User(a), feed::FeedItem::Step { step: Step::Done, text }] if a.text() == "A website" && text == CALLED_DONE),
             "{items:?}"
         );
         let err = e.call("project_build_finish", json!({"project": d.path().join("nope")}), CallOptions::new(Caller::Cli)).unwrap_err();

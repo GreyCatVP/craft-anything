@@ -26,6 +26,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+pub mod progress;
+
 pub const MANIFEST: &str = "craft.json";
 
 /// Folders a copy of a project leaves out: what a build makes again, which can be gigabytes.

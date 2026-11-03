@@ -1,6 +1,6 @@
 //! Reading and editing one client's config text, per format. Pure text in, text out.
 
-use crate::clients::{Client, Format, SERVER_NAME};
+use crate::clients::{Client, Format, SERVER_NAME, Shape, is_owned_entry};
 use crate::yaml;
 use craft_anything_formats::jsonc;
 use serde_json::Value;
@@ -46,6 +46,12 @@ pub fn is_disabled(client: &Client, text: &str) -> bool {
         return false;
     }
     parse(client, text).ok().and_then(|v| v.get("disabled_mcp_servers").and_then(|d| d.as_array()).map(|a| a.iter().any(|x| x == SERVER_NAME))).unwrap_or(false)
+}
+
+/// True when the person turned our entry off themselves (Codex's `enabled = false`). Setup leaves
+/// that as it is; the doctor says so.
+pub fn entry_turned_off(client: &Client, text: &str) -> bool {
+    client.shape == Shape::Codex && read_entry(client, text).ok().flatten().is_some_and(|e| e.get("enabled") == Some(&Value::Bool(false)))
 }
 
 /// Text with our entry set to `entry`.
@@ -113,7 +119,40 @@ fn json_to_toml(v: &Value) -> Option<toml_edit::Value> {
     })
 }
 
+/// `want` set into `target` where it stands: a setting that already has the value is left alone, a
+/// different one is replaced keeping its comment, and a table of ours is merged into the person's
+/// (regular or inline) instead of replacing it, so their other settings and comments stay.
+fn merge_in_place(target: &mut dyn toml_edit::TableLike, want: &serde_json::Map<String, Value>) -> Result<(), String> {
+    for (k, v) in want {
+        if let Value::Object(inner) = v
+            && let Some(child) = target.get_mut(k).and_then(|i| i.as_table_like_mut())
+        {
+            merge_in_place(child, inner)?;
+            continue;
+        }
+        let mut new = json_to_toml(v).ok_or_else(|| format!("cannot write {k} as TOML"))?;
+        if let Some(have) = target.get(k).and_then(|i| i.as_value()) {
+            if have.to_string().trim() == new.to_string().trim() {
+                continue;
+            }
+            *new.decor_mut() = have.decor().clone();
+        }
+        // Through the entry, so the key stays as written (a comment on the line above it is part of
+        // the key); `insert` would put in a fresh key.
+        match target.entry(k) {
+            toml_edit::Entry::Occupied(mut entry) => {
+                entry.insert(toml_edit::Item::Value(new));
+            }
+            toml_edit::Entry::Vacant(entry) => {
+                entry.insert(toml_edit::Item::Value(new));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String> {
+    let old = read_entry(client, text)?;
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
     let table_name = client.table.first().copied().unwrap_or("mcp_servers");
     let Value::Object(fields) = entry else { return Err("entry must be a table".into()) };
@@ -128,16 +167,24 @@ fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String
         doc.insert(table_name, toml_edit::Item::Table(t));
     }
     let servers = doc.get_mut(table_name).and_then(|t| t.as_table_mut()).ok_or_else(|| format!("`{table_name}` exists but is not a table"))?;
-    match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
-        Some(existing) => {
-            // Keep the existing table's position and decor; replace its keys.
-            existing.clear();
-            for (k, v) in ours.iter() {
-                existing.insert(k, v.clone());
+    // Only our own entry is merged into (a foreign one, such as an HTTP `url` Codex would refuse
+    // beside a `command`, is replaced, as the plan says it will be). The person's other settings
+    // and comments stay, whether the entry is a table or written inline.
+    let merge = client.shape == Shape::Codex && old.as_ref().is_some_and(is_owned_entry);
+    if merge && let Some(existing) = servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_like_mut()) {
+        merge_in_place(existing, fields)?;
+    } else {
+        match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
+            Some(existing) => {
+                // Keep the existing table's position and decor; replace its keys.
+                existing.clear();
+                for (k, v) in ours.iter() {
+                    existing.insert(k, v.clone());
+                }
             }
-        }
-        None => {
-            servers.insert(SERVER_NAME, toml_edit::Item::Table(ours));
+            None => {
+                servers.insert(SERVER_NAME, toml_edit::Item::Table(ours));
+            }
         }
     }
     if client.id == "grok_build"
@@ -173,6 +220,92 @@ mod tests {
         assert_eq!(read_entry(&c, &removed).unwrap(), None);
         assert!(removed.contains("# theirs"));
         assert!(parse(&c, "a = [").is_err());
+    }
+
+    /// #540: moving an older Codex entry to the approving one keeps what the person added to it.
+    #[test]
+    fn a_codex_entry_keeps_the_persons_own_settings_when_it_gains_the_approval() {
+        let c = client("codex");
+        let text = "[mcp_servers.craft-anything]\ncommand = \"/old/craft-anything-cli\"\nargs = [\"mcp\"]\nenabled_tools = [\"core_a\"] # mine\ntools = { other = { approval_mode = \"prompt\" } }\n\n[mcp_servers.craft-anything.env]\nK = \"v\"\n";
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        assert!(!c.entry_is_current(&read_entry(&c, text).unwrap().unwrap(), &e));
+        let new = set_entry(&c, text, &e).unwrap();
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!(got["command"], "/b/craft-anything-cli");
+        assert_eq!(got["enabled_tools"][0], "core_a");
+        assert_eq!(got["env"]["K"], "v");
+        assert_eq!(got["tools"]["other"]["approval_mode"], "prompt", "their other approvals stay");
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert!(got.get("default_tools_approval_mode").is_none());
+        assert!(new.contains("# mine"));
+        assert!(c.entry_is_current(&got, &e), "their extra settings don't make it out of date");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
+    }
+
+    /// #540: a foreign entry (here an HTTP one) is replaced whole, not merged into, and an entry the
+    /// person turned off is reported as such.
+    #[test]
+    fn a_foreign_codex_entry_is_replaced_and_a_disabled_one_is_noticed() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let foreign = "[mcp_servers.craft-anything]\nurl = \"https://example.test/mcp\"\n";
+        let got = read_entry(&c, &set_entry(&c, foreign, &e).unwrap()).unwrap().unwrap();
+        assert!(got.get("url").is_none(), "{got}");
+        assert_eq!(got, e);
+        let off = set_entry(&c, "", &e).unwrap().replace("startup_timeout_sec", "enabled = false\nstartup_timeout_sec");
+        assert!(entry_turned_off(&c, &off) && !entry_turned_off(&c, &set_entry(&c, "", &e).unwrap()));
+        assert!(c.entry_is_current(&read_entry(&c, &off).unwrap().unwrap(), &e), "setup keeps their choice");
+    }
+
+    /// #540: our own entry written inline keeps the person's settings too.
+    #[test]
+    fn an_inline_codex_entry_keeps_the_persons_own_settings() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let text = "[mcp_servers]\ncraft-anything = { command = \"/old/craft-anything-cli\", args = [\"mcp\"], enabled = false, disabled_tools = [\"x\"] }\n";
+        let new = set_entry(&c, text, &e).unwrap();
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!(got["command"], "/b/craft-anything-cli");
+        assert_eq!(got["enabled"], false);
+        assert_eq!(got["disabled_tools"][0], "x");
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
+    }
+
+    /// #540: comments on an inline entry, in its fields and in a `tools` table stay.
+    #[test]
+    fn comments_on_our_codex_entry_and_its_tools_table_stay() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let inline = "[mcp_servers]\ncraft-anything = { command = \"/old/craft-anything-cli\", args = [\"mcp\"], enabled = false } # mine\n";
+        let new = set_entry(&c, inline, &e).unwrap();
+        assert!(new.contains("# mine"), "{new}");
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!((got["enabled"].clone(), got["command"].clone()), (Value::Bool(false), Value::from("/b/craft-anything-cli")));
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new);
+
+        let table = "[mcp_servers.craft-anything]\ncommand = \"/old/craft-anything-cli\" # the program\nargs = [\"mcp\"]\n\n# about tools\n[mcp_servers.craft-anything.tools]\n# keep me\nother = { approval_mode = \"prompt\" } # theirs\n";
+        let new = set_entry(&c, table, &e).unwrap();
+        for note in ["# the program", "# about tools", "# keep me", "# theirs"] {
+            assert!(new.contains(note), "{note} lost:\n{new}");
+        }
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!(got["tools"]["other"]["approval_mode"], "prompt");
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
+    }
+
+    /// #540: a comment on the line above a key stays when that key's value changes.
+    #[test]
+    fn a_comment_above_a_key_stays_when_its_value_changes() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let text = "[mcp_servers.craft-anything]\n# the program\ncommand = \"/old/craft-anything-cli\"\nargs = [\"mcp\"]\n# how long to wait\nstartup_timeout_sec = 10\n";
+        let new = set_entry(&c, text, &e).unwrap();
+        assert!(new.contains("# the program\ncommand = \"/b/craft-anything-cli\""), "{new}");
+        assert!(new.contains("# how long to wait\nstartup_timeout_sec = 30"), "{new}");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
     }
 
     #[test]
