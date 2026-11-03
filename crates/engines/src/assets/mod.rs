@@ -8,15 +8,17 @@
 pub mod elevenlabs;
 pub mod fal;
 mod http;
+pub mod model;
 pub mod scenario;
 
 use craft_anything_evidence::{ErrorCode, ToolError};
-use serde::Deserialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
 use std::sync::{Arc, OnceLock};
 
 /// What kind of asset a request makes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AssetKind {
@@ -25,6 +27,28 @@ pub enum AssetKind {
     Speech,
     SoundEffect,
     Music,
+}
+
+impl AssetKind {
+    /// Every kind, in the order the screens list them.
+    pub const ALL: [AssetKind; 5] = [AssetKind::Image, AssetKind::Model3d, AssetKind::Speech, AssetKind::SoundEffect, AssetKind::Music];
+
+    /// The name the spending ledger has always used for this kind. It differs from the serde name
+    /// for 3D models and sound effects, and old ledgers must keep reading.
+    pub fn ledger_name(self) -> &'static str {
+        match self {
+            AssetKind::Image => "image",
+            AssetKind::Model3d => "model",
+            AssetKind::Speech => "speech",
+            AssetKind::SoundEffect => "sound",
+            AssetKind::Music => "music",
+        }
+    }
+
+    /// The kind a ledger name stands for, or `None` for a name this build doesn't know.
+    pub fn from_ledger_name(s: &str) -> Option<AssetKind> {
+        AssetKind::ALL.into_iter().find(|k| k.ledger_name() == s)
+    }
 }
 
 /// How an audio model's published rate is measured.
