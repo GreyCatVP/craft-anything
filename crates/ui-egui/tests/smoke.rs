@@ -1949,7 +1949,11 @@ fn the_builders_open_questions_show_beside_the_project() {
     h.state_mut().state.project_input = "Make the header blue".into();
     h.get_all_by_label("Write my own answer").nth(1).unwrap().click();
     h.run_steps(3);
-    assert_eq!(h.state().state.project_input, "Make the header blue\nAbout \"Should the contact link open an email or a form?\": ");
+    // It names the question's id, as a clicked answer does, so the builder can close it.
+    assert_eq!(
+        h.state().state.project_input,
+        "Make the header blue\nAbout open question unk_83e0b6f2c4d9a175 \"Should the contact link open an email or a form?\": "
+    );
     assert!(h.get_by_label("Ask for a change").is_focused(), "the prompt box has the keyboard");
 }
 

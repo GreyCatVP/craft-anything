@@ -64,7 +64,7 @@ const ACTIONS: &[Action] = &[
     // Two ways, as with a typed message: a note while it builds, else a follow-up.
     a("answer_open_question", "answer an open question while it builds (a note)", Tool(&["core_unknowns_show", "rebuild_note"])),
     a("answer_open_question", "answer an open question when it's idle (a follow-up)", Cli("rebuild <target> <request> --continue-in")),
-    a("write_own_answer",    "start a typed answer to an open question",       UiOnly("fills the prompt box with the question; sending it is send_message")),
+    a("write_own_answer",    "start a typed answer to an open question",       UiOnly("fills the prompt box with the question and its id; sending it is send_message")),
     a("pause",               "stop the running build",                         Tool(&["rebuild_stop"])),
     a("unsend",              "take back a note the builder hasn't read yet",   Tool(&["rebuild_note_withdraw"])),
     a("continue_build",      "carry on a build that stopped part-way",         Cli("rebuild <target> <request> --continue-in --resume")),

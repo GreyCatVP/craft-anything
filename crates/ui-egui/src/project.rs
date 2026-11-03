@@ -1015,8 +1015,8 @@ fn open_folder(app: &mut CraftApp, ws: &Workspace) {
 enum Reply {
     /// One of the suggested answers, or the builder's own choice ([`decide_answer`]).
     Answer(OpenQuestion, String),
-    /// They'll write their own: the prompt box gets the question to start from.
-    Own(String),
+    /// They'll write their own: the prompt box gets the question (and its id) to start from.
+    Own(OpenQuestion),
 }
 
 /// The answer sent when the person lets the builder decide.
@@ -1077,7 +1077,7 @@ fn open_questions(app: &mut CraftApp, ui: &mut Ui) {
                     reply = Some(Reply::Answer(q.clone(), decide_answer()));
                 }
                 if widgets::small_link(ui, "Write my own answer").clicked() {
-                    reply = Some(Reply::Own(q.question.clone()));
+                    reply = Some(Reply::Own(q.clone()));
                 }
             });
         }
@@ -1090,7 +1090,7 @@ fn open_questions(app: &mut CraftApp, ui: &mut Ui) {
     ui.add_space(14.0);
     match reply {
         Some(Reply::Answer(q, a)) => app.answer_open_question(&q.id, &q.question, &a),
-        Some(Reply::Own(q)) => app.write_own_answer(ui.ctx(), &q),
+        Some(Reply::Own(q)) => app.write_own_answer(ui.ctx(), &q.id, &q.question),
         None => {}
     }
 }
@@ -2166,9 +2166,10 @@ impl CraftApp {
     }
 
     /// Start a typed answer to an open question: the prompt box gets the question to write after
-    /// (below what's already typed) and the keyboard, set to ask for a change.
-    pub fn write_own_answer(&mut self, ctx: &egui::Context, question: &str) {
-        let start = format!("{} ", trf("About \"{q}\":", &[("q", question)]));
+    /// (below what's already typed) and the keyboard, set to ask for a change. It names the
+    /// question's id (`unk_…`), as a clicked answer does, so the builder can close it.
+    pub fn write_own_answer(&mut self, ctx: &egui::Context, id: &str, question: &str) {
+        let start = format!("{} ", trf("About open question {id} \"{q}\":", &[("id", id), ("q", question)]));
         let input = &mut self.state.project_input;
         if input.trim().is_empty() {
             *input = start;

@@ -139,7 +139,6 @@ Android resources	Zdroje aplikace pro Android
 Annotate function	Přidat poznámku k funkci
 Another build is working, so this one waits its turn.	Probíhá jiné sestavení, takže toto čeká, až na ně přijde řada.
 Answer a project's question	Odpovědět na otázku projektu
-Answer any of them in a message below.	Na kteroukoli můžete odpovědět zprávou níže.
 Answered by {name}	Odpověď od {name}
 Answers come from {brain}. To build, set up a coding agent in Settings → AI.	Na otázky odpovídá {brain}. Pro sestavení nastavte programovacího agenta v Nastavení → AI.
 App	Aplikace
@@ -1423,3 +1422,10 @@ Add Unreal's Linux C++ toolchain	Přidat linuxový nástrojový řetězec C++ pr
 Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Ve složce enginu spusťte Engine/Build/BatchFiles/Linux/SetupToolchain.sh a nainstaluje se přibalený nástrojový řetězec Clang. Při sestavení ze zdrojů Setup.sh místo toho stáhne nativní nástrojový řetězec. Systémový Clang nemusí odpovídat verzi enginu.
 Unreal is here, but it also needs Xcode.	Unreal je dostupný, ale potřebuje také Xcode.
 About 60 GB, an Epic Games account, and Xcode.	Přibližně 60 GB, účet Epic Games a Xcode.
+About open question {id} "{q}":	K otevřené otázce {id} „{q}“:
+Answer sent. The builder reads it next.	Odpověď je odeslaná. Sestavovací agent si ji přečte jako další.
+Answer to your open question {id} "{q}": {a}	Odpověď na tvou otevřenou otázku {id} „{q}“: {a}
+It picks what fits your request best and tells you what it chose.	Vybere to, co nejlépe odpovídá vašemu požadavku, a sdělí, co zvolil.
+Let the builder decide	Nechat rozhodnout sestavovacího agenta
+Write my own answer	Napsat vlastní odpověď
+you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	rozhodni sám. Vyber to, co je nejblíž tomu, o co jsem žádal, a řekni mi, co jsi zvolil.

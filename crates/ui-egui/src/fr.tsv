@@ -1,5 +1,6 @@
 # French UI catalog: English key<TAB>French text. See i18n.rs.
 Attach pictures (or drop or paste them here)	Joindre des images (ou les déposer ou coller ici)
+About open question {id} "{q}":	À propos de la question ouverte {id} « {q} » :
 Coding agent app	Application d'agent de code
 Load a picture	Charger une image
 Paste pictures	Coller des images
@@ -560,7 +561,6 @@ It picks what fits your request best and tells you what it chose.	Il choisit ce 
 Write my own answer	Écrire ma propre réponse
 you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	décide toi-même. Choisis ce qui se rapproche le plus de ce que j'ai demandé, et dis-moi ce que tu as choisi.
 Answer to your open question {id} "{q}": {a}	Réponse à ta question ouverte {id} « {q} » : {a}
-About "{q}":	À propos de « {q} » :
 Progress	Progression
 Now	Maintenant
 Stopped here	Arrêté ici

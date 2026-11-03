@@ -89,9 +89,9 @@ API boundary	API 边界
 API key	API 密钥
 API key (stored in your system keychain)	API 密钥 (存储在系统钥匙串中)
 API key, if it needs one	API 密钥 (如需要)
-About "{q}":	关于“{q}”：
 About 10 GB. Free for personal use with a Unity account.	约 10 GB。个人使用免费，需要 Unity 账户。
 About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	约 60 GB，需要 Epic Games 账户和 Visual Studio 的 C++ 工具。
+About open question {id} "{q}":	关于未解决的问题 {id}“{q}”：
 Add	添加
 Add Visual Studio's C++ tools	添加 Visual Studio 的 C++ 工具
 Add a brain	添加 AI

@@ -75,9 +75,9 @@ API boundary	Граница API
 API key	Ключ API
 API key (stored in your system keychain)	Ключ API (хранится в системной связке ключей)
 API key, if it needs one	Ключ API, если он нужен
-About "{q}":	О «{q}»:
 About 10 GB. Free for personal use with a Unity account.	Около 10 ГБ. Бесплатно для личного использования с аккаунтом Unity.
 About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Около 60 ГБ, аккаунт Epic Games и инструменты C++ Visual Studio.
+About open question {id} "{q}":	Об открытом вопросе {id} «{q}»:
 Add	Добавить
 Add Visual Studio's C++ tools	Добавить инструменты C++ Visual Studio
 Add a brain	Добавить «мозг»

@@ -139,7 +139,6 @@ Android resources	Android 리소스
 Annotate function	함수 주석 달기
 Another build is working, so this one waits its turn.	다른 빌드가 진행 중이라 이 빌드는 차례를 기다립니다.
 Answer a project's question	프로젝트 질문에 답하기
-Answer any of them in a message below.	아래 메시지로 어느 것이든 답할 수 있습니다.
 Answered by {name}	답변: {name}
 Answers come from {brain}. To build, set up a coding agent in Settings → AI.	답은 {brain}에서 옵니다. 만들려면 설정 → AI에서 코딩 에이전트를 설정해야 합니다.
 App	앱
@@ -1423,3 +1422,10 @@ Add Unreal's Linux C++ toolchain	Unreal의 Linux C++ 도구 체인 추가
 Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	엔진 폴더에서 Engine/Build/BatchFiles/Linux/SetupToolchain.sh를 실행해 함께 제공되는 Clang 도구 체인을 설치하세요. 소스 빌드라면 Setup.sh가 대신 네이티브 도구 체인을 내려받습니다. 시스템 Clang은 엔진 버전과 맞지 않을 수 있습니다.
 Unreal is here, but it also needs Xcode.	Unreal은 있지만 Xcode도 필요합니다.
 About 60 GB, an Epic Games account, and Xcode.	약 60 GB, Epic Games 계정, Xcode가 필요합니다.
+About open question {id} "{q}":	미해결 질문 {id} “{q}”에 대해:
+Answer sent. The builder reads it next.	답을 보냈습니다. 빌더가 다음에 읽습니다.
+Answer to your open question {id} "{q}": {a}	미해결 질문 {id} “{q}”에 대한 답: {a}
+It picks what fits your request best and tells you what it chose.	요청에 가장 잘 맞는 것을 고르고 무엇을 골랐는지 알려 줍니다.
+Let the builder decide	빌더가 정하게 하기
+Write my own answer	직접 답 쓰기
+you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	네가 정해. 내가 요청한 것에 가장 가까운 것을 고르고, 무엇을 골랐는지 알려 줘.
