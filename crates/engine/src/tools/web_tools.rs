@@ -5,7 +5,9 @@
 use super::artifact_tools::{WalkOptions, abs_path, create_absent_dir, env, read_capped, rel_to, resolve_evidence_input, walk_dir, write_new_file};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use craft_anything_analysis::web_har::{HarOptions, inspect_har};
-use craft_anything_analysis::web_scripts::{CapturedScript, parse_map, plan_layout, scripts_from_capture, scripts_from_har, trace_location};
+use craft_anything_analysis::web_scripts::{
+    ExtractedScripts, ScriptBudget, parse_map, plan_layout, scripts_from_capture_within, scripts_from_har_within, trace_location,
+};
 use craft_anything_evidence::{
     Authority, Confidence, Coverage, CoverageStatus, ErrorCode, EvidenceBuilder, Limitation, Location, Subject, ToolError, sha256_hex,
 };
@@ -96,29 +98,40 @@ fn default_max_bytes() -> u64 {
 fn web_scripts_save(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ExportParams = parse_params(params)?;
     let mut links = Vec::new();
-    let (scripts, source_name): (Vec<CapturedScript>, String) = match (&p.capture, &p.capture_path) {
+    // Only the scripts that fit the export's limits are copied out of the capture and planned;
+    // the rest are listed as skipped by URL.
+    let budget = ScriptBudget { max_scripts: p.max_scripts, max_bytes: p.max_bytes };
+    let (extracted, source_name): (ExtractedScripts, String) = match (&p.capture, &p.capture_path) {
         (Some(c), None) => {
             let ev = resolve_evidence_input(ctx, c, &[])?;
             links.push(ev.id.clone());
-            (scripts_from_capture(&ev.result), ev.subject.name.clone().unwrap_or_else(|| ev.id.clone()))
+            (scripts_from_capture_within(&ev.result, budget), ev.subject.name.clone().unwrap_or_else(|| ev.id.clone()))
         }
         (None, Some(path)) => {
             let path = abs_path(path, "capture_path")?;
             let bytes = read_capped(&path, 512 * 1024 * 1024)?;
             let v: Value = serde_json::from_slice(&bytes).map_err(|e| ToolError::invalid(format!("{} is not JSON: {e}", path.display())))?;
-            let s = if v.pointer("/log/entries").is_some() { scripts_from_har(&bytes, 200_000).map_err(ToolError::invalid)? } else { scripts_from_capture(&v) };
+            let s = if v.pointer("/log/entries").is_some() {
+                // The HAR reader parses the bytes itself; don't hold this copy meanwhile.
+                drop(v);
+                scripts_from_har_within(&bytes, 200_000, budget).map_err(ToolError::invalid)?
+            } else {
+                scripts_from_capture_within(&v, budget)
+            };
             (s, path.display().to_string())
         }
         _ => return Err(ToolError::invalid("pass exactly one of capture or capture_path")),
     };
-    if scripts.is_empty() {
+    if extracted.seen() == 0 {
         return Err(ToolError::invalid("the capture holds no script sources")
             .with_remediation("Captures need script text (url + source); HAR files need saved response bodies."));
     }
+    let seen = extracted.seen();
+    let ExtractedScripts { scripts, over_budget, .. } = extracted;
     let out = create_absent_dir(&p.output_directory)?;
     let plan = plan_layout(&scripts);
     let mut written = Vec::new();
-    let mut skipped = Vec::new();
+    let mut skipped: Vec<Value> = over_budget.into_iter().map(|url| json!({"url": url, "reason": "count or size limit reached"})).collect();
     let mut total = 0u64;
     for (i, (s, f)) in scripts.iter().zip(plan.iter()).enumerate() {
         if i % 64 == 0 {
@@ -147,7 +160,7 @@ fn web_scripts_save(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         .result(json!({"output_directory": out, "manifest": out.join("manifest.json"), "files_folder": files_dir, "scripts": written, "skipped": skipped, "bytes": total}))
         .summary(summary)
         .confidence(Confidence::Derived)
-        .coverage(Coverage { status: if skipped.is_empty() { CoverageStatus::Complete } else { CoverageStatus::Partial }, examined: Some(written.len() as u64), total: Some(scripts.len() as u64), next_offset: None })
+        .coverage(Coverage { status: if skipped.is_empty() { CoverageStatus::Complete } else { CoverageStatus::Partial }, examined: Some(written.len() as u64), total: Some(seen as u64), next_offset: None })
         .location(Location::new("path", out.display().to_string()));
     for l in links {
         b = b.link(l);
@@ -662,5 +675,25 @@ mod tests {
         let input = x["result"]["files_folder"].as_str().unwrap().to_string();
         let a = call(&e, "js_app_map", json!({"input_path": input})).unwrap();
         assert!(a["result"]["endpoints"].as_array().unwrap().iter().any(|ep| ep["url"] == "/api/notes"));
+    }
+
+    #[test]
+    fn script_export_lists_what_the_limits_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let cap = json!({"scripts": [
+            {"url": "https://app.test/a.js", "source": "a();"},
+            {"url": "https://app.test/b.js", "source": "b();"},
+            {"url": "https://app.test/c.js", "source": "c();"},
+        ]});
+        let cp = dir.path().join("capture.json");
+        std::fs::write(&cp, serde_json::to_vec(&cap).unwrap()).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let out = dir.path().join("export");
+        let x = call(&e, "web_scripts_save", json!({"capture_path": cp, "output_directory": out, "max_scripts": 1})).unwrap();
+        assert_eq!(x["result"]["scripts"].as_array().unwrap().len(), 1);
+        let skipped: Vec<&str> = x["result"]["skipped"].as_array().unwrap().iter().map(|s| s["url"].as_str().unwrap()).collect();
+        assert_eq!(skipped, ["https://app.test/b.js", "https://app.test/c.js"]);
+        assert_eq!(x["coverage"]["total"], 3);
+        assert!(out.join("files/app.test/a.js").exists() && !out.join("files/app.test/b.js").exists());
     }
 }
