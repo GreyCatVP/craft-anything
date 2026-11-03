@@ -439,7 +439,7 @@ Gaps found while using the app for real projects.
       on a laptop whose integrated GPU drives the panel the window took 20 s to open and the whole
       desktop lagged (#571). Pick by the connected displays in `/sys/class/drm`: the built-in
       panel's GPU, else the only GPU with displays, else the discrete one; `WGPU_POWER_PREF` and
-      `WGPU_ADAPTER_NAME` still decide when set. Checked live on an AMD + NVIDIA laptop only
+      `WGPU_ADAPTER_NAME` still decide when set. Checked live on an AMD + NVIDIA laptop only (#578)
       — claimed: Nghiathan13, branch bugfix/r2.9-linux-gpu-choice
 - [ ] Linux GPU choice on a desktop with monitors on two GPUs, and on an Intel + NVIDIA laptop:
       covered by unit tests on fake `/sys/class/drm` folders, not run on such a machine yet (#571)
