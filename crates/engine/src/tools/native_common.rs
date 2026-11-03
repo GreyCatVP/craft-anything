@@ -66,8 +66,17 @@ pub fn image_for(t: &Target) -> Result<Image, ToolError> {
         TargetKind::DosCom => Image::dos_com(t.bytes.clone()).map_err(disasm_err),
         TargetKind::RawBinary => {
             let raw = t.raw.as_ref().ok_or_else(|| ToolError::invalid("raw binary without an architecture"))?;
-            let arch = Arch::from_name(&raw.architecture).ok_or_else(|| ToolError::invalid(format!("unknown architecture {}", raw.architecture)))?;
-            Ok(Image::raw(t.bytes.clone(), arch, raw.entry_point))
+            match Arch::from_name(&raw.architecture) {
+                Some(arch) => Ok(Image::raw(t.bytes.clone(), arch, raw.entry_point)),
+                // A processor only Deep mode's engine reads (opened with a Ghidra language): the
+                // bytes and where they load, under the name it was given; the built-in decoder
+                // says it can't read them, and Deep mode takes addresses straight to Ghidra.
+                None => {
+                    let mut bin = craft_anything_formats::Binary::raw(Arch::Other, raw.entry_point, t.bytes.len() as u64, 0);
+                    bin.arch_name = raw.architecture.clone();
+                    Ok(Image::from_binary(t.bytes.clone(), bin))
+                }
+            }
         }
         other => Err(ToolError::unsupported(format!("{} is not native machine code.", other.plain()))
             .with_remediation("Run triage to see which tools fit this kind of file.")),

@@ -18,9 +18,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// The analysis settings hash for the default Deep profile. Part of the project cache key, so a
-/// different pinned language re-analyses rather than reusing the auto-detected project.
-fn settings_hash(language_id: Option<&str>) -> String {
-    let seed = format!("craft-anything-ghidra-fast-profile-v2|lang={}", language_id.unwrap_or(""));
+/// different pinned language, or raw code loaded somewhere else, re-analyses rather than reusing
+/// another project. (Without a load address the seed is what it always was, so existing analyses
+/// are still found.)
+fn settings_hash(language_id: Option<&str>, load_base: Option<u64>) -> String {
+    let mut seed = format!("craft-anything-ghidra-fast-profile-v2|lang={}", language_id.unwrap_or(""));
+    if let Some(base) = load_base {
+        seed.push_str(&format!("|base={base:#x}"));
+    }
     craft_anything_evidence::sha256_hex(seed.as_bytes())
 }
 
@@ -64,10 +69,17 @@ fn provider_for_active(ctx: &mut Ctx<'_>) -> Result<Arc<dyn DeepDecompiler>, Opt
         return remember(ctx, Err("Ghidra needs the program's bytes, which aren't loaded, so the built-in decompiler was used.".into()));
     }
 
-    // A per-target language override (from core_target_open) wins over the global setting.
-    let language = ctx.session.active().ok().and_then(|t| t.ext.get::<LanguageOverride>().map(|o| o.0.clone()));
+    // A per-target language override (from core_target_open) wins over the global setting. Raw
+    // machine code has no headers saying where it loads: Ghidra is told where it was opened at.
+    let (language, load_base) = match ctx.session.active() {
+        Ok(t) => (
+            t.ext.get::<LanguageOverride>().map(|o| o.0.clone()),
+            t.target.raw.as_ref().filter(|_| t.target.kind == crate::target::TargetKind::RawBinary).map(|r| r.entry_point),
+        ),
+        Err(_) => (None, None),
+    };
     // Not remembered: once the person installs Ghidra, the next call uses it.
-    let Some((cfg, digest)) = config(&ctx.session.settings, language) else {
+    let Some((cfg, digest)) = config(&ctx.session.settings, language, load_base) else {
         return Err(Some(NOT_INSTALLED.into()));
     };
     let cancel = ctx.cancel.clone();
@@ -88,10 +100,12 @@ fn provider_for_active(ctx: &mut Ctx<'_>) -> Result<Arc<dyn DeepDecompiler>, Opt
 
 /// Ghidra's settings for a target (and its analysis settings hash), the same for the app and the
 /// builder's tool server so both find one shared analysis. `None`: Ghidra isn't installed.
-fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghidra::Config, String)> {
+fn config(settings: &Settings, language_override: Option<String>, load_base: Option<u64>) -> Option<(ghidra::Config, String)> {
     let g = &settings.engines.ghidra;
     let language_id = language_override.or_else(|| g.language_id.clone());
-    let digest = settings_hash(language_id.as_deref());
+    // The raw loader needs a language; without one Ghidra reads the file as it would anyway.
+    let load_base = load_base.filter(|_| language_id.as_deref().is_some_and(|l| !l.trim().is_empty()));
+    let digest = settings_hash(language_id.as_deref(), load_base);
     let cfg = ghidra::Config {
         analyze_headless: settings.ghidra_launcher()?,
         java_home: settings.ghidra_java(),
@@ -100,6 +114,7 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
         language_id,
         compiler_spec: g.compiler_spec.clone(),
         memory_gb: g.memory_gb,
+        load_base,
     };
     Some((cfg, digest))
 }
@@ -108,7 +123,7 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
 /// a saved analysis instead of waiting hours for one. Shares the analysis with any other process
 /// doing the same. `progress` gets a line now and then.
 pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
-    let (cfg, digest) = config(settings, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
+    let (cfg, digest) = config(settings, None, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
     let never = || false;
     ghidra::analyse(&cfg, bytes, sha256, &digest, &never, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string())
 }
@@ -135,6 +150,47 @@ pub enum At {
 /// `Err(why)` → the caller uses the built-in lifter and passes on why Ghidra wasn't used (`None`
 /// in Clean room). `Ok(Err(..))` only for a cancellation the caller should surface.
 pub fn pseudo_code(ctx: &mut Ctx<'_>, at: At, our_base: u64, params: serde_json::Value) -> Result<Result<ToolOutput, ToolError>, Option<String>> {
+    match decompile(ctx, at, our_base)? {
+        Ok(d) => Ok(build_evidence(ctx, d.provider.as_ref(), d.function, d.rebase, params)),
+        Err(e) => Ok(Err(e)),
+    }
+}
+
+/// One function from the deep engine, with the engine and the address move that came with it.
+pub struct Decompiled {
+    pub provider: Arc<dyn DeepDecompiler>,
+    pub function: DeepFunction,
+    pub rebase: ghidra::Rebase,
+}
+
+impl Decompiled {
+    /// The function's entry as the other tools give it.
+    pub fn entry(&self) -> u64 {
+        self.rebase.from_engine(self.function.entry)
+    }
+
+    /// One item of a batch: what [`build_evidence`] reports for a single function.
+    pub fn item(&self) -> serde_json::Value {
+        let mut v = serde_json::json!({
+            "function": self.function.name,
+            "entry": format!("{:#x}", self.entry()),
+            "signature": self.function.signature,
+            "pseudo_code": self.function.pseudocode,
+            "engine": self.provider.engine(),
+        });
+        if !self.rebase.is_identity() {
+            v["engine_entry"] = serde_json::json!(format!("{:#x}", self.function.entry));
+        }
+        if self.function.created {
+            v["made_on_demand"] = serde_json::json!(true);
+        }
+        v
+    }
+}
+
+/// [`pseudo_code`] without the evidence record, for tools that report several functions.
+/// `Err(why)` and `Ok(Err(..))` mean what they do there.
+pub fn decompile(ctx: &mut Ctx<'_>, at: At, our_base: u64) -> Result<Result<Decompiled, ToolError>, Option<String>> {
     let provider = provider_for_active(ctx)?;
     let rebase = ghidra::Rebase::new(our_base, provider.image_base());
     let entry = match at {
@@ -142,7 +198,7 @@ pub fn pseudo_code(ctx: &mut Ctx<'_>, at: At, our_base: u64, params: serde_json:
         At::Engine(a) => a,
     };
     match provider.decompile(entry) {
-        Ok(Some(df)) => Ok(build_evidence(ctx, provider.as_ref(), df, rebase, params)),
+        Ok(Some(function)) => Ok(Ok(Decompiled { provider, function, rebase })),
         Ok(None) => Err(Some("Ghidra had no answer for this function.".into())),
         Err(ghidra::GhidraError::Cancelled) => Ok(Err(ToolError::cancelled())),
         Err(e) => {
@@ -288,6 +344,66 @@ mod tests {
         let r = call(&e, "native_function_pseudocode", json!({"function": ghidra_name}));
         assert_eq!(moved.asked.load(Ordering::SeqCst), l.code_va + SHIFT + 0x7a00);
         assert_eq!(r["result"]["entry"], format!("{:#x}", l.code_va + 0x7a00));
+    }
+
+    #[test]
+    fn raw_code_for_a_processor_only_ghidra_reads_is_decompiled_by_ghidra_where_it_loads() {
+        // A Dreamcast-style start: SH-4 `nop; nop; rts; nop`, run from 0x8c010000.
+        let code = [0x09u8, 0x00, 0x09, 0x00, 0x0b, 0x00, 0x09, 0x00];
+        let e = crate::Engine::new(crate::testing::session());
+        let path = tk::temp_file("1ST_READ.BIN", &code);
+        let open = json!({"path": path.to_string_lossy(), "format": "raw-binary", "architecture": "sh4", "entry_point": "0x8c010000"});
+        // Without a Ghidra language nothing could read it: refused, saying what to pass.
+        let err = call_err(&e, "core_target_open", open.clone());
+        assert!(err.message.contains("sh4"), "{err:?}");
+        assert!(err.remediation.as_deref().unwrap_or_default().contains("language_id"), "{err:?}");
+        let mut pinned = open;
+        pinned["language_id"] = json!("SuperH4:LE:32:default");
+        call(&e, "core_target_open", pinned);
+
+        // Ghidra (a stand-in) loaded it where it runs, so addresses cross unchanged.
+        let ghidra = Arc::new(Moved { base: 0x8c01_0000, asked: AtomicU64::new(0) });
+        {
+            let mut s = e.session();
+            let provider: Arc<dyn DeepDecompiler> = ghidra.clone();
+            s.active_mut().unwrap().ext.insert(Arc::new(DeepSlot { provider: Ok(provider) }));
+        }
+        let r = call(&e, "native_function_pseudocode", json!({"function": "0x8c010000"}));
+        assert_eq!(r["environment"]["engine"], "ghidra", "{r}");
+        assert_eq!(ghidra.asked.load(Ordering::SeqCst), 0x8c01_0000);
+        assert_eq!(r["result"]["entry"], "0x8c010000");
+        assert!(r["result"].get("engine_entry").is_none(), "{r}");
+
+        // The batch tool asks Ghidra too, item by item; a name only the built-in engine could
+        // place fails on its own.
+        let r = call(&e, "native_functions_decompile", json!({"addresses": ["0x8c010000", "FUN_8c010004", "entry"]}));
+        assert_eq!(r["result"]["succeeded"], 2, "{r}");
+        assert_eq!(r["result"]["from_deep_engine"], 2, "{r}");
+        assert_eq!(r["result"]["items"][1]["engine"], "ghidra");
+        assert_eq!(r["result"]["items"][1]["entry"], "0x8c010004");
+        assert_eq!(r["result"]["items"][2]["ok"], false);
+        assert_eq!(r["confidence"], "derived", "{r}");
+        assert!(r["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "deep_engine"), "{r}");
+
+        // Without Ghidra there's no answer: the built-in engine says it can't decode this
+        // processor, and why Ghidra didn't answer.
+        e.session().active_mut().unwrap().ext.remove::<DeepSlot>();
+        let err = call_err(&e, "native_function_pseudocode", json!({"function": "0x8c010000"}));
+        assert_eq!(err.code, craft_anything_evidence::ErrorCode::NotSupported, "{err:?}");
+        let why = err.remediation.unwrap_or_default();
+        assert!(why.contains("isn't installed") && why.contains("can't decode"), "{why}");
+        let r = call(&e, "native_functions_decompile", json!({"addresses": ["0x8c010000"]}));
+        assert_eq!(r["result"]["succeeded"], 0, "{r}");
+        assert!(r["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "deep_engine_unavailable"), "{r}");
+    }
+
+    #[test]
+    fn raw_code_is_analysed_apart_from_the_same_bytes_loaded_elsewhere() {
+        // The seed without a load address is unchanged, so analyses saved before are still found.
+        let old = craft_anything_evidence::sha256_hex(b"craft-anything-ghidra-fast-profile-v2|lang=SuperH4:LE:32:default");
+        assert_eq!(settings_hash(Some("SuperH4:LE:32:default"), None), old);
+        assert_ne!(settings_hash(Some("SuperH4:LE:32:default"), Some(0x8c01_0000)), old);
+        assert_ne!(settings_hash(Some("SuperH4:LE:32:default"), Some(0x8c01_0000)), settings_hash(Some("SuperH4:LE:32:default"), Some(0)));
     }
 
     #[test]

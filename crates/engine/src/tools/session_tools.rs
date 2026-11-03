@@ -168,7 +168,8 @@ pub struct OpenParams {
     /// Force a format: `raw-binary` or `dos-com`.
     #[serde(default)]
     pub format: Option<String>,
-    /// Required with raw-binary: x86, x86_64, arm, arm64.
+    /// Required with raw-binary: x86, x86_64, arm, arm64, or any other processor's name together
+    /// with language_id (read by Deep mode's engine alone).
     #[serde(default)]
     pub architecture: Option<String>,
     /// Required with raw-binary: load/entry address (0x-hex).
@@ -194,9 +195,16 @@ fn core_target_open(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
     match p.format.as_deref() {
         None => {}
         Some("raw-binary") => {
-            let architecture = p.architecture.ok_or_else(|| ToolError::invalid("raw-binary needs architecture"))?;
-            if !["x86", "x86_64", "arm", "arm64"].contains(&architecture.as_str()) {
-                return Err(ToolError::invalid(format!("unsupported architecture {architecture}")));
+            let architecture = p.architecture.map(|a| a.trim().to_string()).filter(|a| !a.is_empty());
+            let architecture = architecture.ok_or_else(|| ToolError::invalid("raw-binary needs architecture"))?;
+            // Another processor is read by Deep mode's engine alone, so it needs the Ghidra
+            // language that says how (for this target, or in Settings).
+            let pinned = p.language_id.as_deref().is_some_and(|l| !l.trim().is_empty())
+                || ctx.session.settings.engines.ghidra.language_id.as_deref().is_some_and(|l| !l.trim().is_empty());
+            if craft_anything_formats::Arch::from_name(&architecture).is_none() && !pinned {
+                return Err(ToolError::invalid(format!("unsupported architecture {architecture}")).with_remediation(
+                    "The built-in engine reads x86, x86_64, arm and arm64. For another processor, also pass language_id with the Ghidra language for it (e.g. SuperH4:LE:32:default, MIPS:LE:32:default) and use Deep mode with Ghidra installed.",
+                ));
             }
             let entry = p.entry_point.as_deref().ok_or_else(|| ToolError::invalid("raw-binary needs entry_point"))?;
             target.kind = TargetKind::RawBinary;

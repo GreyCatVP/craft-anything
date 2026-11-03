@@ -2,12 +2,13 @@
 //! the containing function of an address, one instruction in detail, call-target resolution,
 //! and best-effort data typing.
 
-use super::native_common::{ev, hex, name_of, native, params_json, resolve_function, select_document, spec, user_names};
+use super::deep::At;
+use super::native_common::{ev, hex, image, name_of, native, params_json, resolve_function, select_document, spec, user_names};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use craft_anything_analysis::native as an;
 use craft_anything_disasm::pseudo::lift;
 use craft_anything_disasm::{Flow, XrefKind};
-use craft_anything_evidence::{Confidence, Coverage, Limitation, Location, ToolError};
+use craft_anything_evidence::{Confidence, Coverage, ErrorCode, Limitation, Location, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -377,38 +378,15 @@ fn native_function_references_list(ctx: &mut Ctx<'_>, params: Value) -> Result<T
 fn native_function_pseudocode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ProcParams = parse_params(params)?;
     select_document(ctx, &p.document)?;
-    // Resolve the function entry in a scoped borrow so the deep hook can take `&mut ctx`. The
-    // built-in analysis stops short on a huge program (a 200 MB game has far more functions than
-    // it maps), so in Deep mode an address it can't place (0x…, FUN_…, sub_…) goes to Ghidra,
-    // which analysed the whole program and finds the function containing it.
-    // Ghidra may load the program somewhere else (a position-independent ELF goes to 0x100000),
-    // so the deep hook is told whose address this is: ours, or one from a name Ghidra made.
-    let (at, our_base, unknown) = {
-        let st = native(ctx)?;
-        let t = ctx.session.active()?;
-        let our_base = st.img.bin.image_base;
-        match resolve_function(t, &st.prog, &p.function) {
-            Ok(f) => (super::deep::At::Ours(f.entry), our_base, None),
-            Err(e) => match ghidra_address(&p.function).filter(|_| !ctx.session.clean_room()) {
-                Some(a) if is_ghidra_name(&p.function) => (super::deep::At::Engine(a), our_base, Some(e)),
-                Some(a) => (super::deep::At::Ours(a), our_base, Some(e)),
-                None => return Err(e),
-            },
-        }
-    };
+    let (at, our_base, gap) = locate(ctx, &p.function)?;
     // Deep mode (Ghidra) is preferred through this same tool id when it is on and available;
     // otherwise, and whenever anything about it fails, we use the built-in clean-room lifter.
     let why_not_deep = match super::deep::pseudo_code(ctx, at, our_base, params_json(&p)) {
         Ok(result) => return result,
         Err(why) => why,
     };
-    if let Some(e) = unknown {
-        return Err(match why_not_deep {
-            Some(why) => e.with_remediation(format!(
-                "{why} The built-in analysis has no function there either: it may be data, or code reached only through a table of pointers. Try native_function_find, or xrefs to the address to find the code that uses it."
-            )),
-            None => e,
-        });
+    if let Some(gap) = gap {
+        return Err(gap.explained(why_not_deep));
     }
     // Built-in clean-room lifter.
     let st = native(ctx)?;
@@ -428,6 +406,76 @@ fn native_function_pseudocode(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOu
         .location(Location::address(f.entry))
         .build()?;
     Ok(ToolOutput::evidence(e))
+}
+
+/// Why the built-in engine has no answer for a function Deep mode was asked about.
+pub(super) enum BuiltinGap {
+    /// Its analysis has no function there (Ghidra's may: code reached only through pointers, or
+    /// past where a huge program's analysis stopped).
+    NoFunction(ToolError),
+    /// It can't decode this processor at all (raw code opened with a Ghidra language, or a program
+    /// for a processor it doesn't know).
+    Unreadable(ToolError),
+}
+
+impl BuiltinGap {
+    /// The built-in engine's error, saying why Ghidra didn't answer either (`None`: Clean room).
+    pub(super) fn explained(self, why_not_deep: Option<String>) -> ToolError {
+        match (self, why_not_deep) {
+            (BuiltinGap::NoFunction(e), Some(why)) => e.with_remediation(format!(
+                "{why} The built-in analysis has no function there either: it may be data, or code reached only through a table of pointers. Try native_function_find, or xrefs to the address to find the code that uses it."
+            )),
+            (BuiltinGap::Unreadable(e), Some(why)) => {
+                e.with_remediation(format!("{why} The built-in engine can't decode this processor, so there is no other answer."))
+            }
+            (BuiltinGap::NoFunction(e) | BuiltinGap::Unreadable(e), None) => e,
+        }
+    }
+}
+
+/// Where to decompile `function`, and our image base: the built-in engine's function when it has
+/// one; otherwise, in Deep mode, the address for Ghidra and why the built-in engine had none.
+///
+/// The built-in analysis stops short on a huge program (a 200 MB game has far more functions than
+/// it maps) and can't read every processor, so in Deep mode an address it can't place (0x…, FUN_…,
+/// sub_…) goes to Ghidra, which analysed the whole program and finds the function containing it.
+/// Ghidra may load the program somewhere else (a position-independent ELF goes to 0x100000), so
+/// the deep hook is told whose address this is: ours, or one from a name Ghidra made.
+pub(super) fn locate(ctx: &mut Ctx<'_>, function: &str) -> Result<(At, u64, Option<BuiltinGap>), ToolError> {
+    match native(ctx) {
+        Ok(st) => {
+            let t = ctx.session.active()?;
+            let our_base = st.img.bin.image_base;
+            match resolve_function(t, &st.prog, function) {
+                Ok(f) => Ok((At::Ours(f.entry), our_base, None)),
+                Err(e) => match deep_at(ctx, function) {
+                    Some(at) => Ok((at, our_base, Some(BuiltinGap::NoFunction(e)))),
+                    None => Err(e),
+                },
+            }
+        }
+        Err(e) if e.code == ErrorCode::NotSupported && !ctx.session.clean_room() => {
+            // Still a program we can place in memory (raw code, or a container we parse), only
+            // not one we can decode; anything else fails here as it did above.
+            let our_base = image(ctx)?.0.bin.image_base;
+            match deep_at(ctx, function) {
+                Some(at) => Ok((at, our_base, Some(BuiltinGap::Unreadable(e)))),
+                None => Err(e.with_remediation(
+                    "The built-in engine can't decode this processor. In Deep mode, name the function by its address (0x…) or by the name Ghidra gave it (FUN_…).",
+                )),
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The address for the deep engine in `function` (Deep mode only), and whose it is.
+fn deep_at(ctx: &Ctx<'_>, function: &str) -> Option<At> {
+    if ctx.session.clean_room() {
+        return None;
+    }
+    let a = ghidra_address(function)?;
+    Some(if is_ghidra_name(function) { At::Engine(a) } else { At::Ours(a) })
 }
 
 /// An address Ghidra can look up: `0x…`, a bare hex address, or a generated name like `FUN_…`.

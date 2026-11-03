@@ -222,6 +222,13 @@ merge state. Without CI, run its steps locally with `--locked`; a Mac can compil
 systems with `cargo check --target`, with zig as the C compiler for `ring` (a wrapper that drops the
 `--target=` flag `cc` adds), but that only proves it compiles.
 
+**A build that "can't find" a crate it just built.** With Windows Smart App Control on, rustc was
+refused a proc-macro DLL it had just compiled (`can't find crate for seq_macro`), then a build
+script (`failed to run custom build command for httparse`). Nothing in cargo's output says why:
+the refusals are in the `Microsoft-Windows-CodeIntegrity/Operational` log (events 3033 and 3077).
+The verdict is per file, so building the same file again fails again; turn Smart App Control off
+to build, or give the refused file new bytes (`--config 'profile.dev.package.<crate>.opt-level=1'`).
+
 **Unformatted code reached `main`.** A test was edited by script after `cargo fmt --all` had run,
 so #53 merged with a long line rustfmt rewraps. Run `cargo fmt --all --check` last, after every
 edit, right before committing.
@@ -403,6 +410,16 @@ address found nothing there, and Deep mode quietly fell back to the built-in dec
 PIE program and shared library. Whenever an address crosses between engines, move it by their
 image bases (`ghidra::Rebase`, from the base the bridge reports) and say in the evidence which
 space each address is in.
+It happened again with raw code: a Dreamcast `1ST_READ.BIN` opened at 0x8c010000 went to Ghidra
+with no load address, so Ghidra put it at 0 and every pointer in it led nowhere. Raw code is
+handed over with where it runs (`Config::load_base`).
+
+**A promise tested only where it's built.** The Ghidra language pin was documented as what lets
+Deep mode read processors the built-in engine doesn't, and its test checked the `-processor`
+argument. Every native tool builds the built-in analysis first, so on a MIPS or SH-4 program they
+all stopped at "isn't supported by the built-in decoder" and never asked Ghidra; only a live run
+on two console games showed it. Test a promise through the tool a person calls, with a stand-in
+engine if need be, not at the layer that implements it.
 
 **An id that only means something on one computer, kept in a folder that travels.** The project
 saved Claude Code's session id, but the session itself lives in `~/.claude/projects/` on the

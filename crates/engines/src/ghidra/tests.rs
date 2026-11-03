@@ -240,7 +240,7 @@ fn analysis_runs_once_with_the_language_pin_then_the_bridge_opens_it_read_only()
 
     // No pin: Ghidra auto-detects, so neither flag appears. The analysis is saved (not read-only,
     // not deleted) and runs no script.
-    let auto = strs(analyse_args(pd, snap, log, Path::new("/scripts"), None, None));
+    let auto = strs(analyse_args(pd, snap, log, Path::new("/scripts"), None, None, None));
     assert!(auto.iter().any(|a| a == "-import"));
     assert!(!auto.iter().any(|a| a == "-processor"), "no processor flag without a pin");
     assert!(!auto.iter().any(|a| a == "-cspec"));
@@ -250,16 +250,27 @@ fn analysis_runs_once_with_the_language_pin_then_the_bridge_opens_it_read_only()
     assert_eq!(auto.get(pre + 1).map(String::as_str), Some(FAST_SCRIPT_NAME));
 
     // A pinned language id and compiler spec are forwarded, in order, with their values.
-    let pinned = strs(analyse_args(pd, snap, log, Path::new("/scripts"), Some("RISCV:LE:64:RV64GC"), Some("gcc")));
+    let pinned = strs(analyse_args(pd, snap, log, Path::new("/scripts"), Some("RISCV:LE:64:RV64GC"), Some("gcc"), None));
     let pi = pinned.iter().position(|a| a == "-processor").expect("has -processor");
     assert_eq!(pinned.get(pi + 1).map(String::as_str), Some("RISCV:LE:64:RV64GC"));
     let ci = pinned.iter().position(|a| a == "-cspec").expect("has -cspec");
     assert_eq!(pinned.get(ci + 1).map(String::as_str), Some("gcc"));
 
     // A blank language id is ignored (treated as no pin); a cspec without a language is dropped.
-    let blank = strs(analyse_args(pd, snap, log, Path::new("/scripts"), Some("  "), Some("gcc")));
+    let blank = strs(analyse_args(pd, snap, log, Path::new("/scripts"), Some("  "), Some("gcc"), None));
     assert!(!blank.iter().any(|a| a == "-processor"));
     assert!(!blank.iter().any(|a| a == "-cspec"), "cspec needs a processor");
+
+    // Raw machine code: Ghidra's raw loader, at the address the code runs from, with the language.
+    let raw = strs(analyse_args(pd, snap, log, Path::new("/scripts"), Some("SuperH4:LE:32:default"), None, Some(0x8c01_0000)));
+    let li = raw.iter().position(|a| a == "-loader").expect("names the raw loader");
+    assert_eq!(raw.get(li + 1).map(String::as_str), Some("BinaryLoader"));
+    let bi = raw.iter().position(|a| a == "-loader-baseAddr").expect("gives the load address");
+    assert_eq!(raw.get(bi + 1).map(String::as_str), Some("0x8c010000"));
+    assert!(li > raw.iter().position(|a| a == "-processor").unwrap(), "{raw:?}");
+    // Without a language the raw loader can't read anything, so it isn't asked for.
+    let unpinned = strs(analyse_args(pd, snap, log, Path::new("/scripts"), None, None, Some(0x8c01_0000)));
+    assert!(!unpinned.iter().any(|a| a.starts_with("-loader")), "{unpinned:?}");
 
     // Later sessions open the saved program without analysing again, and run our bridge.
     let open = strs(bridge_args(pd, "target-abc", log, Path::new("/s.log"), Path::new("/scripts"), Path::new("/session.json")));
@@ -283,6 +294,7 @@ fn ghidra_memory_follows_the_setting_within_its_bounds() {
         language_id: None,
         compiler_spec: None,
         memory_gb,
+        load_base: None,
     };
     assert_eq!(ghidra_heap(&cfg(Some(12))), "12G");
     assert_eq!(ghidra_heap(&cfg(Some(2))), "4G");
@@ -291,6 +303,25 @@ fn ghidra_memory_follows_the_setting_within_its_bounds() {
     assert_eq!(suggested_heap_gb(192 << 20), 8);
     assert_eq!(suggested_heap_gb(900 << 20), 16);
     assert_eq!(suggested_heap_gb(3 << 30), BIG_PROGRAM_GB);
+}
+
+#[test]
+fn raw_code_is_where_ghidra_was_told_to_load_it_not_at_its_image_base() {
+    let cfg = |language_id: Option<&str>| Config {
+        analyze_headless: PathBuf::from("/ghidra/support/analyzeHeadless"),
+        java_home: None,
+        startup_timeout: Duration::from_secs(1),
+        store_dir: PathBuf::from("/store"),
+        language_id: language_id.map(String::from),
+        compiler_spec: None,
+        memory_gb: None,
+        load_base: Some(0x8c01_0000),
+    };
+    // Ghidra's raw loader reports an image base of 0 for code it put at 0x8c010000.
+    assert_eq!(loaded_at(&cfg(Some("SuperH4:LE:32:default"))), Some(0x8c01_0000));
+    // Without a language the raw loader isn't used, so the bridge's base stands.
+    assert_eq!(loaded_at(&cfg(None)), None);
+    assert_eq!(loaded_at(&cfg(Some(" "))), None);
 }
 
 #[test]
@@ -313,6 +344,7 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
         language_id: None,
         compiler_spec: None,
         memory_gb: None,
+        load_base: None,
     };
     let (sha, digest) = ("ab".repeat(32), "cd".repeat(32));
     let project = project_cache_dir(d.path(), &sha, &digest);
@@ -351,6 +383,7 @@ fn the_first_analysis_in_a_fresh_store_starts_instead_of_waiting_for_a_lock_it_c
         language_id: None,
         compiler_spec: None,
         memory_gb: None,
+        load_base: None,
     };
     let t = Instant::now();
     let err = analyse(&cfg, b"x", &"ab".repeat(32), &"cd".repeat(32), &|| false, &|_, _| {}).unwrap_err();
@@ -410,6 +443,7 @@ fn live_ghidra_makes_and_decompiles_code_reached_only_through_a_pointer_table() 
         language_id: None,
         compiler_spec: None,
         memory_gb: Some(4),
+        load_base: None,
     };
     let (elf, triple, negate, table) = pointer_table_elf();
     let session = Session::start(&cfg, &elf, &craft_anything_evidence::sha256_hex(&elf), &"cd".repeat(32), &|| false, &|_, _| {}).expect("Ghidra starts");
@@ -459,6 +493,7 @@ fn live_ghidra_reports_where_it_loaded_a_position_independent_elf() {
         language_id: None,
         compiler_spec: None,
         memory_gb: Some(4),
+        load_base: None,
     };
     let (elf, triple, _, _) = pointer_table_elf_at(0, 3);
     let session = Session::start(&cfg, &elf, &craft_anything_evidence::sha256_hex(&elf), &"ef".repeat(32), &|| false, &|_, _| {}).expect("Ghidra starts");

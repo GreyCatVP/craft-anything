@@ -85,7 +85,7 @@ Issues are ranked by people affected and how badly, after leaving out what's alr
 | 3 | R2.7, R2.8 | — | Small gaps left in finished work |
 | 3 | R2.9 Everyday use, R2.10 Pinned builds | — | Open to anyone at any time; most lines stand alone |
 | 3 | R1.5, R1.6 | — | Small leftovers |
-| Any | M3: R3.3, R3.9, R3.11 | — | Open lane |
+| Any | M3: R3.3, R3.9, R3.11, R3.12 | — | Open lane |
 | Later | R4.1 macOS CLI, R4.2 Managed tier | **decision** | Not before M5 |
 
 ---
@@ -473,6 +473,32 @@ Owner: open · Status: in progress
       it's there
 - [ ] `native_publisher_show` hashes the file minus the signature fields, not section by section;
       a file with unusual gaps between sections can read as different
+
+### R3.12 Console games in Deep mode
+Owner: open · Status: in progress
+- [x] Deep mode reaches processors the built-in engine can't decode (found on a Dreamcast game's
+      `1ST_READ.BIN`, SH-4): a raw binary opens with any architecture name when a Ghidra
+      `language_id` is given, `native_function_pseudocode` takes an address straight to Ghidra when
+      the built-in decoder can't read the program (it used to stop before asking), and raw code is
+      loaded into Ghidra where it runs (`-loader BinaryLoader -loader-baseAddr`, part of the cache key)
+- [x] `native_functions_decompile` asks Ghidra in Deep mode, item by item, as
+      `native_function_pseudocode` does (it used the built-in lifter only)
+- [ ] String tools (`native_strings_find`, `native_strings_browse`) refuse a program the built-in
+      decoder can't read (a MIPS PSP module), though finding strings needs no decoding
+- [ ] Triage says a PSP module (`.prx`, MIPS ELF of type 0xFFA0) is "a program for Linux, built for
+      other"; its imports by library (`.sceStub.text.*`) aren't read as imports
+- [ ] Disc images: triage doesn't recognise an ISO 9660 image, a `.cue` or its `.bin` tracks
+      (`core_archive_show` calls a PSP ISO "text"); `firmware_regions_list` finds the ISO 9660, but
+      nothing extracts its files
+- [ ] The managed Java doesn't start from a deep folder (its `jvm.dll` path past ~250 characters):
+      Ghidra's launcher then blames `JAVA_HOME`, and our error points at an analysis log that was
+      never written
+- [ ] Ghidra's raw loader is given no entry point, so a raw program has no functions until one is
+      asked for (each is made on demand)
+- [ ] `deep::prepare` (the builder's analysis ahead of time) builds its cache key without a target's
+      own `language_id` or raw load address, so for raw code (or a target opened with its own
+      language) it analyses separately, loading the code at 0, and the builder's tools never reuse
+      it (found in review); pass the target's settings through
 
 ---
 
