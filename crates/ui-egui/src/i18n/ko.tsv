@@ -141,6 +141,7 @@ Answers come from {brain}. To build, set up a coding agent in Settings → AI.	�
 App	앱
 App details on device	기기의 앱 정보
 Apple apps	Apple 앱
+Apply model options	모델 옵션 적용
 Approve an agent action	에이전트 작업 승인
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	앱과 게임: 그림과 이만큼 닮을 때까지 계속 다듬습니다. 끄면 닮은 정도만 알려 줍니다.
 Architectures	아키텍처
@@ -281,6 +282,7 @@ Connect to a browser	브라우저에 연결
 Connect {name}	{name} 연결
 Connected devices	연결된 기기
 Connected phone	연결된 휴대폰
+Context window	컨텍스트 창
 Continue	계속
 Contradicted	반박됨
 Control-flow graph: a map of every path a function can take, like a flowchart.	제어 흐름 그래프: 순서도처럼 함수가 지날 수 있는 모든 경로를 보여 주는 지도입니다.
@@ -330,6 +332,7 @@ Deep	심층
 Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	이제 심층 모드에서 Ghidra로 디컴파일합니다. 큰 프로그램은 처음 살펴볼 때 몇 분 걸릴 수 있습니다.
 Deep mode on	심층 모드 켜짐
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	심층: 가진 모든 도구로 코드, 파일, 페이지 소스를 읽고, Ghidra가 설치되어 있으면 Ghidra도 씁니다. 눌러서 전환합니다.
+Default	기본값
 Delete a project	프로젝트 삭제
 Delete it	삭제
 Delete the project	프로젝트 삭제
@@ -402,6 +405,7 @@ Export a report (Markdown)	보고서 내보내기 (Markdown)
 Export captured scripts	캡처한 스크립트 내보내기
 Export evidence	근거 내보내기
 Export report	보고서 내보내기
+Extended	확장
 Extract an archive	압축 파일 풀기
 Extract firmware	펌웨어 추출
 Extract with this	이걸로 추출
@@ -630,6 +634,7 @@ List strings	문자열 목록
 Live: the project's latest build	최신 유지: 프로젝트의 최신 빌드
 Load a picture	그림 불러오기
 Load a screenshot	스크린샷 불러오기
+Load model options	모델 옵션 불러오기
 Loading…	불러오는 중…
 Log	로그
 Look again	다시 살펴보기
@@ -677,6 +682,7 @@ Memory for Ghidra	Ghidra 메모리
 Minimise	최소화
 Mode	모드
 Model	모델
+Model options	모델 옵션
 Model: {model}	모델: {model}
 Modules	모듈
 More detail	더 자세히
@@ -885,6 +891,7 @@ Read the project	프로젝트 읽기
 Reading what's inside…	안에 든 것을 읽는 중…
 Ready	완성
 Ready: {what} is on this computer.	준비됨: {what} 설치되어 있습니다.
+Reasoning	추론
 Rebuild status	다시 만들기 상태
 Record a finding	발견 기록
 Record a hypothesis	가설 기록
@@ -989,6 +996,7 @@ Server address	서버 주소
 Session status	세션 상태
 Set a project's asset budget	프로젝트 에셋 예산 정하기
 Set an AI's program	AI 프로그램 정하기
+Set model options	모델 옵션 설정
 Set one up	설정하기
 Set up a brain…	AI 설정…
 Set up a builder	빌더 설정
@@ -998,6 +1006,7 @@ Show a project	프로젝트 보기
 Show folder	폴더 보기
 Show me everything	모두 보여 주기
 Show me the proof	근거 보기
+Show model options	모델 옵션 표시
 Show pinned builds	고정한 빌드 보기
 Show settings	설정 보기
 Show the answer	답 보기
@@ -1021,6 +1030,7 @@ Some plugins couldn't be read:	읽지 못한 플러그인이 있습니다:
 Something a program borrows from the operating system or a library, like "open a file".	프로그램이 운영체제나 라이브러리에서 빌려 쓰는 기능. "파일 열기" 같은 것입니다.
 Something a program or library offers for other programs to use.	프로그램이나 라이브러리가 다른 프로그램이 쓰도록 내놓는 기능.
 Source	소스
+Standard	표준
 Start	시작
 Start a Frida session	Frida 세션 시작
 Start a GDB session	GDB 세션 시작
@@ -1152,6 +1162,7 @@ Unreal IoStore	Unreal IoStore
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal은 Apple의 Xcode로 게임을 만듭니다. App Store에서 무료로 받을 수 있습니다.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal은 있지만 Visual Studio의 C++ 도구도 필요합니다.
 Unreal pak	Unreal pak
+Update a finding	분석 결과 수정
 Update a hypothesis	가설 갱신
 Update an open question	남은 질문 갱신
 Update the checklist	체크리스트 갱신

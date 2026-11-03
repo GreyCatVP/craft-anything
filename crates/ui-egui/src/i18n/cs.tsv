@@ -141,6 +141,7 @@ Answers come from {brain}. To build, set up a coding agent in Settings → AI.	N
 App	Aplikace
 App details on device	Podrobnosti aplikace v zařízení
 Apple apps	Aplikace Apple
+Apply model options	Použít možnosti modelu
 Approve an agent action	Schválit akci agenta
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Aplikace a hry: vylepšovat, dokud nedosáhnou této podobnosti s vašimi obrázky. Při vypnutí se podobnost pouze hlásí.
 Architectures	Architektury
@@ -281,6 +282,7 @@ Connect to a browser	Připojit k prohlížeči
 Connect {name}	Připojit {name}
 Connected devices	Připojená zařízení
 Connected phone	Připojený telefon
+Context window	Kontextové okno
 Continue	Pokračovat
 Contradicted	Vyvráceno
 Control-flow graph: a map of every path a function can take, like a flowchart.	Graf toku řízení: mapa všech cest, kterými může funkce projít, podobná vývojovému diagramu.
@@ -330,6 +332,7 @@ Deep	Hloubkový
 Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	Hloubkový režim nyní dekompiluje pomocí Ghidra. První průzkum velkého programu může trvat několik minut.
 Deep mode on	Hloubkový režim zapnutý
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Hloubkový režim: čteme kód, soubory i zdrojový kód stránek všemi svými nástroji a také pomocí Ghidra, pokud je nainstalována. Kliknutím přepnete režim.
+Default	Výchozí
 Delete a project	Smazat projekt
 Delete it	Smazat to
 Delete the project	Smazat tento projekt
@@ -402,6 +405,7 @@ Export a report (Markdown)	Exportovat zprávu (Markdown)
 Export captured scripts	Exportovat zachycené skripty
 Export evidence	Exportovat důkazy
 Export report	Exportovat zprávu
+Extended	Rozšířené
 Extract an archive	Rozbalit archiv
 Extract firmware	Extrahovat firmware
 Extract with this	Používat pro extrakci
@@ -630,6 +634,7 @@ List strings	Vypsat řetězce
 Live: the project's latest build	Průběžné: nejnovější sestavení projektu
 Load a picture	Načíst obrázek
 Load a screenshot	Načíst snímek obrazovky
+Load model options	Načíst možnosti modelu
 Loading…	Načítání…
 Log	Protokol
 Look again	Hledat znovu
@@ -677,6 +682,7 @@ Memory for Ghidra	Paměť pro Ghidra
 Minimise	Minimalizovat
 Mode	Režim
 Model	Model AI
+Model options	Možnosti modelu
 Model: {model}	Model AI: {model}
 Modules	Moduly
 More detail	Více podrobností
@@ -885,6 +891,7 @@ Read the project	Načíst projekt
 Reading what's inside…	Čtení obsahu…
 Ready	Hotovo
 Ready: {what} is on this computer.	Připraveno: {what} je v tomto počítači.
+Reasoning	Uvažování
 Rebuild status	Stav rekonstrukce
 Record a finding	Zaznamenat zjištění
 Record a hypothesis	Zaznamenat hypotézu
@@ -989,6 +996,7 @@ Server address	Adresa serveru
 Session status	Stav relace
 Set a project's asset budget	Nastavit rozpočet podkladů projektu
 Set an AI's program	Nastavit program AI
+Set model options	Nastavit možnosti modelu
 Set one up	Nastavit
 Set up a brain…	Nastavit AI asistenta…
 Set up a builder	Nastavit sestavovacího agenta
@@ -998,6 +1006,7 @@ Show a project	Zobrazit projekt
 Show folder	Zobrazit složku
 Show me everything	Ukázat vše
 Show me the proof	Ukázat důkazy
+Show model options	Zobrazit možnosti modelu
 Show pinned builds	Zobrazit připnutá sestavení
 Show settings	Zobrazit nastavení
 Show the answer	Zobrazit odpověď
@@ -1021,6 +1030,7 @@ Some plugins couldn't be read:	Některé pluginy se nepodařilo načíst:
 Something a program borrows from the operating system or a library, like "open a file".	Operace, kterou program přebírá z operačního systému nebo knihovny, například „otevřít soubor“.
 Something a program or library offers for other programs to use.	Funkce, kterou program nebo knihovna nabízí jiným programům.
 Source	Zdrojový kód
+Standard	Standardní
 Start	Spustit
 Start a Frida session	Zahájit relaci Frida
 Start a GDB session	Zahájit relaci GDB
@@ -1152,6 +1162,7 @@ Unreal IoStore	Unreal IoStore
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal sestavuje hry pomocí Apple Xcode, které je zdarma v App Store.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal je dostupný, ale potřebuje také nástroje C++ pro Visual Studio.
 Unreal pak	Unreal pak
+Update a finding	Upravit zjištění
 Update a hypothesis	Aktualizovat hypotézu
 Update an open question	Aktualizovat otevřenou otázku
 Update the checklist	Aktualizovat kontrolní seznam
