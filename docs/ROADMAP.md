@@ -866,6 +866,9 @@ Owner: open · Status: in progress
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
+- [ ] Devin over ACP: `devin acp` asks the host to `authenticate` (`meta.api_key`) before
+      `session/new`, so the backend's stored key is sent — claimed: NibrasAz7, branch
+      feature/r2.2-devin-agent
 
 **Finding them:**
 - [ ] #105, #135, #259, #385 and #423 predate 0.3.0, which looks in more places, and came through

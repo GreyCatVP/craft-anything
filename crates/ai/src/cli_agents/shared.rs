@@ -22,7 +22,7 @@ pub(crate) struct SharedConversation {
 }
 
 impl SharedConversation {
-    pub(crate) fn new(engine: Arc<Engine>, entry: BackendEntry, beginner: bool) -> Result<Self, ToolError> {
+    pub(crate) fn new(engine: Arc<Engine>, keys: crate::KeyStore, entry: BackendEntry, beginner: bool) -> Result<Self, ToolError> {
         let (commands, requests) = std::sync::mpsc::channel();
         let (output, events) = std::sync::mpsc::channel();
         let report = output.clone();
@@ -40,7 +40,7 @@ impl SharedConversation {
                             Ok(Command::Quit) | Err(RecvTimeoutError::Disconnected) => break,
                             Ok(Command::Send(text)) => {
                                 let _ = output.send(AgentEvent::Status { text: "Preparing the shared investigation...".into() });
-                                match prepare(&engine, &entry, beginner) {
+                                match prepare(&engine, &keys, &entry, beginner) {
                                     Ok(mut spec) => {
                                         let next = json!({"project": spec.project, "targets": spec.targets, "deep": spec.deep, "options": spec.options});
                                         if context.as_ref() != Some(&next) {
@@ -132,7 +132,7 @@ fn continues(previous: Option<&Value>, next: &Value) -> bool {
     previous.get("project") == next.get("project") && (deep(next) || !deep(previous))
 }
 
-fn prepare(engine: &Engine, entry: &BackendEntry, beginner: bool) -> Result<CliSpec, ToolError> {
+fn prepare(engine: &Engine, keys: &crate::KeyStore, entry: &BackendEntry, beginner: bool) -> Result<CliSpec, ToolError> {
     let mut session = engine.session();
     let config = crate::AiConfig::from_settings(&session.settings);
     let entry = config.get(&entry.config.name).unwrap_or(entry);
@@ -143,6 +143,7 @@ fn prepare(engine: &Engine, entry: &BackendEntry, beginner: bool) -> Result<CliS
     spec.targets = targets;
     spec.deep = !session.clean_room();
     spec.logs = Some(crate::failure_log::dir_in(&session.config_dir()));
+    spec.key = acp::key_for(keys, &spec.config.model, &spec.config.name, spec.config.kind);
     Ok(spec)
 }
 
@@ -222,7 +223,9 @@ mod tests {
             config: BackendConfig { name: "Agent".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true },
             options: BackendOptions::default(),
         };
-        let spec = prepare(&engine, &entry, false).unwrap();
+        let keys = crate::KeyStore::file_only(directory.path().join("keys.toml"));
+        let spec = prepare(&engine, &keys, &entry, false).unwrap();
+        assert_eq!(spec.key, None, "copilot is not a key-auth agent: the keychain is never asked");
         assert_eq!(spec.targets.len(), 2);
         assert_eq!(spec.targets.last().unwrap().path, first);
         assert_eq!(spec.project, engine.session().project.as_ref().map(|project| project.root.clone()));
@@ -234,7 +237,7 @@ mod tests {
         let mut config = crate::AiConfig::default();
         config.upsert(updated);
         engine.session().settings.ai = config.to_table().unwrap();
-        let refreshed = prepare(&engine, &entry, false).unwrap();
+        let refreshed = prepare(&engine, &keys, &entry, false).unwrap();
         assert_eq!(refreshed.options.cli_context, Some(crate::config::CliContext::Long));
         assert_eq!(refreshed.options.cli_reasoning_effort, Some(crate::config::CliReasoningEffort::Max));
     }
