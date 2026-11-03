@@ -344,8 +344,18 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     // A game's request can have an app stack recorded; asset controls must not depend on it.
     ws.manifest.stack = "Rust + egui".into();
     ws.save().unwrap();
-    ws.record_asset(AssetRecord { file: "Assets/Generated/crate.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.51, at_ms: 0 })
-        .unwrap();
+    ws.record_asset(AssetRecord {
+        file: "Assets/Generated/crate.glb".into(),
+        kind: "model".into(),
+        prompt: "a crate".into(),
+        provider: "scenario".into(),
+        model: "model_meshy-7-1-img23d".into(),
+        amount: Some(0.51),
+        unit: Some(craft_anything_engines::assets::model::Unit::Usd),
+        cost_missing: false,
+        at_ms: 0,
+    })
+    .unwrap();
     let root = ws.root.clone();
     // Tall enough that the whole asset section, master switch included, fits beside the feed.
     let mut h = harness_sized(egui::vec2(1280.0, 1000.0), move || {

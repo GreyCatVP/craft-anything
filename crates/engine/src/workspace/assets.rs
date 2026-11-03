@@ -91,13 +91,19 @@ impl ProjectAssets {
     }
 
     /// Choose the provider and model for `kind`. The limit, its switch and the start of the count
-    /// stay when the provider and its unit are the same as before; another provider starts the
-    /// count afresh at `now_ms` with Settings' default limit in the new unit.
+    /// stay when the provider and its unit are the same as before. Another provider (Off counts as
+    /// one) or unit starts the count afresh at `now_ms` with Settings' default limit in the new
+    /// unit, switched on: a limit the person turned off for the old provider does not leave the new
+    /// one unlimited.
     pub fn choose(&mut self, kind: AssetKind, choice: AssetChoice, s: &AssetSettings, now_ms: u64) {
         let before = self.effective(kind, s);
         let same = before.choice.provider == choice.provider && before.choice.unit == choice.unit;
-        let (limit, since_ms) = if same { (before.limit, before.since_ms) } else { (s.default_limit(choice.unit), now_ms) };
-        self.types.insert(kind, TypeAssets { choice, limit, limit_on: before.limit_on, since_ms });
+        let t = if same {
+            TypeAssets { choice, limit: before.limit, limit_on: before.limit_on, since_ms: before.since_ms }
+        } else {
+            TypeAssets { limit: s.default_limit(choice.unit), limit_on: true, since_ms: now_ms, choice }
+        };
+        self.types.insert(kind, t);
     }
 
     /// Change the limit of `kind` (in its provider's unit) and/or its switch. A limit outside what
@@ -130,6 +136,7 @@ impl ProjectAssets {
 mod tests {
     use super::*;
     use crate::settings::AssetSettings;
+    use crate::workspace::{AssetRecord, TypeUsage};
     use crate::workspace::{MANIFEST, Manifest, TargetRef, Workspace, read_manifest};
     use craft_anything_engines::assets::AssetKind;
     use craft_anything_engines::assets::model::{MAX_ASSET_CREDITS, Pricing, Unit};
@@ -151,6 +158,210 @@ mod tests {
     fn v3(extra: &str) -> Vec<u8> {
         format!(r#"{{"version":3,"name":"Old","request":"x","target":{{"kind":"none"}},"created_ms":1,"updated_ms":1,"generate_assets":true{extra}}}"#)
             .into_bytes()
+    }
+
+    /// A project's choice for a type, as `try_type_usage` is asked about it.
+    fn typed(provider: &str, unit: Unit, since_ms: u64) -> TypeAssets {
+        TypeAssets { choice: pick(provider, "m", unit), limit: 5.0, limit_on: true, since_ms }
+    }
+
+    /// A generation as the ledger holds it; no amount means the provider reported no cost.
+    fn made(kind: &str, provider: &str, unit: Option<Unit>, amount: Option<f64>, at_ms: u64) -> AssetRecord {
+        AssetRecord {
+            file: format!("{kind}-{at_ms}"),
+            kind: kind.into(),
+            prompt: "p".into(),
+            provider: provider.into(),
+            model: "m".into(),
+            amount,
+            unit,
+            cost_missing: amount.is_none(),
+            at_ms,
+        }
+    }
+
+    fn new_workspace() -> (tempfile::TempDir, Workspace) {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "game", "A snake game", TargetRef::None).unwrap();
+        (dir, ws)
+    }
+
+    const OLD_LEDGER: &str = r#"[{"file":"a.png","kind":"image","prompt":"a crate","cost_usd":2.25,"at_ms":7}]"#;
+
+    #[test]
+    fn an_old_ledger_reads_as_dollars_of_unknown_provider() {
+        let (_d, ws) = new_workspace();
+        let path = ws.root.join("assets.json");
+        std::fs::write(&path, OLD_LEDGER).unwrap();
+        let expected = AssetRecord {
+            file: "a.png".into(),
+            kind: "image".into(),
+            prompt: "a crate".into(),
+            provider: String::new(),
+            model: String::new(),
+            amount: Some(2.25),
+            unit: Some(Unit::Usd),
+            cost_missing: false,
+            at_ms: 7,
+        };
+        assert_eq!(ws.try_assets().unwrap(), std::slice::from_ref(&expected));
+        assert_eq!(ws.try_assets_spent().unwrap(), 2.25);
+        let usage = ws.try_type_usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)).unwrap();
+        assert_eq!(usage, TypeUsage { amount: 2.25, generations: 1, cost_missing: false });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), OLD_LEDGER, "reading changes nothing");
+        // The next receipt writes the new shape and keeps the old one as it was read.
+        let next = made("sound", "elevenlabs", Some(Unit::Credits), Some(30.0), 9);
+        ws.record_asset(next.clone()).unwrap();
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["version"], 1);
+        assert_eq!(saved["records"][0]["amount"], 2.25);
+        assert!(saved["records"][0].get("cost_usd").is_none());
+        assert_eq!(ws.try_assets().unwrap(), [expected, next]);
+    }
+
+    #[test]
+    fn a_record_from_before_providers_counts_only_for_a_dollar_type_counted_from_the_start() {
+        let (_d, ws) = new_workspace();
+        ws.record_asset(made("image", "", Some(Unit::Usd), Some(2.0), 7)).unwrap();
+        ws.record_asset(made("sound", "", Some(Unit::Usd), Some(9.0), 8)).unwrap();
+        let usage = |kind, t: &TypeAssets| ws.try_type_usage(kind, t).unwrap();
+        let one = TypeUsage { amount: 2.0, generations: 1, cost_missing: false };
+        assert_eq!(usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)), one, "the dollar type counted from the start of the project");
+        assert_eq!(usage(AssetKind::Image, &typed("fal", Unit::Usd, 5)), TypeUsage::default(), "a count that began later leaves the old spending out");
+        assert_eq!(usage(AssetKind::Image, &typed("scenario", Unit::Credits, 0)), TypeUsage::default(), "dollars are not credits");
+        assert_eq!(
+            usage(AssetKind::Image, &TypeAssets { choice: AssetChoice::off(), ..typed("fal", Unit::Usd, 0) }),
+            TypeUsage::default(),
+            "Off counts nothing"
+        );
+        assert_eq!(usage(AssetKind::SoundEffect, &typed("elevenlabs", Unit::Usd, 0)).amount, 9.0, "ledger names, not tool names");
+        assert_eq!(usage(AssetKind::Music, &typed("fal", Unit::Usd, 0)), TypeUsage::default(), "another type");
+    }
+
+    #[test]
+    fn usage_counts_only_the_current_provider_unit_and_period() {
+        let (_d, ws) = new_workspace();
+        for r in [
+            made("image", "fal", Some(Unit::Usd), Some(1.0), 10),
+            made("image", "scenario", Some(Unit::Credits), Some(30.0), 20),
+            made("image", "scenario", Some(Unit::Credits), Some(40.0), 30),
+            made("model", "scenario", Some(Unit::Credits), Some(99.0), 30),
+        ] {
+            ws.record_asset(r).unwrap();
+        }
+        let usage = |kind, t: &TypeAssets| ws.try_type_usage(kind, t).unwrap();
+        let scenario = typed("scenario", Unit::Credits, 25);
+        assert_eq!(usage(AssetKind::Image, &scenario), TypeUsage { amount: 40.0, generations: 1, cost_missing: false });
+        // The start of the period is included; everything earlier is not.
+        assert_eq!(usage(AssetKind::Image, &typed("scenario", Unit::Credits, 30)).generations, 1);
+        assert_eq!(usage(AssetKind::Image, &typed("scenario", Unit::Credits, 31)).generations, 0);
+        assert_eq!(usage(AssetKind::Image, &typed("scenario", Unit::Credits, 0)), TypeUsage { amount: 70.0, generations: 2, cost_missing: false });
+        // Another provider's, and another kind's, spending is not this type's.
+        assert_eq!(usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)), TypeUsage { amount: 1.0, generations: 1, cost_missing: false });
+        assert_eq!(usage(AssetKind::Model3d, &scenario).amount, 99.0, "the ledger calls 3D models `model`");
+        // A record in another unit than the type's does not count, even at the same provider.
+        assert_eq!(usage(AssetKind::Image, &typed("scenario", Unit::Usd, 0)), TypeUsage::default());
+    }
+
+    #[test]
+    fn a_generation_without_a_cost_is_flagged() {
+        let (_d, ws) = new_workspace();
+        ws.record_asset(made("image", "scenario", Some(Unit::Credits), Some(10.0), 1)).unwrap();
+        let none = made("image", "scenario", None, None, 2);
+        assert!(none.cost_missing);
+        ws.record_asset(none).unwrap();
+        // A cost the provider gave in part is still flagged when the record says so.
+        let mut partly = made("music", "elevenlabs", Some(Unit::Credits), Some(4.0), 2);
+        partly.cost_missing = true;
+        ws.record_asset(partly).unwrap();
+        ws.record_asset(made("image", "fal", Some(Unit::Usd), None, 3)).unwrap();
+        // No amount is no cost, whether or not the record says so.
+        let unflagged = AssetRecord { cost_missing: false, ..made("speech", "elevenlabs", Some(Unit::Credits), None, 4) };
+        ws.record_asset(unflagged).unwrap();
+        assert!(ws.try_type_usage(AssetKind::Speech, &typed("elevenlabs", Unit::Credits, 0)).unwrap().cost_missing);
+        let scenario = typed("scenario", Unit::Credits, 0);
+        assert_eq!(ws.try_type_usage(AssetKind::Image, &scenario).unwrap(), TypeUsage { amount: 10.0, generations: 2, cost_missing: true });
+        assert_eq!(
+            ws.try_type_usage(AssetKind::Music, &typed("elevenlabs", Unit::Credits, 0)).unwrap(),
+            TypeUsage { amount: 4.0, generations: 1, cost_missing: true }
+        );
+        // Another provider's missing cost, or one before the period, does not flag this type.
+        let only_priced = typed("scenario", Unit::Credits, 0);
+        assert!(!ws.try_type_usage(AssetKind::Speech, &only_priced).unwrap().cost_missing);
+        assert!(!ws.try_type_usage(AssetKind::Image, &typed("scenario", Unit::Credits, 3)).unwrap().cost_missing);
+        assert_eq!(ws.try_type_usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)).unwrap(), TypeUsage { amount: 0.0, generations: 1, cost_missing: true });
+    }
+
+    #[test]
+    fn the_new_ledger_is_versioned_and_damage_fails_closed() {
+        let (_d, ws) = new_workspace();
+        let path = ws.root.join("assets.json");
+        assert!(ws.try_assets().unwrap().is_empty(), "no file: no spending");
+        ws.record_asset(made("image", "fal", Some(Unit::Usd), Some(1.5), 1)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.split_whitespace().collect::<String>().starts_with(r#"{"version":1,"records":[{"#), "{text}");
+        assert_eq!(ws.try_assets().unwrap().len(), 1);
+
+        let usd = |amount: Value| json!({"file":"f","kind":"image","prompt":"p","provider":"fal","model":"m","amount":amount,"unit":"usd","cost_missing":false,"at_ms":1});
+        let v1 = |records: Value| json!({"version": 1, "records": records}).to_string();
+        let cases = [
+            ("garbage", "not json".to_string()),
+            ("empty", String::new()),
+            ("a number", "7".to_string()),
+            ("truncated", text[..text.len() / 2].to_string()),
+            ("no version", json!({"records": []}).to_string()),
+            ("version 0 object", json!({"version": 0, "records": []}).to_string()),
+            ("version as text", json!({"version": "1", "records": []}).to_string()),
+            ("no records", json!({"version": 1}).to_string()),
+            ("negative", v1(json!([usd(json!(-1.0))]))),
+            ("overflow", v1(json!([usd(json!(1.7e308)), usd(json!(1.7e308))]))),
+            ("out of range", v1(json!([usd(json!(0))])).replace("\"amount\":0", "\"amount\":1e999")),
+            ("a text amount", v1(json!([usd(json!("1.0"))]))),
+            (
+                "amount without a unit",
+                v1(json!([{"file":"f","kind":"image","prompt":"p","provider":"fal","model":"m","amount":1.0,"unit":null,"cost_missing":false,"at_ms":1}])),
+            ),
+            ("a record without its provider", v1(json!([{"file":"f","kind":"image","prompt":"p","amount":1.0,"unit":"usd","cost_missing":false,"at_ms":1}]))),
+            ("a bare list of new records", json!([usd(json!(1.0))]).to_string()),
+            ("an old record without a cost", r#"[{"file":"a","kind":"image","prompt":"p","at_ms":1}]"#.to_string()),
+            ("an old record with a null cost", r#"[{"file":"a","kind":"image","prompt":"p","cost_usd":null,"at_ms":1}]"#.to_string()),
+            ("an old record that isn't one", "[7]".to_string()),
+        ];
+        for (name, bytes) in cases {
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(ws.try_assets().is_err(), "{name}: read");
+            assert!(ws.try_assets_spent().is_err(), "{name}: total");
+            assert!(ws.try_type_usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)).is_err(), "{name}: usage");
+            assert!(ws.record_asset(made("image", "fal", Some(Unit::Usd), Some(0.2), 2)).is_err(), "{name}: record");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes.as_bytes(), "{name}: the damaged file is left as it was");
+        }
+
+        // A charge that can't be added is refused before anything is written.
+        std::fs::write(&path, &text).unwrap();
+        for bad in [f64::NAN, f64::INFINITY, -1.0] {
+            assert!(ws.record_asset(made("image", "fal", Some(Unit::Usd), Some(bad), 2)).is_err(), "{bad}");
+        }
+        let no_unit = made("image", "fal", None, Some(1.0), 2);
+        assert!(ws.record_asset(no_unit).is_err(), "an amount needs its unit");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn a_ledger_from_a_newer_build_is_never_read_or_written_over() {
+        let (_d, ws) = new_workspace();
+        let path = ws.root.join("assets.json");
+        let newer = json!({"version": 2, "records": [], "extra": true}).to_string();
+        std::fs::write(&path, &newer).unwrap();
+        let e = ws.try_assets().unwrap_err();
+        assert!(e.message.contains("written by a newer Craft Anything"), "{}", e.message);
+        assert_eq!(e.code, craft_anything_evidence::ErrorCode::NotSupported);
+        assert!(e.remediation.as_deref().unwrap_or_default().contains("Update Craft Anything"));
+        assert!(ws.try_type_usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)).is_err());
+        assert!(ws.record_asset(made("image", "fal", Some(Unit::Usd), Some(0.2), 2)).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), newer);
+        // A version beyond what a number can hold is newer too, not damage.
+        std::fs::write(&path, r#"{"version":99999999999999,"records":[]}"#).unwrap();
+        assert!(ws.try_assets().unwrap_err().message.contains("newer Craft Anything"));
     }
 
     #[test]
@@ -255,6 +466,58 @@ mod tests {
         // Off is a change of provider too.
         a.choose(AssetKind::Image, AssetChoice::off(), &s, 400);
         assert_eq!(a.effective(AssetKind::Image, &s).since_ms, 400);
+    }
+
+    #[test]
+    fn a_new_provider_or_unit_puts_the_limit_back_on() {
+        let s = settings();
+        let mut a = ProjectAssets::from_defaults(&s, 1);
+        let on = |a: &ProjectAssets| a.effective(AssetKind::Image, &s).limit_on;
+        let off = |a: &mut ProjectAssets| a.set_limit(AssetKind::Image, None, Some(false), &s).unwrap();
+        off(&mut a);
+        assert!(!on(&a));
+        // Another model at the same provider keeps the person's choice to have no limit.
+        a.choose(AssetKind::Image, pick("fal", "fal-ai/flux/schnell", Unit::Usd), &s, 5);
+        assert!(!on(&a));
+        // Another provider in the same unit starts a fresh count, and a fresh count starts limited.
+        a.choose(AssetKind::Image, pick("other", "m", Unit::Usd), &s, 6);
+        assert!(on(&a));
+        off(&mut a);
+        // The same provider in another unit does too.
+        a.choose(AssetKind::Image, pick("other", "m", Unit::Credits), &s, 7);
+        assert!(on(&a));
+        off(&mut a);
+        a.choose(AssetKind::Image, pick("elevenlabs", "m", Unit::Credits), &s, 8);
+        assert!(on(&a), "another provider billed in the same unit");
+        off(&mut a);
+        // A switched-off limit on a dollar type does not leave the credit type that follows unlimited.
+        a.choose(AssetKind::Image, pick("fal", "fal-ai/flux/dev", Unit::Usd), &s, 9);
+        assert!(on(&a));
+        // Only the type that changed is touched.
+        off(&mut a);
+        a.choose(AssetKind::Music, pick("fal", "m", Unit::Usd), &s, 10);
+        assert!(!on(&a));
+    }
+
+    #[test]
+    fn off_and_back_to_the_same_provider_starts_a_new_count_and_limit() {
+        let mut s = settings();
+        s.usd_limit = 9.0;
+        let mut a = ProjectAssets::from_defaults(&s, 1);
+        a.set_limit(AssetKind::Image, Some(40.0), Some(false), &s).unwrap();
+        a.choose(AssetKind::Image, AssetChoice::off(), &s, 400);
+        let t = a.effective(AssetKind::Image, &s);
+        assert_eq!((t.choice.provider, t.limit, t.limit_on, t.since_ms), (None, 9.0, true, 400), "Off is a change of provider");
+        a.choose(AssetKind::Image, pick("fal", "fal-ai/flux/dev", Unit::Usd), &s, 500);
+        let t = a.effective(AssetKind::Image, &s);
+        assert_eq!(
+            (t.choice.provider.as_deref(), t.limit, t.limit_on, t.since_ms),
+            (Some("fal"), 9.0, true, 500),
+            "neither the 40 dollars nor the count from 1 came back"
+        );
+        // Choosing Off while Off changes nothing.
+        a.choose(AssetKind::Speech, AssetChoice::off(), &s, 600);
+        assert_eq!(a.effective(AssetKind::Speech, &s).since_ms, 1);
     }
 
     #[test]

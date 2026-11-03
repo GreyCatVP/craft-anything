@@ -22,6 +22,7 @@ use crate::project::write_atomic;
 use crate::settings::AssetSettings;
 use crate::versioned::{self, upgrade};
 use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::Unit;
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -547,17 +548,127 @@ pub const MAX_ASSET_BUDGET_USD: f64 = 10_000.0;
 pub struct AssetRecord {
     /// Intended destination relative to app/; recording a charge does not guarantee this file exists.
     pub file: String,
-    /// Asset category: image, model, speech, sound or music.
+    /// Asset category: image, model, speech, sound or music (see [`AssetKind::ledger_name`]).
     pub kind: String,
     /// What it was made from (the description, or the picture it was made from).
     pub prompt: String,
-    /// Provider-reported spending estimate in USD, which may differ from the final bill.
-    pub cost_usd: f64,
+    /// The provider's id (`fal`, `scenario`, `elevenlabs`). Empty: the generation was recorded
+    /// before the ledger kept providers (`assets.json` version 0), in dollars.
+    pub provider: String,
+    /// The model's id at the provider. Empty for a generation recorded before version 1.
+    pub model: String,
+    /// What the provider reported the generation cost, in `unit`, which may differ from the final
+    /// bill. `None`: it reported nothing usable.
+    pub amount: Option<f64>,
+    /// What `amount` is counted in; `None` when the provider's unit isn't known either.
+    pub unit: Option<Unit>,
+    /// The provider gave no cost for this generation, so the totals understate what it took.
+    pub cost_missing: bool,
     pub at_ms: u64,
+}
+
+/// What one asset type has used under the provider and unit it has now (see
+/// [`Workspace::try_type_usage`]).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TypeUsage {
+    /// The sum of the amounts reported, in the type's unit.
+    pub amount: f64,
+    /// How many generations were counted, including those that reported no cost.
+    pub generations: u32,
+    /// At least one counted generation reported no cost, so `amount` is a lower bound.
+    pub cost_missing: bool,
 }
 
 /// The list of generated assets, in the workspace folder.
 const ASSETS: &str = "assets.json";
+
+/// The current `assets.json` format version: `{"version": 1, "records": [...]}`. A bare list of
+/// records is version 0. Bumping it means appending a step to [`LEDGER_STEPS`].
+const LEDGER_VERSION: u32 = 1;
+
+/// The steps that bring an older ledger forward; step `i` goes from version `i` to `i + 1`.
+const LEDGER_STEPS: &[versioned::Step<Value>] = &[ledger_v0_to_v1];
+const _: () = assert!(LEDGER_STEPS.len() == LEDGER_VERSION as usize, "one step per assets.json version");
+
+/// Version 1 wraps the records in an object with a version, and each one gains its provider, model,
+/// unit and whether its cost was missing. A version 0 record had only a dollar cost, so it becomes
+/// an amount in dollars of an unknown provider and model. A record without a number for its cost is
+/// damage, never a free generation.
+fn ledger_v0_to_v1(doc: &mut Value) -> Result<(), String> {
+    let Value::Array(items) = doc else { return Err("the ledger isn't a list of records".into()) };
+    let mut records = std::mem::take(items);
+    for item in &mut records {
+        let record = item.as_object_mut().ok_or("a record isn't a JSON object")?;
+        let cost = record.remove("cost_usd").filter(Value::is_number).ok_or("a record has no cost_usd number")?;
+        record.insert("provider".into(), Value::from(""));
+        record.insert("model".into(), Value::from(""));
+        record.insert("amount".into(), cost);
+        record.insert("unit".into(), Value::from("usd"));
+        record.insert("cost_missing".into(), Value::from(false));
+    }
+    *doc = serde_json::json!({"version": 1, "records": records});
+    Ok(())
+}
+
+/// The ledger as it is read: the version is checked before this is built.
+#[derive(Deserialize)]
+struct LedgerFile {
+    records: Vec<AssetRecord>,
+}
+
+/// The ledger as it is written. Always the current version.
+#[derive(Serialize)]
+struct LedgerOut<'a> {
+    version: u32,
+    records: &'a [AssetRecord],
+}
+
+/// Read the bytes of an `assets.json` of any version this build understands. A newer ledger is
+/// refused rather than read as far as its fields are known: spending that can't be counted fully
+/// must not be mistaken for less.
+fn read_ledger(bytes: &[u8]) -> Result<Vec<AssetRecord>, ToolError> {
+    let damaged = || ToolError::invalid("The asset ledger is not valid asset-record JSON.");
+    let mut doc: Value = serde_json::from_slice(bytes).map_err(|_| damaged())?;
+    let found = match &doc {
+        Value::Array(_) => 0,
+        Value::Object(o) => match o.get("version").and_then(Value::as_u64) {
+            Some(n) if n >= 1 => u32::try_from(n).unwrap_or(u32::MAX),
+            _ => return Err(damaged()),
+        },
+        _ => return Err(damaged()),
+    };
+    if found > LEDGER_VERSION {
+        return Err(ToolError::unsupported(format!(
+            "The asset ledger was written by a newer Craft Anything (assets.json version {found}; this one reads up to {LEDGER_VERSION})."
+        ))
+        .with_remediation("Update Craft Anything before generating assets for this project."));
+    }
+    upgrade(&mut doc, found, 0, LEDGER_STEPS).map_err(|e| ToolError::invalid(format!("The asset ledger could not be brought up to date: {e}")))?;
+    let records = serde_json::from_value::<LedgerFile>(doc).map_err(|_| damaged())?.records;
+    asset_total(&records)?;
+    Ok(records)
+}
+
+/// What `kind` has used under `t`: the generations of that kind since the provider was chosen,
+/// at that provider and in that unit. A generation recorded before ledger version 1 has no
+/// provider; it counts only for a type billed in dollars and counted from the start of the project.
+fn type_usage(records: &[AssetRecord], kind: AssetKind, t: &TypeAssets) -> TypeUsage {
+    let mut usage = TypeUsage::default();
+    let Some(provider) = t.choice.provider.as_deref() else { return usage };
+    for record in records.iter().filter(|r| r.kind == kind.ledger_name() && r.at_ms >= t.since_ms) {
+        let ours = if record.provider.is_empty() { t.choice.unit == Unit::Usd && t.since_ms == 0 } else { record.provider == provider };
+        if !ours || record.unit.is_some_and(|unit| unit != t.choice.unit) {
+            continue;
+        }
+        usage.generations = usage.generations.saturating_add(1);
+        match record.amount {
+            Some(amount) => usage.amount += amount,
+            None => usage.cost_missing = true,
+        }
+        usage.cost_missing |= record.cost_missing;
+    }
+    usage
+}
 
 /// Taken while one paid generation is admitted, run and recorded.
 const ASSETS_LOCK: &str = "assets.lock";
@@ -573,11 +684,14 @@ pub struct SpendLock {
 /// Bound untrusted ledger reads, including files that grow after opening.
 const MAX_ASSET_LEDGER_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Validate every recorded charge and reject totals that overflow instead of understating spending.
+/// Validate every recorded charge and reject totals that overflow instead of understating
+/// spending. An amount needs the unit it is counted in. Returns the sum of all amounts whatever
+/// their units (an overflow guard; see [`Workspace::try_assets_spent`]).
 fn asset_total(records: &[AssetRecord]) -> Result<f64, ToolError> {
     records.iter().try_fold(0.0, |spent, record| {
-        let total = spent + record.cost_usd;
-        if !record.cost_usd.is_finite() || record.cost_usd < 0.0 || !total.is_finite() {
+        let amount = record.amount.unwrap_or(0.0);
+        let total = spent + amount;
+        if !amount.is_finite() || amount < 0.0 || !total.is_finite() || (record.amount.is_some() && record.unit.is_none()) {
             return Err(ToolError::invalid("The asset ledger contains an invalid charge or overflowing total."));
         }
         Ok(total)
@@ -933,7 +1047,8 @@ impl Workspace {
     }
 
     /// Read and validate a regular-file asset ledger without changing it. Only an absent directory entry
-    /// means no spending; links and special files are rejected before opening them.
+    /// means no spending; links and special files are rejected before opening them. A version 0
+    /// ledger (a bare list) is read as dollars of an unknown provider; a newer one is refused.
     pub fn try_assets(&self) -> Result<Vec<AssetRecord>, ToolError> {
         let path = self.root.join(ASSETS);
         let metadata = match std::fs::symlink_metadata(&path) {
@@ -953,9 +1068,7 @@ impl Workspace {
         if bytes.len() as u64 > MAX_ASSET_LEDGER_BYTES {
             return Err(ToolError::new(ErrorCode::OverLimit, "The asset ledger exceeds the 64 MiB reading limit."));
         }
-        let records: Vec<AssetRecord> = serde_json::from_slice(&bytes).map_err(|_| ToolError::invalid("The asset ledger is not valid asset-record JSON."))?;
-        asset_total(&records)?;
-        Ok(records)
+        read_ledger(&bytes)
     }
 
     /// What the builds have taken and used so far.
@@ -963,12 +1076,18 @@ impl Workspace {
         ProjectUsage::load(&self.root)
     }
 
-    /// Best-effort display total, or zero on an unreadable ledger; never use this to authorize spending.
-    pub fn assets_spent(&self) -> f64 {
-        self.try_assets_spent().unwrap_or_default()
+    /// What `kind` has used under the choice, limit period and unit in `t`: see [`TypeUsage`]. A
+    /// generation counts when it is of that kind, at that provider, in that unit and since
+    /// `t.since_ms`. Unreadable, malformed or newer ledgers fail closed.
+    pub fn try_type_usage(&self, kind: AssetKind, t: &TypeAssets) -> Result<TypeUsage, ToolError> {
+        Ok(type_usage(&self.try_assets()?, kind, t))
     }
 
-    /// Checked spending total; unreadable, malformed or invalid ledgers fail closed.
+    /// Checked sum of every amount in the ledger, whatever its unit (dollars and credits are
+    /// added as plain numbers); unreadable, malformed or invalid ledgers fail closed.
+    ///
+    /// Temporary: only for the callers not yet rewritten for per-type limits. Tasks 10, 12 and 14 of
+    /// the per-type assets plan replace them with [`Workspace::try_type_usage`] and delete this.
     pub fn try_assets_spent(&self) -> Result<f64, ToolError> {
         asset_total(&self.try_assets()?)
     }
@@ -1008,7 +1127,7 @@ impl Workspace {
         let mut all = self.try_assets()?;
         all.push(rec);
         asset_total(&all)?;
-        let json = serde_json::to_vec_pretty(&all).map_err(|e| ToolError::internal(e.to_string()))?;
+        let json = serde_json::to_vec_pretty(&LedgerOut { version: LEDGER_VERSION, records: &all }).map_err(|e| ToolError::internal(e.to_string()))?;
         if json.len() as u64 > MAX_ASSET_LEDGER_BYTES {
             return Err(ToolError::new(ErrorCode::OverLimit, "The asset ledger would exceed the 64 MiB reading limit."));
         }
@@ -1343,7 +1462,22 @@ mod tests {
 
     /// Construct a receipt independently of provider APIs for ledger validation tests.
     fn asset_receipt(cost_usd: f64) -> AssetRecord {
-        AssetRecord { file: "picture.png".into(), kind: "image".into(), prompt: "a crate".into(), cost_usd, at_ms: 0 }
+        AssetRecord {
+            file: "picture.png".into(),
+            kind: "image".into(),
+            prompt: "a crate".into(),
+            provider: "fal".into(),
+            model: "fal-ai/flux/dev".into(),
+            amount: Some(cost_usd),
+            unit: Some(Unit::Usd),
+            cost_missing: false,
+            at_ms: 0,
+        }
+    }
+
+    /// The bytes of a version 1 ledger holding `records`.
+    fn ledger_bytes(records: &[AssetRecord]) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({"version": 1, "records": records})).unwrap()
     }
 
     /// A missing ledger is empty, but malformed JSON and invalid totals must never be overwritten.
@@ -1356,11 +1490,7 @@ mod tests {
         ws.record_asset(asset_receipt(0.5)).unwrap();
         assert_eq!(ws.try_assets_spent().unwrap(), 0.5);
         let path = ws.root.join(ASSETS);
-        for bytes in [
-            b"broken JSON".to_vec(),
-            serde_json::to_vec(&[asset_receipt(-1.0)]).unwrap(),
-            serde_json::to_vec(&[asset_receipt(f64::MAX), asset_receipt(f64::MAX)]).unwrap(),
-        ] {
+        for bytes in [b"broken JSON".to_vec(), ledger_bytes(&[asset_receipt(-1.0)]), ledger_bytes(&[asset_receipt(f64::MAX), asset_receipt(f64::MAX)])] {
             std::fs::write(&path, &bytes).unwrap();
             assert!(ws.try_assets().is_err());
             assert!(ws.try_assets_spent().is_err());

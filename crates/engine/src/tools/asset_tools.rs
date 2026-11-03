@@ -10,6 +10,7 @@ use crate::inbox::Inbox;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use crate::tools::interaction_tools::{Verdict, ask_approval, inbox, inside, resolve, workspace_of};
 use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, Workspace};
+use craft_anything_engines::assets::model::Unit;
 use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Catalogue, Generated, Shape, about_usd, charged_usd, fal, usd};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
@@ -317,7 +318,7 @@ fn assets_speech_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         return Err(ToolError::invalid("voice_id must contain 1 to 128 letters, digits, underscores or hyphens"));
     }
     let model = Catalogue::built_in().audio_model(AssetKind::Speech, p.model.as_deref())?;
-    generate_audio(ctx, &p.save_as, "speech", text, AssetRequest::Speech { model, text, voice_id: voice })
+    generate_audio(ctx, &p.save_as, "speech", text, &model.id, AssetRequest::Speech { model, text, voice_id: voice })
 }
 
 /// Validate the prompt and sound duration before generating an MP3 with the chosen sound model.
@@ -326,7 +327,7 @@ fn assets_sound_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let prompt = prompt_ok(&p.prompt)?;
     duration_ok(p.duration_seconds, 0.5, 30.0)?;
     let model = Catalogue::built_in().audio_model(AssetKind::SoundEffect, p.model.as_deref())?;
-    generate_audio(ctx, &p.save_as, "sound", prompt, AssetRequest::SoundEffect { model, prompt, duration_seconds: p.duration_seconds })
+    generate_audio(ctx, &p.save_as, "sound", prompt, &model.id, AssetRequest::SoundEffect { model, prompt, duration_seconds: p.duration_seconds })
 }
 
 /// Validate music length and prompt, defaulting to instrumental audio before paid generation.
@@ -340,12 +341,13 @@ fn assets_music_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         &p.save_as,
         "music",
         prompt,
+        &model.id,
         AssetRequest::Music { model, prompt, duration_seconds: p.duration_seconds, instrumental: p.instrumental.unwrap_or(true) },
     )
 }
 
 /// Check destination, provider permission, credentials and budget before generating and recording an MP3.
-fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, req: AssetRequest<'_>) -> Result<ToolOutput, ToolError> {
+fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, model: &str, req: AssetRequest<'_>) -> Result<ToolOutput, ToolError> {
     let mut j = job(ctx)?;
     let (path, rel) = save_path(&j.ws, save_as, "mp3")?;
     let provider = j.providers.for_request(&req)?;
@@ -354,8 +356,9 @@ fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, re
     let estimate = provider.estimate(&req)?;
     within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
     ctx.report(None, "Generating audio…");
-    let g = generate_paid(&j.ws, provider.as_ref(), &key, &req, &rel, kind, prompt)?;
-    keep(&j.ws, &path, &rel, kind, prompt, &g)?;
+    let made = Made { kind, from: prompt, provider: provider.id(), model };
+    let g = generate_paid(&j.ws, provider.as_ref(), &key, &req, &rel, &made)?;
+    keep(&j.ws, &path, &rel, &made, &g)?;
     within_estimate(&rel, g.cost_usd, estimate)?;
     summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id()}))
 }
@@ -477,33 +480,48 @@ fn within_budget(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, cost: f64
     }
 }
 
+/// What a receipt says about one generation besides where it went and what it cost.
+#[derive(Clone, Copy)]
+struct Made<'a> {
+    /// The ledger's name for the asset type: image, model, speech, sound or music.
+    kind: &'a str,
+    /// What it was made from: the description, or the picture it was made from.
+    from: &'a str,
+    provider: &'a str,
+    model: &'a str,
+}
+
+impl Made<'_> {
+    /// The receipt for `rel`. Temporary: every provider is still billed in dollars here, until
+    /// Task 10 of the per-type assets plan records each provider's own unit.
+    fn receipt(&self, rel: &str, cost: f64) -> AssetRecord {
+        AssetRecord {
+            file: rel.to_string(),
+            kind: self.kind.into(),
+            prompt: self.from.chars().take(1000).collect(),
+            provider: self.provider.into(),
+            model: self.model.into(),
+            amount: Some(cost),
+            unit: Some(Unit::Usd),
+            cost_missing: false,
+            at_ms: crate::inbox::now_ms(),
+        }
+    }
+}
+
 /// Run one paid stage. When it fails after the provider accepted the work and reports a charge, that
 /// charge is recorded as spending first, so a retry is checked against the budget it already used.
-fn generate_paid(
-    ws: &Workspace,
-    provider: &dyn AssetProvider,
-    key: &str,
-    req: &AssetRequest<'_>,
-    rel: &str,
-    kind: &str,
-    made_from: &str,
-) -> Result<Generated, ToolError> {
-    provider.generate(key, req).map_err(|e| record_charge(ws, rel, kind, made_from, e))
+fn generate_paid(ws: &Workspace, provider: &dyn AssetProvider, key: &str, req: &AssetRequest<'_>, rel: &str, made: &Made<'_>) -> Result<Generated, ToolError> {
+    provider.generate(key, req).map_err(|e| record_charge(ws, rel, made, e))
 }
 
 /// Record the charge a failed generation reported, and say so in its error. An invalid or
 /// unrecordable charge is reported instead of being dropped.
-fn record_charge(ws: &Workspace, rel: &str, kind: &str, made_from: &str, error: ToolError) -> ToolError {
+fn record_charge(ws: &Workspace, rel: &str, made: &Made<'_>, error: ToolError) -> ToolError {
     let Some(cost) = charged_usd(&error) else { return error };
     let receipt = || {
         valid_cost(cost)?;
-        ws.record_asset(AssetRecord {
-            file: rel.to_string(),
-            kind: kind.into(),
-            prompt: made_from.chars().take(1000).collect(),
-            cost_usd: cost,
-            at_ms: crate::inbox::now_ms(),
-        })
+        ws.record_asset(made.receipt(rel, cost))
     };
     match receipt() {
         Ok(()) => {
@@ -530,16 +548,9 @@ fn record_charge(ws: &Workspace, rel: &str, kind: &str, made_from: &str, error: 
 
 /// Record a paid generation before preparing or saving its output. A failed save keeps the receipt;
 /// a failed receipt leaves the destination untouched. These two files are not a crash-atomic transaction.
-fn keep(ws: &Workspace, path: &Path, rel: &str, kind: &str, made_from: &str, g: &Generated) -> Result<(), ToolError> {
+fn keep(ws: &Workspace, path: &Path, rel: &str, made: &Made<'_>, g: &Generated) -> Result<(), ToolError> {
     valid_cost(g.cost_usd)?;
-    ws.record_asset(AssetRecord {
-        file: rel.to_string(),
-        kind: kind.into(),
-        prompt: made_from.chars().take(1000).collect(),
-        cost_usd: g.cost_usd,
-        at_ms: crate::inbox::now_ms(),
-    })
-    .map_err(|e| {
+    ws.record_asset(made.receipt(rel, g.cost_usd)).map_err(|e| {
         ToolError::new(
             e.code,
             format!("Asset spending could not be recorded; the provider may have charged ${:.6}. Output was not saved: {}", g.cost_usd, e.message),
@@ -618,8 +629,9 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let estimate = provider.estimate(&req)?;
     within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
     ctx.report(None, "Making a picture…");
-    let g = generate_paid(&j.ws, provider.as_ref(), &key, &req, &rel, "image", prompt)?;
-    keep(&j.ws, &path, &rel, "image", prompt, &g)?;
+    let made = Made { kind: "image", from: prompt, provider: provider.id(), model: &model.id };
+    let g = generate_paid(&j.ws, provider.as_ref(), &key, &req, &rel, &made)?;
+    keep(&j.ws, &path, &rel, &made, &g)?;
     within_estimate(&rel, g.cost_usd, estimate)?;
     summary(&j.ws, &rel, g.cost_usd, json!({"provider": provider.id(), "model": model.id}))
 }
@@ -682,8 +694,9 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
                 picture_maker.ok_or_else(|| ToolError::internal("no picture model was chosen"))?;
             ctx.report(None, "Making a picture of it first…");
             let picture_req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
-            let g = generate_paid(&j.ws, picture_provider.as_ref(), &picture_key, &picture_req, &pic_rel, "image", prompt)?;
-            keep(&j.ws, &pic_path, &pic_rel, "image", prompt, &g)?;
+            let picture_made = Made { kind: "image", from: prompt, provider: picture_provider.id(), model: &image_model.id };
+            let g = generate_paid(&j.ws, picture_provider.as_ref(), &picture_key, &picture_req, &pic_rel, &picture_made)?;
+            keep(&j.ws, &pic_path, &pic_rel, &picture_made, &g)?;
             within_estimate(&pic_rel, g.cost_usd, picture_estimate)?;
             cost += g.cost_usd;
             picture = Value::String(pic_rel);
@@ -692,8 +705,9 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     };
     ctx.report(None, "Turning it into a 3D model (a minute or two)…");
     let model_job = AssetRequest::Model3d { model, image_url: &url, textured, faces };
-    let g = generate_paid(&j.ws, provider.as_ref(), &key, &model_job, &rel, "model", &made_from)?;
-    keep(&j.ws, &path, &rel, "model", &made_from, &g)?;
+    let made = Made { kind: "model", from: &made_from, provider: provider.id(), model: &model.id };
+    let g = generate_paid(&j.ws, provider.as_ref(), &key, &model_job, &rel, &made)?;
+    keep(&j.ws, &path, &rel, &made, &g)?;
     within_estimate(&rel, g.cost_usd, model_estimate)?;
     cost += g.cost_usd;
     summary(&j.ws, &rel, cost, json!({"picture": picture, "textured": textured, "faces": faces, "provider": provider.id(), "model": model.id}))
@@ -732,6 +746,31 @@ mod tests {
         let mut w = Workspace::create(dir.path(), "game", "A snake game", TargetRef::None).unwrap();
         w.set_person(|m| m.generate_assets = true).unwrap();
         (dir, w)
+    }
+
+    /// The bytes of a version 1 `assets.json` holding `records`.
+    fn ledger_of(records: &[AssetRecord]) -> Vec<u8> {
+        serde_json::to_vec(&json!({"version": 1, "records": records})).unwrap()
+    }
+
+    /// A spoken line made at ElevenLabs, as a receipt records it.
+    fn speech() -> Made<'static> {
+        Made { kind: "speech", from: "hi", provider: "elevenlabs", model: "eleven_v3" }
+    }
+
+    /// A dollar receipt written by hand, to stand for spending already in the ledger.
+    fn receipt(file: &str, kind: &str, cost: f64) -> AssetRecord {
+        AssetRecord {
+            file: file.into(),
+            kind: kind.into(),
+            prompt: "x".into(),
+            provider: "fal".into(),
+            model: "flux-dev".into(),
+            amount: Some(cost),
+            unit: Some(Unit::Usd),
+            cost_missing: false,
+            at_ms: 0,
+        }
     }
 
     #[test]
@@ -806,7 +845,7 @@ mod tests {
         assert_eq!(v["picture"], "Assets/crate.png");
         assert_eq!(*stand_in.0.lock().unwrap(), vec!["fal-ai/flux/schnell".to_string(), "tripo3d/p1/image-to-3d".to_string()], "the configured picture model");
         assert_eq!(std::fs::read(w.app_dir().join("Assets/crate.glb")).unwrap(), b"glb");
-        let spent = w.assets_spent();
+        let spent = w.try_assets_spent().unwrap();
         let catalogue = Catalogue::built_in();
         let image = catalogue.image_model(Some("flux-schnell")).unwrap();
         let expected = 0.50 + AssetRequest::Image { model: image, prompt: "a crate", shape: Shape::Square }.listed_cost();
@@ -880,7 +919,7 @@ mod tests {
     #[test]
     fn the_budget_asks_before_going_over_and_remembers_always() {
         let (_d, mut w) = ws();
-        w.record_asset(AssetRecord { file: "a.glb".into(), kind: "model".into(), prompt: "x".into(), cost_usd: 4.80, at_ms: 0 }).unwrap();
+        w.record_asset(receipt("a.glb", "model", 4.80)).unwrap();
         let inbox = Inbox::new(w.inbox_dir());
         let mut session = crate::testing::session();
         // Auto mode stops at the budget without asking.
@@ -921,7 +960,7 @@ mod tests {
         assert!(Workspace::open(&w.root).unwrap().manifest.allowed_actions.iter().any(|k| k == OVER_BUDGET));
         within_budget(&mut ctx, &inbox, &mut w, 10.0).unwrap();
         assert!(inbox.pending().is_empty(), "after \"always\" it doesn't ask again");
-        assert!((w.assets_spent() - 4.80).abs() < 1e-9);
+        assert!((w.try_assets_spent().unwrap() - 4.80).abs() < 1e-9);
     }
 
     struct Recording {
@@ -1002,7 +1041,7 @@ mod tests {
         assert!(error.remediation.as_deref().is_some_and(|r| r.starts_with("Check the job.") && r.contains("asset budget")));
         let records = w.try_assets().unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!((records[0].file.as_str(), records[0].kind.as_str(), records[0].cost_usd), ("audio/chime.mp3", "sound", 0.03));
+        assert_eq!((records[0].file.as_str(), records[0].kind.as_str(), records[0].amount), ("audio/chime.mp3", "sound", Some(0.03)));
         assert!(!w.app_dir().join("audio/chime.mp3").exists(), "no output was saved");
         // With the budget at what was already charged, the next attempt is refused before spending.
         w.set_person(|m| m.assets.legacy_budget_usd = Some(0.03)).unwrap();
@@ -1028,7 +1067,7 @@ mod tests {
         assert!(error.message.contains("recorded as spending for crate.glb"), "{}", error.message);
         let records = w.try_assets().unwrap();
         assert_eq!(records.iter().map(|r| (r.file.as_str(), r.kind.as_str())).collect::<Vec<_>>(), [("crate.png", "image"), ("crate.glb", "model")]);
-        assert!((records[1].cost_usd - 0.4).abs() < 1e-9);
+        assert!(records[1].amount.is_some_and(|a| (a - 0.4).abs() < 1e-9));
         assert!(w.app_dir().join("crate.png").exists() && !w.app_dir().join("crate.glb").exists());
         assert_eq!(*picture.calls.lock().unwrap(), [AssetKind::Image]);
     }
@@ -1164,7 +1203,7 @@ mod tests {
         assert!(scenario.calls.lock().unwrap().is_empty());
         assert!(scenario.estimates.lock().unwrap().is_empty());
         assert!(w.assets().is_empty());
-        assert_eq!(w.assets_spent(), 0.0);
+        assert_eq!(w.try_assets_spent().unwrap(), 0.0);
         assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
         assert!(!w.app_dir().join("crate.png").exists());
         assert!(!w.app_dir().join("crate.glb").exists());
@@ -1205,7 +1244,7 @@ mod tests {
         }
         assert_eq!(w.assets().len(), 3);
         assert_eq!(stub.calls.lock().unwrap().len(), 3);
-        assert!(w.assets_spent() > 0.0);
+        assert!(w.try_assets_spent().unwrap() > 0.0);
     }
 
     /// Auto-mode audio calls must stop before generation when opt-in is missing or the shared budget is exhausted.
@@ -1311,7 +1350,7 @@ mod tests {
         let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
         for cost_usd in [f64::NAN, f64::INFINITY, -1.0] {
             let made = Generated { url: String::new(), bytes: vec![1], cost_usd };
-            assert!(keep(&w, &path, &rel, "speech", "hi", &made).is_err());
+            assert!(keep(&w, &path, &rel, &speech(), &made).is_err());
             assert!(!path.exists());
             assert!(w.assets().is_empty());
         }
@@ -1323,11 +1362,11 @@ mod tests {
         for invalid in ["json", "directory", "negative", "overflow"] {
             let (_d, w) = ws();
             let ledger = w.root.join("assets.json");
-            let receipt = |cost_usd| AssetRecord { file: "old.png".into(), kind: "image".into(), prompt: "x".into(), cost_usd, at_ms: 0 };
+            let receipt = |cost_usd| receipt("old.png", "image", cost_usd);
             match invalid {
                 "directory" => std::fs::create_dir(&ledger).unwrap(),
-                "negative" => std::fs::write(&ledger, serde_json::to_vec(&[receipt(-1.0)]).unwrap()).unwrap(),
-                "overflow" => std::fs::write(&ledger, serde_json::to_vec(&[receipt(f64::MAX), receipt(f64::MAX)]).unwrap()).unwrap(),
+                "negative" => std::fs::write(&ledger, ledger_of(&[receipt(-1.0)])).unwrap(),
+                "overflow" => std::fs::write(&ledger, ledger_of(&[receipt(f64::MAX), receipt(f64::MAX)])).unwrap(),
                 _ => std::fs::write(&ledger, "not JSON").unwrap(),
             }
             let original = std::fs::read(&ledger).ok();
@@ -1382,7 +1421,7 @@ mod tests {
             }
             std::fs::write(w.root.join("assets.json"), "broken").unwrap();
             let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost_usd: 0.2 };
-            let err = keep(&w, &path, &rel, "speech", "hi", &made).unwrap_err();
+            let err = keep(&w, &path, &rel, &speech(), &made).unwrap_err();
             assert!(err.message.contains("may have charged"));
             assert!(err.remediation.unwrap().contains("Do not blindly"));
             if existing {
@@ -1400,7 +1439,7 @@ mod tests {
         let (_d, w) = ws();
         let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
         let made = Generated { url: String::new(), bytes: b"generated".to_vec(), cost_usd: 0.2 };
-        keep(&w, &path, &rel, "speech", "hi", &made).unwrap();
+        keep(&w, &path, &rel, &speech(), &made).unwrap();
         std::fs::write(w.root.join("assets.json"), "broken").unwrap();
         let err = summary(&w, &rel, made.cost_usd, json!({})).unwrap_err();
         assert!(err.message.contains("Saved a.mp3 and recorded") && err.message.contains("total could not be read"));
@@ -1424,7 +1463,7 @@ mod tests {
             };
             std::fs::write(&preserved, b"original").unwrap();
             let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost_usd: 0.2 };
-            let err = keep(&w, &path, &rel, "speech", "hi", &made).unwrap_err();
+            let err = keep(&w, &path, &rel, &speech(), &made).unwrap_err();
             assert!(err.message.contains("was recorded, but saving"));
             assert!(err.remediation.unwrap().contains("Do not blindly"));
             assert_eq!(w.try_assets_spent().unwrap(), 0.2);
@@ -1445,7 +1484,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&target, &path).unwrap();
         let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost_usd: 0.2 };
-        assert!(keep(&w, &path, &rel, "speech", "hi", &made).unwrap_err().message.contains("was recorded, but saving"));
+        assert!(keep(&w, &path, &rel, &speech(), &made).unwrap_err().message.contains("was recorded, but saving"));
         assert_eq!(w.try_assets_spent().unwrap(), 0.2);
         assert_eq!(std::fs::read(target).unwrap(), b"original");
     }

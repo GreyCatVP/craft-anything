@@ -550,8 +550,10 @@ impl Facts {
     pub fn read(ws: &Workspace, godot: Option<&Path>) -> Facts {
         let dir = ws.app_dir();
         let (assets, assets_error) = match ws.try_assets() {
-            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
-            Ok(records) => ((records.len(), records.iter().fold(0.0, |sum, record| sum + record.cost_usd)), None),
+            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00". Temporary: this
+            // adds dollars and credits as plain numbers, until Task 14 of the per-type assets plan
+            // shows each type's own usage in its own unit.
+            Ok(records) => ((records.len(), records.iter().fold(0.0, |sum, record| sum + record.amount.unwrap_or(0.0))), None),
             Err(error) => ((0, 0.0), Some(error.for_people())),
         };
         Facts {

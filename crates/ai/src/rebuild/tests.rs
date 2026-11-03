@@ -519,7 +519,11 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
             file: "chime.mp3".into(),
             kind: "sound".into(),
             prompt: "a chime".into(),
-            cost_usd: 0.25,
+            provider: "elevenlabs".into(),
+            model: "eleven_v3".into(),
+            amount: Some(0.25),
+            unit: Some(craft_anything_engines::assets::model::Unit::Usd),
+            cost_missing: false,
             at_ms: 1,
         })
         .unwrap();
@@ -2581,7 +2585,17 @@ fn every_builder_hears_the_asset_choice_as_it_is_now() {
         assert!(brief(&ws, kind, false, false, None, true, None).contains("scenario: enabled"));
     }
     // Turned off after some were made: say so.
-    let rec = craft_anything_engine::workspace::AssetRecord { file: "a.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.5, at_ms: 1 };
+    let rec = craft_anything_engine::workspace::AssetRecord {
+        file: "a.glb".into(),
+        kind: "model".into(),
+        prompt: "a crate".into(),
+        provider: "scenario".into(),
+        model: "model_meshy-7-1-img23d".into(),
+        amount: Some(0.5),
+        unit: Some(craft_anything_engines::assets::model::Unit::Usd),
+        cost_missing: false,
+        at_ms: 1,
+    };
     ws.record_asset(rec).unwrap();
     ws.set_person(|m| m.generate_assets = false).unwrap();
     assert!(project_assets_note(&cx(&ws, true)).contains("now off"));

@@ -668,8 +668,18 @@ mod tests {
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.legacy_budget_usd(), 12.5);
         assert!(call(json!({"project": ws.root, "budget_usd": -1})).is_err());
         assert!(call(json!({"project": ws.root, "budget_usd": 10001})).unwrap_err().message.contains("between 0 and 10000"));
-        ws.record_asset(crate::workspace::AssetRecord { file: "sound.mp3".into(), kind: "sound".into(), prompt: "chime".into(), cost_usd: 2.25, at_ms: 1 })
-            .unwrap();
+        ws.record_asset(crate::workspace::AssetRecord {
+            file: "sound.mp3".into(),
+            kind: "sound".into(),
+            prompt: "chime".into(),
+            provider: "elevenlabs".into(),
+            model: "eleven_v3".into(),
+            amount: Some(2.25),
+            unit: Some(craft_anything_engines::assets::model::Unit::Usd),
+            cost_missing: false,
+            at_ms: 1,
+        })
+        .unwrap();
         let out = call(json!({"project": ws.root, "budget_usd": 1.75})).unwrap();
         assert_eq!(out["budget_usd"], 1.75);
         assert_eq!(out["spent_usd"], 2.25);

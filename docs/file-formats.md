@@ -8,6 +8,7 @@ version up to the current one, then turn the document into Rust types. The step 
 | File | Owner | Current version | Older files | Newer files |
 |---|---|---|---|---|
 | `<project>/craft.json` | `engine::workspace` (`Manifest`) | `MANIFEST_VERSION` = 4 (`version`; missing = 0; 3 added the optional `asset_providers` list; 4 moved the asset choices into `assets`, one provider, model and limit per asset type) | brought forward, saved as current | opened read-only: saving is refused |
+| `<project>/assets.json` | `engine::workspace` (`AssetRecord`; written by the asset tools under the project's spending lock) | `LEDGER_VERSION` = 1 (`{version, records}`; a bare list = 0, where each record had only a dollar `cost_usd`) | read as before (its records count as dollars of an unknown provider), saved as current at the next receipt | refused: no spending is counted or recorded, and the file is never written over |
 | `<project>/inbox/build-progress.json` | `engine::workspace::progress` (`BuildProgress`; written only by the rebuild run) | `BUILD_PROGRESS_VERSION` = 1 (`version`; missing = 0) | brought forward; an absent file starts with no counted turns | the build stops and the record is left unchanged |
 | `config.toml` (`settings::config_dir()`) | `engine::settings` (`Settings`) | `SETTINGS_VERSION` = 5 (`version`; missing = 0; 2 moved `[engines.ghidra] enabled` to `deep_mode`; 3 added more project folders and the answer about a picked folder's files; 4 added `[assets] model_3d`; 5 chose generated assets per type: `[assets] budget_usd` became `usd_limit`, next to `credit_limit` and `ignore_budget`, and `image_model` and `model_3d` became `[assets.defaults.image]` and `[assets.defaults.model_3d]`, each a provider, a model, its unit and its price; an old id the asset table never had is dropped, which leaves that type Off) | brought forward | loaded, never saved over |
 | `<name>.cany/project.toml` | `engine::project` (`ProjectMeta`) | `FORMAT_VERSION` = 1 (`format_version`, required) | brought forward | refused, with "update Craft Anything" |
@@ -24,8 +25,8 @@ A saved `User` message with pictures is `{text, pictures: [paths]}`, where the p
 copies in the project's `attachments/`; one without pictures stays the plain string earlier
 versions wrote.
 
-Other JSON in a project (`assets.json`, `inbox/` except `inbox/build-progress.json`, `checks/`,
-evidence records) has no version yet; add one the first time its shape changes. `assets.lock` is an
+Other JSON in a project (`inbox/` except `inbox/build-progress.json`, `checks/`, evidence records)
+has no version yet; add one the first time its shape changes. `assets.lock` is an
 empty file that only carries the operating system's lock on the project's spending; it holds no data.
 
 `craft.json` version 4 keeps the generated-asset choices in an `assets` object. `types` holds, for
@@ -34,7 +35,9 @@ a new project) has chosen: the `choice` (provider, model, the unit the provider 
 model's price), the `limit` in that unit, `limit_on`, and `since_ms`, when the provider was chosen
 (usage counts from then; 0 is from the start of the project). `ignore_budget` turns every limit off
 at once. A new project gets all five types from Settings' defaults and keeps them when Settings
-change later.
+change later. Choosing another provider for a type (Off counts as one) or another unit starts its
+count afresh and puts its limit back to Settings' default for the unit, switched on; another model
+at the same provider changes none of that.
 
 Version 3's `asset_budget_usd` and `asset_providers` moved into `assets` as `legacy_budget_usd` and
 `legacy_providers`, and are only written when the project had them. A type the project has not
@@ -43,6 +46,18 @@ provider out (missing or null: every provider, as in version 3), with `legacy_bu
 limit of a type billed in dollars. The master switch `generate_assets` still needs to be on.
 Choices, limits and "Ignore budget" are person-owned fields: builder saves preserve the values on
 disk, and duplicating a project retains them. An older build opens a version 4 project read-only.
+
+`assets.json` version 1 is `{"version": 1, "records": [...]}`. Each record is one paid generation:
+`file`, `kind` (`image`, `model`, `speech`, `sound` or `music`), `prompt`, the `provider` and `model`
+that made it, the `amount` the provider reported in `unit` (`usd` or `credits`), `cost_missing` and
+`at_ms`. A generation whose provider gave no cost has no `amount` and `cost_missing` set, and the
+type's usage is then a lower bound. Credits are never converted to dollars. A type's usage
+adds up the records of its kind at its current provider and unit with `at_ms` not before the type's
+`since_ms`. Version 0, a bare list with a dollar `cost_usd` and no provider, is read as an `amount`
+in dollars with an empty provider and model; such records count only for a type billed in dollars
+and counted from the start of the project (`since_ms` 0). A ledger that can't be read, has a charge
+that isn't a non-negative number with its unit, or is of a newer version is never treated as empty:
+spending stops until it is repaired or Craft Anything is updated.
 
 ## Stand-in cached responses
 
