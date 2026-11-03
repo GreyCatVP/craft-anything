@@ -120,6 +120,7 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
     }
     ui.add_space(10.0);
     let detected: Vec<Detected> = app.detected.clone().unwrap_or_default();
+    let tab = crate::detect_tabs::bar(ui, &mut app.state.detect_tab, &detected);
     let list_h = (ui.ctx().content_rect().height() - 330.0).clamp(220.0, 520.0);
     egui::ScrollArea::vertical().max_height(list_h).show(ui, |ui| {
         ui.set_width(width);
@@ -130,9 +131,15 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
             });
             ui.add_space(8.0);
         }
-        for d in &detected {
+        ui.add_space(4.0);
+        let mut shown = 0;
+        for d in detected.iter().filter(|d| crate::detect_tabs::tab_of(d) == tab) {
             brain_card(app, ui, d);
             ui.add_space(8.0);
+            shown += 1;
+        }
+        if !app.detecting && shown == 0 && !detected.is_empty() {
+            ui.label(RichText::new(tr("Nothing of this kind was found.")).color(t.text_faint));
         }
         if !app.detecting && detected.is_empty() {
             widgets::card(&t).show(ui, |ui| {

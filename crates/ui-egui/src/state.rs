@@ -397,6 +397,9 @@ pub struct PaletteState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
+    /// Which half of Detect's findings is showing (a view choice, not part of the project).
+    #[serde(skip)]
+    pub detect_tab: Option<crate::detect_tabs::DetectTab>,
     pub screen: Screen,
     pub first_run: FirstRunStep,
     pub purpose: Purpose,
@@ -526,6 +529,7 @@ impl PluginForm {
 impl Default for UiState {
     fn default() -> Self {
         UiState {
+            detect_tab: None,
             screen: Screen::Home,
             first_run: FirstRunStep::Welcome,
             purpose: Purpose::OwnOrAuthorized,

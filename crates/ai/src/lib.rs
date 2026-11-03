@@ -79,6 +79,14 @@ impl BackendKind {
         }
     }
 
+    /// A coding agent run as a program, rather than an HTTP API.
+    pub fn is_harness(self) -> bool {
+        match self {
+            BackendKind::AgentCli => true,
+            BackendKind::Anthropic | BackendKind::Openai | BackendKind::Openrouter | BackendKind::Gemini | BackendKind::OpenaiCompatible => false,
+        }
+    }
+
     pub fn needs_key(self) -> bool {
         matches!(self, BackendKind::Anthropic | BackendKind::Openai | BackendKind::Openrouter | BackendKind::Gemini)
     }

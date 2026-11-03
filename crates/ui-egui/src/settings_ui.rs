@@ -542,8 +542,15 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         app.set_role(craft_anything_ai::Role::Extractor, e);
     }
     ui.add_space(8.0);
+    let detected = app.detected.clone().unwrap_or_default();
+    let mut tab = {
+        let (providers, harnesses) = crate::detect_tabs::counts(&detected);
+        crate::detect_tabs::resolve(app.state.detect_tab, providers, harnesses)
+    };
     ui.horizontal(|ui| {
         widgets::caption(ui, "Found on this computer");
+        ui.add_space(12.0);
+        tab = crate::detect_tabs::bar(ui, &mut app.state.detect_tab, &detected);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if app.detecting {
                 ui.add(crate::widgets::Spinner::new().color(t.accent));
@@ -553,14 +560,17 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         });
     });
     ui.add_space(4.0);
-    let detected = app.detected.clone().unwrap_or_default();
     if detected.is_empty() && !app.detecting {
         ui.label(
             RichText::new(tr("Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below."))
                 .color(t.text_faint),
         );
     }
-    for d in detected {
+    let shown = detected.iter().filter(|d| crate::detect_tabs::tab_of(d) == tab).count();
+    if shown == 0 && !detected.is_empty() && !app.detecting {
+        ui.label(RichText::new(tr("Nothing of this kind was found.")).color(t.text_faint));
+    }
+    for d in detected.into_iter().filter(|d| crate::detect_tabs::tab_of(d) == tab) {
         let configured = app.backends.iter().any(|b| b.name == d.suggestion.name);
         widgets::panel(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
