@@ -1944,6 +1944,69 @@ fn a_paragraph_is_drawn_as_one_piece_of_text() {
 }
 
 #[test]
+fn long_agent_answers_do_not_push_the_conversation_under_the_sidebar() {
+    use craft_anything_ui_egui::state::FeedItem;
+    fn text_rects(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| text_rects(s, out)),
+            egui::Shape::Text(text) if text.galley.text().contains("file:///") || text.galley.text().contains("long_component_") => {
+                out.push(shape.visual_bounding_rect());
+            }
+            _ => {}
+        }
+    }
+    let long_path = format!("C:\\Example\\{}\\source.rs", "long_component_".repeat(40));
+    let long_link = format!("[source.rs](file:///C:/Example/{}/source.rs)", "nested_module/".repeat(40));
+    let replies = [
+        long_link,
+        format!("`{long_path}`"),
+        format!("```text\n{long_path}\n```"),
+        "servidor IPC [engine.rs](file:///C:/Users/alice/MyDrive1/Documents/Craft%20Anything/demo1/app/src/engine.rs).".to_string(),
+        include_str!("fixtures/message-width.md").to_string(),
+    ];
+    for size in [egui::vec2(1920.0, 1032.0), egui::vec2(1280.0, 820.0)] {
+        for in_chat in [false, true] {
+            for (case, reply) in replies.iter().enumerate() {
+                let reply = reply.clone();
+                let mut h = harness_sized(size, move || {
+                    let mut a = demo::app(demo::engine(Mode::Beginner, true));
+                    if in_chat {
+                        demo::fill_ask(&mut a);
+                        a.state.chat = vec![ChatItem::Assistant { text: "Before the long answer".into(), backend: None, streaming: false }];
+                    } else {
+                        demo::fill_project(&mut a);
+                        a.state.feed = vec![FeedItem::Agent { text: "Before the long answer".into(), streaming: false }];
+                    }
+                    a
+                });
+                h.run_steps(3);
+                if in_chat {
+                    h.state_mut().state.chat.push(ChatItem::Assistant { text: reply.clone(), backend: None, streaming: false });
+                    h.state_mut().state.chat.push(ChatItem::Assistant { text: "After the long answer".into(), backend: None, streaming: false });
+                } else {
+                    h.state_mut().state.feed.push(FeedItem::Agent { text: reply.clone(), streaming: false });
+                    h.state_mut().state.feed.push(FeedItem::Agent { text: "After the long answer".into(), streaming: false });
+                }
+                h.run_steps(4);
+                let composer = h.get_by_label(if in_chat { "Ask a question" } else { "Ask for a change" }).rect();
+                let mut long = Vec::new();
+                for shape in &h.output().shapes {
+                    text_rects(&shape.shape, &mut long);
+                }
+                assert!(!long.is_empty(), "the answer was not painted");
+                let after = h.get_by_label("After the long answer").rect();
+                assert!(
+                    long.iter().all(|r| r.left() >= composer.left() - 2.0 && r.right() <= composer.right() + 2.0)
+                        && after.left() >= composer.left() - 1.0
+                        && after.right() <= composer.right() + 1.0,
+                    "the answer displaced the conversation: long={long:?}, answer={after:?}, composer={composer:?}, size={size:?}, chat={in_chat}, case={case}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn make_says_who_builds_and_a_picked_builder_stays_with_the_project() {
     use craft_anything_ai::{BackendConfig, BackendKind, rebuild::StandIns};
     use craft_anything_engine::workspace::Workspace;
