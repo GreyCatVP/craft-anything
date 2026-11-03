@@ -129,6 +129,19 @@ mod tests {
     }
 
     #[test]
+    fn helper_handles_stop_arriving_after_connection_is_accepted() {
+        let (mut guard, port) = helper();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        stream.write_all(b"stop").unwrap();
+        let exited = guard.0.wait_timeout(Duration::from_secs(2)).is_some();
+        if !exited {
+            stop_if_alive(port);
+        }
+        assert!(exited, "the helper must process a stop that arrives after accept");
+    }
+
+    #[test]
     fn releasing_a_finished_keep_awake_helper_does_not_wait_for_the_deadline() {
         let mut process = stand_in("tests::keep_awake_finished_stand_in").spawn().unwrap();
         assert!(process.wait_timeout(Duration::from_secs(5)).unwrap().as_ref().unwrap().success);
@@ -151,6 +164,7 @@ mod tests {
         while Instant::now() < deadline {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
                     let mut byte = [0];
                     if stream.read(&mut byte).ok() == Some(1) {

@@ -4,17 +4,25 @@
 use super::protocol::{GhidraError, Request, Response};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
 
 /// How long one socket read blocks before we re-check the deadline and the cancel flag.
 const READ_TICK: Duration = Duration::from_millis(200);
+
+/// Largest reply line we read. The bridge answers with lists that the target decides the size
+/// of (every function in the program), so a reply is refused rather than read without end.
+pub const MAX_REPLY_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct Client {
     writer: TcpStream,
     reader: BufReader<TcpStream>,
     token: String,
     next_id: u64,
+    /// The reply line read so far. It's kept between read ticks, so a long reply that arrives
+    /// over more than one tick isn't cut.
+    pending: Vec<u8>,
+    max_reply: usize,
 }
 
 impl std::fmt::Debug for Client {
@@ -35,7 +43,7 @@ impl Client {
                 Ok(stream) => {
                     stream.set_read_timeout(Some(READ_TICK)).map_err(|e| GhidraError::Connection(e.to_string()))?;
                     let reader = BufReader::new(stream.try_clone().map_err(|e| GhidraError::Connection(e.to_string()))?);
-                    return Ok(Client { writer: stream, reader, token: token.to_string(), next_id: 1 });
+                    return Ok(Client { writer: stream, reader, token: token.to_string(), next_id: 1, pending: Vec::new(), max_reply: MAX_REPLY_BYTES });
                 }
                 Err(e) => {
                     last = e.to_string();
@@ -62,15 +70,13 @@ impl Client {
             if Instant::now() >= deadline {
                 return Err(GhidraError::Timeout(format!("no reply to {method} within the deadline")));
             }
-            let mut buf = String::new();
-            match self.reader.read_line(&mut buf) {
-                Ok(0) => return Err(GhidraError::Connection("the bridge closed the connection".into())),
-                Ok(_) => {
-                    let trimmed = buf.trim();
-                    if trimmed.is_empty() {
+            match self.read_line_part() {
+                Ok(None) => continue,
+                Ok(Some(line)) => {
+                    if line.iter().all(u8::is_ascii_whitespace) {
                         continue;
                     }
-                    let resp: Response = serde_json::from_str(trimmed).map_err(|e| GhidraError::Protocol(format!("bad response: {e}")))?;
+                    let resp: Response = serde_json::from_slice(&line).map_err(|e| GhidraError::Protocol(format!("bad response: {e}")))?;
                     if resp.id != id {
                         // Out-of-order frame; keep reading for ours.
                         continue;
@@ -81,14 +87,46 @@ impl Client {
                     let err = resp.error.unwrap_or(super::protocol::WireError { code: "bridge_error".into(), message: "unknown error".into() });
                     return Err(GhidraError::Bridge { code: err.code, message: err.message });
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                    // Read tick elapsed; loop re-checks deadline and cancel.
-                    continue;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(GhidraError::Connection(e.to_string())),
+                Err(e) => return Err(e),
             }
         }
+    }
+
+    /// Read what's available of the next reply line. `Some` is a whole line; `None` means the
+    /// read tick passed first (the deadline and cancel flag are checked again before the next).
+    fn read_line_part(&mut self) -> Result<Option<Vec<u8>>, GhidraError> {
+        let room = self.max_reply.saturating_sub(self.pending.len());
+        if room == 0 {
+            // The rest of this reply is still on the socket, so later replies can't be told
+            // apart from it: close the connection rather than read on.
+            let _ = self.writer.shutdown(Shutdown::Both);
+            self.pending = Vec::new();
+            return Err(GhidraError::Protocol(format!("a reply from the bridge was larger than {} MiB", self.max_reply / (1024 * 1024))));
+        }
+        let buf = match self.reader.fill_buf() {
+            Ok(buf) => buf,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {
+                return Ok(None);
+            }
+            Err(e) => return Err(GhidraError::Connection(e.to_string())),
+        };
+        if buf.is_empty() {
+            return Err(GhidraError::Connection("the bridge closed the connection".into()));
+        }
+        let (take, complete) = match buf.iter().position(|&b| b == b'\n') {
+            Some(i) if i < room => (i + 1, true),
+            _ => (buf.len().min(room), false),
+        };
+        self.pending.extend_from_slice(buf.get(..take).unwrap_or_default());
+        self.reader.consume(take);
+        Ok(complete.then(|| std::mem::take(&mut self.pending)))
+    }
+
+    /// Use a smaller reply limit (tests).
+    #[cfg(test)]
+    pub(crate) fn with_max_reply(mut self, bytes: usize) -> Client {
+        self.max_reply = bytes;
+        self
     }
 
     /// The handshake: returns the bridge's session info.

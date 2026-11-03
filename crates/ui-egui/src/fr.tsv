@@ -1,5 +1,12 @@
 # French UI catalog: English key<TAB>French text. See i18n.rs.
+Attach pictures (or drop or paste them here)	Joindre des images (ou les déposer ou coller ici)
 Coding agent app	Application d'agent de code
+Load a picture	Charger une image
+Paste pictures	Coller des images
+The clipboard can't be read:	Impossible de lire le presse-papiers :
+The pasted picture wasn't attached: another screen was opened meanwhile.	L'image collée n'a pas été jointe : un autre écran a été ouvert entre-temps.
+The picture on the clipboard is too large.	L'image du presse-papiers est trop grande.
+There's no picture on the clipboard to paste.	Le presse-papiers ne contient aucune image à coller.
 Turn on an AI	Activer une IA
 Turn off an AI	Désactiver une IA
 Remove an AI	Retirer une IA
@@ -93,6 +100,8 @@ Getting Godot	Récupération de Godot
 Getting Unity Hub	Récupération de Unity Hub
 Getting the Epic Games Launcher	Récupération de l'Epic Games Launcher
 The installer is open. Follow its steps, then come back here.	L'installateur est ouvert. Suivez ses étapes, puis revenez ici.
+{name} can't be attached: a message takes pictures up to 20 MB.	Impossible de joindre {name} : un message accepte des images de 20 Mo au plus.
+{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.	Impossible de joindre {name} : ce n'est pas une image PNG, JPEG, GIF ou WebP.
 {name} is ready.	{name} est prêt.
 Starting…	Démarrage…
 Getting Ghidra	Récupération de Ghidra
@@ -589,7 +598,6 @@ Ask about the build, e.g. "where are the latest files?" Nothing changes and no b
 Add more info. The builder reads it at its next step.	Ajoutez des précisions. Le constructeur les lira à sa prochaine étape.
 Ask for a change, e.g. "make the header blue" or "add a contact form"	Demandez une modification, par ex. « mets l'en-tête en bleu » ou « ajoute un formulaire de contact »
 Ask for a change	Demander une modification
-Attach pictures (or drop them here)	Joindre des images (ou les déposer ici)
 Pause	Pause
 Pausing…	Mise en pause…
 Change it	Modifier

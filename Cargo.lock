@@ -1320,6 +1320,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1377,6 +1378,7 @@ dependencies = [
 name = "craft-anything-ui-egui"
 version = "0.4.0"
 dependencies = [
+ "arboard",
  "craft-anything-ai",
  "craft-anything-engine",
  "craft-anything-engines",

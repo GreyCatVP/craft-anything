@@ -55,14 +55,17 @@ pub fn port_open(base_url: &str, timeout: Duration) -> bool {
     addrs.iter().any(|a| TcpStream::connect_timeout(a, timeout).is_ok())
 }
 
-/// Words in the names of models that turn text into numbers, rank or transcribe, and can't chat:
-/// an embedding model listed first was used for every message and each one failed (#127).
-const NOT_CHAT: &[&str] = &["embed", "minilm", "bge-", "rerank", "whisper", "tts"];
+/// Task tokens and known model families that turn text into numbers, rank or transcribe.
+/// Match the model name, not its publisher: `matts/llama-3-instruct` can chat (#127).
+const NOT_CHAT: &[&str] = &["embed", "embedding", "embeddings", "embeddinggemma", "minilm", "bge", "rerank", "reranker", "whisper", "tts", "xtts"];
 
-/// The first model a server lists that can chat (else its first, so something is chosen).
+/// The first model a server lists that can chat. A specialised model isn't a chat fallback.
 pub(crate) fn chat_model(models: &[String]) -> Option<String> {
-    let chats = |m: &&String| !NOT_CHAT.iter().any(|w| m.to_ascii_lowercase().contains(w));
-    models.iter().find(chats).or(models.first()).cloned()
+    let chats = |m: &&String| {
+        let name = m.rsplit('/').next().unwrap_or(m).to_ascii_lowercase();
+        !name.split(|c: char| !c.is_ascii_alphanumeric()).any(|token| NOT_CHAT.contains(&token))
+    };
+    models.iter().find(chats).cloned()
 }
 
 /// One local server: connect, then list models.
@@ -78,7 +81,11 @@ pub fn probe_local(label: &str, base: &str) -> Option<Detected> {
         // No answer in time: it may still be loading a model.
         Err(_) => Vec::new(),
     };
-    let model = chat_model(&models).unwrap_or_default();
+    let model = match chat_model(&models) {
+        Some(model) => model,
+        None if models.is_empty() => String::new(),
+        None => return None,
+    };
     let reason = match models.len() {
         0 => format!("Found {label} running at {base}"),
         1 => format!("Found {label} running with 1 model"),
@@ -214,22 +221,37 @@ pub fn detect_all() -> Vec<Detected> {
     }
     let mut hosts = crate::ssh::ssh_hosts();
     hosts.truncate(5);
-    let ssh: Vec<Detected> = hosts
-        .into_iter()
-        .map(|h| {
-            let mut c = cfg(&format!("Claude Code on {h}"), BackendKind::AgentCli, "claude-code");
-            c.ssh_host = Some(h.clone());
-            Detected { suggestion: c, reason: format!("SSH host {h} from ~/.ssh/config (runs an agent CLI there)"), needs_key: false }
-        })
-        .collect();
+    let ssh: Vec<Detected> = hosts.into_iter().flat_map(remote_agents).collect();
     parts.push((100, ssh));
     parts.sort_by_key(|(i, _)| *i);
     parts.into_iter().flat_map(|(_, v)| v).collect()
 }
 
+/// SSH aliases are suggestions, not proof that an agent is installed there.
+fn remote_agents(host: String) -> Vec<Detected> {
+    [("claude-code", "Claude Code"), ("opencode", "OpenCode")]
+        .into_iter()
+        .map(|(id, label)| {
+            let mut c = cfg(&format!("{label} on {host}"), BackendKind::AgentCli, id);
+            c.ssh_host = Some(host.clone());
+            Detected { suggestion: c, reason: format!("SSH host {host} from ~/.ssh/config (check that {label} is installed there)"), needs_key: false }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Non-Git SSH hosts offer both supported agent suggestions without probing the remote computer.
+    #[test]
+    fn ssh_hosts_offer_opencode_as_well_as_claude_code() {
+        let found = remote_agents("test-box".into());
+        assert_eq!(found.iter().map(|d| d.suggestion.model.as_str()).collect::<Vec<_>>(), ["claude-code", "opencode"]);
+        let oc = &found[1].suggestion;
+        assert_eq!(oc.name, "OpenCode on test-box");
+        assert_eq!(oc.ssh_host.as_deref(), Some("test-box"));
+    }
 
     #[test]
     fn env_detection() {
@@ -272,10 +294,36 @@ mod tests {
         let names = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(chat_model(&names(&["nomic-embed-text:latest", "llama3.2:3b"])).as_deref(), Some("llama3.2:3b"));
         assert_eq!(chat_model(&names(&["mxbai-embed-large", "all-MiniLM-L6-v2", "qwen3:8b"])).as_deref(), Some("qwen3:8b"));
-        assert_eq!(chat_model(&names(&["nomic-embed-text"])).as_deref(), Some("nomic-embed-text"), "something is chosen");
+        assert_eq!(chat_model(&names(&["nomic-embed-text"])), None, "an embedding model cannot answer a chat request");
         assert_eq!(chat_model(&[]), None);
         let url = crate::tests::serve("200 OK", r#"{"object":"list","data":[{"id":"nomic-embed-text:latest"},{"id":"gemma3:4b"}]}"#);
         assert_eq!(probe_local("Ollama", &url).unwrap().suggestion.model, "gemma3:4b");
+    }
+
+    #[test]
+    fn specialised_only_servers_are_not_offered_for_chat() {
+        for body in [
+            r#"{"object":"list","data":[{"id":"nomic-embed-text"}]}"#,
+            r#"{"object":"list","data":[{"id":"bge-reranker-v2"}]}"#,
+            r#"{"object":"list","data":[{"id":"whisper-large"}]}"#,
+            r#"{"object":"list","data":[{"id":"tts-1"}]}"#,
+            r#"{"object":"list","data":[{"id":"all-MiniLM-L6-v2"}]}"#,
+        ] {
+            let url = crate::tests::serve("200 OK", body);
+            assert!(probe_local("Local server", &url).is_none(), "{body} has no chat model");
+        }
+    }
+
+    #[test]
+    fn task_markers_do_not_match_publishers_or_unrelated_words() {
+        for model in ["matts/llama-3-instruct", "embedding-author/qwen-2.5-instruct", "embedded-chat", "whisper/gemma-3"] {
+            assert_eq!(chat_model(&[model.into()]).as_deref(), Some(model));
+        }
+        let url = crate::tests::serve("200 OK", r#"{"object":"list","data":[{"id":"matts/llama-3-instruct"}]}"#);
+        assert_eq!(probe_local("Local", &url).unwrap().suggestion.model, "matts/llama-3-instruct");
+        for model in ["vendor/text-embedding-3-small", "nomic-embed-text:latest", "BAAI/bge-m3", "vendor/embeddinggemma-300m", "XTTS-v2"] {
+            assert!(chat_model(&[model.into()]).is_none(), "{model}");
+        }
     }
 
     /// #83: a server set up in OpenCode (here LM Studio on another port) is offered; hosted

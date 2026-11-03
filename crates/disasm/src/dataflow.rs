@@ -155,15 +155,29 @@ pub fn def_use(img: &Image, prog: &Program, f: &Function, max_nodes: usize, max_
     for (r, id) in &param_node {
         entry_defs.insert(r.clone(), BTreeSet::from([*id]));
     }
+    let noreturn_calls: BTreeSet<u64> = f.calls.iter().filter(|call| prog.call_is_noreturn(call)).map(|call| call.site).collect();
+    let record_writes = |cur: &mut Defs, i: &Insn, id: usize| {
+        let conditional_call = i.cond.is_some() && matches!(i.flow, Flow::Call { .. } | Flow::IndirectCall { .. });
+        if conditional_call && noreturn_calls.contains(&i.addr) {
+            // Only the skipped path continues; a non-returning call supplies no later value.
+            return;
+        }
+        for w in &i.writes {
+            if !ignored(w) {
+                let definitions = cur.entry(w.clone()).or_default();
+                // A skipped call keeps the earlier value; an unconditional write replaces it.
+                if !conditional_call {
+                    definitions.clear();
+                }
+                definitions.insert(id);
+            }
+        }
+    };
     let transfer = |inp: &Defs, insns: &[Insn]| -> Defs {
         let mut cur = inp.clone();
         for i in insns {
             if let Some(&id) = node_of.get(&i.addr) {
-                for w in &i.writes {
-                    if !ignored(w) {
-                        cur.insert(w.clone(), BTreeSet::from([id]));
-                    }
-                }
+                record_writes(&mut cur, i, id);
             }
         }
         cur
@@ -240,11 +254,7 @@ pub fn def_use(img: &Image, prog: &Program, f: &Function, max_nodes: usize, max_
                     .collect();
                 out.effects.push(Effect { addr: i.addr, kind: "call", text: name, inputs });
             }
-            for w in &i.writes {
-                if !ignored(w) {
-                    cur.insert(w.clone(), BTreeSet::from([me]));
-                }
-            }
+            record_writes(&mut cur, i, me);
         }
     }
     out.parameters = args.iter().filter(|a| params_used.contains(**a)).map(|a| (*a).to_string()).collect();

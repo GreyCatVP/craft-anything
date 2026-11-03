@@ -501,6 +501,17 @@ impl Scrub {
         (names, kept.join("&"))
     }
 
+    /// Apply the current query rules to incoming requests and older saved samples alike.
+    fn query_text(&mut self, query: &str) -> String {
+        let pairs: Vec<(String, String)> = query
+            .split('&')
+            .take(200)
+            .filter(|p| !p.is_empty())
+            .map(|p| p.split_once('=').map_or((p.to_string(), String::new()), |(k, v)| (k.to_string(), v.to_string())))
+            .collect();
+        self.query(&pairs, false).1
+    }
+
     fn note_header(&mut self, name: &str) {
         self.dropped.headers = self.dropped.headers.saturating_add(1);
         let l = name.to_ascii_lowercase();
@@ -1115,13 +1126,7 @@ pub fn answer(standin: &StandIn, turns: &mut Turns, method: &str, path: &str, qu
     // A request is brought to the same form as the recording, so a dropped value still compares equal.
     let mut scrub = Scrub::new(&[]);
     let clean_path = scrub.path(path.split(['?', '#']).next().unwrap_or_default(), false);
-    let pairs: Vec<(String, String)> = query
-        .split('&')
-        .take(200)
-        .filter(|p| !p.is_empty())
-        .map(|p| p.split_once('=').map_or((p.to_string(), String::new()), |(k, v)| (k.to_string(), v.to_string())))
-        .collect();
-    let (_, clean_query) = scrub.query(&pairs, false);
+    let clean_query = scrub.query_text(query);
     let key = request_key(body);
     let key = key.as_deref();
 
@@ -1141,7 +1146,13 @@ pub fn answer(standin: &StandIn, turns: &mut Turns, method: &str, path: &str, qu
     let same_method = || standin.routes.iter().enumerate().filter(|(_, r)| r.method == look_for);
     let mut picked: Option<(usize, MatchKind, Vec<usize>)> = None;
     for (ri, route) in same_method() {
-        let exact: Vec<usize> = route.samples.iter().enumerate().filter(|(_, s)| s.path == clean_path && s.query == clean_query).map(|(i, _)| i).collect();
+        let exact: Vec<usize> = route
+            .samples
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.path == clean_path && (s.query == clean_query || scrub.query_text(&s.query) == clean_query))
+            .map(|(i, _)| i)
+            .collect();
         if let Some(fit) = consider(route, exact) {
             picked = Some((ri, MatchKind::PathAndQuery, fit));
             break;

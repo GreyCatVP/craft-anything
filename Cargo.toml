@@ -41,6 +41,8 @@ egui = "0.36"
 egui_extras = { version = "0.36", default-features = false }
 egui_kittest = "0.36"
 rfd = "0.17"
+# Pictures pasted from the clipboard (egui only receives pasted text); egui-winit already uses it.
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 rayon = "1"
 proptest = "1"
 # JavaScript (pure Rust, wasm-safe)

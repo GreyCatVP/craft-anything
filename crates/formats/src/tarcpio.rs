@@ -142,8 +142,8 @@ pub fn tar(data: &[u8], max_members: usize) -> Option<Listing> {
             out.length = pos as u64;
             break;
         };
-        if let Some(s) = pax_size.take()
-            && !matches!(typeflag, b'x' | b'g' | b'L' | b'K')
+        if !matches!(typeflag, b'x' | b'g' | b'L' | b'K')
+            && let Some(s) = pax_size.take()
         {
             size = s;
         }
@@ -177,7 +177,8 @@ pub fn tar(data: &[u8], max_members: usize) -> Option<Listing> {
             }
             b'g' => {}
             _ => {
-                let ustar = h.get(257..262) == Some(b"ustar");
+                // Old GNU headers use these bytes for timestamps and sparse-file metadata.
+                let ustar = h.get(257..263) == Some(b"ustar\0");
                 let base = text(h.get(0..100).unwrap_or(&[]));
                 let prefix = if ustar { text(h.get(345..500).unwrap_or(&[])) } else { String::new() };
                 let joined = if prefix.is_empty() { base } else { format!("{prefix}/{base}") };
@@ -338,6 +339,19 @@ pub fn cpio(data: &[u8], max_members: usize) -> Option<Listing> {
             out.truncated = true;
             out.length = pos as u64;
             break;
+        }
+        if format == "cpio-crc" {
+            match h.get(102..110).and_then(hex_field).and_then(|n| u32::try_from(n).ok()) {
+                Some(expected) => {
+                    if let Some(body) = r.slice(data_off, size) {
+                        let actual = body.iter().fold(0u32, |sum, &byte| sum.wrapping_add(u32::from(byte)));
+                        if actual != expected {
+                            out.warnings.push(format!("{name}: data checksum mismatch (stored {expected:08x}, computed {actual:08x})"));
+                        }
+                    }
+                }
+                None => out.warnings.push(format!("{name}: unreadable data checksum")),
+            }
         }
         out.members.push(Member { name, kind, size: filesize, data_offset: data_off as u64, link_target, mode });
         if next > data.len() {

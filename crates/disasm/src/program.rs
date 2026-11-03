@@ -200,6 +200,7 @@ pub struct Program {
     /// block start → (end, function entry)
     block_index: BTreeMap<u64, (u64, u64)>,
     name_index: BTreeMap<String, u64>,
+    symbol_noreturn: BTreeSet<u64>,
 }
 
 const NORETURN: &[&str] = &[
@@ -527,13 +528,31 @@ impl Program {
             "functions reached only through computed pointers or at run time may be missing; absence is not proof".into(),
         ));
         ctl.progress(1.0, "done");
-        Ok(Program { mode, functions, strings, xrefs_to, xrefs_from, import_slots: slots, data_names, stats, limitations, block_index, name_index })
+        Ok(Program {
+            mode,
+            functions,
+            strings,
+            xrefs_to,
+            xrefs_from,
+            import_slots: slots,
+            data_names,
+            stats,
+            limitations,
+            block_index,
+            name_index,
+            symbol_noreturn: sym_noreturn,
+        })
     }
 
     /// True when function discovery stopped at the function or instruction cap, so the function
     /// list (and everything derived from it) is incomplete.
     pub fn discovery_capped(&self) -> bool {
         self.limitations.iter().any(|(c, _)| c == "function_limit" || c == "instruction_limit")
+    }
+
+    /// The same known targets used to stop function scanning, independent of call conditions.
+    pub(crate) fn call_is_noreturn(&self, call: &CallSite) -> bool {
+        call.import.as_deref().is_some_and(is_noreturn) || call.target.is_some_and(|target| self.symbol_noreturn.contains(&target))
     }
 
     /// The function whose blocks contain `addr` (or whose range does).
@@ -857,7 +876,7 @@ fn scan_function(ctx: &Ctx<'_>, entry: u64, known: &BTreeSet<u64>) -> Scan {
                     let import = ctx.stubs.get(&target).cloned();
                     let noreturn = import.as_deref().is_some_and(is_noreturn) || ctx.sym_noreturn.contains(&target);
                     sc.calls.push(CallSite { site: a, target: Some(target), import, indirect: false });
-                    if noreturn {
+                    if noreturn && ins.cond.is_none() {
                         break;
                     }
                 }
@@ -868,7 +887,7 @@ fn scan_function(ctx: &Ctx<'_>, entry: u64, known: &BTreeSet<u64>) -> Scan {
                     }
                     let noreturn = import.as_deref().is_some_and(is_noreturn);
                     sc.calls.push(CallSite { site: a, target: None, import, indirect: true });
-                    if noreturn {
+                    if noreturn && ins.cond.is_none() {
                         break;
                     }
                 }

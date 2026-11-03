@@ -153,19 +153,14 @@ pub fn analyze(path: &str, src: &str, limits: &Limits) -> Analysis {
 }
 
 fn find_map_url(src: &str) -> Option<String> {
-    // Only the tail: the comment must be the last thing in the file to count.
-    let mut start = src.len().saturating_sub(4096);
-    while !src.is_char_boundary(start) {
-        start += 1;
-    }
-    let tail = src.get(start..).unwrap_or("");
-    for line in tail.lines().rev().take(8) {
+    // Only terminal comments count, but inline maps can be larger than a short scan window.
+    for line in src.lines().rev().take(8) {
         let t = line.trim();
         for p in ["//# sourceMappingURL=", "//@ sourceMappingURL=", "/*# sourceMappingURL="] {
             if let Some(u) = t.strip_prefix(p) {
                 let u = u.trim_end_matches("*/").trim();
                 if !u.is_empty() {
-                    return Some(u.chars().take(4096).collect());
+                    return Some(u.to_string());
                 }
             }
         }
@@ -233,7 +228,7 @@ fn parse_and_visit(src: &str, st: SourceType) -> Option<Analysis> {
     let webpack_hint = facts.bundler_markers.keys().any(|k| k.contains("webpack"));
     let mut bv = bundle::BundleVisitor::new(src, &lines, webpack_hint, scoping);
     bv.visit_program(&ret.program);
-    let bundle = bv.finish();
+    let bundle = bv.finish(&ret.program);
     Some(Analysis { facts, bundle })
 }
 

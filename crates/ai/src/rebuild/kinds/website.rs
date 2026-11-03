@@ -716,6 +716,14 @@ fn states_note(cx: &CheckCx, base: &str, out: &Path, dir: &str, unknowns: &mut V
 /// builder but don't change the score.
 pub struct WebVisualCheck;
 
+/// What the check says when there is no site to look at: the places `site_dir` accepts, in the
+/// place the app really is ("app/" or "the project folder", #494).
+fn missing_site_note(place: &str) -> String {
+    format!(
+        "No built site found in {place} yet. Expected an index.html in its dist/, build/ or out/ folder, or an index.html straight in {place} when there is no package.json."
+    )
+}
+
 impl Check for WebVisualCheck {
     fn id(&self) -> &'static str {
         CheckResult::WEB_VISUAL
@@ -725,7 +733,7 @@ impl Check for WebVisualCheck {
         let (ws, round) = (cx.ws, cx.round);
         let widths = cx.build_settings().widths();
         let Some(site) = site_dir(&ws.app_dir()) else {
-            return Ok(CheckResult::new(self.id(), round, false, "No built site found in app/dist, app/out or app/build yet."));
+            return Ok(CheckResult::new(self.id(), round, false, missing_site_note(ws.app_place())));
         };
         let base = cx.serve_preview(&site)?;
         let out = ws.checks_dir().join(format!("round-{round}"));
@@ -815,5 +823,33 @@ impl Check for WebVisualCheck {
         // One page needs no list; with several, each one's likeness is kept for the project page.
         let pages = if likeness.len() > 1 { likeness } else { Vec::new() };
         Ok(CheckResult { similarity: Some(avg), artifacts, pages, unknowns, claims, ..CheckResult::new(self.id(), round, true, notes.join(" | ")) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #494: the note names every place `site_dir` accepts, and the place the app really is.
+    #[test]
+    fn the_missing_site_note_names_what_site_dir_accepts() {
+        let note = missing_site_note("app/");
+        for named in ["dist/", "build/", "out/", "index.html straight in app/", "no package.json"] {
+            assert!(note.contains(named), "{named} in {note}");
+        }
+        assert!(missing_site_note("the project folder").contains("index.html straight in the project folder"));
+        // What it names is what is accepted, and a manifest turns the plain page down.
+        for folder in ["dist", "build", "out"] {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(d.path().join(folder)).unwrap();
+            std::fs::write(d.path().join(folder).join("index.html"), "<html></html>").unwrap();
+            assert_eq!(site_dir(d.path()), Some(d.path().join(folder)), "{folder}");
+        }
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(site_dir(d.path()), None, "nothing built");
+        std::fs::write(d.path().join("index.html"), "<html></html>").unwrap();
+        assert_eq!(site_dir(d.path()), Some(d.path().to_path_buf()), "a plain page");
+        std::fs::write(d.path().join("package.json"), "{}").unwrap();
+        assert_eq!(site_dir(d.path()), None, "a page beside a manifest is not a built site");
     }
 }

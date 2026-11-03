@@ -26,6 +26,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+pub mod progress;
+
 pub const MANIFEST: &str = "craft.json";
 
 /// Folders a copy of a project leaves out: what a build makes again, which can be gigabytes.
@@ -809,7 +811,9 @@ impl Workspace {
     /// the person's pictures…), which the builder never changes, even when the app is the
     /// project folder itself. checks/ isn't one: the builder keeps its notes there.
     pub fn is_own_record(&self, p: &Path) -> bool {
-        OWN_NAMES.iter().filter(|n| **n != "checks").any(|n| inside(&self.root.join(n), p))
+        let own = |root: &Path, p: &Path| OWN_NAMES.iter().filter(|n| **n != "checks").any(|n| inside(&root.join(n), p));
+        // Also where a link would really take it.
+        own(&self.root, p) || matches!((real_path(&self.root), real_path(p)), (Some(root), Some(p)) if own(&root, &p))
     }
     /// Separate from capture/, which a website study replaces.
     pub fn reference_dir(&self) -> PathBuf {
@@ -949,6 +953,40 @@ pub fn inside(dir: &Path, p: &Path) -> bool {
     }
 }
 
+/// Where `p` really is: its deepest part that exists, with every link in it followed, then the
+/// rest as written (parts that don't exist yet can't be links). `None` when an existing part
+/// can't be followed, such as a link to nothing, since writing there would follow it.
+pub fn real_path(p: &Path) -> Option<PathBuf> {
+    let mut existing = p;
+    let mut missing = Vec::new();
+    while existing.symlink_metadata().is_err() {
+        missing.push(existing.file_name()?);
+        existing = existing.parent()?;
+    }
+    let mut real = std::fs::canonicalize(existing).ok()?;
+    real.extend(missing.iter().rev());
+    Some(real)
+}
+
+/// [`inside`], after following links: `p` is inside `dir` where the file system really puts
+/// them both, so a link inside `dir` can't lead out of it. Only the real paths are compared: `p`
+/// may already be partly resolved (`..` after a link) while `dir` is as written, and a `dir`
+/// that sits behind a link (macOS's `/var` → `/private/var`) is still the same folder.
+pub fn really_inside(dir: &Path, p: &Path) -> bool {
+    matches!((real_path(dir), real_path(p)), (Some(d), Some(p)) if inside(&d, &p))
+}
+
+/// The other side of [`really_inside`], for places that must be kept out of: `p` may land in
+/// `dir` as written, once links are followed (also links in `dir`'s own path, such as macOS's
+/// `/etc` → `/private/etc`), or because a link in `p` can't be followed to tell.
+pub fn may_reach(dir: &Path, p: &Path) -> bool {
+    inside(dir, p)
+        || match real_path(p) {
+            Some(real) => inside(dir, &real) || real_path(dir).is_some_and(|d| inside(&d, &real)),
+            None => true,
+        }
+}
+
 /// How many of a picked folder's names are kept for the builder.
 pub const START_FILES_SHOWN: usize = 40;
 
@@ -1025,12 +1063,11 @@ fn pictures_in(dir: &Path) -> Vec<PathBuf> {
 /// Copy pictures into `dir` as picture-N.ext, numbering on from what's there. Files that aren't
 /// PNG, JPEG, WebP or GIF, or are over 20 MB, are skipped.
 fn copy_pictures(dir: &Path, files: &[PathBuf]) -> Result<Vec<PathBuf>, ToolError> {
-    const MAX: u64 = 20 * 1024 * 1024;
     std::fs::create_dir_all(dir).map_err(|e| ToolError::io(dir.display(), e))?;
     let mut next = pictures_in(dir).iter().map(|p| picture_number(p)).max().unwrap_or(0);
     let mut added = Vec::new();
     for f in files {
-        if !is_picture(f) || f.metadata().map_or(true, |m| m.len() > MAX) {
+        if !attachable_picture(f) {
             continue;
         }
         next += 1;
@@ -1047,6 +1084,93 @@ fn picture_number(p: &Path) -> u32 {
     p.file_stem().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix("picture-")).and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
+/// The most pixels a pasted picture may have (a 16K screen): more is refused before encoding.
+const MAX_PASTED_PIXELS: u64 = 15360 * 8640;
+
+/// The largest picture a message sends ([`copy_pictures`] skips bigger files).
+const MAX_PICTURE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Whether the file starts the way a PNG, JPEG, GIF or WebP picture does, whatever its name says.
+/// Reads its first bytes, so not while drawing.
+pub fn picture_content(p: &Path) -> bool {
+    use std::io::Read as _;
+    let mut head = Vec::with_capacity(12);
+    if std::fs::File::open(p).and_then(|f| f.take(12).read_to_end(&mut head)).is_err() {
+        return false;
+    }
+    head.starts_with(b"\x89PNG\r\n\x1a\n")
+        || head.starts_with(&[0xFF, 0xD8, 0xFF])
+        || head.starts_with(b"GIF87a")
+        || head.starts_with(b"GIF89a")
+        || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP".as_slice()))
+}
+
+/// A picture file a message can take: a picture ([`is_picture`]) of at most 20 MB. Reads its
+/// size, so not while drawing.
+pub fn attachable_picture(p: &Path) -> bool {
+    is_picture(p) && p.metadata().is_ok_and(|m| m.is_file() && m.len() <= MAX_PICTURE_BYTES)
+}
+
+/// Where pictures pasted from the clipboard wait until their message is sent: this person's own
+/// cache folder (never a temp folder other users can read).
+pub fn pasted_dir() -> PathBuf {
+    dirs::cache_dir().or_else(|| dirs::home_dir().map(|h| h.join(".cache"))).unwrap_or_else(std::env::temp_dir).join("Craft Anything").join("pasted")
+}
+
+/// Save a picture pasted from the clipboard (8-bit RGBA, `width`×`height`) as `pasted-<time>.png`
+/// in `dir`, readable only by this person, where it waits until its message is sent (which
+/// copies it into the project). Pastes from earlier days are cleared out first, except those in
+/// `keep` (still attached to a draft or a message).
+pub fn save_pasted_picture(dir: &Path, width: u32, height: u32, rgba: Vec<u8>, keep: &[PathBuf]) -> Result<PathBuf, ToolError> {
+    let pixels = u64::from(width).saturating_mul(u64::from(height));
+    if pixels == 0 || pixels > MAX_PASTED_PIXELS {
+        return Err(ToolError::new(ErrorCode::OverLimit, format!("the pasted picture is {width}×{height}; at most a 16K screen fits")));
+    }
+    if pixels.checked_mul(4) != Some(rgba.len() as u64) {
+        return Err(ToolError::invalid("the pasted picture's pixels don't match its size"));
+    }
+    // Encoded against the limit, so a picture that won't fit never takes a second copy's memory.
+    let image = crate::tools::web_common::Image { width, height, rgba };
+    let max = usize::try_from(MAX_PICTURE_BYTES).unwrap_or(usize::MAX);
+    let Some(png) = crate::tools::web_common::encode_png_within(&image, max)? else {
+        return Err(ToolError::new(ErrorCode::OverLimit, "the pasted picture is over 20 MB as a PNG; a message takes pictures up to 20 MB")
+            .with_remediation("Paste a smaller part of the screen, or save it as a JPEG and attach the file."));
+    };
+    std::fs::create_dir_all(dir).map_err(|e| ToolError::io(dir.display(), e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    forget_old_pastes(dir, keep);
+    // The name is taken with create_new, so two pastes (or two copies of the app) never share one.
+    let ms = now_ms();
+    let mut n = 1u32;
+    let path = loop {
+        let path = if n == 1 { dir.join(format!("pasted-{ms}.png")) } else { dir.join(format!("pasted-{ms}-{n}.png")) };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => break path,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n = n.saturating_add(1),
+            Err(e) => return Err(ToolError::io(path.display(), e)),
+        }
+    };
+    craft_anything_platform::fs::write_atomic_private(&path, &png)?;
+    Ok(path)
+}
+
+/// Remove pastes over a day old from `dir` (only ours: `pasted-….png`), except those in `keep`.
+fn forget_old_pastes(dir: &Path, keep: &[PathBuf]) {
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        let ours = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("pasted-") && n.ends_with(".png"));
+        let old = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+        if ours && old && !keep.contains(&p) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// The default projects folder: `Documents/Craft Anything`, else `~/Craft Anything`.
 pub fn default_projects_dir() -> PathBuf {
     dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from(".")).join("Craft Anything")
@@ -1055,6 +1179,72 @@ pub fn default_projects_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_takes_picture_files_up_to_20_mb() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = dir.path().join("small.png");
+        std::fs::write(&small, b"png").unwrap();
+        let big = dir.path().join("big.PNG");
+        std::fs::File::create(&big).unwrap().set_len(MAX_PICTURE_BYTES + 1).unwrap();
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"hi").unwrap();
+        let folder = dir.path().join("folder.png");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(attachable_picture(&small));
+        for no in [&big, &text, &folder, &dir.path().join("gone.png")] {
+            assert!(!attachable_picture(no), "{}", no.display());
+        }
+        let copied = copy_pictures(&dir.path().join("attachments"), &[small, big]).unwrap();
+        assert_eq!(copied.len(), 1, "the big one is left out: {copied:?}");
+    }
+
+    #[test]
+    fn a_picture_is_told_by_its_first_bytes_not_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, bytes: &[u8]| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, bytes).unwrap();
+            p
+        };
+        for yes in [
+            file("a.png", b"\x89PNG\r\n\x1a\n...."),
+            file("b.jpg", &[0xFF, 0xD8, 0xFF, 0xE0]),
+            file("c.gif", b"GIF89a.."),
+            file("d.webp", b"RIFF\x10\0\0\0WEBPVP8 "),
+            file("e.png", &[0xFF, 0xD8, 0xFF, 0xDB]),
+        ] {
+            assert!(picture_content(&yes), "{}", yes.display());
+        }
+        for no in [file("f.png", b"png"), file("g.webp", b"RIFF\0\0\0\0WAVE"), file("h.png", b""), dir.path().join("gone.png")] {
+            assert!(!picture_content(&no), "{}", no.display());
+        }
+    }
+
+    #[test]
+    fn a_pasted_picture_is_saved_as_a_png_and_bad_sizes_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = save_pasted_picture(dir.path(), 2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255], &[]).unwrap();
+        assert!(is_picture(&p));
+        let bytes = std::fs::read(&p).unwrap();
+        assert_eq!(crate::tools::web_common::png_dimensions(&bytes).unwrap(), (2, 1));
+        let second = save_pasted_picture(dir.path(), 2, 1, vec![0; 8], &[]).unwrap();
+        assert_ne!(p, second, "two pastes in one millisecond don't overwrite each other");
+        assert!(save_pasted_picture(dir.path(), 2, 2, vec![0; 8], &[]).is_err(), "pixels that don't match the size");
+        assert!(save_pasted_picture(dir.path(), 0, 0, Vec::new(), &[]).is_err());
+        assert!(save_pasted_picture(dir.path(), u32::MAX, u32::MAX, Vec::new(), &[]).is_err());
+        assert_eq!(pictures_in(dir.path()).len(), 2, "fresh pastes are kept");
+        // A day later, a paste clears out old ones, but not one still attached somewhere.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 60 * 60);
+        for f in [&p, &second] {
+            std::fs::File::options().write(true).open(f).unwrap().set_modified(old).unwrap();
+        }
+        let third = save_pasted_picture(dir.path(), 2, 1, vec![0; 8], std::slice::from_ref(&second)).unwrap();
+        assert!(!p.exists() && second.exists() && third.exists());
+        let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        names.sort();
+        assert_eq!(names.len(), 2, "no temp files left behind: {names:?}");
+    }
 
     #[test]
     fn a_projects_usage_adds_up_across_runs_and_a_newer_file_is_left_alone() {

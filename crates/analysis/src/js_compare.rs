@@ -235,16 +235,37 @@ pub fn compare_versions(l: &AppGraph, r: &AppGraph) -> Value {
             .collect::<BTreeMap<_, _>>()
     };
     let (lw, rw) = (windows(l), windows(r));
+    let keys: BTreeSet<_> = lw.keys().chain(rw.keys()).collect();
+    let window_name = |(module, binding, occurrence): &(String, String, usize)| {
+        if binding.is_empty() || *occurrence > 0 { format!("{module}:{binding}[{}]", occurrence.saturating_add(1)) } else { format!("{module}:{binding}") }
+    };
+    let reserved: BTreeSet<_> = keys.iter().map(|key| window_name(key)).collect();
+    let mut assigned = BTreeSet::new();
+    let mut labels = BTreeMap::new();
+    let mut suffixes = BTreeMap::<String, usize>::new();
+    let named = |key: &&(String, String, usize)| !key.1.is_empty() && key.2 == 0;
+    // Reserve every natural label, including unchanged windows, and give literal names priority
+    // over generated occurrence labels. A collision suffix never changes the occurrence index.
+    for key in keys.iter().copied().filter(named).chain(keys.iter().copied().filter(|key| !named(key))) {
+        let base = window_name(key);
+        let mut label = base.clone();
+        if !assigned.insert(label.clone()) {
+            let suffix = suffixes.entry(base.clone()).or_default();
+            loop {
+                *suffix = suffix.saturating_add(1);
+                label = format!("{base} #{suffix}");
+                if !reserved.contains(&label) && assigned.insert(label.clone()) {
+                    break;
+                }
+            }
+        }
+        labels.insert(key, label);
+    }
     let window_changes: Vec<Value> = lw
         .iter()
         .filter_map(|(key, v)| {
             rw.get(key).filter(|w| *w != v).map(|w| {
-                let (module, binding, occurrence) = key;
-                let name = if binding.is_empty() || *occurrence > 0 {
-                    format!("{module}:{binding}[{}]", occurrence.saturating_add(1))
-                } else {
-                    format!("{module}:{binding}")
-                };
+                let name = labels.get(key).cloned().unwrap_or_else(|| window_name(key));
                 json!({"window": name, "from": v, "to": w})
             })
         })
@@ -402,6 +423,41 @@ mod tests {
         let windows = compare_versions(&left, &right)["windows"].clone();
         assert_eq!((windows["left"].as_u64(), windows["right"].as_u64()), (Some(2), Some(3)));
         assert_eq!(windows["changed"].as_array().unwrap().len(), 1, "the first preference change survives shifted lines");
+    }
+
+    #[test]
+    fn window_labels_preserve_literal_names_and_occurrence_indices() {
+        let graph = |preferences: [bool; 4], prefix: &str| {
+            let mut source = format!("{prefix}const {{ BrowserWindow }} = require('electron');\nconst obj = {{}};\n");
+            for (binding, preference) in ["obj.x", "obj.x", r#"obj["x[2]"]"#, r#"obj["x[2] #1"]"#].into_iter().zip(preferences) {
+                source.push_str(&format!("{binding} = new BrowserWindow({{ webPreferences: {{ backgroundThrottling: {preference} }} }});\n"));
+            }
+            graph_of(vec![("package.json", r#"{"name":"window-labels","main":"main.js"}"#.into()), ("main.js", source)])
+        };
+        let left = graph([false; 4], "");
+        let right = graph([true; 4], "// Source lines may shift.\n\n");
+        assert_eq!(left.windows.len(), 4);
+        assert_eq!(left.windows[2]["binding"], "obj.x[2]", "the real parser retains the literal property name");
+        let windows = compare_versions(&left, &right)["windows"].clone();
+        assert_eq!((windows["left"].as_u64(), windows["right"].as_u64()), (Some(4), Some(4)));
+        let changes = windows["changed"].as_array().unwrap();
+        assert_eq!(changes.len(), 4);
+        let labels: Vec<_> = changes.iter().map(|change| change["window"].as_str().unwrap()).collect();
+        assert_eq!(labels.iter().copied().collect::<BTreeSet<_>>().len(), 4, "every construction has a distinct label: {labels:?}");
+        assert_eq!(labels[0], "main.js:obj.x");
+        assert!(labels[1].starts_with("main.js:obj.x[2] #"), "the second occurrence retains [2]: {labels:?}");
+        assert_eq!(labels[2], "main.js:obj.x[2]", "a literal binding keeps its original label");
+        assert_eq!(labels[3], "main.js:obj.x[2] #1", "a literal collision suffix is reserved too");
+        for (index, label) in labels.iter().enumerate() {
+            let mut preferences = [false; 4];
+            preferences[index] = true;
+            let one = compare_versions(&left, &graph(preferences, ""))["windows"].clone();
+            let changed = one["changed"].as_array().unwrap();
+            assert_eq!(changed.len(), 1);
+            assert_eq!(changed[0]["window"].as_str(), Some(*label), "unchanged constructions still reserve their labels");
+            assert_eq!(changed[0]["from"]["backgroundThrottling"], false);
+            assert_eq!(changed[0]["to"]["backgroundThrottling"], true);
+        }
     }
 
     /// #236: an edited inline script had no hash on either side and counted as unchanged.

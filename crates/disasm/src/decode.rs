@@ -987,7 +987,8 @@ fn decode_a32(mode: Mode, bytes: &[u8], addr: u64, fmt: bool) -> Option<Insn> {
         }
     }
     let kind = if exact { kind } else { Kind::Other };
-    let cond = if matches!(flow, Flow::Cond { .. }) {
+    let conditional_call = conditional && matches!(flow, Flow::Call { .. } | Flow::IndirectCall { .. });
+    let cond = if conditional_call || matches!(flow, Flow::Cond { .. }) {
         Some(match inst.condition {
             C::EQ => Cond::Eq,
             C::NE => Cond::Ne,
