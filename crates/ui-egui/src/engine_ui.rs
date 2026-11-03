@@ -657,7 +657,7 @@ fn status_line(app: &mut CraftApp, ui: &mut Ui, b: Builder, offer: bool) {
     let inv = app.game_engines.clone();
     ui.horizontal_wrapped(|ui| match &inv {
         None => {
-            ui.add(egui::Spinner::new().size(14.0).color(t.accent));
+            ui.add(crate::widgets::Spinner::new().size(14.0).color(t.accent));
             ui.label(RichText::new(tr("Looking for game engines on this computer…")).color(t.text_dim).size(theme::SMALL));
         }
         Some(inv) if inv.ready(b) => {
@@ -775,7 +775,7 @@ pub fn modal(app: &mut CraftApp, ui: &mut Ui, b: Builder, close: &mut bool) {
     ui.set_width(520.0);
     let Some(inv) = app.game_engines.clone() else {
         ui.horizontal(|ui| {
-            ui.add(egui::Spinner::new().size(16.0).color(t.accent));
+            ui.add(crate::widgets::Spinner::new().size(16.0).color(t.accent));
             ui.label(tr("Looking for game engines on this computer…"));
         });
         app.refresh_game_engines();

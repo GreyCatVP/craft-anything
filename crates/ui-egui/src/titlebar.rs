@@ -186,7 +186,8 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
             usage_pill(app, ui);
             if app.jobs.busy() {
                 let n = app.jobs.running().filter(|j| j.visible).count();
-                ui.add(egui::Spinner::new().size(14.0).color(t.accent)).on_hover_text(crate::i18n::trf("{n} job(s) running", &[("n", &n.to_string())]));
+                ui.add(crate::widgets::Spinner::new().size(14.0).color(t.accent))
+                    .on_hover_text(crate::i18n::trf("{n} job(s) running", &[("n", &n.to_string())]));
             }
         });
     });

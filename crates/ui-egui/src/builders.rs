@@ -215,7 +215,7 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
     let found: Vec<BackendConfig> = app.found_agents().cloned().collect();
     if app.detecting {
         ui.horizontal(|ui| {
-            ui.add(egui::Spinner::new().color(t.accent));
+            ui.add(crate::widgets::Spinner::new().color(t.accent));
             ui.label(RichText::new(tr("Looking on this computer…")).color(t.text_dim));
         });
     } else if found.is_empty() {

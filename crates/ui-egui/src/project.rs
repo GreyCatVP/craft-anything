@@ -435,7 +435,7 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(b) = began {
                     ui.label(RichText::new(crate::usage::duration_words(b.elapsed())).font(theme::mono(12.0)).color(t.text_faint));
-                    ui.add(egui::Spinner::new().size(12.0).color(t.accent));
+                    ui.add(crate::widgets::Spinner::new().size(12.0).color(t.accent));
                     ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
                 }
                 ui.label(

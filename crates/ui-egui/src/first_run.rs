@@ -125,7 +125,7 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
         ui.set_width(width);
         if app.detecting {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().color(t.accent));
+                ui.add(crate::widgets::Spinner::new().color(t.accent));
                 ui.label(RichText::new(tr("Looking for AI on this computer…")).color(t.text_dim));
             });
             ui.add_space(8.0);
