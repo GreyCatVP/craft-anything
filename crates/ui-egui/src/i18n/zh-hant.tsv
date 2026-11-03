@@ -1,5 +1,17 @@
 # zh-hant: original Chinese UI translations. Licensed MIT OR Apache-2.0.
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
+OpenCode default	OpenCode 預設設定
+Model default	模型預設設定
+Thinking depth	思考深度
+OpenCode model	OpenCode 模型
+Remote program	遠端程式
+Reload models	重新載入模型
+Apply	套用
+OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode 中沒有可見的聊天模型。請在 OpenCode 中連線至服務供應商，然後重新載入。
+The saved model is no longer visible. Choose another model or the OpenCode default.	已儲存的模型不再可見。請選擇其他模型或使用 OpenCode 預設設定。
+The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	此模型不支援已儲存的思考深度。請選擇預設設定或可用的深度。
+List an agent's models	列出代理程式的模型
+Choose an agent's model and thinking	選擇代理程式的模型與思考深度
  GB	 GB
  and {n} more	，另有 {n} 項
  {ascii}	 {ascii}
@@ -160,7 +172,7 @@ Asking for its models…	正在取得可用模型…
 Asset catalog	資源目錄
 At most this many rounds of fixes after the first build.	首次建置後，最多進行這麼多輪修正。
 Attach pictures	附上圖片
-Attach pictures (or drop them here)	附加圖片 (或拖到這裡)
+Attach pictures (or drop or paste them here)	附加圖片 (或拖到這裡、貼到這裡)
 Auto mode	自動模式
 Automatic	自動
 Automatic ({name})	自動 ({name})
@@ -616,6 +628,7 @@ List segments	列出區段
 List shared Cutter sessions	列出共用的 Cutter 工作階段
 List strings	列出字串
 Live: the project's latest build	目前：專案的最新建置
+Load a picture	載入圖片
 Load a screenshot	載入螢幕擷取畫面
 Loading…	正在載入…
 Log	記錄
@@ -787,6 +800,7 @@ Page through evidence	分頁瀏覽證據
 Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	應用程式的某個部分卡住，已將其停止，其他部分繼續執行。你的工作已保留。
 Part of the app is stuck. Restarting clears it, and your work is kept.	應用程式的某個部分卡住了。重新啟動即可恢復，你的工作會保留。
 Part of this screen hit a bug and was skipped. Your work is safe.	此畫面的一部分發生錯誤，已略過。你的工作內容是安全的。
+Paste pictures	貼上圖片
 Paste your API key (kept in your system keychain)	貼上 API 金鑰 (儲存在系統鑰匙圈中)
 Paste your {name} key	貼上你的 {name} 金鑰
 Path	路徑
@@ -1065,6 +1079,7 @@ The builder's questions	建置助手的問題
 The builder's questions come to you as cards, and it waits for your answer.	建置助手的問題會以卡片形式交給你，並等待你的回答。
 The builder's questions will come to you.	建置助手的問題會交給你回答。
 The built-in engines still show you everything they find.	內建引擎仍會顯示它們發現的所有內容。
+The clipboard can't be read:	無法讀取剪貼簿:
 The code	程式碼
 The code format Android apps use.	Android 應用程式使用的程式碼格式。
 The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	這是程式設計代理程式依 API 價格估算的費用，並非你的實際帳單；訂閱不會依此金額收費。
@@ -1075,6 +1090,8 @@ The installer is open. Follow its steps, then come back here.	安裝程式已開
 The lowest-level human-readable form of machine code: one small instruction per line.	機器碼最底層的可讀形式，每行一條簡短指令。
 The names were removed from the program before it was shipped, so we have to work them out.	程式發佈前移除了這些名稱，因此需要推導它們。
 The packed contents of an Electron app (a website inside a desktop app)	Electron 應用程式的打包內容 (桌面應用程式中的網站)
+The pasted picture wasn't attached: another screen was opened meanwhile.	貼上的圖片沒有附加:期間開啟了另一個頁面。
+The picture on the clipboard is too large.	剪貼簿中的圖片太大。
 The program's machine code written out as one tiny instruction per line.	將程式的機器碼寫成每行一條簡單指令的形式。
 The project's name and round	專案名稱與輪次
 The raw result	原始結果
@@ -1085,6 +1102,7 @@ The {} view isn't available yet in this build.	此版本暫不提供 {} 檢視�
 Theme	佈景主題
 There's no /{name} command. You can use {commands}.	沒有 /{name} 命令。你可以使用 {commands}。
 There's no AI brain set up yet, so here's what the built-in engines found:	尚未設定 AI 助手，以下是內建引擎的發現：
+There's no picture on the clipboard to paste.	剪貼簿中沒有可貼上的圖片。
 They're my app: edit them in place	這些就是我的應用程式：就地編輯
 Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	程式借用作業系統或函式庫提供的功能，例如「開啟檔案」或「繪製視窗」。
 Things a program or library offers for other programs to use.	程式或程式庫提供給其他程式使用的功能。
@@ -1318,6 +1336,8 @@ your files there are the app, edited in place	該位置的檔案就是應用程�
 {mb} MB	{mb} MB
 {name} builds what you make.	由 {name} 建置你的作品。
 {name} builds what you make; answers come from {brain}.	由 {name} 負責建置，{brain} 負責回答。
+{name} can't be attached: a message takes pictures up to 20 MB.	無法附加 {name}:訊息中的圖片最大為 20 MB。
+{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.	無法附加 {name}:它不是 PNG、JPEG、GIF 或 WebP 圖片。
 {name} is ready	{name} 已就緒
 {name} is ready.	{name} 已就緒。
 {name} isn't available yet in this build.	此版本尚未提供{name}。

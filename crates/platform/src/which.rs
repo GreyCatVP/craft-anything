@@ -21,11 +21,7 @@ const USUAL_HOME_DIRS: &[&str] = &[".local/bin", ".claude/local", ".npm-global/b
 #[cfg(unix)]
 const USUAL_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 // Claude Code's installer, npm (without a custom prefix), WinGet's portable packages (Claude
-// Code's WinGet install), bun, cargo and Antigravity's installer (`%LOCALAPPDATA%\Antigravity\agy.exe`,
-// from a third-party guide, #400); PATH may not have them yet in an app started before the install.
-#[cfg(windows)]
-const USUAL_HOME_DIRS: &[&str] =
-    &[r".local\bin", r"AppData\Roaming\npm", r"AppData\Local\Microsoft\WinGet\Links", r".bun\bin", r".cargo\bin", r"AppData\Local\Antigravity"];
+
 #[cfg(not(any(unix, windows)))]
 const USUAL_HOME_DIRS: &[&str] = &[];
 // WinGet's portable packages installed for every user (`--scope machine`).
@@ -40,7 +36,8 @@ const HOME_VAR: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
 /// shell's, and would miss a coding agent installed in `~/.local/bin`; on Windows an installer
 /// may not have added its folder to `PATH` at all.
 pub fn search_path() -> Option<OsString> {
-    with_usual_dirs(std::env::var_os("PATH"), std::env::var_os(HOME_VAR).map(PathBuf::from))
+    let local_data = cfg!(windows).then(|| std::env::var_os("LOCALAPPDATA")).flatten().map(PathBuf::from);
+    with_usual_dirs(std::env::var_os("PATH"), std::env::var_os(HOME_VAR).map(PathBuf::from), local_data)
 }
 
 /// How to start `program`, and the arguments that go before the caller's. On Windows only `.exe`
@@ -51,8 +48,10 @@ pub fn search_path() -> Option<OsString> {
 #[cfg(windows)]
 pub(crate) fn launch_target(program: &std::ffi::OsStr) -> (OsString, Vec<OsString>) {
     let Some(found) = which_in(&program.to_string_lossy(), search_path()).into_iter().next() else { return (program.to_owned(), Vec::new()) };
+    // Started by the path it was found at, not by name: a child with a cleared environment, or a
+    // lookup that differs from ours, would say "not found" for a program that is there (#152).
     if !found.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
-        return (program.to_owned(), Vec::new());
+        return (found.into_os_string(), Vec::new());
     }
     let dir = found.parent().map(Path::to_path_buf).unwrap_or_default();
     let shim = std::fs::metadata(&found)
@@ -143,11 +142,15 @@ fn npmrc_prefix(home: &Path) -> Option<PathBuf> {
     })
 }
 
-fn with_usual_dirs(path: Option<OsString>, home: Option<PathBuf>) -> Option<OsString> {
+fn with_usual_dirs(path: Option<OsString>, home: Option<PathBuf>, local_data: Option<PathBuf>) -> Option<OsString> {
     let mut dirs: Vec<PathBuf> = path.as_ref().map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
     let before = dirs.len();
     let in_home = home.iter().flat_map(|h| USUAL_HOME_DIRS.iter().map(move |d| h.join(d)).chain(nvm_bins(h)).chain(npm_global_bin(h)));
-    for d in in_home.chain(USUAL_DIRS.iter().map(PathBuf::from)) {
+    // Antigravity's per-user installer may use a redirected LOCALAPPDATA directory.
+    let local_data =
+        local_data.filter(|p| !p.as_os_str().is_empty()).or_else(|| home.as_ref().filter(|_| cfg!(windows)).map(|h| h.join("AppData").join("Local")));
+    let antigravity = local_data.map(|p| p.join("agy").join("bin"));
+    for d in in_home.chain(antigravity).chain(USUAL_DIRS.iter().map(PathBuf::from)) {
         if !dirs.contains(&d) {
             dirs.push(d);
         }
@@ -229,7 +232,8 @@ fn candidates(base: &Path) -> Vec<PathBuf> {
         let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
         for e in exts.split(';').filter(|e| !e.is_empty()) {
             let mut s = base.as_os_str().to_os_string();
-            s.push(e);
+            // Lower case, as installers name their files; PATHEXT spells them `.EXE`.
+            s.push(e.to_ascii_lowercase());
             v.push(PathBuf::from(s));
         }
     }
@@ -270,14 +274,14 @@ mod tests {
     fn usual_dirs_come_after_path() {
         let home = PathBuf::from("/home/u");
         let path = std::env::join_paths([PathBuf::from("/usr/bin"), home.join(".local/bin")]).unwrap();
-        let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone())).unwrap()).collect();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone()), None).unwrap()).collect();
         assert_eq!(dirs[..3], [PathBuf::from("/usr/bin"), home.join(".local/bin"), home.join(".claude/local")]);
         // (Plus npm's prefix where the environment sets one.)
         let npm = usize::from(npm_global_bin(&home).is_some());
         assert_eq!(dirs.len(), 1 + USUAL_HOME_DIRS.len() + USUAL_DIRS.len() + npm, "nothing twice");
         assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
         // No PATH and no home folder: the system-wide folders still.
-        assert_eq!(with_usual_dirs(None, None), std::env::join_paths(USUAL_DIRS).ok());
+        assert_eq!(with_usual_dirs(None, None, None), std::env::join_paths(USUAL_DIRS).ok());
     }
 
     /// #112: agents npm installed under nvm, newest Node first, after the usual folders.
@@ -291,24 +295,14 @@ mod tests {
         let bins = nvm_bins(home.path());
         let node = home.path().join(".nvm/versions/node");
         assert_eq!(bins, [node.join("v20.10.0/bin"), node.join("v18.19.1/bin"), node.join("v9.11.2/bin")]);
-        let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(None, Some(home.path().to_path_buf())).unwrap()).collect();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(None, Some(home.path().to_path_buf()), None).unwrap()).collect();
         assert!(dirs.contains(&home.path().join(".opencode/bin")));
         let at = |p: &Path| dirs.iter().position(|d| d == p).unwrap();
         assert!(at(&home.path().join(".cargo/bin")) < at(&bins[0]) && at(&bins[2]) < at(Path::new("/usr/local/bin")));
         assert!(nvm_bins(Path::new("/nowhere")).is_empty());
     }
 
-    /// #400: Antigravity's Windows installer puts `agy.exe` in `%LOCALAPPDATA%\Antigravity` and adds
-    /// it to the user's PATH, which an app started before the install doesn't have.
-    #[cfg(windows)]
-    #[test]
-    fn antigravitys_windows_folder_is_searched() {
-        let home = tempfile::tempdir().unwrap();
-        let dir = home.path().join(r"AppData\Local\Antigravity");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("agy.exe"), "").unwrap();
-        let path = with_usual_dirs(None, Some(home.path().to_path_buf()));
-        assert_eq!(which_in("agy", path), [dir.join("agy.exe")]);
+
     }
 
     /// #132: npm's own prefix setting says where it put the agents it installed.
@@ -327,9 +321,36 @@ mod tests {
         if std::env::var_os("NPM_CONFIG_PREFIX").is_none() && std::env::var_os("npm_config_prefix").is_none() {
             std::fs::write(&rc, "prefix=~/.npm-packages\n").unwrap();
             let bin = if cfg!(windows) { home.path().join(".npm-packages") } else { home.path().join(".npm-packages").join("bin") };
-            let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(None, Some(home.path().to_path_buf())).unwrap()).collect();
+            let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(None, Some(home.path().to_path_buf()), None).unwrap()).collect();
             assert!(dirs.contains(&bin), "{dirs:?}");
         }
+    }
+
+    #[test]
+    fn antigravity_is_found_in_redirected_local_app_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("profile");
+        let local_data = dir.path().join("redirected-local-data");
+        let bin = local_data.join("agy").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let program = bin.join(if cfg!(windows) { "agy.exe" } else { "agy" });
+        std::fs::write(&program, b"fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = with_usual_dirs(None, Some(home.clone()), Some(local_data.clone()));
+        assert_eq!(which_in("agy", path.clone()).as_slice(), std::slice::from_ref(&program));
+        let dirs: Vec<_> = std::env::split_paths(path.as_ref().unwrap()).collect();
+        assert!(!dirs.contains(&home.join("AppData").join("Local").join("agy").join("bin")));
+        // A folder already in PATH retains its position and is not added again.
+        let explicit = std::env::join_paths([&bin]).unwrap();
+        let path = with_usual_dirs(Some(explicit), Some(home), Some(local_data)).unwrap();
+        let dirs: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(dirs.first(), Some(&bin));
+        assert_eq!(dirs.iter().filter(|d| *d == &bin).count(), 1);
+        assert_eq!(which_in("agy", Some(path)), [program]);
     }
 
     #[cfg(windows)]
@@ -337,11 +358,12 @@ mod tests {
     fn usual_windows_dirs_come_after_path() {
         let home = PathBuf::from(r"C:\Users\u");
         let path = OsString::from(r"C:\Windows;C:\Users\u\.local\bin");
-        let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone())).unwrap()).collect();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone()), None).unwrap()).collect();
         assert_eq!(dirs[..3], [PathBuf::from(r"C:\Windows"), home.join(r".local\bin"), home.join(r"AppData\Roaming\npm")]);
         // (Plus npm's prefix where the environment sets one.)
         let npm = usize::from(npm_global_bin(&home).is_some());
-        assert_eq!(dirs.len(), 1 + USUAL_HOME_DIRS.len() + USUAL_DIRS.len() + npm, "nothing twice");
+        assert_eq!(dirs.len(), 2 + USUAL_HOME_DIRS.len() + USUAL_DIRS.len() + npm, "nothing twice");
+        assert!(dirs.contains(&home.join("AppData").join("Local").join("agy").join("bin")));
         // Each way Claude Code installs on Windows: native, npm, WinGet (per user and machine-wide).
         assert!(dirs.contains(&home.join(r"AppData\Local\Microsoft\WinGet\Links")));
         assert!(dirs.contains(&PathBuf::from(r"C:\Program Files\WinGet\Links")));
@@ -377,8 +399,8 @@ mod tests {
         std::fs::write(dir.path().join("node.exe"), "").unwrap();
         // Found without its extension too, as a bare name is.
         assert_eq!(launch_target(dir.path().join("gemini").as_os_str()), (dir.path().join("node.exe").into_os_string(), vec![script.into_os_string()]));
-        // An .exe is left to the system's own lookup.
-        assert_eq!(launch_target(dir.path().join("node").as_os_str()), (dir.path().join("node").into_os_string(), Vec::new()));
+        // An .exe is started by the path it was found at.
+        assert_eq!(launch_target(dir.path().join("node").as_os_str()), (dir.path().join("node.exe").into_os_string(), Vec::new()));
     }
 
     /// A prompt with line breaks and quotes reaches the agent whole (needs Node; skipped without).

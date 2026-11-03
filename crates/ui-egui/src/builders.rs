@@ -9,6 +9,81 @@ use crate::{CraftApp, icons, widgets};
 use craft_anything_ai::{BackendConfig, BackendKind};
 use egui::{RichText, Ui, Vec2};
 
+/// A live agent catalogue and a draft selection, tied to the settings that were queried.
+pub struct AgentModelPicker {
+    pub request: u64,
+    pub context: craft_anything_ai::ModelContext,
+    pub result: Option<Result<Vec<craft_anything_ai::AgentModel>, String>>,
+    pub model: Option<String>,
+    pub thinking: Option<craft_anything_ai::Effort>,
+}
+
+/// The UI keeps the draft; discovery, validation and persistence live in the AI layer.
+pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let Some(result) = &picker.result else {
+        ui.add(egui::Spinner::new().size(theme::CAPTION));
+        ui.label(tr("Asking for its models…"));
+        return false;
+    };
+    let models = match result {
+        Ok(models) => models,
+        Err(message) => {
+            ui.label(RichText::new(message).color(t.warning));
+            return false;
+        }
+    };
+    if models.is_empty() {
+        ui.label(tr("OpenCode has no visible chat models. Connect a provider in OpenCode, then reload."));
+    }
+    let default = tr("OpenCode default");
+    let selected = picker.model.as_deref().unwrap_or(&default);
+    let response = egui::ComboBox::from_id_salt(("agent-model", &picker.context.backend.config.name))
+        .icon(widgets::combo_icon)
+        .selected_text(selected)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(picker.model.is_none(), &default).clicked() {
+                picker.model = None;
+                picker.thinking = None;
+            }
+            for model in models {
+                let label = format!("{} · {}", model.name, model.id);
+                if ui.selectable_label(picker.model.as_ref() == Some(&model.id), label).clicked() && picker.model.as_ref() != Some(&model.id) {
+                    picker.model = Some(model.id.clone());
+                    picker.thinking = None;
+                }
+            }
+        });
+    widgets::named(response.response, "OpenCode model");
+    let model = models.iter().find(|m| picker.model.as_ref() == Some(&m.id));
+    let missing = picker.model.is_some() && model.is_none();
+    if missing {
+        ui.label(RichText::new(tr("The saved model is no longer visible. Choose another model or the OpenCode default.")).color(t.warning));
+    }
+    let depths = model.map(|m| m.thinking.as_slice()).unwrap_or_default();
+    ui.label(tr("Thinking depth"));
+    let default_depth = tr("Model default");
+    let response = egui::ComboBox::from_id_salt(("agent-thinking", &picker.context.backend.config.name))
+        .icon(widgets::combo_icon)
+        .selected_text(picker.thinking.map(|d| d.title()).unwrap_or(&default_depth))
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(picker.thinking.is_none(), &default_depth).clicked() {
+                picker.thinking = None;
+            }
+            for depth in depths {
+                if ui.selectable_label(picker.thinking == Some(*depth), depth.title()).clicked() {
+                    picker.thinking = Some(*depth);
+                }
+            }
+        });
+    widgets::named(response.response, "Thinking depth");
+    let unsupported = picker.thinking.is_some_and(|d| !depths.contains(&d));
+    if unsupported {
+        ui.label(RichText::new(tr("The saved thinking depth is unavailable for this model. Choose its default or an offered depth.")).color(t.warning));
+    }
+    ui.add_enabled_ui(!missing && !unsupported, |ui| widgets::link(ui, "Apply").clicked()).inner
+}
+
 /// One AI that could build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
@@ -93,6 +168,42 @@ impl CraftApp {
         });
     }
 
+    /// Capture the backend context and load its catalogue in a worker tagged with a fresh picker request id.
+    /// If the session cannot be read, report the error and keep the existing draft.
+    pub fn pick_agent_model(&mut self, name: &str) {
+        let context = match self.hub.model_context(name) {
+            Ok(context) => context,
+            Err(e) => {
+                self.toast(e.for_people(), true);
+                return;
+            }
+        };
+        self.model_request = self.model_request.wrapping_add(1);
+        let request = self.model_request;
+        self.agent_model_picker = Some(AgentModelPicker {
+            request,
+            model: context.backend.options.cli_model.clone(),
+            thinking: context.backend.options.cli_thinking,
+            context: context.clone(),
+            result: None,
+        });
+        let hub = self.hub.clone();
+        self.jobs.spawn(tr("List an AI's models"), false, move |_| {
+            let result = hub.agent_models(&context);
+            Ok(crate::Done::AgentModelChoices { request, context, result })
+        });
+    }
+
+    /// Submit the matching picker's selection for background validation and persistence against its captured context.
+    pub fn set_agent_model(&mut self, name: &str, model: Option<String>, thinking: Option<craft_anything_ai::Effort>) {
+        let Some(picker) = self.agent_model_picker.take().filter(|p| p.context.backend.config.name == name) else { return };
+        let hub = self.hub.clone();
+        self.jobs.spawn(tr("Change an AI's model"), false, move |_| {
+            hub.set_agent_selection(&picker.context, model.as_deref(), thinking).map_err(|e| e.for_people())?;
+            Ok(crate::backends(&hub))
+        });
+    }
+
     /// Use `model` for an AI from now on.
     pub fn set_model(&mut self, name: &str, model: &str) {
         self.model_picker = None;
@@ -126,6 +237,7 @@ impl CraftApp {
 
     /// Run an agent app from this program (`None`: find it by its usual name again).
     pub fn set_agent_program(&mut self, name: &str, program: Option<String>) {
+        self.agent_model_picker = None;
         let (hub, name) = (self.hub.clone(), name.to_string());
         self.jobs.spawn(tr("Set an AI's program"), false, move |_| {
             hub.set_command(&name, program.as_deref()).map_err(|e| e.message)?;

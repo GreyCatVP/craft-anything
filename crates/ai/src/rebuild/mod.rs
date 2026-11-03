@@ -21,6 +21,7 @@ use crate::cli_agents::{Builder, CliSpec};
 use crate::{AgentEvent, AiHub, BackendKind, Conversation, Role};
 use craft_anything_engine::inbox::{Answer, Inbox, InboxDir, Request};
 use craft_anything_engine::project::{Project, Purpose};
+use craft_anything_engine::workspace::progress::{AppFingerprintCache, BuildProgress};
 use craft_anything_engine::workspace::{CheckResult, ProjectUsage, Status, TargetRef, Workspace};
 use craft_anything_engine::{CallOptions, Caller, CancelToken, Engine, ToolOutput};
 use craft_anything_engines::game;
@@ -249,6 +250,7 @@ impl RebuildRun {
             decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
+            reset_progress_after_notes: false,
         };
         let r2 = running.clone();
         std::thread::Builder::new()
@@ -429,6 +431,8 @@ struct Worker {
     usage: Option<UsageClock>,
     /// The kind and bar the builder's own checks (`rebuild_check`) are judged by, once known.
     self_check: Option<(Arc<dyn kinds::TargetKind>, f64)>,
+    /// A hook consumed a new request; persist its reset only after the builder finishes.
+    reset_progress_after_notes: bool,
 }
 
 /// The project a run records its usage in, and when it last did.
@@ -499,7 +503,7 @@ impl Worker {
 
     /// The prompt for notes the person added while the agent worked, if there are any.
     fn added(&self, ws: &mut Workspace) -> Option<String> {
-        let notes = std::mem::take(&mut *self.notes.lock().unwrap_or_else(PoisonError::into_inner));
+        let mut notes = std::mem::take(&mut *self.notes.lock().unwrap_or_else(PoisonError::into_inner));
         if notes.is_empty() {
             return None;
         }
@@ -507,6 +511,10 @@ impl Worker {
         let dir = notes::notes_dir(&ws.inbox_dir());
         for n in &notes {
             notes::forget(&dir, n.id);
+        }
+        notes.retain(|n| !n.text.trim().is_empty());
+        if notes.is_empty() {
+            return None;
         }
         for n in &notes {
             self.emit(RunEvent::Note { shown: n.shown.clone(), pictures: n.pictures.clone() });
@@ -590,6 +598,15 @@ impl Worker {
         extractor: Option<(String, crate::agent::ApiConversation)>,
         opts: &RunOptions,
     ) -> Result<String, ToolError> {
+        let mut progress = BuildProgress::load(&ws.root)?;
+        let mut progress_available = true;
+        let mut fingerprints = AppFingerprintCache::default();
+        // Try again has no message. Only an explicit new request starts another attempt on
+        // unchanged files; restarting the app or resuming a paused run keeps the saved count.
+        if opts.message.as_deref().is_some_and(|m| !m.trim().is_empty()) {
+            progress.reset();
+            progress.save(&ws.root)?;
+        }
         // Fail before any work when the agent's tools are missing or it can't sign in.
         let remote = entry.config.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty());
         if !remote && api.is_none() {
@@ -686,6 +703,14 @@ impl Worker {
         let mut only_check = carrying_on && !first && opts.message.is_none() && ws.manifest.awaiting_check;
         loop {
             if !std::mem::take(&mut only_check) {
+                progress = BuildProgress::load(&ws.root)?;
+                if let Some(fingerprint) = self.progress_fingerprint(ws, &mut progress, &mut progress_available, &mut fingerprints)? {
+                    progress.before_turn(fingerprint);
+                    if progress.stalled() {
+                        return Err(no_build_progress(ws));
+                    }
+                    progress.save(&ws.root)?;
+                }
                 let doing = match (round, carrying_on) {
                     (0, false) => "Building the first version…",
                     (0, true) => "Carrying on with the build…",
@@ -698,7 +723,24 @@ impl Worker {
                 if let Some(a) = &keeper {
                     self.keep_session(ws, a.as_ref());
                 }
-                let reply = reply?;
+                let reply = match reply {
+                    Ok(reply) => reply,
+                    Err(error) => {
+                        // Consumed instructions start a fresh attempt even if this turn fails
+                        // or is cancelled. The provider retry loop has ended; stop any remaining
+                        // work before touching the record, and retain the original failure.
+                        agent.stop();
+                        drop(agent);
+                        if self.reset_progress_after_notes
+                            && let Err(reset_error) = self.progress_after_notes(ws)
+                        {
+                            self.emit(RunEvent::Agent(AgentEvent::Status {
+                                text: format!("The new request couldn't reset the unchanged-turn count ({}).", reset_error.message),
+                            }));
+                        }
+                        return Err(error);
+                    }
+                };
                 if !reply.trim().is_empty() {
                     ws.manifest.last_reply = reply.trim().to_string();
                 }
@@ -712,8 +754,19 @@ impl Worker {
                 }
                 ws.manifest.awaiting_check = true;
                 ws.save()?;
+                // Keep the finished turn before scanning: a cancellation during the scan
+                // must not make Try again repeat work that only needs its checks.
+                // A consumed note starts another attempt, but its record I/O must not
+                // interrupt a live builder or enter the provider retry path.
+                progress = self.progress_after_notes(ws)?;
+                if let Some(fingerprint) = self.progress_fingerprint(ws, &mut progress, &mut progress_available, &mut fingerprints)? {
+                    progress.after_turn(fingerprint);
+                    progress.save(&ws.root)?;
+                }
                 // What the person added while the agent worked goes in before anything else.
                 if let Some(p) = self.added(ws) {
+                    progress.reset();
+                    progress.save(&ws.root)?;
                     prompt = p;
                     continue;
                 }
@@ -732,10 +785,23 @@ impl Worker {
             for c in &checks {
                 self.emit(RunEvent::Checked(c.clone()));
             }
-            let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
             if let Some(p) = self.added(ws) {
+                progress.reset();
+                progress.save(&ws.root)?;
                 prompt = p;
                 continue;
+            }
+            let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
+            if not_good.is_some() && progress_available && progress.stalled() {
+                // A check-only resume skipped the builder's before-turn scan. A real edit
+                // while the project was closed (or during this check) still starts an attempt.
+                if let Some(fingerprint) = self.progress_fingerprint(ws, &mut progress, &mut progress_available, &mut fingerprints)? {
+                    progress.before_turn(fingerprint);
+                    progress.save(&ws.root)?;
+                    if progress.stalled() {
+                        return Err(no_build_progress(ws));
+                    }
+                }
             }
             let Some(check) = not_good else { break };
             if refinements >= opts.max_rounds {
@@ -771,6 +837,47 @@ impl Worker {
         ws.set_status(Status::Ready, summary.clone())?;
         self.emit(RunEvent::Step { step: Step::Done, text: summary.clone() });
         Ok(summary)
+    }
+
+    /// Read progress after the turn has ended. A consumed request resets the allowance on
+    /// success, failure or cancellation; a failed save never acknowledges the pending reset.
+    fn progress_after_notes(&mut self, ws: &Workspace) -> Result<BuildProgress, ToolError> {
+        let mut progress = BuildProgress::load(&ws.root)?;
+        if self.reset_progress_after_notes {
+            progress.reset();
+            progress.save(&ws.root)?;
+            self.reset_progress_after_notes = false;
+        }
+        Ok(progress)
+    }
+
+    /// File scanning is an optional guard, not a prerequisite for building or checking. Once
+    /// it is unavailable, skip it for this run and start a new comparison on the next run.
+    fn progress_fingerprint(
+        &self,
+        ws: &Workspace,
+        progress: &mut BuildProgress,
+        available: &mut bool,
+        fingerprints: &mut AppFingerprintCache,
+    ) -> Result<Option<String>, ToolError> {
+        self.stop.check()?;
+        if !*available {
+            return Ok(None);
+        }
+        match fingerprints.scan(ws, &self.stop) {
+            Ok(fingerprint) => Ok(Some(fingerprint)),
+            Err(e) if e.code == ErrorCode::Cancelled => Err(e),
+            Err(e) => {
+                *available = false;
+                progress.invalidate();
+                // Record errors remain errors: never overwrite a broken or newer record.
+                progress.save(&ws.root)?;
+                self.emit(RunEvent::Agent(AgentEvent::Status {
+                    text: format!("Build progress couldn't be checked ({}). Continuing without the unchanged-turn limit for this run.", e.message),
+                }));
+                Ok(None)
+            }
+        }
     }
 
     /// One builder turn. Its session is kept even when the turn fails, so nothing is lost; a turn
@@ -966,6 +1073,7 @@ impl Worker {
                     self.emit(RunEvent::Agent(e));
                 }
                 if done {
+                    self.relay_read_notes(ws);
                     self.stop.check()?;
                     // An agent-level error (sign-in, crash, limits) ends the run: checking a
                     // build that never happened would only mislead.
@@ -987,7 +1095,7 @@ impl Worker {
 
     /// Notes the builder took at a step of this turn (its hook claimed them): they join the feed
     /// now and aren't sent again after the turn.
-    fn relay_read_notes(&self, ws: &Workspace) {
+    fn relay_read_notes(&mut self, ws: &Workspace) {
         let dir = notes::notes_dir(&ws.inbox_dir());
         let read: Vec<Note> = {
             let mut notes = self.notes.lock().unwrap_or_else(PoisonError::into_inner);
@@ -995,10 +1103,12 @@ impl Worker {
             *notes = waiting;
             read
         };
+        let new_request = read.iter().any(|n| !n.text.trim().is_empty());
         for n in read {
             notes::forget(&dir, n.id);
             self.emit(RunEvent::Note { shown: n.shown, pictures: n.pictures });
         }
+        self.reset_progress_after_notes |= new_request;
     }
 
     fn relay_inbox(&mut self) {
@@ -1008,6 +1118,11 @@ impl Worker {
             }
         }
     }
+}
+
+fn no_build_progress(ws: &Workspace) -> ToolError {
+    ToolError::new(ErrorCode::OverLimit, format!("The build stopped after two builder turns changed no files in {}.", ws.app_place()))
+        .with_remediation("Send a new request with a concrete correction, or edit the app's files before trying again.")
 }
 
 /// Largest builder session the project keeps a copy of.

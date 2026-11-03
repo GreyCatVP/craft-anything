@@ -354,6 +354,7 @@ fn schemas(root: &Path, check: bool) -> bool {
     let dir = root.join("docs").join("schemas");
     let files = [
         ("craft.schema.json", craft_anything_engine::workspace::manifest_schema()),
+        ("build-progress.schema.json", craft_anything_engine::workspace::progress::build_progress_schema()),
         ("mechanics.schema.json", craft_anything_engine::mechanics::mechanics_schema()),
         ("self-test.schema.json", craft_anything_engine::self_test::self_test_schema()),
     ];

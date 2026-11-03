@@ -498,16 +498,25 @@ fn neighbours(prog: &Program, entry: u64, forward: bool) -> Vec<(u64, Option<u64
     }
 }
 
+/// Most call edges one call graph lists. A function can have a huge number of call sites, so the
+/// node limit alone doesn't bound the report.
+pub const MAX_CALL_GRAPH_EDGES: usize = 50_000;
+
 /// Callers or callees by depth, bounded.
 pub fn call_graph(prog: &Program, start: u64, forward: bool, max_depth: usize, max_nodes: usize, names: Names<'_>) -> Report {
+    call_graph_capped(prog, start, forward, max_depth, max_nodes, MAX_CALL_GRAPH_EDGES, names)
+}
+
+fn call_graph_capped(prog: &Program, start: u64, forward: bool, max_depth: usize, max_nodes: usize, max_edges: usize, names: Names<'_>) -> Report {
     let mut levels: BTreeMap<usize, Vec<Value>> = BTreeMap::new();
     let mut edges = Vec::new();
     let mut seen: BTreeSet<u64> = BTreeSet::from([start]);
     let mut seen_imports: BTreeSet<String> = BTreeSet::new();
     let mut q = VecDeque::from([(start, 0usize)]);
     let mut truncated = false;
+    let mut edges_capped = false;
     let mut limitations = Vec::new();
-    while let Some((cur, d)) = q.pop_front() {
+    'walk: while let Some((cur, d)) = q.pop_front() {
         if d >= max_depth {
             if !neighbours(prog, cur, forward).is_empty() {
                 truncated = true;
@@ -515,6 +524,10 @@ pub fn call_graph(prog: &Program, start: u64, forward: bool, max_depth: usize, m
             continue;
         }
         for (site, n, label) in neighbours(prog, cur, forward) {
+            if edges.len() >= max_edges {
+                edges_capped = true;
+                break 'walk;
+            }
             let (from, to) = if forward { (cur, n) } else { (n.unwrap_or(0), Some(cur)) };
             edges.push(json!({"site": hex(site), "from": hex(from), "to": to.map(hex), "to_import": if n.is_none() { Some(label.clone()) } else { None }}));
             match n {
@@ -536,9 +549,14 @@ pub fn call_graph(prog: &Program, start: u64, forward: bool, max_depth: usize, m
             }
         }
     }
+    // Both can apply: the walk may have hit the depth or function limit before the edge limit.
     if truncated {
         limitations.push(Limitation::new("truncated", format!("stopped at depth {max_depth} or {max_nodes} functions")));
     }
+    if edges_capped {
+        limitations.push(Limitation::new("truncated", format!("stopped after {max_edges} call edges")));
+    }
+    let truncated = truncated || edges_capped;
     limitations.push(Limitation::new("direct_calls_only", "only statically resolved calls are followed; calls through pointers are not"));
     let total: usize = levels.values().map(Vec::len).sum();
     let result = json!({
@@ -1174,6 +1192,15 @@ mod tests {
         assert_eq!(d.result["referenced_strings"][0]["text"], tk::HELLO);
         let g = call_graph(&p, main.entry, true, 3, 100, &none);
         assert!(g.result["levels"]["1"].as_array().unwrap().len() >= 3);
+        // The edge budget stops the walk, however many call sites a function has.
+        let capped = call_graph_capped(&p, main.entry, true, 3, 100, 1, &none);
+        assert_eq!(capped.result["edges"].as_array().unwrap().len(), 1);
+        assert_eq!(capped.result["truncated"], true);
+        assert!(capped.limitations.iter().any(|l| l.message.contains("1 call edges")));
+        // When the function limit was hit first, both reasons are reported.
+        let both = call_graph_capped(&p, main.entry, true, 3, 1, 2, &none);
+        let msgs: Vec<&str> = both.limitations.iter().map(|l| l.message.as_str()).collect();
+        assert!(msgs.iter().any(|m| m.contains("1 functions")) && msgs.iter().any(|m| m.contains("2 call edges")), "{msgs:?}");
         let helper = p.function_by_name("helper").unwrap();
         let path = call_path(&p, main.entry, Some(Goal::Function(helper.entry)), true, &none);
         assert_eq!(path.result["goal_result"], "reached");

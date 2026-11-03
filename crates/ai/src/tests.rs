@@ -137,6 +137,85 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
+/// A CLI stand-in checks saved selections and refuses native execution until its MCP server is wired.
+#[cfg(unix)]
+#[test]
+fn opencode_selection_is_validated_saved_and_refused_without_native_mcp() {
+    use std::os::unix::fs::PermissionsExt;
+    let (h, dir) = hub();
+    let program = dir.path().join("agent");
+    let catalogue = dir.path().join("models.json");
+    let seen = dir.path().join("arguments.txt");
+    let quote = |p: &std::path::Path| ssh::shell_quote(&p.display().to_string());
+    let script = format!(
+        "#!/bin/sh\ncase \"$1\" in\napi) cat {};;\nrun) printf '%s\\n' \"$@\" > {}; printf 'done';;\n*) exit 8;;\nesac\n",
+        quote(&catalogue),
+        quote(&seen)
+    );
+    std::fs::write(&program, script).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let model = json!({"id":"alias","providerID":"test","name":"Test","enabled":true,"type":"chat","variants":[{"id":"high"},{"id":"max"}]});
+    std::fs::write(&catalogue, json!({"data":[model]}).to_string()).unwrap();
+    let cfg = BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend_with(
+        BackendEntry { config: cfg, options: BackendOptions { command: Some(program.display().to_string()), acp: Some(true), ..Default::default() } },
+        None,
+    )
+    .unwrap();
+    assert_eq!(h.model_choices("OpenCode").unwrap(), ["test/alias"]);
+    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(Effort::Max)).unwrap());
+    let saved = AiConfig::from_settings(&Settings::load_from(&dir.path().join("config.toml")));
+    assert_eq!(saved.get("OpenCode").unwrap().options.cli_thinking, Some(Effort::Max));
+    assert_eq!(saved.get("OpenCode").unwrap().config.model, "opencode");
+    let mut conversation = h.start(Some("OpenCode"), false).unwrap();
+    conversation.send("test prompt");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut events = Vec::new();
+    while conversation.is_busy() && Instant::now() < deadline {
+        events.extend(conversation.poll());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    events.extend(conversation.poll());
+    assert!(
+        matches!(events.as_slice(), [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }]
+        if message.contains("cannot yet connect")),
+        "{events:?}"
+    );
+    assert!(!seen.exists(), "an explicit selection must not start a run without its MCP server");
+    assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(Effort::Xhigh)).is_err());
+    assert_eq!(h.options()["OpenCode"].cli_thinking, Some(Effort::Max), "a failed validation changes nothing");
+    let stale = h.model_context("OpenCode").unwrap();
+    h.set_enabled("OpenCode", false).unwrap();
+    assert!(h.set_agent_selection(&stale, None, None).is_err(), "a late picker cannot overwrite newer settings");
+    std::fs::write(&catalogue, r#"{"data":[]}"#).unwrap();
+    assert!(h.set_model("OpenCode", "test/alias").is_err(), "removed models are not offered as a fallback");
+    h.set_agent_model("OpenCode", None, None).unwrap();
+    assert!(h.options()["OpenCode"].cli_model.is_none());
+    assert!(h.options()["OpenCode"].cli_thinking.is_none());
+}
+
+/// Contention is an error, while an available session retains its actual optional project and remains saveable.
+#[test]
+fn model_context_distinguishes_a_busy_session_from_no_project() {
+    use craft_anything_engine::project::{Project, Purpose};
+    let (h, dir) = hub();
+    let backend =
+        BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend(backend.clone(), None).unwrap();
+    assert_eq!(h.model_context("OpenCode").unwrap().directory, None);
+    let root = dir.path().join("test.cany");
+    {
+        let mut session = h.engine.session();
+        session.open_project(Project::create(&root, "test", Purpose::Education).unwrap()).unwrap();
+        assert!(h.model_context("OpenCode").is_err(), "lock contention must not capture a missing project");
+    }
+    let context = h.model_context("OpenCode").unwrap();
+    assert_eq!(context.directory.as_ref(), Some(&root));
+    assert_eq!(context.backend.config, backend);
+    assert!(h.set_agent_selection(&context, None, None).unwrap(), "a capture after contention must remain saveable");
+    assert!(h.model_context("missing").is_err());
+}
+
 #[test]
 fn a_failed_save_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -155,8 +234,8 @@ fn a_failed_save_changes_nothing() {
 fn ai_settings_that_cant_be_read_are_never_saved_over() {
     let (h, d) = hub();
     add(&h, "Claude Code", BackendKind::AgentCli, "http://127.0.0.1:9", None);
-    add(&h, "Kimi K3 (OpenRouter)", BackendKind::Openrouter, "http://127.0.0.1:9", None);
-    h.set_role(Role::Builder, Some("Kimi K3 (OpenRouter)")).unwrap();
+    add(&h, "Kimi K3.1 Pro (OpenRouter)", BackendKind::Openrouter, "http://127.0.0.1:9", None);
+    h.set_role(Role::Builder, Some("Kimi K3.1 Pro (OpenRouter)")).unwrap();
     let file = d.path().join("config.toml");
     let mut bad = h.engine.session().settings.clone();
     let price: toml::Table = toml::from_str(
@@ -183,17 +262,17 @@ input_per_mtok = 1.0
 fn the_person_chooses_who_builds() {
     let (h, _d) = hub();
     add(&h, "Claude Code", BackendKind::AgentCli, "http://127.0.0.1:9", None);
-    add(&h, "Kimi K3 (OpenRouter)", BackendKind::Openrouter, "http://127.0.0.1:9", Some("sk-test"));
+    add(&h, "Kimi K3.1 Pro (OpenRouter)", BackendKind::Openrouter, "http://127.0.0.1:9", Some("sk-test"));
     assert_eq!(h.chosen(Role::Builder), None, "automatic until chosen");
     assert!(h.set_role(Role::Builder, Some("Nobody")).is_err(), "only a configured backend");
-    h.set_role(Role::Builder, Some("Kimi K3 (OpenRouter)")).unwrap();
-    assert_eq!(h.chosen(Role::Builder).as_deref(), Some("Kimi K3 (OpenRouter)"));
+    h.set_role(Role::Builder, Some("Kimi K3.1 Pro (OpenRouter)")).unwrap();
+    assert_eq!(h.chosen(Role::Builder).as_deref(), Some("Kimi K3.1 Pro (OpenRouter)"));
     // The extractor is chosen the same way, and has no default.
     assert_eq!(h.chosen(Role::Extractor), None);
-    h.set_role(Role::Extractor, Some("Kimi K3 (OpenRouter)")).unwrap();
-    assert_eq!(h.chosen(Role::Extractor).as_deref(), Some("Kimi K3 (OpenRouter)"));
+    h.set_role(Role::Extractor, Some("Kimi K3.1 Pro (OpenRouter)")).unwrap();
+    assert_eq!(h.chosen(Role::Extractor).as_deref(), Some("Kimi K3.1 Pro (OpenRouter)"));
     // A removed backend can't stay the builder.
-    h.remove_backend("Kimi K3 (OpenRouter)").unwrap();
+    h.remove_backend("Kimi K3.1 Pro (OpenRouter)").unwrap();
     assert_eq!((h.chosen(Role::Builder), h.chosen(Role::Extractor)), (None, None));
     h.set_role(Role::Builder, Some("Claude Code")).unwrap();
     h.set_role(Role::Builder, None).unwrap();
@@ -270,6 +349,10 @@ fn a_server_is_added_by_its_address() {
     assert_eq!(h.add_server("Named", &url, Some("llama3"), None).unwrap(), "llama3", "a named model is kept");
     assert!(h.add_server("Web page", &serve("404 Not Found", "nope"), None, None).is_err(), "not a model server");
     assert!(h.add_server("Empty", &serve("200 OK", r#"{"object":"list","data":[]}"#), None, None).is_err(), "no models to use");
+    let embeddings = serve("200 OK", r#"{"object":"list","data":[{"id":"nomic-embed-text"}]}"#);
+    let error = h.add_server("Embeddings", &embeddings, None, None).unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotFound);
+    assert!(error.message.contains("model that can chat"));
     assert!(h.add_server("No scheme", "192.168.1.20:11434/v1", None, None).is_err());
     assert!(h.add_server(" ", &url, None, None).is_err());
     assert_eq!(h.backends().len(), 2, "only the ones that answered");

@@ -15,13 +15,60 @@ pub struct CapturedScript {
     pub text: String,
 }
 
+/// Most scripts, and most bytes of script text, an extraction keeps. Scripts past it are listed
+/// by URL only, so a large capture isn't copied in full when only part of it will be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptBudget {
+    pub max_scripts: usize,
+    pub max_bytes: u64,
+}
+
+impl ScriptBudget {
+    pub const UNLIMITED: ScriptBudget = ScriptBudget { max_scripts: usize::MAX, max_bytes: u64::MAX };
+}
+
+/// Scripts kept within a [`ScriptBudget`], and the URLs of those left out because of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtractedScripts {
+    pub scripts: Vec<CapturedScript>,
+    pub over_budget: Vec<String>,
+    pub bytes: u64,
+}
+
+impl ExtractedScripts {
+    /// Every script seen, kept or not.
+    pub fn seen(&self) -> usize {
+        self.scripts.len().saturating_add(self.over_budget.len())
+    }
+
+    /// Whether another script can be kept at all.
+    fn has_room(&self, budget: ScriptBudget) -> bool {
+        self.scripts.len() < budget.max_scripts
+    }
+
+    /// Whether a script of `len` bytes fits in what's left.
+    fn fits(&self, budget: ScriptBudget, len: usize) -> bool {
+        self.has_room(budget) && self.bytes.saturating_add(len as u64) <= budget.max_bytes
+    }
+
+    fn keep(&mut self, url: String, text: String) {
+        self.bytes = self.bytes.saturating_add(text.len() as u64);
+        self.scripts.push(CapturedScript { url, text });
+    }
+}
+
 /// Scripts listed in a capture result: any object with a `url` and inline source
 /// (`source`, `text`, `content` or `script_source`).
 pub fn scripts_from_capture(v: &Value) -> Vec<CapturedScript> {
-    let mut out = Vec::new();
+    scripts_from_capture_within(v, ScriptBudget::UNLIMITED).scripts
+}
+
+/// [`scripts_from_capture`], copying only the scripts that fit `budget`.
+pub fn scripts_from_capture_within(v: &Value, budget: ScriptBudget) -> ExtractedScripts {
+    let mut out = ExtractedScripts::default();
     let mut stack = vec![(v, 0usize)];
     while let Some((x, depth)) = stack.pop() {
-        if depth > 10 || out.len() >= 20_000 {
+        if depth > 10 || out.seen() >= 20_000 {
             break;
         }
         match x {
@@ -29,7 +76,11 @@ pub fn scripts_from_capture(v: &Value) -> Vec<CapturedScript> {
                 let text = ["source", "text", "content", "script_source"].iter().find_map(|k| m.get(*k).and_then(Value::as_str));
                 if let Some(text) = text {
                     let url = m.get("url").and_then(Value::as_str).unwrap_or("").to_string();
-                    out.push(CapturedScript { url, text: text.to_string() });
+                    if out.fits(budget, text.len()) {
+                        out.keep(url, text.to_string());
+                    } else {
+                        out.over_budget.push(url);
+                    }
                     continue;
                 }
                 for y in m.values() {
@@ -49,8 +100,13 @@ pub fn scripts_from_capture(v: &Value) -> Vec<CapturedScript> {
 
 /// JavaScript responses recorded in a HAR, when their bodies were saved.
 pub fn scripts_from_har(bytes: &[u8], max_entries: usize) -> Result<Vec<CapturedScript>, String> {
+    Ok(scripts_from_har_within(bytes, max_entries, ScriptBudget::UNLIMITED)?.scripts)
+}
+
+/// [`scripts_from_har`], decoding and keeping only the scripts that fit `budget`.
+pub fn scripts_from_har_within(bytes: &[u8], max_entries: usize, budget: ScriptBudget) -> Result<ExtractedScripts, String> {
     let h = har::parse(bytes, max_entries).map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
+    let mut out = ExtractedScripts::default();
     for e in h.entries {
         let mime = e.response.mime.as_deref().unwrap_or("").to_ascii_lowercase();
         let path = e.request.url.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
@@ -59,13 +115,25 @@ pub fn scripts_from_har(bytes: &[u8], max_entries: usize) -> Result<Vec<Captured
             continue;
         }
         let Some(text) = e.response.text else { continue };
+        if text.is_empty() {
+            continue;
+        }
+        if !out.has_room(budget) {
+            out.over_budget.push(e.request.url);
+            continue;
+        }
         let text = if e.response.encoding.as_deref() == Some("base64") {
             base64_decode(&text).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
         } else {
             text
         };
-        if !text.is_empty() {
-            out.push(CapturedScript { url: e.request.url, text });
+        if text.is_empty() {
+            continue;
+        }
+        if out.fits(budget, text.len()) {
+            out.keep(e.request.url, text);
+        } else {
+            out.over_budget.push(e.request.url);
         }
     }
     Ok(out)
@@ -208,6 +276,29 @@ mod tests {
           {"request":{"method":"GET","url":"https://x.test/b.css"},"response":{"status":200,"content":{"mimeType":"text/css","text":"x"}}}]}}"#;
         let s = scripts_from_har(har, 100).unwrap();
         assert_eq!(s, vec![CapturedScript { url: "https://x.test/a.js".into(), text: "a()".into() }]);
+    }
+
+    #[test]
+    fn extraction_keeps_only_what_fits_the_budget() {
+        let cap = json!({"scripts": [
+            {"url": "https://ex.test/a.js", "source": "aaaa"},
+            {"url": "https://ex.test/big.js", "source": "bbbbbbbbbb"},
+            {"url": "https://ex.test/c.js", "source": "cc"},
+            {"url": "https://ex.test/d.js", "source": "d"},
+        ]});
+        let e = scripts_from_capture_within(&cap, ScriptBudget { max_scripts: 10, max_bytes: 6 });
+        let kept: Vec<&str> = e.scripts.iter().map(|s| s.url.as_str()).collect();
+        assert_eq!(kept, ["https://ex.test/a.js", "https://ex.test/c.js"]);
+        assert_eq!(e.over_budget, ["https://ex.test/big.js", "https://ex.test/d.js"]);
+        assert_eq!((e.bytes, e.seen()), (6, 4));
+        let e = scripts_from_capture_within(&cap, ScriptBudget { max_scripts: 1, max_bytes: u64::MAX });
+        assert_eq!((e.scripts.len(), e.over_budget.len()), (1, 3));
+
+        let har = br#"{"log":{"entries":[{"request":{"method":"GET","url":"https://x.test/a.js"},"response":{"status":200,"content":{"mimeType":"text/javascript","text":"YSgp","encoding":"base64"}}},
+          {"request":{"method":"GET","url":"https://x.test/b.js"},"response":{"status":200,"content":{"mimeType":"text/javascript","text":"b()"}}}]}}"#;
+        let e = scripts_from_har_within(har, 100, ScriptBudget { max_scripts: 1, max_bytes: u64::MAX }).unwrap();
+        assert_eq!(e.scripts, vec![CapturedScript { url: "https://x.test/a.js".into(), text: "a()".into() }]);
+        assert_eq!(e.over_budget, ["https://x.test/b.js"]);
     }
 
     #[test]

@@ -43,7 +43,7 @@ fn utf8_seq(data: &[u8], i: usize) -> Option<usize> {
 }
 
 /// Extract strings of at least `min_len` characters. Offsets are `base + position`.
-/// Stops after `max_count` strings.
+/// Stops after `max_count` strings. Strings whose starting address overflows `u64` are omitted.
 pub fn extract(data: &[u8], base: u64, min_len: usize, max_count: usize) -> Vec<FoundString> {
     let min_len = min_len.max(2);
     let mut out = Vec::new();
@@ -98,9 +98,10 @@ pub fn extract(data: &[u8], base: u64, min_len: usize, max_count: usize) -> Vec<
             chars -= 1;
         }
         if chars >= min_len {
+            let Some(offset) = base.checked_add(start as u64) else { break };
             let units: Vec<u16> = data.get(start..i).unwrap_or(&[]).as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).take(MAX_STRING_CHARS).collect();
             out.push(FoundString {
-                offset: base + start as u64,
+                offset,
                 byte_len: (i - start) as u64,
                 encoding: Encoding::Utf16le,
                 text: String::from_utf16_lossy(&units),
@@ -115,11 +116,12 @@ pub fn extract(data: &[u8], base: u64, min_len: usize, max_count: usize) -> Vec<
 }
 
 fn push(out: &mut Vec<FoundString>, data: &[u8], base: u64, start: usize, end: usize, encoding: Encoding) {
+    let Some(offset) = base.checked_add(start as u64) else { return };
     let bytes = data.get(start..end).unwrap_or(&[]);
     let text = String::from_utf8_lossy(bytes);
     let truncated = text.chars().count() > MAX_STRING_CHARS;
     let text: String = if truncated { text.chars().take(MAX_STRING_CHARS).collect() } else { text.into_owned() };
-    out.push(FoundString { offset: base + start as u64, byte_len: (end - start) as u64, encoding, text, truncated });
+    out.push(FoundString { offset, byte_len: (end - start) as u64, encoding, text, truncated });
 }
 
 #[cfg(test)]

@@ -406,6 +406,52 @@ impl CraftApp {
     }
 }
 
+impl CraftApp {
+    /// A small picture of each file in `files` for its chip in a prompt box, decoded on a worker
+    /// the first time it's asked for (`None` until then, or if it can't be read). Pictures no
+    /// prompt box holds any more are forgotten.
+    pub fn previews(&mut self, ctx: &egui::Context, files: &[PathBuf]) -> Vec<Option<egui::TextureHandle>> {
+        let (attached, make) = (&self.state.project_attachments, &self.state.make.pictures);
+        self.previews.retain(|p, _| attached.contains(p) || make.contains(p) || files.contains(p));
+        files.iter().map(|p| self.preview(ctx, p)).collect()
+    }
+
+    fn preview(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+        if let Some(t) = self.previews.get(path) {
+            return if let Thumb::Ready(t) = t { Some(t.clone()) } else { None };
+        }
+        self.previews.insert(path.to_path_buf(), Thumb::Loading);
+        let (p, ctx) = (path.to_path_buf(), ctx.clone());
+        self.jobs.spawn(tr("Load a picture"), false, move |_| {
+            use craft_anything_engine::tools::web_common::{decode_picture, resize};
+            // The same size limit as attaching: a larger file wouldn't be sent anyway.
+            let small = std::fs::metadata(&p).is_ok_and(|m| m.len() <= 20 * 1024 * 1024);
+            let image =
+                small.then(|| std::fs::read(&p).ok()).flatten().and_then(|b| decode_picture(&b).ok()).filter(|i| i.width > 0 && i.height > 0).map(|img| {
+                    let longest = img.width.max(img.height);
+                    // In u64: a picture's own sizes can be anything up to the decode budget.
+                    let scaled = |side: u32| u32::try_from(u64::from(side) * u64::from(PREVIEW_PIXELS) / u64::from(longest)).unwrap_or(PREVIEW_PIXELS).max(1);
+                    let img = if longest > PREVIEW_PIXELS { resize(&img, scaled(img.width), scaled(img.height)) } else { img };
+                    let ci = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba);
+                    ctx.load_texture(format!("preview:{}", p.display()), ci, egui::TextureOptions::LINEAR)
+                });
+            Ok(Done::Preview { path: p, image })
+        });
+        None
+    }
+
+    pub fn preview_ready(&mut self, path: PathBuf, image: Option<egui::TextureHandle>) {
+        // Removed from the box while it was decoded: nothing shows it.
+        if self.previews.contains_key(&path) {
+            self.previews.insert(path, image.map_or(Thumb::Missing, Thumb::Ready));
+        }
+    }
+}
+
+/// The longest side of an attachment's picture as decoded (twice its hover size in points, so
+/// it's sharp on a high-density screen).
+const PREVIEW_PIXELS: u32 = 720;
+
 /// How much of a page's screenshot a thumbnail shows (from the top), and its widest, in pixels.
 const THUMB_TOP: u32 = 1800;
 const THUMB_WIDTH: u32 = 720;
@@ -1530,6 +1576,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
             .unwrap_or("Ask for a change, e.g. \"make the header blue\" or \"add a contact form\""))
     };
     ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
+        let previews = app.previews(ui.ctx(), &app.state.project_attachments.clone());
         let history = || {
             let asked = app.workspace.as_ref().and_then(|w| app.asked.get(&w.root)).map_or(&[][..], Vec::as_slice);
             crate::just_ask::prompts(&app.state.feed, asked)
@@ -1542,7 +1589,8 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
                 name: "Ask for a change",
                 hint,
                 rows: (1, 8),
-                attach: Some("Attach pictures (or drop them here)"),
+                attach: Some("Attach pictures (or drop or paste them here)"),
+                previews: &previews,
                 // The one way to pause (Continue picks up where it stopped).
                 stop_button: running.then_some("Pause"),
                 stopping: pausing,
@@ -1567,6 +1615,9 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
         }
         if out.attach {
             app.pick(crate::Pick::Attach);
+        }
+        if out.paste {
+            app.paste_pictures(true);
         }
         if out.stop {
             app.pause();
@@ -1623,6 +1674,14 @@ fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engin
     }
 }
 
+/// A picture being pasted into a project's prompt box: its job, and whether Send was pressed
+/// meanwhile (the message then goes once the picture is in, with it).
+pub struct PendingPaste {
+    pub job: u64,
+    pub root: PathBuf,
+    pub send: bool,
+}
+
 /// What was typed for a note while its project's builder worked.
 pub struct Draft {
     pub root: PathBuf,
@@ -1641,6 +1700,74 @@ impl CraftApp {
         }
     }
 
+    /// Pictures pasted with Ctrl+V: attached to the project's next message (`attach`), else added
+    /// as pictures of the original on Make. The clipboard is read on a worker; one with no
+    /// picture says so.
+    pub fn paste_pictures(&mut self, attach: bool) {
+        // Tests never read the person's clipboard.
+        if self.headless {
+            return;
+        }
+        // One at a time: a second paste would take the first one's place as the paste a message
+        // waits for, and the first picture would turn up in the next message.
+        if self.pasting().is_some() {
+            return;
+        }
+        // Where it goes is decided now: another project may be open by the time it's read.
+        let project = if attach {
+            match &self.workspace {
+                Some(ws) => Some(ws.root.clone()),
+                None => return,
+            }
+        } else {
+            None
+        };
+        // Pastes still attached somewhere are kept when old ones are cleared out.
+        let mut keep: Vec<PathBuf> = self.state.project_attachments.iter().chain(&self.state.make.pictures).cloned().collect();
+        keep.extend(self.state.unsent.values().flat_map(|(_, files)| files.iter().cloned()));
+        keep.extend(self.drafts.values().flat_map(|d| d.attachments.iter().cloned()));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let root = project.clone();
+            let job = self.jobs.spawn(tr("Paste pictures"), false, move |_| {
+                let files = crate::paste::read_pictures(&craft_anything_engine::workspace::pasted_dir(), &keep)?;
+                if files.is_empty() {
+                    return Err(tr("There's no picture on the clipboard to paste."));
+                }
+                Ok(Done::Pasted { project, files })
+            });
+            // A message sent before the picture is in waits for it (`send_message`).
+            if let Some(root) = root {
+                self.pending_paste = Some(PendingPaste { job, root, send: false });
+            }
+        }
+    }
+
+    /// The paste into a project's prompt box that is still being read, if one is.
+    pub(crate) fn pasting(&self) -> Option<&PendingPaste> {
+        self.pending_paste.as_ref().filter(|p| self.jobs.running().any(|j| j.id == p.job))
+    }
+
+    /// A job finished: when it was the paste a message is waiting for, the message goes now, with
+    /// its picture. If the paste failed, what was typed stays in the box to send again.
+    pub(crate) fn paste_done(&mut self, job: u64, ok: bool) {
+        let Some(p) = self.pending_paste.take_if(|p| p.job == job) else { return };
+        if p.send && ok && self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| w.root == p.root) {
+            self.send_message();
+        }
+    }
+
+    /// Pasted pictures were read: attached to the project they were pasted in while its screen is
+    /// still showing, or added to Make's pictures while Make is still showing.
+    pub(crate) fn pasted(&mut self, project: Option<PathBuf>, files: Vec<PathBuf>) {
+        let showing = |root: &PathBuf| self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| &w.root == root);
+        match project {
+            Some(root) if showing(&root) => self.attach(files),
+            None if self.state.screen == Screen::Home => self.add_pictures(files),
+            _ => self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true),
+        }
+    }
+
     /// Send what's in the project's prompt box: a follow-up, or a note while it's working.
     pub fn send_message(&mut self) {
         let Some(ws) = self.workspace.clone() else { return };
@@ -1651,6 +1778,13 @@ impl CraftApp {
         // Before anything is taken from the box: a project waiting its turn keeps what was typed.
         if self.queue_position().is_some() {
             return self.toast(tr("This project is waiting its turn. Send your message once it starts."), true);
+        }
+        // A picture still being pasted goes with the message: it's sent once the picture is in.
+        if self.pasting().is_some_and(|p| p.root == ws.root) {
+            if let Some(p) = self.pending_paste.as_mut() {
+                p.send = true;
+            }
+            return;
         }
         self.state.project_input.clear();
         let attachments = std::mem::take(&mut self.state.project_attachments);
@@ -1736,6 +1870,60 @@ mod tests {
         busy.join().unwrap();
         assert!(app.settings.deep_mode, "a busy engine at startup must not mean default settings");
         drop(release.0);
+    }
+
+    /// Send pressed while a picture is still being pasted: the message waits for it and goes with it,
+    /// instead of going without it and leaving the picture for the next message.
+    #[test]
+    fn a_message_sent_while_a_picture_is_pasted_waits_for_it() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let root = ws.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        app.state.screen = Screen::Project;
+        let shot = d.path().join("shot.png");
+        std::fs::write(&shot, b"\x89PNG\r\n\x1a\n").unwrap();
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (project, files) = (Some(root.clone()), vec![shot.clone()]);
+        let job = app.jobs.spawn("Paste pictures", false, move |_| {
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(10));
+            Ok(Done::Pasted { project, files })
+        });
+        app.pending_paste = Some(PendingPaste { job, root, send: false });
+        // While it's read, it's the one paste: another Ctrl+V waits (`paste_pictures` checks this).
+        assert!(app.pasting().is_some_and(|p| p.job == job));
+        app.state.project_input = "Like this".into();
+        app.send_message();
+        assert_eq!(app.state.project_input, "Like this", "it waits for the picture");
+        go.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.pending_paste.is_some() && std::time::Instant::now() < deadline {
+            app.take_finished_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(app.state.project_input.is_empty() && app.state.project_attachments.is_empty(), "the message went");
+        assert!(app.jobs.running().any(|j| j.title == "Attach pictures"), "with its picture");
+        assert!(app.pasting().is_none(), "a next paste can start");
+    }
+
+    /// A paste read while the person went Home goes nowhere, though the project is still the
+    /// open one: it would land in a prompt box nobody can see.
+    #[test]
+    fn a_paste_reaches_a_project_only_while_its_screen_shows() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let root = ws.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        let shot = vec![PathBuf::from("pasted-1.png")];
+        app.state.screen = Screen::Home;
+        app.pasted(Some(root.clone()), shot.clone());
+        assert!(app.state.project_attachments.is_empty());
+        assert!(app.state.toasts.iter().any(|(t, error)| *error && t.contains("another screen")), "{:?}", app.state.toasts);
+        app.state.screen = Screen::Project;
+        app.pasted(Some(root), shot.clone());
+        assert_eq!(app.state.project_attachments, shot);
     }
 
     #[test]

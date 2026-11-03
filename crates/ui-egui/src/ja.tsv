@@ -82,7 +82,7 @@ Ask: "Is it safe to run?"	「実行しても安全?」と質問します。
 Ask: "What does it send over the internet?"	「インターネットに何を送っている?」と質問します。
 At most this many rounds of fixes after the first build.	最初のビルドの後に修正する回数の上限です。
 Attach pictures	画像を添付
-Attach pictures (or drop them here)	画像を添付(ここにドロップも可)
+Attach pictures (or drop or paste them here)	画像を添付(ここにドロップ・貼り付けも可)
 Auto mode	自動モード
 Automatic	自動
 Automatic ({name})	自動({name})
@@ -341,6 +341,7 @@ Lets the builder make realistic 3D models and textures for games, {model} a mode
 Light copy: shares big files with the project	軽量コピー: 大きなファイルをプロジェクトと共有
 Likeness	類似度
 Live: the project's latest build	ライブ: プロジェクトの最新ビルド
+Load a picture	画像を読み込み
 Load a screenshot	スクリーンショットを読み込む
 Loading…	読み込んでいます…
 Log	ログ
@@ -475,6 +476,7 @@ Other pages of a website studied and compared besides the one you gave.	指定�
 Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	アプリの一部が応答しなくなったため、その部分だけを停止し、残りはそのまま続けました。作業内容は残っています。
 Part of the app is stuck. Restarting clears it, and your work is kept.	アプリの一部が止まっています。再起動で解消します。作業内容は残ります。
 Part of this screen hit a bug and was skipped. Your work is safe.	この画面の一部で不具合が発生したため、その部分を飛ばしました。作業内容は失われていません。
+Paste pictures	画像を貼り付け
 Paste your API key (kept in your system keychain)	API キーを貼り付け(システムのキーチェーンに保存)
 Paste your {name} key	{name} のキーを貼り付け
 Path	パス
@@ -655,16 +657,20 @@ The builder's questions	ビルダーの質問
 The builder's questions come to you as cards, and it waits for your answer.	ビルダーの質問はカードで届き、あなたの回答を待ちます。
 The builder's questions will come to you.	ビルダーからの質問はあなたに表示されます。
 The built-in engines still show you everything they find.	内蔵エンジンは見つけた内容をすべて表示します。
+The clipboard can't be read:	クリップボードを読み取れません:
 The code	コード
 The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	API 価格でのコーディングエージェントの見積もりで、請求額ではありません。サブスクリプション利用時はこの費用は請求されません。
 The download keeps going in the background.	ダウンロードはバックグラウンドで続きます。
 The full toolset, evidence and logs.	すべてのツール、エビデンス、ログ。
 The installer is open. Follow its steps, then come back here.	インストーラを開きました。手順に従ってから、ここに戻ってください。
+The pasted picture wasn't attached: another screen was opened meanwhile.	貼り付けた画像は添付されませんでした:その間に別の画面が開かれました。
+The picture on the clipboard is too large.	クリップボードの画像が大きすぎます。
 The project's name and round	プロジェクト名とラウンド
 The raw result	未加工の結果
 Theme	テーマ
 There's no /{name} command. You can use {commands}.	/{name} というコマンドはありません。{commands} が使えます。
 There's no AI brain set up yet, so here's what the built-in engines found:	まだ AI が設定されていないため、内蔵エンジンが見つけた内容を示します:
+There's no picture on the clipboard to paste.	貼り付けられる画像がクリップボードにありません。
 They're my app: edit them in place	自分のアプリなので、その場で編集する
 Things we couldn't establish yet are listed here, with what would settle them.	まだ確定できていないことを、確定に必要な情報とともにここに表示します。
 This answer won't be there after a restart:	この回答は再起動後には残りません:
@@ -818,6 +824,8 @@ your files there are the app, edited in place	そこにあるファイルがア�
 {line}, and {n} more	{line}、ほか {n} 件
 {name} builds what you make.	{name} が作るものをビルドします。
 {name} builds what you make; answers come from {brain}.	{name} がビルドし、回答は {brain} から得ます。
+{name} can't be attached: a message takes pictures up to 20 MB.	{name} は添付できません: メッセージに添付できる画像は 20 MB までです。
+{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.	{name} は添付できません: PNG、JPEG、GIF、WebP の画像ではありません。
 {name} is ready	{name} の準備ができました
 {name} is ready.	{name} の準備ができました。
 {name} isn't on this computer yet.	{name} はまだこのコンピュータにありません。

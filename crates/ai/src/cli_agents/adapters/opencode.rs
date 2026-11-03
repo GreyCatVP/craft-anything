@@ -10,6 +10,48 @@ impl AgentAdapter for OpenCode {
         &["opencode"]
     }
 
+    /// OpenCode V2 exposes a catalogue through its authenticated CLI.
+    fn has_model_catalog(&self) -> bool {
+        true
+    }
+
+    /// Native model selection cannot yet carry this run's Craft Anything MCP server.
+    fn check_native_options(&self, options: &BackendOptions) -> Result<(), ToolError> {
+        if options.cli_model.is_some() || options.cli_thinking.is_some() {
+            return Err(ToolError::new(
+                ErrorCode::BadSettings,
+                "OpenCode's native model/thinking selection cannot yet connect this run's Craft Anything tools.",
+            )
+            .with_remediation("For a local OpenCode run, clear the model and thinking selection and enable ACP, or choose another AI. Native MCP configuration is not implemented yet."));
+        }
+        Ok(())
+    }
+
+    /// Discover enabled chat models and thinking variants from the selected local or SSH installation.
+    fn model_catalog(
+        &self,
+        config: &BackendConfig,
+        options: &BackendOptions,
+        directory: Option<&Path>,
+        stop: &Stop,
+    ) -> Result<Vec<models::AgentModel>, ToolError> {
+        models::discover(config, options, directory, stop)
+    }
+
+    /// Validate explicit choices against the live catalogue and refuse conflicting extra model arguments.
+    /// With no selection, leave extra arguments to OpenCode and skip the catalogue query.
+    fn validate_model(&self, config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>, stop: &Stop) -> Result<(), ToolError> {
+        if options.cli_model.is_none() && options.cli_thinking.is_none() {
+            return Ok(());
+        }
+        // Extra flags must not silently override the selected model or its thinking variant.
+        if options.args.iter().any(|a| a == "--model" || a.starts_with("--model=") || a.starts_with("-m")) {
+            return Err(ToolError::invalid("Choose OpenCode's model in its model setting, rather than in extra arguments."));
+        }
+        models::validate(options, &self.model_catalog(config, options, directory, stop)?)
+    }
+
+    /// Build native `run` arguments, encoding an optional thinking depth as `provider/model#variant`.
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = vec!["run".to_string()];
         // A builder works unattended: what OpenCode would stop to ask is allowed, unless its own
@@ -18,7 +60,8 @@ impl AgentAdapter for OpenCode {
             a.push("--auto".into());
         }
         if let Some(m) = &cx.options.cli_model {
-            a.extend(["--model".into(), m.clone()]);
+            let model = cx.options.cli_thinking.map_or_else(|| m.clone(), |d| format!("{m}#{}", d.as_str()));
+            a.extend(["--model".into(), model]);
         }
         a.extend(cx.options.args.iter().cloned());
         a.extend(["--format".into(), "json".into()]);
@@ -217,5 +260,46 @@ mod tests {
         zero.line(&step(json!(0)));
         zero.line(&step(json!(0)));
         assert_eq!(zero.cost_usd, Some(0.0), "an explicit zero is a known cost");
+    }
+
+    /// Every supported depth reaches native chat and builder runs in the selected model reference.
+    #[test]
+    fn thinking_depth_is_part_of_the_selected_model_reference() {
+        for depth in crate::Effort::ALL {
+            let options = BackendOptions { cli_model: Some("test/model".into()), cli_thinking: Some(depth), ..Default::default() };
+            for builder in [false, true] {
+                let argv = args(builder, &options);
+                let model = argv.iter().position(|a| a == "--model").unwrap();
+                assert_eq!(argv[model + 1], format!("test/model#{}", depth.as_str()));
+                assert_eq!(argv.last().unwrap(), "PRE make a game");
+            }
+        }
+        let argv = args(false, &BackendOptions::default());
+        assert!(!argv.iter().any(|a| a == "--model"));
+    }
+
+    /// Extra model arguments work without a saved selection, but cannot override an explicit model or depth.
+    #[test]
+    fn extra_model_arguments_are_checked_only_for_explicit_selections() {
+        let config = BackendConfig {
+            name: "OpenCode".into(),
+            kind: crate::BackendKind::AgentCli,
+            model: "opencode".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        for extra in [vec!["--model", "test/legacy"], vec!["--model=test/legacy"], vec!["-m", "test/legacy"], vec!["-mtest/legacy"]] {
+            let options =
+                BackendOptions { command: Some("missing-test-opencode".into()), args: extra.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+            assert!(OpenCode.validate_model(&config, &options, None, &Stop::default()).is_ok());
+            let argv = args(false, &options);
+            assert_eq!(argv.get(1..1 + extra.len()).unwrap(), extra.as_slice());
+            for (model, thinking) in [(Some("test/selected"), None), (None, Some(crate::Effort::High)), (Some("test/selected"), Some(crate::Effort::High))] {
+                let selected = BackendOptions { cli_model: model.map(str::to_string), cli_thinking: thinking, ..options.clone() };
+                let error = OpenCode.validate_model(&config, &selected, None, &Stop::default()).unwrap_err();
+                assert_eq!(error.code, craft_anything_evidence::ErrorCode::BadInput);
+            }
+        }
     }
 }

@@ -87,7 +87,7 @@ impl Redactor {
         let mut needles: Vec<String> = Vec::new();
         for v in values.iter().filter(|v| !v.is_empty()) {
             let json_escaped = serde_json::to_string(v).ok().and_then(|q| q.get(1..q.len().saturating_sub(1)).map(String::from)).unwrap_or_default();
-            for form in [v.clone(), percent_encode(v), percent_encode(v).to_ascii_lowercase(), json_escaped, v.replace(' ', "+")] {
+            for form in [v.clone(), v.to_ascii_lowercase(), percent_encode(v), percent_encode(v).to_ascii_lowercase(), json_escaped, v.replace(' ', "+")] {
                 if !form.is_empty() && !needles.contains(&form) {
                     needles.push(form);
                 }
@@ -140,8 +140,29 @@ pub(crate) fn split_url(url: &str) -> (String, String, String, Vec<(String, Stri
     (scheme.to_ascii_lowercase(), host.to_ascii_lowercase(), if path.is_empty() { "/".into() } else { path.to_string() }, pairs, userinfo)
 }
 
+/// Decode a query name once for privacy checks; malformed escapes stay literal.
+fn decode_query_name(name: &str) -> String {
+    let mut decoded = Vec::with_capacity(name.len());
+    let mut bytes = name.as_bytes().iter().copied().peekable();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let mut next = bytes.clone();
+            let hex = next.next().and_then(|hi| next.next().map(|lo| [hi, lo]));
+            if let Some(value) =
+                hex.filter(|h| h.iter().all(u8::is_ascii_hexdigit)).and_then(|h| std::str::from_utf8(&h).ok().and_then(|s| u8::from_str_radix(s, 16).ok()))
+            {
+                decoded.push(value);
+                bytes = next;
+                continue;
+            }
+        }
+        decoded.push(if b == b'+' { b' ' } else { b });
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 pub(crate) fn is_credential_param(k: &str) -> bool {
-    let l = k.to_ascii_lowercase();
+    let l = decode_query_name(k).to_ascii_lowercase();
     CREDENTIAL_PARAMS.contains(&l.as_str()) || l.ends_with("_token") || l.ends_with("token") || l.contains("password") || l.contains("secret")
 }
 
@@ -154,6 +175,10 @@ fn safe_url(url: &str, pointer: &str, red: &mut Redactor) -> (String, Vec<String
     let mut q = Vec::new();
     let mut names = Vec::new();
     for (k, v) in pairs {
+        if red.contains(&k) || red.contains(&decode_query_name(&k)) {
+            red.log.push(json!({"pointer": pointer, "reason": "secret-value", "scope": "query-name"}));
+            continue;
+        }
         names.push(k.clone());
         if is_credential_param(&k) && !v.is_empty() {
             red.log.push(json!({"pointer": pointer, "reason": "credential-parameter", "parameter": k}));
@@ -195,11 +220,18 @@ pub(crate) fn is_uuid(s: &str) -> bool {
 
 fn is_iso_date(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() >= 10
-        && b.get(4) == Some(&b'-')
-        && b.get(7) == Some(&b'-')
-        && b.iter().take(4).all(u8::is_ascii_digit)
-        && b.get(5..7).is_some_and(|m| m.iter().all(u8::is_ascii_digit))
+    if b.len() != 10 || b.get(4) != Some(&b'-') || b.get(7) != Some(&b'-') {
+        return false;
+    }
+    let number = |start, end| s.get(start..end).filter(|v| v.bytes().all(|b| b.is_ascii_digit())).and_then(|v| v.parse::<u32>().ok());
+    let (Some(year), Some(month), Some(day)) = (number(0, 4), number(5, 7), number(8, 10)) else { return false };
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => 28 + u32::from(year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))),
+        _ => return false,
+    };
+    (1..=days).contains(&day)
 }
 
 /// The outline of a JSON value: types only, never values.
@@ -288,12 +320,13 @@ fn body_outline(
     pointer: &str,
 ) -> Value {
     let mime_l = mime.unwrap_or("").to_ascii_lowercase();
-    let decoded: Option<String> = match (text, encoding) {
-        (Some(t), Some("base64")) => base64_decode(t).map(|b| String::from_utf8_lossy(&b).into_owned()),
-        (Some(t), _) => Some(t.to_string()),
+    let decoded_bytes = match (text, encoding) {
+        (Some(t), Some("base64")) => base64_decode(t),
+        (Some(t), _) => Some(t.as_bytes().to_vec()),
         _ => None,
     };
-    let bytes = decoded.as_ref().map_or(0, String::len);
+    let bytes = decoded_bytes.as_ref().map_or(0, Vec::len);
+    let decoded = decoded_bytes.as_deref().map(|b| String::from_utf8_lossy(b).into_owned());
     let json_like = mime_l.contains("json") || decoded.as_deref().is_some_and(|t| t.trim_start().starts_with('{') || t.trim_start().starts_with('['));
     if json_like && let Some(v) = decoded.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()) {
         let mut sr = OutlineRedactions { needles: &red.needles, log: Vec::new() };
@@ -316,24 +349,28 @@ fn body_outline(
     if decoded.is_none() {
         return Value::Null;
     }
-    json!({"kind": if mime_l.is_empty() { "unknown".to_string() } else { mime_l }, "bytes": bytes})
+    json!({"kind": if mime_l.is_empty() { "unknown".to_string() } else { red.text(&format!("{pointer}/mime"), &mime_l) }, "bytes": bytes})
 }
 
 fn headers_view(h: &[(String, String)], pointer: &str, red: &mut Redactor) -> Vec<Value> {
     h.iter()
         .take(200)
         .enumerate()
-        .map(|(i, (n, v))| {
+        .filter_map(|(i, (n, v))| {
+            if red.contains(n) {
+                red.log.push(json!({"pointer": pointer, "reason": "secret-value", "scope": "header-name"}));
+                return None;
+            }
             let l = n.to_ascii_lowercase();
             let p = format!("{pointer}/{i}/value");
             if CREDENTIAL_HEADERS.contains(&l.as_str()) {
                 red.log.push(json!({"pointer": p, "reason": "auth-header"}));
-                json!({"name": n, "value": null, "redacted": "auth-header"})
+                Some(json!({"name": n, "value": null, "redacted": "auth-header"}))
             } else if matches!(l.as_str(), "referer" | "origin" | "location") {
                 let (u, _) = safe_url(v, &p, red);
-                json!({"name": n, "value": u})
+                Some(json!({"name": n, "value": u}))
             } else {
-                json!({"name": n, "value": red.text(&p, v)})
+                Some(json!({"name": n, "value": red.text(&p, v)}))
             }
         })
         .collect()
@@ -353,27 +390,27 @@ fn entry_view(e: &HarEntry, red: &mut Redactor) -> Value {
     }
     json!({
         "ordinal": e.ordinal,
-        "started": e.started,
+        "started": e.started.as_deref().map(|value| red.text(&format!("{base}/started"), value)),
         "time_ms": e.time_ms,
-        "resource_type": e.resource_type,
-        "method": e.request.method,
+        "resource_type": e.resource_type.as_deref().map(|value| red.text(&format!("{base}/resource_type"), value)),
+        "method": red.text(&format!("{base}/request/method"), &e.request.method),
         "url": url,
-        "host": host,
-        "path_template": path_template(&path),
+        "host": red.text(&format!("{base}/request/host"), &host),
+        "path_template": red.text(&format!("{base}/request/path_template"), &path_template(&path)),
         "query_parameters": query_names,
-        "http_version": e.request.http_version,
+        "http_version": e.request.http_version.as_deref().map(|value| red.text(&format!("{base}/http_version"), value)),
         "status": e.response.status,
-        "status_text": e.response.status_text,
+        "status_text": e.response.status_text.as_deref().map(|value| red.text(&format!("{base}/status_text"), value)),
         "request_headers": headers_view(&e.request.headers, &format!("{base}/request/headers"), red),
         "response_headers": headers_view(&e.response.headers, &format!("{base}/response/headers"), red),
         "request_cookie_names": e.request.cookie_names.iter().filter(|n| !red.contains(n)).collect::<Vec<_>>(),
         "response_cookie_names": e.response.cookie_names.iter().filter(|n| !red.contains(n)).collect::<Vec<_>>(),
         "request_body": req_body,
         "response_body": res_body,
-        "response_mime": e.response.mime,
+        "response_mime": e.response.mime.as_deref().map(|value| red.text(&format!("{base}/response_mime"), value)),
         "response_bytes": e.response.content_size,
         "redirect_url": redirect,
-        "timings": e.timings.iter().map(|(k, v)| (k.clone(), json!(v))).collect::<Map<String, Value>>(),
+        "timings": e.timings.iter().filter(|(k, _)| !red.contains(k)).map(|(k, v)| (k.clone(), json!(v))).collect::<Map<String, Value>>(),
     })
 }
 
@@ -393,11 +430,11 @@ pub fn inspect_har(bytes: &[u8], opts: &HarOptions) -> Result<Value, String> {
     let mut views = Vec::new();
     for e in &har.entries {
         let view = entry_view(e, &mut red);
-        *methods.entry(e.request.method.to_ascii_uppercase()).or_default() += 1;
+        *methods.entry(view["method"].as_str().unwrap_or_default().to_ascii_uppercase()).or_default() += 1;
         *statuses.entry(format!("{}xx", e.response.status / 100)).or_default() += 1;
         let host = view["host"].as_str().unwrap_or("").to_string();
         *hosts.entry(red.text("/hosts", &host)).or_default() += 1;
-        let mime = e.response.mime.as_deref().unwrap_or("").split(';').next().unwrap_or("").trim().to_string();
+        let mime = view["response_mime"].as_str().unwrap_or("").split(';').next().unwrap_or("").trim().to_string();
         *mimes.entry(mime.clone()).or_default() += 1;
         total_bytes = total_bytes.saturating_add(e.response.body_size.unwrap_or(0).max(e.response.content_size.unwrap_or(0)).max(0));
         if let Some(s) = &e.started {
@@ -413,7 +450,13 @@ pub fn inspect_har(bytes: &[u8], opts: &HarOptions) -> Result<Value, String> {
         }
         // API surface.
         let (scheme, _, _, _, _) = split_url(&e.request.url);
-        let key = format!("{} {}://{}{}", e.request.method.to_ascii_uppercase(), scheme, host, view["path_template"].as_str().unwrap_or(""));
+        let key = format!(
+            "{} {}://{}{}",
+            view["method"].as_str().unwrap_or_default().to_ascii_uppercase(),
+            red.text("/scheme", &scheme),
+            host,
+            view["path_template"].as_str().unwrap_or("")
+        );
         let key = red.text("/api_surface", &key);
         let g = surface.entry(key.clone()).or_insert_with(|| json!({"operation": key, "count": 0, "statuses": [], "query_parameters": [], "request_outline": null, "response_outline": null, "response_mimes": []}));
         if let Some(o) = g.as_object_mut() {
@@ -447,12 +490,16 @@ pub fn inspect_har(bytes: &[u8], opts: &HarOptions) -> Result<Value, String> {
         None => views.iter().skip(opts.offset).take(opts.limit.max(1)).cloned().collect(),
     };
     let ops: Vec<Value> = surface.into_values().collect();
+    let version = har.version.as_deref().map(|v| red.text("/har_version", v));
+    let creator = har.creator.as_deref().map(|v| red.text("/creator", v));
+    let first = first.as_deref().map(|v| red.text("/summary/first_request", v));
+    let last = last.as_deref().map(|v| red.text("/summary/last_request", v));
     let mut redactions = red.log;
     redactions.truncate(5000);
     Ok(json!({
         "format": "har",
-        "har_version": har.version,
-        "creator": har.creator,
+        "har_version": version,
+        "creator": creator,
         "pages": har.pages,
         "summary": {
             "entries": har.entries.len(),

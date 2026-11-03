@@ -74,6 +74,14 @@ pub enum Out {
 /// while the person is asked. True allows it.
 pub type Approver = Arc<dyn Fn(&str, &Value) -> bool + Send + Sync>;
 
+/// The approver for a chat in Clean room (#564): the agent's own reading, writing, commands and
+/// fetching are refused (they'd reach the original), and what's left (planning, our tools, which
+/// our tool server limits itself) is allowed. There is no project to check paths against in a chat,
+/// so nothing of the agent's own is let through.
+pub fn clean_room_chat_approver() -> Approver {
+    Arc::new(|tool, _input| !matches!(tool, "Read" | "Write" | "Bash" | "WebFetch"))
+}
+
 /// An ACP tool call in the approval policy's shape.
 fn policy_action(call: &Value) -> (String, Value) {
     let s = |p: &str| call.pointer(p).and_then(Value::as_str).map(str::to_string);
@@ -102,6 +110,11 @@ enum Pending {
     Prompt,
 }
 
+struct QueuedPrompt {
+    text: String,
+    continuation: Option<String>,
+}
+
 /// The ACP protocol for one conversation.
 pub struct AcpCore {
     backend: String,
@@ -113,7 +126,9 @@ pub struct AcpCore {
     pending: HashMap<u64, Pending>,
     session: Option<String>,
     ready: bool,
-    queued: VecDeque<String>,
+    queued: VecDeque<QueuedPrompt>,
+    /// Only a loaded session or one already sent a prompt can continue an interrupted turn.
+    session_has_history: bool,
     /// Permission requests waiting for an answer: our call id → (JSON-RPC id, options).
     asks: HashMap<String, (Value, Vec<Value>)>,
     /// Tool call titles by id, for the finished event.
@@ -136,6 +151,7 @@ impl AcpCore {
             session: None,
             ready: false,
             queued: VecDeque::new(),
+            session_has_history: false,
             asks: HashMap::new(),
             tools: HashMap::new(),
             decides: false,
@@ -173,8 +189,12 @@ impl AcpCore {
 
     /// A message from the person: sent now, or once the session is ready.
     pub fn prompt(&mut self, text: &str) -> Vec<Out> {
+        self.queue_prompt(text, None)
+    }
+
+    fn queue_prompt(&mut self, text: &str, continuation: Option<String>) -> Vec<Out> {
         self.failure = None;
-        self.queued.push_back(text.to_string());
+        self.queued.push_back(QueuedPrompt { text: text.to_string(), continuation });
         // A start that failed earlier (an `initialize` error) left nothing under way: start again,
         // or the message would wait for a session that never comes (#271).
         if !self.ready && self.pending.is_empty() {
@@ -186,7 +206,9 @@ impl AcpCore {
     fn flush(&mut self) -> Vec<Out> {
         let busy = self.pending.values().any(|p| *p == Pending::Prompt);
         let Some(sid) = self.session.clone().filter(|_| self.ready && !busy) else { return Vec::new() };
-        let Some(text) = self.queued.pop_front() else { return Vec::new() };
+        let Some(prompt) = self.queued.pop_front() else { return Vec::new() };
+        let text = if self.session_has_history { prompt.continuation.unwrap_or(prompt.text) } else { prompt.text };
+        self.session_has_history = true;
         let params = json!({"sessionId": sid, "prompt": [{"type": "text", "text": text}]});
         vec![self.request("session/prompt", params, Pending::Prompt)]
     }
@@ -226,6 +248,7 @@ impl AcpCore {
             // A session that can't be continued starts afresh rather than failing the message.
             if kind == Pending::LoadSession {
                 self.resume = None;
+                self.session = None;
                 let params = json!({"cwd": self.cwd, "mcpServers": self.mcp_servers()});
                 return vec![self.request("session/new", params, Pending::NewSession)];
             }
@@ -262,6 +285,7 @@ impl AcpCore {
                     return self.fail(format!("{} started no session", self.agent_name), None);
                 }
                 self.ready = true;
+                self.session_has_history = kind == Pending::LoadSession;
                 self.flush()
             }
             Pending::Prompt => {
@@ -565,14 +589,7 @@ impl AcpConversation {
             s.apply(outs, &self.shared, &self.tx, &self.busy);
         }
     }
-}
-
-impl Conversation for AcpConversation {
-    fn last_failure(&self) -> Option<TurnFailure> {
-        self.failure.or_else(|| self.lock().as_ref().and_then(|s| s.core.failure))
-    }
-
-    fn send(&mut self, text: &str) {
+    fn send_prompt(&mut self, text: &str, retry: bool) {
         if self.busy.swap(true, Ordering::SeqCst) {
             let _ = self.tx.send(AgentEvent::Error {
                 message: "Still working on the last message.".into(),
@@ -600,7 +617,22 @@ impl Conversation for AcpConversation {
             }
         }
         let text = format!("{}{text}", self.preamble);
-        self.with_core(|c| c.prompt(&text));
+        let continuation = retry.then(|| format!("{}{}", self.preamble, crate::failure::CONTINUE_TURN));
+        self.with_core(|c| c.queue_prompt(&text, continuation));
+    }
+}
+
+impl Conversation for AcpConversation {
+    fn last_failure(&self) -> Option<TurnFailure> {
+        self.failure.or_else(|| self.lock().as_ref().and_then(|s| s.core.failure))
+    }
+
+    fn send(&mut self, text: &str) {
+        self.send_prompt(text, false);
+    }
+
+    fn retry(&mut self, text: &str) {
+        self.send_prompt(text, true);
     }
 
     fn session_id(&self) -> Option<String> {
@@ -729,6 +761,95 @@ mod tests {
         let mut c = core(Some("old"));
         c.start();
         assert_eq!(sent(&c.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#))[0]["method"], "session/new");
+    }
+
+    #[cfg(unix)]
+    fn prompt_after_interrupted_acp_turn(recovery: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("acp-agent");
+        let script = r#"#!/bin/sh
+d=$(dirname "$0")
+if [ ! -f "$d/started" ]; then
+    : > "$d/started"
+    IFS= read -r init
+    echo '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}'
+    IFS= read -r new
+    echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"saved"}}'
+    IFS= read -r prompt
+    printf '%s\n' "$prompt" > "$d/first-prompt"
+    exit 7
+fi
+IFS= read -r init
+if [ "$1" = unsupported ]; then
+    echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+    IFS= read -r new
+    echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"fresh"}}'
+    prompt_id=3
+else
+    echo '{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}'
+    IFS= read -r load
+    printf '%s\n' "$load" > "$d/load"
+    if [ "$1" = loaded ]; then
+        echo '{"jsonrpc":"2.0","id":2,"result":{}}'
+        prompt_id=3
+    else
+        echo '{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"session unavailable"}}'
+        IFS= read -r new
+        echo '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"fresh"}}'
+        prompt_id=4
+    fi
+fi
+IFS= read -r prompt
+printf '%s\n' "$prompt" > "$d/retry-prompt"
+printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt_id"
+"#;
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mcp = McpCommand { command: "craft-anything-cli".into(), args: vec!["mcp".into()], notes: None };
+        let mut c = AcpConversation::new("Scripted ACP", "gemini-cli", program.display().to_string(), vec![recovery.into()], dir.path().into(), mcp, None)
+            .with_preamble("P:".into());
+        let finish = |c: &mut AcpConversation| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut all = Vec::new();
+            while !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                assert!(std::time::Instant::now() < deadline, "no TurnDone: {all:?}");
+                all.extend(c.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            all
+        };
+        let original = "Build the requested blue header.";
+        c.send(original);
+        assert!(finish(&mut c).iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+        assert_eq!(c.last_failure(), Some(TurnFailure::new(FailureKind::Transient)));
+        assert_eq!(c.session_id().as_deref(), Some("saved"));
+        c.retry(original);
+        let events = finish(&mut c);
+        assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
+        let read = |name: &str| -> Value { serde_json::from_str(&std::fs::read_to_string(dir.path().join(name)).unwrap()).unwrap() };
+        assert_eq!(read("first-prompt")["params"]["prompt"][0]["text"], format!("P:{original}"));
+        if recovery != "unsupported" {
+            assert_eq!(read("load")["params"]["sessionId"], "saved");
+        }
+        let retry = read("retry-prompt");
+        assert_eq!(retry["method"], "session/prompt");
+        assert_eq!(retry["params"]["sessionId"], if recovery == "loaded" { "saved" } else { "fresh" });
+        retry["params"]["prompt"][0]["text"].as_str().unwrap().to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acp_retry_preserves_the_request_when_recovery_starts_a_new_session() {
+        for recovery in ["missing", "unsupported"] {
+            assert_eq!(prompt_after_interrupted_acp_turn(recovery), "P:Build the requested blue header.", "{recovery}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acp_retry_continues_a_successfully_loaded_session() {
+        assert_eq!(prompt_after_interrupted_acp_turn("loaded"), format!("P:{}", crate::failure::CONTINUE_TURN));
     }
 
     fn update(c: &mut AcpCore, value: Value) -> Vec<Out> {

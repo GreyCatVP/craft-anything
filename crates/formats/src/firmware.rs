@@ -803,7 +803,7 @@ impl<'a> Scanner<'a> {
             format!("cpio archive ({}), {} member(s)", l.format.trim_start_matches("cpio-"), l.members.len()),
             if l.complete { "high" } else { "medium" },
             Unpack::Members,
-            json!({"members": l.members.len(), "complete": l.complete}),
+            json!({"members": l.members.len(), "complete": l.complete, "warnings": l.warnings}),
         ))
     }
 

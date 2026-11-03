@@ -38,6 +38,30 @@ pub trait AgentAdapter: Send + Sync {
     fn ids(&self) -> &'static [&'static str];
     /// argv after the program for one message.
     fn args(&self, cx: &ArgsCx) -> Vec<String>;
+    /// Whether this agent supplies its own live model and thinking choices.
+    fn has_model_catalog(&self) -> bool {
+        false
+    }
+    /// Query models visible in this backend's execution context, respecting cancellation.
+    /// Agents without catalogue support return an empty list.
+    fn model_catalog(
+        &self,
+        _config: &BackendConfig,
+        _options: &BackendOptions,
+        _directory: Option<&Path>,
+        _stop: &Stop,
+    ) -> Result<Vec<models::AgentModel>, ToolError> {
+        Ok(Vec::new())
+    }
+    /// Check a saved choice in the actual run context before invoking the agent.
+    fn validate_model(&self, _config: &BackendConfig, _options: &BackendOptions, _directory: Option<&Path>, _stop: &Stop) -> Result<(), ToolError> {
+        Ok(())
+    }
+    /// Refuse options that the native transport cannot support, before preflight or process I/O.
+    /// Saving a model choice and discovering its catalogue do not imply native execution support.
+    fn check_native_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
+        Ok(())
+    }
     /// `(help invocation, substrings it must mention)`, checked once before the first run; when
     /// they're missing the run falls back to the plain adapter. Empty: nothing to check.
     fn required_flags(&self) -> (&'static [&'static str], &'static [&'static str]) {
@@ -190,6 +214,10 @@ pub fn notes_hook_settings(cli: &str, dir: &std::path::Path) -> String {
 const CHANGING_TOOLS: &[&str] =
     &["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Task", "TodoWrite", "AskUserQuestion"];
 
+/// Claude Code's tools that read files, refused outright in Clean room (#564): its defaults let it
+/// read in its own folder and refuse elsewhere only until a release or a setting changes that.
+const READING_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS", "NotebookRead"];
+
 /// Claude Code answering a question about a build: the builder's session copied
 /// (`--fork-session`) and the copy not kept, no tool server, and only Read, Glob and Grep (none in
 /// Clean room).
@@ -209,7 +237,9 @@ fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
     }
     a.extend(["--no-session-persistence".into(), "--strict-mcp-config".into(), "--disallowedTools".into()]);
     a.extend(CHANGING_TOOLS.iter().map(|t| t.to_string()));
-    if !cx.reads_checked {
+    if cx.reads_checked {
+        a.extend(READING_TOOLS.iter().map(|t| t.to_string()));
+    } else {
         a.extend(["--allowedTools", "Read", "Glob", "Grep"].map(String::from));
     }
     a
@@ -273,6 +303,11 @@ impl AgentAdapter for ClaudeCode {
             a.push("TodoWrite".into());
         } else if cx.builder {
             a.extend(["Read", "Glob", "Grep", "TodoWrite"].map(String::from));
+        } else if cx.reads_checked {
+            // A Clean room chat works only through our tools, which keep the original out of reach.
+            // Refused outright: neither its defaults nor an allow rule added later can open them (#564).
+            a.push("--disallowedTools".into());
+            a.extend(READING_TOOLS.iter().chain(CHANGING_TOOLS).map(|t| t.to_string()));
         }
         a
     }

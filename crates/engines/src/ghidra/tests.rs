@@ -16,6 +16,10 @@ enum Mode {
     Serve,
     /// Accept the connection and then stay silent forever.
     Silent,
+    /// Answer the first request with a reply line far longer than a test client accepts.
+    Huge,
+    /// Answer the first request with a reply sent in two halves, a few read ticks apart.
+    Split,
 }
 
 struct Fake {
@@ -50,6 +54,33 @@ impl Fake {
                         }
                     }
                     Mode::Serve => serve(stream, expected_token, &eof2),
+                    Mode::Huge | Mode::Split => {
+                        let mut writer = stream.try_clone().expect("clone");
+                        let mut reader = BufReader::new(stream);
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let id = serde_json::from_str::<Request>(line.trim()).map(|r| r.id).unwrap_or(1);
+                        let names = "f".repeat(64 * 1024);
+                        let reply = format!("{{\"id\":{id},\"ok\":true,\"result\":{{\"functions\":[{{\"name\":\"{names}\",\"address\":\"0x1\"}}]}}}}\n");
+                        if matches!(mode, Mode::Split) {
+                            let (a, b) = reply.as_bytes().split_at(reply.len() / 2);
+                            let _ = writer.write_all(a);
+                            let _ = writer.flush();
+                            std::thread::sleep(Duration::from_millis(600));
+                            let _ = writer.write_all(b);
+                        } else {
+                            let _ = writer.write_all(reply.as_bytes());
+                        }
+                        let _ = writer.flush();
+                        // Wait for the client to go away.
+                        line.clear();
+                        while reader.read_line(&mut line).map(|n| n > 0).unwrap_or(false) {
+                            line.clear();
+                        }
+                        eof2.store(true, Ordering::SeqCst);
+                    }
                 }
             }
         });
@@ -210,6 +241,35 @@ fn cancel_stops_a_request_quickly() {
     let err = client.request("ping", serde_json::json!({}), &move || flag.load(Ordering::SeqCst), Instant::now() + Duration::from_secs(30)).unwrap_err();
     assert!(matches!(err, GhidraError::Cancelled), "{err:?}");
     assert!(t.elapsed() < Duration::from_secs(3));
+    drop(client);
+    fake.join();
+}
+
+#[test]
+fn an_oversized_reply_is_refused_and_the_connection_closed() {
+    let fake = Fake::start(Mode::Huge, "tok");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut client = Client::connect(fake.addr, "tok", deadline).expect("connect").with_max_reply(4 * 1024);
+    match client.request("native_functions_list", serde_json::json!({}), &no_cancel(), deadline).unwrap_err() {
+        GhidraError::Protocol(m) => assert!(m.contains("larger than"), "{m}"),
+        other => panic!("expected a protocol error, got {other:?}"),
+    }
+    // The rest of that reply is still on the wire, so the client must not read on.
+    match client.request("ping", serde_json::json!({}), &no_cancel(), Instant::now() + Duration::from_secs(2)).unwrap_err() {
+        GhidraError::Connection(_) => {}
+        other => panic!("expected a connection error on the closed socket, got {other:?}"),
+    }
+    drop(client);
+    fake.join();
+}
+
+#[test]
+fn a_reply_arriving_over_several_read_ticks_is_read_whole() {
+    let fake = Fake::start(Mode::Split, "tok");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut client = Client::connect(fake.addr, "tok", deadline).expect("connect");
+    let list = client.request("native_functions_list", serde_json::json!({}), &no_cancel(), deadline).expect("the whole reply");
+    assert_eq!(list["functions"][0]["name"].as_str().map(str::len), Some(64 * 1024));
     drop(client);
     fake.join();
 }

@@ -863,6 +863,47 @@ pub fn encode_png(img: &Image) -> Result<Vec<u8>, ToolError> {
     Ok(out)
 }
 
+/// `img` as an 8-bit RGBA PNG of at most `max` bytes, or `None` when it would be bigger. It's
+/// compressed a chunk at a time, so a picture that won't fit stops as soon as it passes `max`
+/// instead of being held whole first.
+pub fn encode_png_within(img: &Image, max: usize) -> Result<Option<Vec<u8>>, ToolError> {
+    /// Takes bytes until `max`, then refuses them and says so.
+    struct Capped {
+        out: Vec<u8>,
+        max: usize,
+        over: bool,
+    }
+    impl std::io::Write for Capped {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.out.len().saturating_add(buf.len()) > self.max {
+                self.over = true;
+                return Err(std::io::Error::other("the PNG passed its size limit"));
+            }
+            self.out.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut capped = Capped { out: Vec::new(), max, over: false };
+    let written = (|| {
+        let mut enc = png::Encoder::new(&mut capped, img.width, img.height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(|e| format!("PNG header: {e}"))?;
+        let mut stream = w.stream_writer().map_err(|e| format!("PNG data: {e}"))?;
+        std::io::Write::write_all(&mut stream, &img.rgba).map_err(|e| format!("PNG data: {e}"))?;
+        stream.finish().map_err(|e| format!("PNG data: {e}"))?;
+        w.finish().map_err(|e| format!("PNG end: {e}"))
+    })();
+    match written {
+        _ if capped.over => Ok(None),
+        Ok(()) => Ok(Some(capped.out)),
+        Err(e) => Err(ToolError::internal(e)),
+    }
+}
+
 /// `img` scaled to `w`×`h` (box sampling: each output pixel is the mean of the input pixels it
 /// covers). Aspect ratio isn't kept: comparisons bring both pictures to one size.
 pub fn resize(img: &Image, w: u32, h: u32) -> Image {
@@ -997,6 +1038,31 @@ pub fn png_artifact(bytes: &[u8]) -> Result<Value, ToolError> {
 
 #[cfg(test)]
 mod tests {
+    /// The capped encoder gives a PNG of the same pixels when it fits, and stops without one when
+    /// it doesn't: noise hardly compresses, so 64×64 of it can't fit in 4 KB.
+    #[test]
+    fn a_png_over_its_limit_is_refused_while_encoding() {
+        let small = Image { width: 3, height: 2, rgba: (0..24).collect() };
+        let png = encode_png_within(&small, 1 << 20).unwrap().unwrap();
+        let back = decode_png(&png).unwrap();
+        assert_eq!((back.width, back.height, back.rgba), (3, 2, small.rgba.clone()));
+        assert_eq!(encode_png_within(&small, png.len()).unwrap().as_deref(), Some(png.as_slice()), "exactly the limit fits");
+        assert_eq!(encode_png_within(&small, png.len() - 1).unwrap(), None);
+        let mut seed = 0x2545_f491_u32;
+        let noise: Vec<u8> = (0..64 * 64 * 4)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            })
+            .collect();
+        let noisy = Image { width: 64, height: 64, rgba: noise };
+        assert_eq!(encode_png_within(&noisy, 4096).unwrap(), None);
+        let fits = encode_png_within(&noisy, 1 << 20).unwrap().unwrap();
+        assert_eq!(png_dimensions(&fits).unwrap(), (64, 64));
+    }
+
     use super::*;
 
     #[test]

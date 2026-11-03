@@ -1,6 +1,7 @@
 //! The prompt box used everywhere the person types to the builder or the assistant: it grows
 //! with the text (Enter sends, Shift+Enter adds a line), shows attached pictures as chips, and
-//! has the attach, stop and send buttons in its bottom row. Up at the start of the box takes back
+//! has the attach, stop and send buttons in its bottom row; where it takes pictures, Ctrl+V pastes
+//! one ([`crate::paste`]). Up at the start of the box takes back
 //! the last message still waiting, to edit it; with none waiting, Up at the very start and Down at
 //! the very end go through earlier prompts, and Down past the newest brings back what was being
 //! typed. Anywhere else they move the cursor as usual.
@@ -27,6 +28,8 @@ pub struct PromptBox<'a> {
     pub rows: (usize, usize),
     /// The paperclip's tooltip; `None` hides it (no attachments here).
     pub attach: Option<&'a str>,
+    /// A small picture of each attachment, in order, once it's decoded (`CraftApp::previews`).
+    pub previews: &'a [Option<egui::TextureHandle>],
     /// A run or answer is in progress: a stop button beside Send, named this ("Stop", "Pause").
     pub stop_button: Option<&'a str>,
     /// The stop was asked for and hasn't finished: the button says so and ignores clicks (#551).
@@ -116,6 +119,8 @@ pub struct PromptOut {
     /// Send was pressed (button or Enter) with something to send.
     pub send: bool,
     pub attach: bool,
+    /// Ctrl+V with something other than text on the clipboard, where the box takes pictures.
+    pub paste: bool,
     pub stop: bool,
     /// Up was pressed at the start of the box while a message could be taken back.
     pub recall: bool,
@@ -146,20 +151,44 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                 ui.horizontal_wrapped(|ui| {
                     for (i, p) in attachments.iter().enumerate() {
                         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        egui::Frame::new()
-                            .fill(t.raised)
-                            .stroke(egui::Stroke::new(1.0, t.card_border))
-                            .corner_radius(t.r_sm())
-                            .inner_margin(Margin { left: 8, right: 2, top: 2, bottom: 2 })
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    icons::show(ui, "paperclip", 13.0, t.icon);
-                                    ui.add(egui::Label::new(RichText::new(&name).size(theme::SMALL)).truncate()).on_hover_text(p.display().to_string());
-                                    if icons::button(ui, "x", 24.0, false, &trf("Remove {name}", &[("name", &name)])).clicked() {
-                                        out.remove = Some(i);
-                                    }
+                        let remove = trf("Remove {name}", &[("name", &name)]);
+                        match b.previews.get(i).cloned().flatten() {
+                            // A picture: a square tile filled with its middle, the whole of it on
+                            // hover, and the x in its corner.
+                            Some(tex) => {
+                                let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(TILE), egui::Sense::hover());
+                                egui::Image::new((tex.id(), rect.size())).uv(middle(tex.size_vec2())).corner_radius(t.r_lg()).paint_at(ui, rect);
+                                ui.painter().rect_stroke(rect, t.r_lg(), egui::Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+                                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, &name));
+                                resp.on_hover_ui(|ui| {
+                                    ui.add(egui::Image::new((tex.id(), fit(tex.size_vec2(), PREVIEW_HOVER))));
+                                    ui.label(RichText::new(p.display().to_string()).size(theme::CAPTION));
                                 });
-                            });
+                                let x = egui::Rect::from_min_size(rect.right_top() + egui::vec2(-26.0, 4.0), egui::Vec2::splat(22.0));
+                                ui.painter().circle_filled(x.center(), 10.0, t.card);
+                                // A child of its own, so the row's next tile isn't placed after it.
+                                if icons::button(&mut ui.new_child(egui::UiBuilder::new().max_rect(x)), "x", 22.0, false, &remove).clicked() {
+                                    out.remove = Some(i);
+                                }
+                            }
+                            // Not decoded yet, or not readable: its name.
+                            None => {
+                                egui::Frame::new()
+                                    .fill(t.raised)
+                                    .stroke(egui::Stroke::new(1.0, t.card_border))
+                                    .corner_radius(t.r_sm())
+                                    .inner_margin(Margin { left: 8, right: 2, top: 2, bottom: 2 })
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            icons::show(ui, "paperclip", 13.0, t.icon);
+                                            ui.add(egui::Label::new(RichText::new(&name).size(theme::SMALL)).truncate()).on_hover_text(p.display().to_string());
+                                            if icons::button(ui, "x", 24.0, false, &remove).clicked() {
+                                                out.remove = Some(i);
+                                            }
+                                        });
+                                    });
+                            }
+                        }
                     }
                 });
                 ui.add_space(6.0);
@@ -215,6 +244,12 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                     out.send = true;
                 }
             });
+            // A paste of a picture never reaches the text field: it's attached instead, when the box
+            // has the focus or nothing else does.
+            let pasted = b.attach.is_some() && crate::paste::picture_wanted(ui.ctx());
+            if pasted && (focused || ui.memory(|m| m.focused().is_none())) {
+                out.paste = true;
+            }
             // Hint: available slash commands when typing one.
             if text.trim_start().starts_with('/') && !text.trim().contains(' ') {
                 ui.label(RichText::new(format!("{} {}", tr("Commands:"), crate::slash::names())).size(theme::CAPTION).color(t.text_faint));
@@ -246,6 +281,28 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
         })
     });
     out
+}
+
+/// An attachment's tile (points, square), and the box its whole picture fits in on hover.
+const TILE: f32 = 96.0;
+const PREVIEW_HOVER: egui::Vec2 = egui::vec2(360.0, 360.0);
+
+/// The middle square of a picture of `size`, as texture coordinates: a tile is filled, not stretched.
+fn middle(size: egui::Vec2) -> egui::Rect {
+    let full = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return full;
+    }
+    let (w, h) = ((size.y / size.x).min(1.0), (size.x / size.y).min(1.0));
+    egui::Rect::from_center_size(full.center(), egui::vec2(w, h))
+}
+
+/// `size` scaled to fit in `max`, keeping its shape.
+fn fit(size: egui::Vec2, max: egui::Vec2) -> egui::Vec2 {
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return max;
+    }
+    size * (max.x / size.x).min(max.y / size.y)
 }
 
 /// What Tab would complete the box to, when it starts with a partial command name. Only the
@@ -364,6 +421,49 @@ mod tests {
     }
 
     #[test]
+    fn picture_tiles_sit_side_by_side_in_one_row() {
+        use egui_kittest::kittest::Queryable as _;
+        let files: Vec<PathBuf> = ["a.png", "b.png", "c.png"].map(PathBuf::from).to_vec();
+        let mut h = egui_kittest::Harness::new_ui_state(
+            move |ui, text: &mut String| {
+                let tex = ui.ctx().load_texture("tile", egui::ColorImage::filled([4, 2], egui::Color32::RED), egui::TextureOptions::LINEAR);
+                let previews = vec![Some(tex); 3];
+                let b = PromptBox {
+                    name: "Box",
+                    hint: String::new(),
+                    rows: (1, 4),
+                    attach: Some("Attach"),
+                    previews: &previews,
+                    stop_button: None,
+                    stopping: false,
+                    send: true,
+                    recall: false,
+                    history: None,
+                    font_size: 14.0,
+                };
+                show(ui, text, &files, b);
+            },
+            String::new(),
+        );
+        h.run();
+        let tiles: Vec<egui::Rect> = ["a.png", "b.png", "c.png"].iter().map(|n| h.get_by_label(n).rect()).collect();
+        assert!(tiles.iter().all(|r| (r.top() - tiles[0].top()).abs() < 0.5 && (r.width() - TILE).abs() < 0.5), "{tiles:?}");
+        assert!(tiles.windows(2).all(|w| w[1].left() > w[0].right()), "side by side, not overlapping: {tiles:?}");
+        let x = h.get_by_label("Remove b.png").rect();
+        assert!(tiles[1].contains_rect(x), "the x sits inside its tile: {x:?} in {:?}", tiles[1]);
+    }
+
+    #[test]
+    fn a_tile_shows_the_middle_square_of_its_picture() {
+        let r = middle(egui::vec2(400.0, 200.0));
+        assert_eq!((r.min.x, r.max.x, r.min.y, r.max.y), (0.25, 0.75, 0.0, 1.0));
+        let r = middle(egui::vec2(100.0, 400.0));
+        assert_eq!((r.min.x, r.max.x, r.min.y, r.max.y), (0.0, 1.0, 0.375, 0.625));
+        assert_eq!(middle(egui::Vec2::ZERO).max, egui::pos2(1.0, 1.0));
+        assert_eq!(fit(egui::vec2(720.0, 360.0), PREVIEW_HOVER), egui::vec2(360.0, 180.0));
+    }
+
+    #[test]
     fn a_prompt_comes_back_without_its_pictures_line() {
         assert_eq!(as_typed("Add tags\n(2 pictures attached)"), "Add tags");
         assert_eq!(as_typed("Add tags\n(1 picture attached)"), "Add tags");
@@ -390,6 +490,7 @@ mod tests {
                         hint: String::new(),
                         rows: (1, 8),
                         attach: None,
+                        previews: &[],
                         stop_button: Some("Pause"),
                         stopping: self.stopping,
                         send: true,
