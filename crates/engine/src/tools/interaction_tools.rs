@@ -252,6 +252,34 @@ pub(crate) fn resolve(base: &Path, p: &str) -> Option<PathBuf> {
     Some(out)
 }
 
+/// [`resolve`], with `..` applied where the system applies it when the path is opened. Linux and
+/// macOS follow a link before the `..` after it, so `app/link/../x` is beside the link's target,
+/// not `app/x`; Windows takes `..` off the text first, as [`resolve`] does. For the checks that
+/// decide what a builder's own tools may open.
+pub(crate) fn resolve_as_opened(base: &Path, p: &str) -> Option<PathBuf> {
+    if !cfg!(unix) {
+        return resolve(base, p);
+    }
+    let path = Path::new(p);
+    let joined = if path.is_absolute() { path.to_path_buf() } else { base.join(path) };
+    let mut out = PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::ParentDir => {
+                if out.symlink_metadata().is_ok() {
+                    out = crate::workspace::real_path(&out)?;
+                }
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Some(out)
+}
+
 pub(crate) use crate::workspace::{inside, may_reach, really_inside};
 
 /// The program a command part starts (a leading quoted path keeps its spaces) and the rest.
@@ -341,7 +369,7 @@ pub fn decide(ws: Option<&Workspace>, tool: &str, input: &Value) -> Decision {
             // approvals are answered), the manifest and the person's pictures stay out of reach,
             // also when the app is the project folder itself.
             let checks = ws.map(Workspace::checks_dir);
-            match (&app, resolve(app.as_deref().unwrap_or(Path::new("/")), &target)) {
+            match (&app, resolve_as_opened(app.as_deref().unwrap_or(Path::new("/")), &target)) {
                 // Followed through links, so a link in app/ can't lead a write out of it.
                 (Some(app), Some(p))
                     if (really_inside(app, &p) || checks.as_ref().is_some_and(|c| really_inside(c, &p))) && !ws.is_some_and(|w| w.is_own_record(&p)) =>
@@ -428,7 +456,7 @@ pub fn off_limits(ws: Option<&Workspace>, tool: &str, input: &Value) -> Option<S
             // The original and, when it's one file, the folder it sits in.
             let root = if path.is_file() { path.parent().unwrap_or(path) } else { path.as_path() };
             // Followed through links, so a link in the project to the original doesn't open it.
-            let touches = |p: &str| !p.is_empty() && resolve(&ws.root, p).is_some_and(|p| may_reach(root, &p) && !really_inside(&ws.root, &p));
+            let touches = |p: &str| !p.is_empty() && resolve_as_opened(&ws.root, p).is_some_and(|p| may_reach(root, &p) && !really_inside(&ws.root, &p));
             match tool {
                 "Read" | "Write" | "Edit" | "MultiEdit" => touches(&s("file_path")),
                 "NotebookRead" | "NotebookEdit" => touches(&s("notebook_path")),
@@ -493,7 +521,7 @@ pub fn never_unasked(ws: Option<&Workspace>, tool: &str, input: &Value) -> Optio
     match tool {
         "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
             let target = if tool == "NotebookEdit" { s("notebook_path") } else { s("file_path") };
-            let p = resolve(ws.map(|w| w.root.clone()).as_deref().unwrap_or(Path::new("/")), &target)?;
+            let p = resolve_as_opened(ws.map(|w| w.root.clone()).as_deref().unwrap_or(Path::new("/")), &target)?;
             // Followed through links: a link in app/ to a system folder is that folder.
             let system = SYSTEM_DIRS.iter().any(|d| may_reach(Path::new(d), &p));
             // The inbox (where answers are written), the manifest and the other records stay out of reach.
@@ -700,6 +728,34 @@ mod tests {
         assert!(matches!(decide(Some(&w), "Edit", &through("new/y.txt")), Decision::Ask { .. }));
         assert_eq!(decide(Some(&w), "Write", &json!({"file_path": w.app_dir().join("ok.txt").display().to_string()})), Decision::Allow);
         assert_eq!(never_unasked(Some(&w), "Write", &through("x.txt")), None, "an ordinary folder may be asked about");
+    }
+
+    #[test]
+    fn dot_dot_after_a_link_is_applied_where_the_system_applies_it() {
+        let (_d, w) = ws();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(outside.path().join("t")).unwrap();
+        std::fs::create_dir_all(w.app_dir()).unwrap();
+        if !link_dir(&outside.path().join("t"), &w.app_dir().join("out")) {
+            eprintln!("skipped: this system won't make links for tests");
+            return;
+        }
+        let raw = format!("{}/out/../x.txt", w.app_dir().display());
+        let opened = resolve_as_opened(Path::new("/"), &raw).unwrap();
+        let write = json!({"file_path": raw});
+        // Where the system really puts it is where the checks must look.
+        std::fs::write(&raw, "x").unwrap();
+        assert!(opened.is_file(), "{} isn't where the write landed", opened.display());
+        if cfg!(unix) {
+            // Opened, this is outside/x.txt: beside the link's target, outside the project.
+            assert_eq!(opened, crate::workspace::real_path(outside.path()).unwrap().join("x.txt"));
+            assert!(matches!(decide(Some(&w), "Write", &write), Decision::Ask { .. }));
+        } else {
+            // Windows takes `..` off the text before it follows anything: app/x.txt.
+            assert_eq!(opened, resolve(Path::new("/"), &raw).unwrap());
+            assert!(inside(&w.app_dir(), &opened));
+            assert_eq!(decide(Some(&w), "Write", &write), Decision::Allow);
+        }
     }
 
     /// Auto mode approves what the policy asks about, so the lines it never crosses must follow
