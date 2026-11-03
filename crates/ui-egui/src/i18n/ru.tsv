@@ -784,6 +784,8 @@ Open the installer app	Открыть приложение-установщик
 Open the website	Открыть веб-сайт
 Open {name}	Открыть {name}
 OpenCode default	По умолчанию для OpenCode
+No chat models are visible in {agent}. Check its setup, then reload.	В {agent} нет доступных моделей для чата. Проверьте настройки и обновите список.
+The saved model is no longer visible. Choose another model or the {agent} default.	Сохранённая модель больше не доступна. Выберите другую модель или модель {agent} по умолчанию.
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	В OpenCode нет доступных моделей для чата. Подключите провайдера в OpenCode и обновите список.
 OpenCode model	Модель OpenCode
 Opened {name}	Открыто: {name}

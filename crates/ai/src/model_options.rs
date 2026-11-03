@@ -76,7 +76,8 @@ fn show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     if !supported(&entry.config) {
         return Err(ToolError::invalid("This backend does not offer CLI model options."));
     }
-    let tuning = crate::cli_agents::acp_model_tuning(&entry.config, &entry.options)?;
+    let stop = crate::model::Stop::for_tool(ctx.cancel.clone());
+    let tuning = crate::cli_agents::acp_model_tuning(&entry.config, &entry.options, &stop)?;
     Ok(ToolOutput::Value(
         serde_json::json!({"backend": params.backend, "cli_model": entry.options.cli_model, "choices": tuning, "context": entry.options.cli_context, "reasoning": entry.options.cli_reasoning_effort}),
     ))
@@ -140,6 +141,17 @@ impl ModelTuning {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn cancelled_context_discovery_stops_before_starting_a_cli() {
+        let cancel = craft_anything_engine::CancelToken::default();
+        cancel.cancel();
+        let stop = crate::model::Stop::for_tool(cancel);
+        let config =
+            BackendConfig { name: "Test Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = crate::BackendOptions { command: Some("craft-anything-no-such-test-agent".into()), ..Default::default() };
+        assert_eq!(crate::cli_agents::acp_model_tuning(&config, &options, &stop).unwrap_err().code, craft_anything_evidence::ErrorCode::Cancelled);
+    }
 
     #[test]
     fn model_choices_preserve_advertised_windows_and_exclude_unsupported_efforts() {

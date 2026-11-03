@@ -7,6 +7,8 @@ OpenCode model	OpenCode 模型
 Remote program	遠端程式
 Reload models	重新載入模型
 Apply	套用
+No chat models are visible in {agent}. Check its setup, then reload.	{agent} 中沒有可見的聊天模型。請檢查其設定，然後重新載入。
+The saved model is no longer visible. Choose another model or the {agent} default.	已儲存的模型不再可見。請選擇其他模型或使用 {agent} 預設設定。
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode 中沒有可見的聊天模型。請在 OpenCode 中連線至服務供應商，然後重新載入。
 The saved model is no longer visible. Choose another model or the OpenCode default.	已儲存的模型不再可見。請選擇其他模型或使用 OpenCode 預設設定。
 The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	此模型不支援已儲存的思考深度。請選擇預設設定或可用的深度。

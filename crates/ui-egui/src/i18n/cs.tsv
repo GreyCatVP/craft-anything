@@ -7,6 +7,8 @@ OpenCode model	Model v OpenCode
 Remote program	Vzdálený program
 Reload models	Znovu načíst modely
 Apply	Použít
+No chat models are visible in {agent}. Check its setup, then reload.	V {agent} nejsou viditelné žádné modely pro chat. Zkontrolujte nastavení a znovu načtěte.
+The saved model is no longer visible. Choose another model or the {agent} default.	Uložený model už není vidět. Vyberte jiný model nebo výchozí model v {agent}.
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode nemá žádné viditelné modely pro chat. Připojte v OpenCode poskytovatele a pak znovu načtěte.
 The saved model is no longer visible. Choose another model or the OpenCode default.	Uložený model už není vidět. Vyberte jiný model nebo výchozí v OpenCode.
 The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	Uložená hloubka uvažování není pro tento model k dispozici. Vyberte jeho výchozí nebo nabízenou hloubku.

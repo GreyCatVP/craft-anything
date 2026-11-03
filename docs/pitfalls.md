@@ -543,6 +543,12 @@ points to as well (`agent-session.jsonl`), tell "not here" apart from a failure 
 
 ## Agent tooling
 
+**Shared CLI efforts reached Claude unchanged.** Keep CLI-only levels available for agents, but
+normalize at the provider boundary; test serialized requests for known and unknown model families.
+
+**A sender could exceed its MCP receiver's target limit.** Bound the handoff to the receiver's
+accepted count and retain the active target; test the boundary, truncation order and remote mode.
+
 **A finding correction reset omitted confidence to inferred.** Edit defaults must preserve existing
 values unless explicitly changed; test omitted fields and every supplied confidence level.
 

@@ -20,6 +20,7 @@ pub const EFFORT_LEVELS: &[(&str, &[Effort])] = &[
 
 /// The effort level `model` is sent: `effort`, or the nearest level below it the model has.
 pub fn effort_for(model: &str, effort: Effort) -> Effort {
+    let effort = effort.within(&Effort::ALL);
     let model = model.trim().trim_start_matches("anthropic/").trim_start_matches("anthropic.");
     EFFORT_LEVELS.iter().find(|(prefix, _)| model.starts_with(prefix)).map_or(effort, |(_, levels)| effort.within(levels))
 }
@@ -373,6 +374,15 @@ mod tests {
         for e in Effort::ALL {
             assert_eq!(effort_for("claude-opus-5-5", e), e);
             assert_eq!(Effort::parse(&e.as_str().to_uppercase()), Some(e));
+        }
+        for model in ["claude-opus-5-5", "claude-sonnet-4-6", "anthropic/claude-future", "anthropic.claude-future"] {
+            let client = Anthropic::new(None, "sk-test".into(), model);
+            for effort in [Effort::None, Effort::Minimal] {
+                assert_eq!(effort_for(model, effort), Effort::Low);
+                let body = client.body(&TurnRequest { system: "s", messages: &[], tools: &[], effort, max_tokens: 10 });
+                assert_eq!(body["output_config"]["effort"], "low");
+                assert_eq!(Effort::parse(effort.as_str()), Some(effort));
+            }
         }
         assert_eq!(effort_for("claude-sonnet-4-6", Effort::Xhigh), Effort::High);
         assert_eq!(effort_for("anthropic/claude-opus-4-6", Effort::Max), Effort::Max);

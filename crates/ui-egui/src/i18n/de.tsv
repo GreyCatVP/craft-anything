@@ -7,6 +7,8 @@ OpenCode model	OpenCode-Modell
 Remote program	Entferntes Programm
 Reload models	Modelle neu laden
 Apply	Übernehmen
+No chat models are visible in {agent}. Check its setup, then reload.	In {agent} sind keine Chat-Modelle sichtbar. Prüfe die Einrichtung und lade dann neu.
+The saved model is no longer visible. Choose another model or the {agent} default.	Das gespeicherte Modell ist nicht mehr sichtbar. Wähle ein anderes Modell oder den Standard von {agent}.
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode hat keine sichtbaren Chat-Modelle. Verbinde in OpenCode einen Anbieter und lade dann neu.
 The saved model is no longer visible. Choose another model or the OpenCode default.	Das gespeicherte Modell ist nicht mehr sichtbar. Wähle ein anderes Modell oder den OpenCode-Standard.
 The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	Die gespeicherte Denktiefe ist für dieses Modell nicht verfügbar. Wähle seinen Standard oder eine angebotene Tiefe.

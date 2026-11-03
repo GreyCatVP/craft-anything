@@ -361,6 +361,9 @@ Owner: open · Status: in progress
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
       — claimed: qu-gg, branch `feature/r2.2-copilot-integration` (recorded during PR preparation)
+- [x] Review hardening: cap target handoff at 128 while preserving the active target; propagate
+      context-discovery cancellation, normalize CLI-only efforts for Claude requests, and name
+      the configured agent in shared picker warnings, with focused regressions and translations
 - [x] Local agent chats share a saved investigation and open-target metadata with MCP; background
       refresh makes recorded findings visible in the workbench Evidence pane. `core_finding_edit`
       corrects a finding with checked evidence and an optional revision guard, preserving confidence

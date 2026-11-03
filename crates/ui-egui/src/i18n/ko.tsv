@@ -7,6 +7,8 @@ OpenCode model	OpenCode 모델
 Remote program	원격 프로그램
 Reload models	모델 다시 불러오기
 Apply	적용
+No chat models are visible in {agent}. Check its setup, then reload.	{agent}에 보이는 채팅 모델이 없습니다. 설정을 확인한 다음 다시 불러오세요.
+The saved model is no longer visible. Choose another model or the {agent} default.	저장된 모델이 더 이상 보이지 않습니다. 다른 모델이나 {agent} 기본값을 고르세요.
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode에 보이는 채팅 모델이 없습니다. OpenCode에서 제공자를 연결한 다음 다시 불러오세요.
 The saved model is no longer visible. Choose another model or the OpenCode default.	저장된 모델이 더 이상 보이지 않습니다. 다른 모델이나 OpenCode 기본값을 고르세요.
 The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	저장된 생각 깊이는 이 모델에서 쓸 수 없습니다. 기본값이나 제공되는 깊이를 고르세요.

@@ -977,6 +977,38 @@ mod tests {
         assert!(harness.query_by_label("Friendly name · provider/model").is_some());
     }
 
+    #[test]
+    fn shared_picker_warnings_name_the_configured_agent() {
+        use craft_anything_ai::{BackendEntry, ModelContext};
+        use egui_kittest::{Harness, kittest::Queryable};
+        for (agent, name) in [("copilot", "GitHub Copilot"), ("opencode", "OpenCode")] {
+            let context = ModelContext {
+                backend: BackendEntry {
+                    config: BackendConfig {
+                        name: "Test".into(),
+                        kind: BackendKind::AgentCli,
+                        model: agent.into(),
+                        base_url: None,
+                        ssh_host: None,
+                        enabled: true,
+                    },
+                    options: Default::default(),
+                },
+                directory: None,
+            };
+            let mut picker = AgentModelPicker { request: 1, context, model: Some("missing-model".into()), thinking: None, result: Some(Ok(Vec::new())) };
+            let harness = Harness::builder().build_ui(move |ui| {
+                theme::install_fonts(ui.ctx());
+                crate::builders::agent_model_picker(ui, &mut picker);
+            });
+            harness.get_by_label(format!("No chat models are visible in {name}. Check its setup, then reload.").as_str());
+            harness.get_by_label(format!("The saved model is no longer visible. Choose another model or the {name} default.").as_str());
+            if agent == "copilot" {
+                assert!(harness.query_by_label("The saved model is no longer visible. Choose another model or the OpenCode default.").is_none());
+            }
+        }
+    }
+
     /// Busy frames retain matching catalogue results, ignore older requests and defer context invalidation until readable.
     #[test]
     fn a_busy_session_keeps_the_picker_and_its_matching_result() {

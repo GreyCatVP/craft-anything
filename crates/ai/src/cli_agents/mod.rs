@@ -424,7 +424,7 @@ fn mcp_for(spec: &CliSpec, remote: bool) -> McpCommand {
         mcp.args.push("--all-tools".into());
     }
     if !remote {
-        for target in &spec.targets {
+        for target in spec.targets.iter().skip(spec.targets.len().saturating_sub(128)) {
             if let Ok(target) = serde_json::to_string(target) {
                 mcp.args.extend(["--target".into(), target]);
             }
@@ -530,8 +530,9 @@ pub fn acp_model_choices(config: &BackendConfig, options: &BackendOptions) -> Re
 }
 
 /// Discover settings for the backend's selected model, without a tool server or model prompt.
-pub fn acp_model_tuning(config: &BackendConfig, options: &BackendOptions) -> Result<crate::model_options::ModelTuning, ToolError> {
-    let metadata = acp_model_metadata(config, options, None, &Stop::default())?;
+pub fn acp_model_tuning(config: &BackendConfig, options: &BackendOptions, stop: &Stop) -> Result<crate::model_options::ModelTuning, ToolError> {
+    stop.check()?;
+    let metadata = acp_model_metadata(config, options, None, stop)?;
     Ok(crate::model_options::ModelTuning::from_metadata(metadata.current_model, &metadata.config_options))
 }
 
@@ -2154,6 +2155,35 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         assert!(acp_for(&spec).is_none());
         spec.config.model = "copilot".into();
         assert!(acp_for(&spec).is_some());
+    }
+
+    #[test]
+    fn mcp_target_handoff_is_bounded_and_keeps_the_active_target_last() {
+        use craft_anything_engine::{TargetKind, target::TargetContext};
+        let directory = tempfile::tempdir().unwrap();
+        for count in [0, 128, 129, 130] {
+            let config =
+                BackendConfig { name: "Test".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+            let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+            spec.targets = (0..count)
+                .map(|index| TargetContext {
+                    path: directory.path().join(format!("target-{index}")),
+                    sha256: format!("{index:064x}"),
+                    kind: TargetKind::Elf,
+                    raw: None,
+                })
+                .collect();
+            let command = mcp_for(&spec, false);
+            let shared: Vec<TargetContext> =
+                command.args.windows(2).filter(|pair| pair[0] == "--target").map(|pair| serde_json::from_str(&pair[1]).unwrap()).collect();
+            assert_eq!(shared.len(), count.min(128));
+            assert_eq!(
+                shared.iter().map(|target| &target.path).collect::<Vec<_>>(),
+                spec.targets.iter().skip(count.saturating_sub(128)).map(|target| &target.path).collect::<Vec<_>>()
+            );
+            assert_eq!(shared.last().map(|target| &target.path), spec.targets.last().map(|target| &target.path));
+            assert!(!mcp_for(&spec, true).args.iter().any(|argument| argument == "--target"));
+        }
     }
 
     #[test]

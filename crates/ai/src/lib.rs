@@ -570,7 +570,7 @@ impl AiHub {
         if !model_options::supported(&entry.config) {
             return Err(ToolError::invalid("This backend does not offer CLI model options."));
         }
-        cli_agents::acp_model_tuning(&entry.config, &entry.options)
+        cli_agents::acp_model_tuning(&entry.config, &entry.options, &Stop::default())
     }
 
     /// Save a model picker's two settings together, before replacing the in-memory config.

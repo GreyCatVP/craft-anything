@@ -85,6 +85,8 @@ The context show tool returns the current `cli_model` and supported choices. Sup
 For a backend inheriting the CLI's model, the guard is null. The write tool also accepts null
 context to restore its default. Model and thinking changes go through the shared `ai_model_set`
 validation path; the context-only tool never changes thinking.
+Context-option discovery follows the calling tool's cancellation token, including before the
+CLI starts. Shared picker warnings name the configured agent rather than assuming OpenCode.
 
 ## Tools and Permissions
 
@@ -113,7 +115,8 @@ only when the agent advertises that capability; failed ACP startup can be retrie
 Local agent chats use the same saved investigation as the app. If no `.cany` project is open,
 the conversation worker creates one under the app's configuration directory and preserves the
 current evidence, unknowns and investigation memory before starting MCP. Open target metadata
-is handed to the child, with the active target restored last. Deep mode reopens and verifies
+is handed to the child, keeping at most the last 128 targets with the active target restored
+last, matching the receiver's limit. Deep mode reopens and verifies
 the files; Clean room shares metadata without reading their contents.
 
 At a turn boundary, changing the project, open targets, active target or analysis mode refreshes

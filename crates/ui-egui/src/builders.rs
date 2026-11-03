@@ -33,8 +33,9 @@ pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
             return false;
         }
     };
+    let agent = craft_anything_ai::cli_agents::display_for(&picker.context.backend.config.model);
     if models.is_empty() {
-        ui.label(tr("OpenCode has no visible chat models. Connect a provider in OpenCode, then reload."));
+        ui.label(trf("No chat models are visible in {agent}. Check its setup, then reload.", &[("agent", &agent)]));
     }
     let default = if picker.context.backend.config.model == "opencode" { tr("OpenCode default") } else { tr("Model default") };
     let selected = picker.model.as_deref().unwrap_or(&default);
@@ -58,7 +59,9 @@ pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
     let model = models.iter().find(|m| picker.model.as_ref() == Some(&m.id));
     let missing = picker.model.is_some() && model.is_none();
     if missing {
-        ui.label(RichText::new(tr("The saved model is no longer visible. Choose another model or the OpenCode default.")).color(t.warning));
+        ui.label(
+            RichText::new(trf("The saved model is no longer visible. Choose another model or the {agent} default.", &[("agent", &agent)])).color(t.warning),
+        );
     }
     let depths = model.map(|m| m.thinking.as_slice()).unwrap_or_default();
     ui.label(tr("Thinking depth"));
