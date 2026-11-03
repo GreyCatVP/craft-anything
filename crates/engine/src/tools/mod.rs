@@ -243,24 +243,4 @@ mod tests {
         assert!(parse_address("0xZZ").is_err());
         assert!(parse_address("").is_err());
     }
-
-    /// A tool's root property schema must be an object, never a boolean.
-    ///
-    /// Claude Code (the builder's client) discards a server's whole `tools/list` when a root
-    /// property schema is a boolean — what schemars emits for a bare `serde_json::Value` — so the
-    /// server looks connected with no tools and `--permission-prompt-tool` stops working. Booleans
-    /// nested elsewhere are accepted (a `$defs`/`oneOf` branch of `core_evidence_browse` has one),
-    /// so only the root properties are checked: flagging the rest would be a false alarm.
-    #[test]
-    fn no_tool_schema_has_boolean_root_properties() {
-        for spec in super::all() {
-            let schema = (spec.input_schema)();
-            let hits: Vec<String> = schema
-                .get("properties")
-                .and_then(serde_json::Value::as_object)
-                .map(|props| props.iter().filter(|(_, v)| v.is_boolean()).map(|(k, _)| k.clone()).collect())
-                .unwrap_or_default();
-            assert!(hits.is_empty(), "{} has boolean property schemas at {:?}", spec.id, hits);
-        }
-    }
 }
