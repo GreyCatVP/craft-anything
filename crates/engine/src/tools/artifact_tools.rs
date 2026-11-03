@@ -565,10 +565,19 @@ fn core_archive_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
             "A size, count or depth limit stopped the inventory early; raise max_entries, max_total_bytes or max_depth to see more.",
         ));
     }
+    if inv.unopened_nested > 0 {
+        lims.push(Limitation::new(
+            "nested_not_opened",
+            format!(
+                "{} nested archive(s) were not opened (depth or size limit; each entry's note says which); raise max_depth to open deeper ones.",
+                inv.unopened_nested
+            ),
+        ));
+    }
     lims.extend(unlisted_limitation(&unlisted));
     lims.push(Limitation::new("no_disk_images", "Disk images (DMG), installers (PKG/MSI) and compressed tarballs are listed as single files, not opened."));
     let mut coverage = Coverage::page(page.len() as u64, total as u64, p.offset as u64);
-    if !unlisted.is_empty() {
+    if !unlisted.is_empty() || inv.unopened_nested > 0 {
         coverage.status = craft_anything_evidence::CoverageStatus::Partial;
     }
     let ev = EvidenceBuilder::new("core_archive_show", subject, env(ctx))
@@ -578,6 +587,7 @@ fn core_archive_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
             "root": inv.root, "root_kind": inv.root_kind, "content_id": inv.content_id(),
             "files": files, "entries_total": total, "by_kind": inv.by_kind(), "hashed_bytes": inv.hashed_bytes,
             "containers": inv.containers, "contradictions": inv.contradictions, "truncated": inv.truncated,
+            "unopened_nested": inv.unopened_nested,
             "entries": page,
         }))
         .summary(summary)
@@ -813,6 +823,26 @@ mod tests {
 
     fn call(e: &Engine, id: &str, p: Value) -> Result<Value, ToolError> {
         e.call(id, p, CallOptions::new(Caller::Cli)).map(|o| o.to_json())
+    }
+
+    #[test]
+    fn unopened_nested_archives_are_disclosed_in_coverage() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = Engine::new(crate::testing::session());
+        for depth in [2, 5] {
+            let mut bytes = fx::zip_stored(&[("leaf.txt", b"leaf")]);
+            for _ in 0..depth {
+                bytes = fx::zip_stored(&[("inner.zip", &bytes)]);
+            }
+            let path = dir.path().join(format!("nested-{depth}.zip"));
+            std::fs::write(&path, bytes).unwrap();
+            let inv = call(&e, "core_archive_show", json!({"path": path})).unwrap();
+            let unopened = depth == 5;
+            assert_eq!(inv["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "nested_not_opened"), unopened);
+            assert_eq!(inv["coverage"]["status"], if unopened { "partial" } else { "complete" });
+            assert_eq!(inv["result"]["entries"].as_array().unwrap().iter().any(|entry| entry["note"] == "nested archive not opened: depth limit"), unopened);
+            assert_eq!(inv["result"]["truncated"], false);
+        }
     }
 
     #[test]
