@@ -571,7 +571,7 @@ Gaps found while using the app for real projects.
       in place, with nothing asked; the project takes the folder's name, an empty folder is
       refused and a folder that's already a project opens. Until now that was only reachable
       through "Choose a folder…" under Make's Start, on a screen that asks what to recreate
-      — claimed: xerenon, branch feature/r2.9-work-on-my-project
+      — claimed: xerenon, branch feature/r2.9-work-on-my-project; PR #686
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
