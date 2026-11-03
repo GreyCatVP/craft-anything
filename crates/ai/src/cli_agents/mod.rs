@@ -865,6 +865,24 @@ mod tests {
         assert!(pos("--mcp-config") > pos("--resume"));
     }
 
+    /// #540: a refused Codex tool call came back as "null"; it says why and how to fix it.
+    #[test]
+    fn a_codex_tool_refused_for_approval_explains_the_way_out() {
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let line = r#"{"type":"item.completed","item":{"id":"i1","type":"mcp_tool_call","tool":"rebuild_start","status":"failed","result":null,"error":{"message":"tool rebuild_start requires approval, but approval policy is never"}}}"#;
+        let v: Value = serde_json::from_str(line).unwrap();
+        let events = adapter_for("codex").parse(&mut p, &v);
+        let text = format!("{events:?}");
+        assert!(text.contains("setup --client codex --yes") && text.contains("default_tools_approval_mode"), "{text}");
+        assert!(!text.contains("\"null\""), "{text}");
+        // Any other failure shows its own message, not the JSON around it.
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let other =
+            r#"{"type":"item.completed","item":{"id":"i2","type":"mcp_tool_call","tool":"x","status":"failed","result":null,"error":{"message":"boom"}}}"#;
+        let text = format!("{:?}", adapter_for("codex").parse(&mut p, &serde_json::from_str::<Value>(other).unwrap()));
+        assert!(text.contains("boom") && !text.contains("null"), "{text}");
+    }
+
     #[test]
     fn codex_and_gemini_args() {
         let a = build_args(adapter_for("codex").as_ref(), &BackendOptions::default(), "q", "P:", &mcp(), None, Access::Analyse);
@@ -878,6 +896,8 @@ mod tests {
         assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
         assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
         assert_eq!(a.last().unwrap(), "P:q");
+        // #540: `codex exec` can't ask, so our tools are approved in the same -c list.
+        assert!(a.contains(&"mcp_servers.craft-anything.default_tools_approval_mode=\"approve\"".to_string()));
         let g = build_args(adapter_for("gemini-cli").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
         assert!(g.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
         let o = BackendOptions { args: vec!["run".into()], ..Default::default() };

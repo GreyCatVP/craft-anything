@@ -139,6 +139,10 @@ pub enum Shape {
     Enabled,
     /// `{command, args, startup_timeout_sec: 30}`
     WithStartupTimeout,
+    /// `{command, args, startup_timeout_sec: 30, default_tools_approval_mode: "approve"}`: `codex exec`
+    /// can't ask, so it refuses any tool not marked read-only unless the entry approves it (#540).
+    /// Craft Anything still asks the person itself before a tool that runs code.
+    Codex,
 }
 
 /// One supported client, resolved for a host.
@@ -199,6 +203,7 @@ impl Client {
             Shape::TransportStdio => json!({"transport": "stdio", "enabled": true, "command": program, "args": args}),
             Shape::Enabled => json!({"command": program, "args": args, "enabled": true}),
             Shape::WithStartupTimeout => json!({"command": program, "args": args, "startup_timeout_sec": 30}),
+            Shape::Codex => json!({"command": program, "args": args, "startup_timeout_sec": 30, "default_tools_approval_mode": "approve"}),
         }
     }
 }
@@ -259,7 +264,7 @@ pub fn clients(host: &Host) -> Vec<Client> {
 
     // Codex
     let codex = host.var("CODEX_HOME").unwrap_or_else(|| h.join(".codex"));
-    add("codex", "Codex", codex.join("config.toml"), vec![codex.clone()], Format::Toml, vec!["mcp_servers"], Shape::WithStartupTimeout, None);
+    add("codex", "Codex", codex.join("config.toml"), vec![codex.clone()], Format::Toml, vec!["mcp_servers"], Shape::Codex, None);
 
     // Cursor
     add("cursor", "Cursor", h.join(".cursor").join("mcp.json"), vec![h.join(".cursor")], Format::Jsonc, vec!["mcpServers"], Shape::Plain, None);
@@ -507,6 +512,7 @@ mod tests {
         assert_eq!(oc, json!({"type": "local", "command": ["/b/craft-anything-cli", "mcp"], "enabled": true}));
         let codex = cs.iter().find(|c| c.id == "codex").unwrap().desired_entry(&cmd);
         assert_eq!(codex["startup_timeout_sec"], 30);
+        assert_eq!(codex["default_tools_approval_mode"], "approve");
         for c in &cs {
             assert!(is_owned_entry(&c.desired_entry(&cmd)), "{}", c.id);
         }
