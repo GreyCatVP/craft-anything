@@ -86,6 +86,7 @@ Issues are ranked by people affected and how badly, after leaving out what's alr
 | 3 | R2.9 Everyday use, R2.10 Pinned builds | — | Open to anyone at any time; most lines stand alone |
 | 3 | R1.5, R1.6 | — | Small leftovers |
 | Any | M3: R3.3, R3.9, R3.11 | — | Open lane |
+| Any | R3.12 Recompile original console titles | — | Requested by a maintainer; increments stand alone, live runs need owned games |
 | Later | R4.1 macOS CLI, R4.2 Managed tier | **decision** | Not before M5 |
 
 ---
@@ -473,6 +474,104 @@ Owner: open · Status: in progress
       it's there
 - [ ] `native_publisher_show` hashes the file minus the signature fields, not section by section;
       a file with unusual gaps between sections can read as different
+
+### R3.12 Recompile original console titles
+Owner: maintainers · Status: in progress
+Turn an original Xbox or PlayStation 3 game the person owns into a native program, through an
+open-source static recompiler per console (`engines::console`: the `Console` trait, one module per
+console, listed in `CONSOLES`). Backends: Xbox XBE Recomp (MIT; Windows x64 only, D3D12/XAudio2;
+Linux only for its headless test harness) and ps3recomp (MIT; Windows x64 runs titles, Linux and
+macOS build but boot no title yet). Each new build clones the backend's latest upstream commit into
+the build's folder and records it in `recomp.json` (asked for by a maintainer, instead of pins).
+No backend builds for Android or iOS, so those are shown as unavailable, never offered. Nothing
+is decrypted or unlocked: a retail or store PS3 executable blocks until the person supplies the
+decrypted ELF they made; `.edat`/`.sdat` data is reported, never opened.
+- [x] Readers: XBE headers, Xbox disc images (XDVDFS, whole-disc or partition), PS3 PARAM.SFO and
+      executable kinds (plain ELF, development SELF, encrypted retail/store SELF)
+- [x] `game_consoles_list` (Clean room) and `game_original_inspect` (Deep): title, executables,
+      compatibility checks and a ready/blocked verdict
+- [x] Builds (`console::build`): a versioned `recomp.json` and `recomp.log` in the build's folder,
+      written only by the build's worker thread; stages validate, dependencies (upstream clone,
+      Visual Studio's environment through vswhere/VsDevCmd, CMake, Ninja, Clang, Python venv),
+      extract, generate, analyse, recompile, compile, package; resumes from the first unfinished
+      stage; `game_recomp_start` (`wait` for the CLI), `_status`, `_stop`, `_play`
+- [x] Xbox stages: assets copied from a folder or streamed out of the disc image, the backend's
+      game template with the title filled in, `cmake --preset release`, `xbe_symbols`,
+      `recompile_Game`, the full build, a package without game files
+- [x] PS3 stages: plain ELF copied or a development SELF converted with `unfself.py`, the project
+      template, `ppu_loader.py`, `ppu_lifter.py --hle-stubs`, `gen_hle_nids.py`, CMake/Ninja with
+      clang-cl on Windows and SPU discovery from the ELF, Play with `PS3_VFS_ROOT`
+- [x] UI: output folder, Recompile, stages with their messages, the log, Stop, Resume, Play, Open
+      folder and log; a build carries on being shown after a restart
+- [ ] PS3 disc images (ISO 9660): read PS3_GAME without extracting by hand
+- [ ] Read the cloned backend's `xdk/` folder for the Xbox signature check instead of the copied
+      list (`console::xbox::SIGNED_BUILDS`), so a build newer upstream supports isn't blocked
+- [ ] Packages: the Visual C++ runtime DLLs beside the exe (as the Xbox backend's release.bat does)
+- [x] Play reports a game that quits within 8 s (exit code, errors, what its log asks for);
+      `game_recomp_config_set` edits `[functions]`, `[symbols]` and `[data]`; "Add them and rebuild"
+      adds the functions the log names; the Recompile screen has the chat beside the build, primed
+      with its context; builds started from the AI's tool server show as running (heartbeat file)
+      and stop from the app (stop file)
+- [x] XACT audio: Analyse adds an APU sample clock, fills the HRTF table and places the DirectSound
+      functions XACT calls (`xbox_audio.rs`); The Warriors plays in-game from the app's own build
+- [ ] XACT placement table measured on one title (DSOUND 5849): derive it from the code, or grow
+      it with each title run; LFO, envelopes and two unnamed voice setters are accepted, not played
+- [ ] The Warriors: shadows draw wrong (backend Direct3D, not yet looked at)
+- [x] Live run: an Xbox title (The Warriors, XDK 5849) built by the app plays in-game on Windows
+- [ ] Live run: a PS3 title (decrypted ELF)
+
+The rest of R3.12 makes a build a project the person and the AI develop and debug, in phases
+agreed with a maintainer (2026-11-03), each its own PR. Analysis, crash reading, fixes and the
+chat work wherever Craft Anything runs; building and playing follow each backend's own systems.
+The original-address-to-generated-code mapping is kept at every step: the AI debugs the original
+function, not an unrelated codebase.
+
+**Phase 1: the original Xbox executable as an analysis target**
+- [ ] `Format::Xbe` in the shared executable reader: sections, entry point, kernel imports (by
+      ordinal) as import slots, library versions; `TargetKind::Xbe`, so every native tool
+      (functions, disassembly, callers, callees, references, cross-references, pseudocode) works
+- [ ] A Recompile tool set (`Toolset::Recompile`) holding the console tools, given to the
+      Recompile chat
+- [ ] `game_recomp_open`: open a build's executable as the active target with the recompiler's
+      names (`[symbols]`, `[functions]`, `[data]`) as user names, never over the person's own
+- [ ] `game_recomp_function_source`: an original address to its generated function, file and line
+      (and the generated line of one instruction), any host override of it, its XDK name; a
+      generated file and line back to the original address
+
+**Phase 2: crash analysis**
+- [ ] A Windows minidump reader (exception, threads, modules, memory) in `formats`;
+      `native_crash_show` reads minidumps as well as ELF cores
+- [ ] `game_recomp_crash_explain`: the newest crash dump and `play.log` as frames (module, generated
+      function, original function, owning library: game code, XACT, DirectSound, D3D…), missing
+      functions and unplaced XDK names, the likely cause and what to look at next; the crash card
+      shows it
+
+**Phase 3: the build as a project, and structured fixes**
+- [ ] A build registers as a workspace of a recompile kind where it is (folder and backend layout
+      untouched), listed with the person's projects; its investigation project keeps the names
+- [ ] A versioned fix ledger (one writer): kind, target, parameters, reason, the problem it
+      addresses, author (person or AI), time; the build's fix files are rendered from it, never
+      patched as text; the recompiler's generated code is never edited
+- [ ] Kinds: name an XDK symbol, add a function entry, stand-in (accept, clear an output, forward,
+      constant), a value set at load, an `[abi]` entry, the person's own C++ file (by hash); the
+      automatic audio fixes become ledger entries marked automatic
+- [ ] Tools to add, list, show, diff and revert fixes
+
+**Phase 4: the AI debugging loop**
+- [ ] The Recompile chat posts approval cards (the inbox) for fixes, rebuilds and play, replacing
+      the person pressing Rebuild and play for it
+- [ ] A rebuild limit per request before asking again; each play's result kept in the build's
+      history and compared with the last (lasted longer, new crash, same crash)
+
+**Phase 5: PS3** (revisit when reached)
+- [ ] A PowerPC (64-bit, big-endian) decoder: an existing pure-Rust crate if one fits
+- [ ] Lifted functions mapped to original addresses from the lifter's function table; crash
+      analysis on Windows, where PS3 titles run
+
+**Phase 6: other systems** (revisit when reached)
+- [ ] Running follows each backend: track ps3recomp's Metal and Vulkan renderers; a Vulkan/SDL
+      port of the Xbox runtime is upstream work, proposed there rather than forked; building on a
+      Windows computer over SSH is an option to weigh
 
 ---
 

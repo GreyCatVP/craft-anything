@@ -1365,3 +1365,55 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 … {} older	… 还有 {} 条较早内容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 选择 · Enter 运行 · Esc 关闭
+Building the recompiled game isn't in this version yet.	此版本尚不能构建重编译的游戏。
+Builds only	仅能构建
+Can't be recompiled yet: see what's missing below.	暂时无法重编译：缺少的内容见下方。
+Check a console game	检查主机游戏
+Check an original console game	检查原版主机游戏
+Its build needs	构建所需
+List consoles that can be recompiled	列出可重编译的主机
+Looking at the game…	正在查看游戏…
+Not available	不可用
+Pick a disc image or executable	选择光盘镜像或可执行文件
+Pick an extracted folder	选择已解包的文件夹
+Pick the game's disc image or executable	选择游戏的光盘镜像或可执行文件
+Pick the game's extracted folder	选择游戏已解包的文件夹
+Ready to recompile.	可以重编译。
+Recompile a console game	重编译主机游戏
+Runs	可运行
+Turn an original Xbox or PlayStation 3 game you own into a PC program.	把你拥有的初代 Xbox 或 PlayStation 3 游戏变成电脑程序。
+Turn an original console game into a program for this computer. Only for games you own; nothing is decrypted.	把原版主机游戏变成这台电脑上的程序。仅限你拥有的游戏；不会解密任何内容。
+Where it runs	可在哪里运行
+Build log	构建日志
+Downloads the recompiler's latest version and runs its build. The first build can take an hour.	会下载重编译器的最新版本并运行其构建。首次构建可能需要一小时。
+Play a recompiled game	运行重编译的游戏
+Play	运行
+Recompile an original console game	重编译原版主机游戏
+Recompile stopped	重编译已停止
+Recompile	重编译
+Recompiled	已重编译
+Recompiling…	正在重编译…
+Resume	继续
+Show a recompile build	查看重编译构建
+Stop a recompile build	停止重编译构建
+Where should the recompiled game go?	重编译的游戏放在哪里？
+Game input and validation	游戏输入与验证
+Dependency installation	安装依赖
+File extraction	提取文件
+Native project generation	生成原生项目
+Executable analysis	分析可执行文件
+Recompilation	重编译
+Compilation	编译
+Packaging	打包
+Stage	阶段
+upstream	上游
+Add them and rebuild	添加并重新构建
+After the config changed: recompile, build and play again.	配置更改后：重新编译、构建并再次运行。
+Ask the AI to fix it	让 AI 修复
+Fix a recompile build's config	修复重编译构建的配置
+It also needs where these are in the game: {names}. The AI can look for them.	它还需要知道这些在游戏中的位置：{names}。AI 可以去查找。
+Open the game's log	打开游戏日志
+Rebuild and play	重新构建并运行
+The game is running.	游戏正在运行。
+The game stopped after {secs} s.	游戏在 {secs} 秒后停止。
+The recompiler missed {n} function(s) the game reached; they can be added for you.	重编译器漏掉了游戏用到的 {n} 个函数；可以为你添加。

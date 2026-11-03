@@ -184,6 +184,11 @@ fn look(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         if widgets::choice_tile(ui, size, "package", "A game's files", "See what a game packs, and save its pictures as PNG files.", false).clicked() {
             app.state.screen = crate::state::Screen::GameFiles;
         }
+        if widgets::choice_tile(ui, size, "cpu", "Recompile a console game", "Turn an original Xbox or PlayStation 3 game you own into a PC program.", false)
+            .clicked()
+        {
+            app.state.screen = crate::state::Screen::Recompile;
+        }
     });
 }
 

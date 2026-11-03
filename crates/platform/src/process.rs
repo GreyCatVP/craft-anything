@@ -790,6 +790,7 @@ pub struct Launch {
     program: OsString,
     args: Vec<OsString>,
     cwd: Option<PathBuf>,
+    env: Vec<(OsString, OsString)>,
     hide_console: bool,
     log: Option<PathBuf>,
     label: Option<String>,
@@ -798,7 +799,16 @@ pub struct Launch {
 
 impl Launch {
     pub fn new(program: impl AsRef<OsStr>) -> Self {
-        Launch { program: program.as_ref().to_owned(), args: Vec::new(), cwd: None, hide_console: false, log: None, label: None, remediation: None }
+        Launch {
+            program: program.as_ref().to_owned(),
+            args: Vec::new(),
+            cwd: None,
+            env: Vec::new(),
+            hide_console: false,
+            log: None,
+            label: None,
+            remediation: None,
+        }
     }
 
     pub fn arg(mut self, a: impl AsRef<OsStr>) -> Self {
@@ -817,6 +827,11 @@ impl Launch {
 
     pub fn cwd(mut self, dir: impl Into<PathBuf>) -> Self {
         self.cwd = Some(dir.into());
+        self
+    }
+
+    pub fn env(mut self, k: impl AsRef<OsStr>, v: impl AsRef<OsStr>) -> Self {
+        self.env.push((k.as_ref().to_owned(), v.as_ref().to_owned()));
         self
     }
 
@@ -866,7 +881,7 @@ impl Launch {
     pub fn start_watched(self) -> Result<Launched, ToolError> {
         let name = self.display();
         let mut cmd = std::process::Command::new(&self.program);
-        cmd.args(&self.args).stdin(Stdio::null());
+        cmd.args(&self.args).envs(self.env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null());
         use_search_path(&mut cmd);
         match &self.log {
             Some(path) => {

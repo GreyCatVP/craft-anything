@@ -20,6 +20,8 @@ pub enum Screen {
     Project,
     /// A game's archives, and saving its pictures.
     GameFiles,
+    /// Checking an original console game for recompiling.
+    Recompile,
     /// Advanced mode's workbench: every tool on the open target. Projects and their builds keep
     /// their own screens beside it, so nothing being built goes out of sight.
     Workbench,
@@ -460,6 +462,42 @@ pub struct UiState {
     /// The Game files screen.
     #[serde(default)]
     pub game: GameFiles,
+    /// The Recompile screen.
+    #[serde(default)]
+    pub recompile: Recompile,
+}
+
+/// The Recompile screen: the console picked, the game picked and what game_original_inspect said.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Recompile {
+    pub console: String,
+    pub input: Option<PathBuf>,
+    pub looking: bool,
+    pub result: Option<Value>,
+    /// The build's folder (kept, so a build carries on after a restart).
+    #[serde(default)]
+    pub out: Option<PathBuf>,
+    /// game_recomp_status's last answer.
+    #[serde(default)]
+    pub status: Option<Value>,
+    #[serde(skip)]
+    pub starting: bool,
+    #[serde(skip)]
+    pub polling: bool,
+    #[serde(skip)]
+    pub last_poll: Option<std::time::Instant>,
+    /// The folder picked for a build not started yet.
+    #[serde(default)]
+    pub chosen: Option<PathBuf>,
+    /// What the last Play said (game_recomp_play's answer).
+    #[serde(default)]
+    pub play: Option<Value>,
+    /// Play once the running build finishes.
+    #[serde(skip)]
+    pub play_after: bool,
+    /// Config entries still being written before a rebuild.
+    #[serde(skip)]
+    pub fixing: usize,
 }
 
 /// The Game files screen: a game's folder, its archives, the one open and its rows.
@@ -562,6 +600,7 @@ impl Default for UiState {
             answers: BTreeMap::new(),
             plugin_form: PluginForm::default(),
             game: GameFiles::default(),
+            recompile: Recompile::default(),
         }
     }
 }

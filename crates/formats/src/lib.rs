@@ -47,6 +47,7 @@ pub mod pe;
 pub mod pixels;
 pub mod pkcs7;
 pub mod plist;
+pub mod ps3;
 pub mod pyc;
 pub mod pyinstaller;
 pub mod rust_bin;
@@ -65,6 +66,8 @@ pub mod unreal_pak;
 pub mod unreal_texture;
 pub mod verify;
 pub mod wasm;
+pub mod xbe;
+pub mod xdvdfs;
 pub mod zip;
 
 // Native executable formats (ELF, PE, Mach-O, DOS) and their shared helpers.

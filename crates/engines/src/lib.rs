@@ -8,6 +8,7 @@
 pub mod adb;
 pub mod assets;
 pub mod cdp;
+pub mod console;
 pub mod cutter;
 pub mod frida;
 pub mod game;

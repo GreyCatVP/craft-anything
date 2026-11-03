@@ -44,6 +44,8 @@ pub mod format_tools;
 pub mod database_tools;
 // Solana sBPF / classic eBPF programs (built-in decoder + ELF parser).
 pub mod sbpf_tools;
+// Original console titles: inspect, recompile, play and fix through a per-console recompiler.
+pub mod console_tools;
 // Firmware images (built-in signature scan, entropy, carving).
 pub mod firmware_tools;
 pub mod game_archive_tools;
@@ -151,6 +153,7 @@ pub fn all() -> Vec<crate::ToolSpec> {
     v.extend(packed_tools::specs());
     v.extend(python_tools::specs());
     v.extend(game_archive_tools::specs());
+    v.extend(console_tools::specs());
     v.extend(il2cpp_tools::specs());
     v.extend(install_tools::specs());
     v.extend(managed_tools::specs());

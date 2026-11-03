@@ -28,6 +28,7 @@ pub mod palette;
 pub mod pins;
 pub mod project;
 pub mod prompt_box;
+pub mod recompile;
 pub mod report;
 pub mod schema_form;
 pub mod settings_ui;
@@ -258,6 +259,12 @@ pub enum Pick {
     GameFolder,
     /// Where to save a picture from a game.
     SavePicture,
+    /// A console game's disc image or executable, to recompile.
+    RecompileFile,
+    /// A console game's extracted folder, to recompile.
+    RecompileFolder,
+    /// Where a recompile build goes.
+    RecompileOut,
     /// The program an agent app runs ([`CraftApp::picking_program_for`] says which).
     AgentProgram,
 }
@@ -344,6 +351,10 @@ pub struct CraftApp {
     pub view: SessionView,
     pub jobs: jobs::Jobs<Done>,
     pub conversation: Option<Box<dyn Conversation>>,
+    /// What the conversation is about, sent to the AI ahead of the person's first message (the
+    /// Recompile screen's build), and the build it's about.
+    pub chat_context: Option<String>,
+    pub chat_for: Option<PathBuf>,
     pub backends: Vec<BackendConfig>,
     /// Each backend's options (an agent app's program and model), by name (Settings → AI).
     pub backend_options: std::collections::BTreeMap<String, craft_anything_ai::BackendOptions>,
@@ -444,6 +455,8 @@ impl CraftApp {
             view: SessionView::default(),
             jobs: jobs::Jobs::default(),
             conversation: None,
+            chat_context: None,
+            chat_for: None,
             backends: Vec::new(),
             backend_options: Default::default(),
             model_picker: None,
@@ -872,6 +885,9 @@ impl CraftApp {
             ) => game_files::tool_done(self, tool, r),
             // The Game files screen's look at a picked game.
             ("core_target_triage", r) => game_files::tool_done(self, tool, r),
+            ("game_original_inspect" | "game_recomp_start" | "game_recomp_status" | "game_recomp_stop" | "game_recomp_play" | "game_recomp_config_set", r) => {
+                recompile::tool_done(self, tool, r)
+            }
             (_, Ok(_)) => {}
             (_, Err(e)) if clean_room::is_refusal(&e) => self.state.modal = Some(state::Modal::DeepMode),
             (_, Err(e)) => self.toast(e.for_people(), true),
@@ -958,6 +974,9 @@ impl CraftApp {
                 Pick::ProjectFolder => pollster::block_on(d.set_title(tr("Pick the folder for this project")).pick_folder()),
                 Pick::ExtraProjectsDir => pollster::block_on(d.set_title(tr("Pick a folder with projects in it")).pick_folder()),
                 Pick::GameFolder => pollster::block_on(d.set_title(tr("Pick the game's folder")).pick_folder()),
+                Pick::RecompileFile => pollster::block_on(d.set_title(tr("Pick the game's disc image or executable")).pick_file()),
+                Pick::RecompileFolder => pollster::block_on(d.set_title(tr("Pick the game's extracted folder")).pick_folder()),
+                Pick::RecompileOut => pollster::block_on(d.set_title(tr("Where should the recompiled game go?")).pick_folder()),
                 Pick::SavePicture => pollster::block_on(d.set_title(tr("Save the picture")).add_filter("PNG", &["png"]).set_file_name(&suggested).save_file()),
                 Pick::AgentProgram => pollster::block_on(d.set_title(tr("Where is the program?")).pick_file()),
                 Pick::Pictures | Pick::Attach => None,
@@ -1089,11 +1108,14 @@ impl CraftApp {
             }
         }
         if let Some(c) = self.conversation.as_mut() {
-            let sent = if self.settings.mode == Mode::Beginner && self.state.explain_new {
+            let mut sent = if self.settings.mode == Mode::Beginner && self.state.explain_new {
                 format!("{text}\n\n(Explain like I'm new to this: plain words, short sentences, no jargon.)")
             } else {
                 text
             };
+            if let Some(context) = self.chat_context.take() {
+                sent = format!("{context}\n\n{sent}");
+            }
             c.send(&sent);
             return;
         }
@@ -1347,6 +1369,8 @@ impl CraftApp {
                         Pick::ProjectFolder => folders::picked(self, path),
                         Pick::ExtraProjectsDir => self.add_project_folder(path),
                         Pick::GameFolder => game_files::folder_picked(self, path),
+                        Pick::RecompileFile | Pick::RecompileFolder => recompile::picked(self, path),
+                        Pick::RecompileOut => recompile::out_picked(self, path),
                         Pick::SavePicture => game_files::save_to(self, path),
                         Pick::AgentProgram => {
                             if let Some(name) = self.picking_program_for.take() {
@@ -1540,6 +1564,7 @@ impl CraftApp {
                     Screen::Ask => chat::ask_screen(self, ui),
                     Screen::Project => project::show(self, ui),
                     Screen::GameFiles => game_files::show(self, ui),
+                    Screen::Recompile => recompile::show(self, ui),
                 })
             });
         } else {

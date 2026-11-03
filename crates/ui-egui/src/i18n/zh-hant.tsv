@@ -1365,3 +1365,55 @@ your files there are the app, edited in place	該位置的檔案就是應用程�
 … {} older	… 還有 {} 則較早內容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 選擇 · Enter 執行 · Esc 關閉
+Building the recompiled game isn't in this version yet.	此版本尚不能建置重新編譯的遊戲。
+Builds only	僅能建置
+Can't be recompiled yet: see what's missing below.	暫時無法重新編譯：缺少的內容見下方。
+Check a console game	檢查主機遊戲
+Check an original console game	檢查原版主機遊戲
+Its build needs	建置所需
+List consoles that can be recompiled	列出可重新編譯的主機
+Looking at the game…	正在查看遊戲…
+Not available	不可用
+Pick a disc image or executable	選擇光碟映像或執行檔
+Pick an extracted folder	選擇已解開的資料夾
+Pick the game's disc image or executable	選擇遊戲的光碟映像或執行檔
+Pick the game's extracted folder	選擇遊戲已解開的資料夾
+Ready to recompile.	可以重新編譯。
+Recompile a console game	重新編譯主機遊戲
+Runs	可執行
+Turn an original Xbox or PlayStation 3 game you own into a PC program.	把你擁有的初代 Xbox 或 PlayStation 3 遊戲變成電腦程式。
+Turn an original console game into a program for this computer. Only for games you own; nothing is decrypted.	把原版主機遊戲變成這台電腦上的程式。僅限你擁有的遊戲；不會解密任何內容。
+Where it runs	可在哪裡執行
+Build log	建置日誌
+Downloads the recompiler's latest version and runs its build. The first build can take an hour.	會下載重新編譯器的最新版本並執行其建置。首次建置可能需要一小時。
+Play a recompiled game	執行重新編譯的遊戲
+Play	執行
+Recompile an original console game	重新編譯原版主機遊戲
+Recompile stopped	重新編譯已停止
+Recompile	重新編譯
+Recompiled	已重新編譯
+Recompiling…	正在重新編譯…
+Resume	繼續
+Show a recompile build	查看重新編譯建置
+Stop a recompile build	停止重新編譯建置
+Where should the recompiled game go?	重新編譯的遊戲放在哪裡？
+Game input and validation	遊戲輸入與驗證
+Dependency installation	安裝相依套件
+File extraction	擷取檔案
+Native project generation	產生原生專案
+Executable analysis	分析執行檔
+Recompilation	重新編譯
+Compilation	編譯
+Packaging	封裝
+Stage	階段
+upstream	上游
+Add them and rebuild	加入並重新建置
+After the config changed: recompile, build and play again.	設定變更後：重新編譯、建置並再次執行。
+Ask the AI to fix it	讓 AI 修復
+Fix a recompile build's config	修復重新編譯建置的設定
+It also needs where these are in the game: {names}. The AI can look for them.	它還需要知道這些在遊戲中的位置：{names}。AI 可以去尋找。
+Open the game's log	開啟遊戲日誌
+Rebuild and play	重新建置並執行
+The game is running.	遊戲正在執行。
+The game stopped after {secs} s.	遊戲在 {secs} 秒後停止。
+The recompiler missed {n} function(s) the game reached; they can be added for you.	重新編譯器漏掉了遊戲用到的 {n} 個函式；可以為你加入。

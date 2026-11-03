@@ -83,6 +83,8 @@ pub const TOOLS: &[&str] = &[
     "settings_show",
     "settings_set",
     "engines_list",
+    // Which consoles can be recompiled and where the output runs: reads no game.
+    "game_consoles_list",
     "engines_install",
     "engines_app_open",
     "engines_adb_check",
@@ -177,6 +179,7 @@ mod tests {
             "js_app_map",
             "web_page_show",
             "game_archives_list",
+            "game_original_inspect",
         ] {
             assert!(!allows(id), "{id} reads the original");
             assert!(availability(id, true).is_some_and(|a| !a.available));
