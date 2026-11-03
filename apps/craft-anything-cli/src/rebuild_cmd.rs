@@ -8,6 +8,7 @@ use craft_anything_ai::rebuild::{self, RebuildRun, RunEvent, RunOptions};
 use craft_anything_ai::{AgentEvent, AiHub, BackendKind};
 use craft_anything_engine::inbox::{Answer, Request, RequestKind};
 use craft_anything_engine::workspace::Workspace;
+use craft_anything_engine::{AGENT_ENV, Caller};
 use craft_anything_evidence::ToolError;
 use std::io::{BufRead as _, Write as _};
 use std::path::PathBuf;
@@ -166,7 +167,7 @@ fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
                 }
                 RunEvent::Ask(r) => {
                     end_line(&mut line_open);
-                    let answer = if a.unattended { auto_answer(&r) } else { prompt_answer(&r) };
+                    let answer = answer_for(&r, a.unattended, crate::caller_for(std::env::var_os(AGENT_ENV).as_deref()));
                     run.answer(&r.id, &answer)?;
                 }
                 RunEvent::Checked(c) => {
@@ -209,6 +210,14 @@ fn end_line(open: &mut bool) {
     }
 }
 
+/// How a card the run relays is answered: on the terminal, or automatically with `--unattended`.
+/// An approval is the person's alone, so when an AI started this command (`caller` is the agent, see
+/// [`AGENT_ENV`]) it is refused as an unattended run refuses it, without reading the terminal. The
+/// run relays every pending card in the project's inbox, those of the AI's own requests included.
+fn answer_for(r: &Request, unattended: bool, caller: Caller) -> Answer {
+    if unattended || (r.kind == RequestKind::Approval && caller == Caller::Agent) { auto_answer(r) } else { prompt_answer(r) }
+}
+
 fn auto_answer(r: &Request) -> Answer {
     match r.kind {
         RequestKind::Question => {
@@ -220,7 +229,7 @@ fn auto_answer(r: &Request) -> Answer {
             }
         }
         RequestKind::Approval => {
-            println!("? {} → refused (unattended)", r.title);
+            println!("? {} → refused (unattended, or not the person's to answer)", r.title);
             Answer { allow: Some(false), text: Some("Unattended run: actions outside the project aren't allowed.".into()), ..Default::default() }
         }
     }
@@ -256,5 +265,38 @@ fn prompt_answer(r: &Request) -> Answer {
             let line = read_line().to_lowercase();
             Answer { allow: Some(line.starts_with('y') || line.starts_with('a')), always: line.starts_with('a'), ..Default::default() }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(kind: RequestKind) -> Request {
+        Request {
+            id: "r1".into(),
+            kind,
+            title: "Allow?".into(),
+            detail: String::new(),
+            choices: vec!["Blue".into(), "Red".into()],
+            allow_text: true,
+            action: None,
+            created_ms: 0,
+        }
+    }
+
+    /// The run relays every card in the project's inbox, those an AI's own request posted included, to
+    /// whoever started the command. When that is an AI, an approval is refused without reading the
+    /// terminal (a read here would wait for input that never comes), exactly as `--unattended` does.
+    #[test]
+    fn an_approval_is_refused_when_an_ai_started_the_command_and_nothing_is_read() {
+        let approval = card(RequestKind::Approval);
+        for (unattended, caller) in [(false, Caller::Agent), (true, Caller::Agent), (true, Caller::Cli)] {
+            let a = answer_for(&approval, unattended, caller);
+            assert_eq!((a.allow, a.always), (Some(false), false), "unattended {unattended}, {caller:?}");
+        }
+        // A question is still answered by the same rules as before: unattended takes the first choice.
+        let q = answer_for(&card(RequestKind::Question), true, Caller::Agent);
+        assert_eq!(q.choice.as_deref(), Some("Blue"));
     }
 }

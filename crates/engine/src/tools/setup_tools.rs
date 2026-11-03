@@ -510,8 +510,20 @@ pub fn with_setting(settings: &Settings, key: &str, value: Value) -> Result<Sett
     Ok(next)
 }
 
+/// Whether `key` is in the asset settings (`assets`, `assets.usd_limit`, ...): the limits, defaults
+/// and "Ignore budget" every new or unchosen type starts from.
+fn is_asset_setting(key: &str) -> bool {
+    key.split('.').next().map(str::trim) == Some("assets")
+}
+
 fn settings_set(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: SetParams = parse_params(params)?;
+    // Raising a default limit, or ignoring the budget, loosens spending for every project and type that
+    // hasn't chosen its own, and Settings has no project inbox to ask in: the person does it.
+    if is_asset_setting(&p.key) && matches!(ctx.caller, crate::Caller::Agent | crate::Caller::Mcp) {
+        return Err(ToolError::new(ErrorCode::NoPermission, "Asset limits, defaults and Ignore budget are the person's to change, not an AI's.")
+            .with_remediation("The person changes asset settings in the Craft Anything app (Settings → Builds)."));
+    }
     let next = with_setting(&ctx.session.settings, &p.key, p.value)?;
     let path = ctx.session.config_dir().join("config.toml");
     next.save_to(&path)?;
@@ -536,6 +548,38 @@ mod tests {
         assert!(with_setting(&s, "version", json!(9)).is_err());
         assert!(with_setting(&s, "auto_mode.inner", json!(1)).is_err());
         assert!(with_setting(&s, "", json!(1)).is_err());
+    }
+
+    /// The asset limits, defaults and Ignore budget are the person's: an AI can't raise them for every
+    /// project, since Settings has no project inbox to ask in. Other settings are unchanged.
+    #[test]
+    fn an_ai_cannot_change_the_asset_settings_and_the_person_can() {
+        let s = crate::testing::session();
+        let config = s.config_dir().join("config.toml");
+        let e = Engine::new(s);
+        let set = |caller: Caller, key: &str, value: Value| {
+            e.call("settings_set", json!({"key": key, "value": value}), CallOptions::new(caller)).map(|o| o.to_json()["result"].clone())
+        };
+        for caller in [Caller::Agent, Caller::Mcp] {
+            for (key, value) in [
+                ("assets.credit_limit", json!(9_000_000.0)),
+                ("assets.usd_limit", json!(9_000.0)),
+                ("assets.ignore_budget", json!(true)),
+                (" assets . usd_limit", json!(1.0)),
+                ("assets", json!({"usd_limit": 9_000.0})),
+            ] {
+                let err = set(caller, key, value).expect_err("an AI changing asset settings");
+                assert_eq!(err.code, ErrorCode::NoPermission, "{caller:?} {key}: {err:?}");
+                assert!(err.remediation.as_deref().is_some_and(|r| r.contains("Craft Anything app") && !r.contains("CLI")), "{err:?}");
+            }
+        }
+        assert!(!config.exists(), "nothing was saved");
+        // The person (the CLI, the app) can, and an AI can still change other settings.
+        assert!(set(Caller::Cli, "assets.usd_limit", json!(12.0)).is_ok());
+        assert!(set(Caller::Ui, "assets.ignore_budget", json!(true)).is_ok());
+        assert!(set(Caller::Agent, "build.good_enough", json!(80.0)).is_ok(), "other settings stay open to an AI");
+        let saved = std::fs::read_to_string(&config).unwrap();
+        assert!(saved.contains("usd_limit = 12.0") && saved.contains("ignore_budget = true"), "{saved}");
     }
 
     #[test]

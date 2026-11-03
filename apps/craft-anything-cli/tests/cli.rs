@@ -258,9 +258,8 @@ fn the_command_line_run_by_an_ai_cannot_answer_an_approval() {
             .args(["project-inbox-answer", "--project", ws.root.to_str().unwrap(), "--id", card.as_str(), "--allow"])
             .env("CRAFT_ANYTHING_CONFIG_DIR", cfg.path())
             .timeout(Duration::from_secs(60));
-        if marked {
-            p = p.env("CRAFT_ANYTHING_AGENT", "1");
-        }
+        // The unmarked run is the person's, whatever environment the tests themselves were started in.
+        p = if marked { p.env("CRAFT_ANYTHING_AGENT", "1") } else { p.env_remove("CRAFT_ANYTHING_AGENT") };
         p.run().unwrap()
     };
     let refused = answer(true);

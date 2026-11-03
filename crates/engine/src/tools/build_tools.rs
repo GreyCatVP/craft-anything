@@ -332,15 +332,21 @@ fn build_command_run(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     let (shell, flag) = if cfg!(windows) { ("cmd", "/C") } else { ("sh", "-c") };
     let cancel = ctx.cancel.clone();
     ctx.report(None, format!("Running {}", p.command.chars().take(120).collect::<String>()));
-    let out = Process::new(shell)
+    let mut command = Process::new(shell)
         .args([flag, p.command.as_str()])
         .cwd(&app)
         .timeout(Duration::from_secs(p.timeout_secs.unwrap_or(600).clamp(1, 7200)))
         .stdout_cap(4 * 1024 * 1024)
         .stderr_cap(4 * 1024 * 1024)
         .cancel_when(move || cancel.is_cancelled())
-        .label("the build command")
-        .run()?;
+        .label("the build command");
+    // A builder on an API backend runs its commands here, in the app's own process. What they start
+    // (a script that calls `craft-anything-cli`) is the AI and not the person, the same as for the
+    // agents the app starts. The person running this tool themselves (the CLI, the app) is not marked.
+    if matches!(ctx.caller, crate::Caller::Agent | crate::Caller::Mcp) {
+        command = command.env(crate::AGENT_ENV, "1");
+    }
+    let out = command.run()?;
     let tail = |s: String| -> String {
         let skip = s.len().saturating_sub(OUTPUT_TAIL);
         let mut start = skip;
@@ -477,6 +483,25 @@ mod tests {
         // Dev servers never exit: refused before anything runs.
         let err = call(&e, "build_command_run", json!({"command": "npm run dev"})).unwrap_err();
         assert!(err.message.contains("dev servers"), "{}", err.message);
+    }
+
+    /// What a command the builder runs sees of the mark that it is an AI (`CRAFT_ANYTHING_AGENT`).
+    #[test]
+    fn a_command_an_ai_runs_is_marked_as_an_ai_and_the_persons_own_is_not() {
+        let (_d, _ws, e) = building();
+        let echo = if cfg!(windows) { "echo %CRAFT_ANYTHING_AGENT%" } else { "printf %s \"$CRAFT_ANYTHING_AGENT\"" };
+        let run = |caller: Caller| {
+            let out = e.call("build_command_run", json!({"command": echo}), CallOptions::new(caller).with_consent(Consent::Granted)).unwrap().to_json();
+            out["result"]["stdout"].as_str().unwrap_or_default().trim().to_string()
+        };
+        for caller in [Caller::Agent, Caller::Mcp] {
+            assert_eq!(run(caller), "1", "{caller:?}");
+        }
+        // The app and the command line add nothing: the command sees what this process was started with.
+        let inherited = if cfg!(windows) { "%CRAFT_ANYTHING_AGENT%".to_string() } else { std::env::var("CRAFT_ANYTHING_AGENT").unwrap_or_default() };
+        for caller in [Caller::Cli, Caller::Ui] {
+            assert_eq!(run(caller), inherited, "{caller:?}");
+        }
     }
 
     #[test]

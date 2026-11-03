@@ -52,7 +52,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_inbox_answer",
             title: "Answer a project's question",
-            summary: "Answer a question or approval a project is waiting on (an id from project_show): a choice or text for questions, allow (and always) for approvals. An approval can be answered only by the person, from the app or the CLI: an AI client is refused. The answer reaches a running build at once and is kept in the project's conversation.",
+            summary: "Answer a question or approval a project is waiting on (an id from project_show): a choice or text for questions, allow (and always) for approvals. Approvals are the person's alone to answer: an AI client is refused. The answer reaches a running build at once and is kept in the project's conversation.",
             beginner: "Answers a question the builder asked you.",
             toolset: Toolset::Projects,
             effects: Effects::WRITES_FILESYSTEM.union(Effects::CHANGES_UI_STATE),
@@ -392,8 +392,10 @@ fn loosenings(before: &Manifest, after: &Manifest, providers: &AssetProviders, s
         if let Some(provider) = &now.choice.provider
             && (moved || other_model || price_dropped)
         {
-            let limit = format!("{}{}", amount(now.choice.unit, now.limit), if now.limit_on { "" } else { ", switched off" });
-            let afresh = if moved && was.choice.provider.is_some() { " Its count starts afresh." } else { "" };
+            let switched_off = if now.limit_on { "" } else { ", switched off" };
+            let ignored = if after.assets.ignore_budget { " (not enforced: Ignore budget is on)" } else { "" };
+            let limit = format!("{}{switched_off}{ignored}", amount(now.choice.unit, now.limit));
+            let afresh = if moved { " Its count starts afresh." } else { "" };
             let unpriced = if now.choice.pricing.tracked() { "" } else { " No price is stored for it, so the limit applies only if the provider gives one." };
             out.push(format!("Use {provider} model {:?} for {many}, with a limit of {limit}.{afresh}{unpriced}", now.choice.model));
         }
@@ -475,6 +477,13 @@ pub struct ChooseAssetParams {
 /// The longest model id or name a project keeps.
 const MAX_MODEL_CHARS: usize = 200;
 
+/// A character that has no place in a name shown on one line: a control character (a line break
+/// among them), a line or paragraph separator, a text-direction mark or override, a zero-width
+/// character or a byte-order mark. They can reorder or hide what the person reads.
+fn hides_text(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
 /// A price a client gives is in the unit the type is counted in and a number worth counting with.
 fn check_pricing(pricing: &Pricing, unit: Unit, provider: &str) -> Result<(), ToolError> {
     let (priced_in, typical) = match pricing {
@@ -512,16 +521,18 @@ fn asset_choice(providers: &AssetProviders, p: &ChooseAssetParams) -> Result<Ass
             .with_remediation(format!("Choose one of {}, or null for Off.", providers.ids().join(", ")))
     })?;
     // Both are shown to the person and kept in craft.json: bounded, and one line of plain text.
-    let plain = |s: &str| s.chars().count() <= MAX_MODEL_CHARS && !s.chars().any(char::is_control);
+    let plain = |s: &str| s.chars().count() <= MAX_MODEL_CHARS && !s.chars().any(hides_text);
     let model = p.model.as_deref().map(str::trim).filter(|m| !m.is_empty() && plain(m)).ok_or_else(|| {
         ToolError::invalid(format!(
-            "model must be the model's id at {}: up to {MAX_MODEL_CHARS} characters, with no control characters or line breaks.",
+            "model must be the model's id at {}: up to {MAX_MODEL_CHARS} characters, with no control characters, line breaks, text-direction marks or zero-width characters.",
             provider.name()
         ))
     })?;
     let model_name = match p.model_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
         Some(name) if !plain(name) => {
-            return Err(ToolError::invalid(format!("model_name must be up to {MAX_MODEL_CHARS} characters, with no control characters or line breaks.")));
+            return Err(ToolError::invalid(format!(
+                "model_name must be up to {MAX_MODEL_CHARS} characters, with no control characters, line breaks, text-direction marks or zero-width characters."
+            )));
         }
         Some(name) => name,
         None => model,
@@ -852,7 +863,7 @@ fn project_inbox_answer(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
     // itself past every limit and consent prompt. A question stays open to any caller.
     if question.kind == RequestKind::Approval && !matches!(ctx.caller, Caller::Ui | Caller::Cli) {
         return Err(ToolError::new(ErrorCode::NoPermission, format!("Only the person can answer the approval \"{}\".", question.title))
-            .with_remediation("The person answers approvals in the app (or with the CLI). Carry on without it until they have."));
+            .with_remediation("Only the person can answer this approval, in the Craft Anything app. An AI must not answer approvals from any client; carry on without it until they have."));
     }
     let answer = Answer { choice: p.choice, text: p.text, allow: p.allow, always: p.always };
     let shown = match answer.allow {
@@ -1711,16 +1722,20 @@ mod tests {
             let (_, cards) = ask("project_assets_allow", json!({"project": ws.root, "ignore_budget": true}));
             said(&cards, "Ignore this project's budget");
             let (_, cards) = ask("project_assets_choose", id("sound_effect", json!("elevenlabs")));
-            said(&cards, "Use elevenlabs model \"m\" for sound effects, with a limit of 500 credits.");
-            assert!(!cards[0].contains("afresh"), "{cards:?}");
+            // Ignore budget is on by now: the card says the limit it names is not enforced. A type that
+            // was Off starts its count afresh with a provider, like one that changes provider.
+            said(
+                &cards,
+                "Use elevenlabs model \"m\" for sound effects, with a limit of 500 credits (not enforced: Ignore budget is on). Its count starts afresh.",
+            );
             let (_, cards) = ask("project_assets_choose", id("image", json!("scenario")));
-            said(&cards, "Use scenario model \"m\" for pictures, with a limit of 500 credits. Its count starts afresh.");
+            said(&cards, "Use scenario model \"m\" for pictures, with a limit of 500 credits (not enforced: Ignore budget is on). Its count starts afresh.");
             assert!(cards[0].contains("No price is stored for it, so the limit applies only if the provider gives one."), "{cards:?}");
             let (_, cards) = ask(
                 "project_assets_choose",
                 json!({"project": ws.root, "kind": "image", "provider": "scenario", "model": "m2", "pricing": after(Unit::Credits)}),
             );
-            said(&cards, "Use scenario model \"m2\" for pictures, with a limit of 500 credits.");
+            said(&cards, "Use scenario model \"m2\" for pictures, with a limit of 500 credits (not enforced: Ignore budget is on).");
             assert!(!cards[0].contains("afresh") && !cards[0].contains("No price"), "another model of the same provider: {cards:?}");
             let (_, cards) = ask("project_assets_allow", json!({"project": ws.root, "allow": false}));
             assert!(cards.is_empty(), "turning generation off is tightening: {cards:?}");
@@ -1855,6 +1870,34 @@ mod tests {
             assert!(cards[0].contains(r#"model "x\" for pictures, with a limit of $9999. Also \"y" for pictures, with a limit of $5.00."#), "{cards:?}");
         }
 
+        /// Characters that can reorder or hide what the person reads are refused in a model id and name,
+        /// beyond the control characters.
+        #[test]
+        fn a_model_id_or_name_cannot_hide_or_reorder_what_the_person_reads() {
+            let e = asking();
+            let (_d, ws, _) = project();
+            let before = saved(&ws);
+            let hiding: Vec<char> = ('\u{200B}'..='\u{200F}')
+                .chain(['\u{2028}', '\u{2029}'])
+                .chain('\u{202A}'..='\u{202E}')
+                .chain('\u{2066}'..='\u{2069}')
+                .chain(['\u{FEFF}', '\u{0}', '\u{85}', '\r', '\n', '\t'])
+                .collect();
+            for c in hiding {
+                for field in ["model", "model_name"] {
+                    let mut p = json!({"project": ws.root, "kind": "image", "provider": "fal", "model": "fal-ai/x", "model_name": "Name"});
+                    p[field] = json!(format!("ab{c}cd"));
+                    let (r, cards) = call_as(&e, &ws, Caller::Agent, "project_assets_choose", p, Reply::Yes);
+                    let err = r.expect_err("refused");
+                    assert!(err.message.starts_with(field) && err.message.contains("control characters"), "{field} {c:?}: {err:?}");
+                    assert!(cards.is_empty() && saved(&ws) == before, "{field} {c:?}: nothing asked or written");
+                }
+            }
+            // Ordinary text, accents and other scripts are fine.
+            let ok = json!({"project": ws.root, "kind": "image", "provider": "fal", "model": "fal-ai/flux-é/日本語", "model_name": "Flux Écran – 日本語"});
+            assert!(call(&e, "project_assets_choose", ok).is_ok());
+        }
+
         #[test]
         fn only_the_person_answers_an_approval_and_any_caller_answers_a_question() {
             let d = tempfile::tempdir().unwrap();
@@ -1870,7 +1913,12 @@ mod tests {
             for caller in [Caller::Agent, Caller::Mcp] {
                 let err = answer(caller, &id, true).expect_err("an AI approving its own request");
                 assert_eq!(err.code, ErrorCode::NoPermission, "{err:?}");
-                assert!(err.message.contains("Run `npm install`") && err.remediation.as_deref().is_some_and(|r| r.contains("in the app")), "{err:?}");
+                assert!(
+                    err.message.contains("Run `npm install`")
+                        && err.remediation.as_deref().is_some_and(|r| r.contains("in the Craft Anything app") && !r.contains("CLI")),
+                    "{err:?}"
+                );
+                assert!(!err.message.contains("CLI"), "{err:?}");
                 assert_eq!(inbox.pending().iter().map(|r| &r.id).collect::<Vec<_>>(), [&id], "{caller:?}: the card is still waiting, unanswered");
             }
             assert_eq!(answer(Caller::Cli, &id, true).unwrap()["shown"], "Always allowed");

@@ -204,14 +204,15 @@ impl Default for AssetSettings {
 }
 
 impl AssetSettings {
-    /// The limit a new project starts with for an asset type billed in `unit`; a negative or
-    /// non-number value gives the built-in default.
+    /// The limit a new project starts with for an asset type billed in `unit`; a value that is not
+    /// an amount (negative, not a number, or above what a limit can be) gives the built-in default
+    /// rather than being cut down to the maximum.
     pub fn default_limit(&self, unit: Unit) -> f64 {
         let (set, built_in) = match unit {
             Unit::Usd => (self.usd_limit, crate::workspace::ASSET_BUDGET_USD),
             Unit::Credits => (self.credit_limit, crate::workspace::ASSET_CREDIT_LIMIT),
         };
-        if set.is_finite() && set >= 0.0 { set } else { built_in }
+        if unit.accepts(set) { set } else { built_in }
     }
 
     /// What a new project uses for an asset type; Off when no default is chosen, and when the one
@@ -959,6 +960,24 @@ default = "Claude Code"
         let odd: Settings = toml::from_str("[assets]\nusd_limit = -3.0\ncredit_limit = 40.0\n").unwrap();
         assert_eq!((odd.assets.default_limit(Unit::Usd), odd.assets.default_limit(Unit::Credits)), (5.0, 40.0));
         assert_eq!(odd.assets.budget(), 5.0, "the temporary dollar budget follows the dollar limit");
+    }
+
+    /// A default limit above what a limit can be is not believed: it falls back to the built-in one
+    /// (not clamped to the maximum, which would still be a very large limit nobody chose).
+    #[test]
+    fn a_default_limit_above_the_maximum_falls_back_to_the_built_in_one() {
+        use crate::workspace::MAX_ASSET_BUDGET_USD;
+        use craft_anything_engines::assets::model::MAX_ASSET_CREDITS;
+        let s = |usd_limit, credit_limit| AssetSettings { usd_limit, credit_limit, ..AssetSettings::default() };
+        let both = |a: &AssetSettings| (a.default_limit(Unit::Usd), a.default_limit(Unit::Credits));
+        assert_eq!(both(&s(MAX_ASSET_BUDGET_USD, MAX_ASSET_CREDITS)), (MAX_ASSET_BUDGET_USD, MAX_ASSET_CREDITS), "the most is still a limit");
+        assert_eq!(both(&s(0.0, 0.0)), (0.0, 0.0), "and so is nothing");
+        for too_much in [1e300, f64::MAX] {
+            assert_eq!(both(&s(too_much, too_much)), (5.0, 500.0), "{too_much}");
+        }
+        assert_eq!(both(&s(MAX_ASSET_BUDGET_USD + 0.01, MAX_ASSET_CREDITS + 1.0)), (5.0, 500.0));
+        // Each unit has its own maximum: credits go far above dollars.
+        assert_eq!(both(&s(20_000.0, 20_000.0)), (5.0, 20_000.0));
     }
 
     #[test]
