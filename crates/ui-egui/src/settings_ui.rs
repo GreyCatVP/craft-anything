@@ -1089,6 +1089,12 @@ mod tests {
         app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
         assert_eq!(app.state.backend.as_deref(), Some("Box"), "the chat's AI stays chosen");
         assert!(app.conversation.is_some(), "the chat keeps going");
+        // A follow-up in a chat that started before the add counts the same way.
+        let started = app.backend_choices;
+        app.send("And then?");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "a follow-up keeps its AI");
+        assert!(app.conversation.is_some(), "the follow-up's answer keeps going");
     }
 }
 
