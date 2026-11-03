@@ -174,6 +174,10 @@ pub struct AiConfig {
     pub fallback_chain: Vec<String>,
     /// Price overrides by model id.
     pub prices: BTreeMap<String, Price>,
+    /// This installation's OpenCode Go session id, made on first use and kept with the settings so
+    /// prompt caching survives restarts (and tests stay inside their own settings file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_id: Option<String>,
 }
 
 pub fn role_key(r: Role) -> &'static str {

@@ -24,6 +24,26 @@ pub const GEMINI_MODELS: &[&str] = &[GEMINI_DEFAULT_MODEL, "gemini-4-argon"];
 /// Generic app identification for OpenRouter (no personal data).
 pub const APP_REFERER: &str = "https://github.com/storytold/craft-anything";
 pub const APP_TITLE: &str = "Craft Anything";
+/// OpenCode Go (a subscription): an OpenAI-compatible base, the key from its console, and a session
+/// header the service asks every client to send so routing and prompt caching follow a conversation.
+pub const OPENCODE_GO_BASE: &str = "https://opencode.ai/inference/go/openai/v1";
+/// The header OpenCode Go asks every client to send.
+pub const OPENCODE_GO_SESSION_HEADER: &str = "x-opencode-session";
+/// The model a new OpenCode Go backend starts on, before its own list is fetched.
+pub const OPENCODE_GO_DEFAULT_MODEL: &str = "kimi-k3.1-pro";
+
+/// Whether this base URL is OpenCode Go's: https, host opencode.ai, path under /inference/go/.
+/// A substring test would also match a look-alike host or a proxy path.
+pub fn is_opencode_go(base: &str) -> bool {
+    let base = base.trim().trim_end_matches('/');
+    let Some((scheme, rest)) = base.split_once("://") else { return false };
+    if !scheme.eq_ignore_ascii_case("https") {
+        return false;
+    }
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let host = host.rsplit('@').next().unwrap_or(host).split(':').next().unwrap_or(host);
+    host.eq_ignore_ascii_case("opencode.ai") && (path == "inference/go" || path.starts_with("inference/go/"))
+}
 
 /// Well-known local servers: (name, base URL).
 pub const LOCAL_SERVERS: &[(&str, &str)] = &[
@@ -132,7 +152,20 @@ impl OpenAi {
         let agent = http::quick_agent(timeout);
         let v = http::get_json(&agent, &self.label, &self.url("models"), &self.headers())?;
         let arr = v.get("data").or_else(|| v.get("models")).and_then(Value::as_array).cloned().unwrap_or_default();
-        Ok(arr.iter().filter_map(|m| m.get("id").or_else(|| m.get("name")).and_then(Value::as_str).map(str::to_string)).collect())
+        // A catalogue may list a model only for another API (Responses, Messages): such an entry
+        // would fail on a chat-completions client, so skip it when the entry says which APIs it
+        // serves. Empty and repeated ids are dropped too.
+        let mut out: Vec<String> = Vec::new();
+        for m in arr {
+            if m.get("api").is_some_and(|a| a.get("chat-completions").is_none()) {
+                continue;
+            }
+            let Some(id) = m.get("id").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) else { continue };
+            if !out.iter().any(|seen| seen == id) {
+                out.push(id.to_string());
+            }
+        }
+        Ok(out)
     }
 
     fn stream_once(&self, req: &TurnRequest<'_>, on_delta: &mut dyn FnMut(Delta), stop: &Stop) -> Result<TurnResult, ToolError> {
@@ -516,6 +549,20 @@ fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
 mod tests {
     use super::*;
     use crate::model::Effort;
+
+    /// Only the real OpenCode Go base gets its session header: not a look-alike host, path or scheme.
+    #[test]
+    fn opencode_go_base_is_recognised_exactly() {
+        assert!(is_opencode_go(OPENCODE_GO_BASE));
+        assert!(is_opencode_go("https://opencode.ai/inference/go/openai/v1/models"));
+        assert!(is_opencode_go("https://OpenCode.AI/inference/go/openai/v1"));
+        assert!(!is_opencode_go("https://opencode.ai.evil.test/inference/go/v1"));
+        assert!(!is_opencode_go("http://127.0.0.1:4000/opencode.ai/inference/go/v1"));
+        assert!(!is_opencode_go("https://opencode.ai/inference/gopher/v1"));
+        assert!(!is_opencode_go("https://opencode.ai/inference/go-v2/v1"));
+        assert!(!is_opencode_go("http://opencode.ai/inference/go/v1"));
+        assert!(!is_opencode_go("https://openrouter.ai/api/v1"));
+    }
 
     #[test]
     fn json_text_calls_and_non_calls() {

@@ -577,7 +577,10 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     }
                 });
             });
-            if d.needs_key && !configured {
+            // A subscription key is worth pasting even when the environment already has one, so a
+            // different key can be used without restarting the app.
+            let pastable = d.needs_key || d.suggestion.base_url.as_deref().is_some_and(craft_anything_ai::openai::is_opencode_go);
+            if pastable && !configured {
                 ui.horizontal(|ui| {
                     let key = app.key_inputs.entry(d.suggestion.name.clone()).or_default();
                     ui.add(

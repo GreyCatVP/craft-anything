@@ -615,3 +615,9 @@ malformed suffixes and non-call JSON examples whose strings contain protocol mar
 the selected row each frame, so the wheel's scroll was pulled back to it at once and the list
 kept jumping to the top (#584). Scroll something into view on the frame it changed (a key, a new
 query), never as a standing request.
+
+**A test wrote into the real config folder.** A helper that keeps one id per installation created
+opencode-session under settings::config_dir() when the first request was made, so running the
+tests left a file on the developer's machine and two runs could collide. Anything we persist goes
+through the hub's stores (AiHub::with_stores, Session::isolated), which tests point at a temp
+folder; production code never writes under the real config folder by hand.

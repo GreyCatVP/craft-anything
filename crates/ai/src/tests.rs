@@ -7,6 +7,14 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 
+/// The model list lives at /v1 on the service root, not under the chat path's /openai/v1.
+#[test]
+fn opencode_go_lists_models_at_the_documented_url() {
+    assert_eq!(format!("{}/models", opencode_go_models_base(openai::OPENCODE_GO_BASE)), "https://opencode.ai/inference/go/v1/models");
+    assert_eq!(opencode_go_models_base("https://opencode.ai/inference/go/openai/v1/"), "https://opencode.ai/inference/go/v1");
+    assert_eq!(opencode_go_models_base("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434/v1");
+}
+
 #[derive(Debug, Clone)]
 struct Seen {
     path: String,

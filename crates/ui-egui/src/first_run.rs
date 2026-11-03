@@ -207,7 +207,10 @@ fn brain_card(app: &mut CraftApp, ui: &mut Ui, d: &Detected) {
                 }
             });
         });
-        if d.needs_key && !configured {
+        // A subscription key is worth pasting even when the environment already has one, so a
+        // different key can be used without restarting the app.
+        let pastable = d.needs_key || d.suggestion.base_url.as_deref().is_some_and(craft_anything_ai::openai::is_opencode_go);
+        if pastable && !configured {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let key = app.key_inputs.entry(name.clone()).or_default();
