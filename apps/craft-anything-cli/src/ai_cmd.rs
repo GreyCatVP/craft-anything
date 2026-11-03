@@ -112,6 +112,8 @@ pub fn chat(cli: &Cli, a: &ChatArgs) -> u8 {
         Err(e) => return fail(&e, cli.format()),
     };
     conv.send(&a.question);
+    // `--allow-run` is the person's OK, which an AI that started this command can't give itself.
+    let allow_run = crate::allows_running(cli.allow_run, crate::caller_for(std::env::var_os(craft_anything_engine::AGENT_ENV).as_deref()));
     let jsonl = cli.format() == Format::Jsonl;
     let mut code = 0u8;
     let mut stopped = false;
@@ -145,10 +147,16 @@ pub fn chat(cli: &Cli, a: &ChatArgs) -> u8 {
                     if !jsonl {
                         eprintln!(
                             "! {title} needs your OK: {explanation} ({})",
-                            if cli.allow_run { "allowed by --allow-run" } else { "declined; re-run with --allow-run to allow" }
+                            if allow_run {
+                                "allowed by --allow-run"
+                            } else if cli.allow_run {
+                                "declined; only the person can allow it"
+                            } else {
+                                "declined; re-run with --allow-run to allow"
+                            }
                         );
                     }
-                    conv.answer_consent(call_id, cli.allow_run);
+                    conv.answer_consent(call_id, allow_run);
                 }
                 AgentEvent::Error { message, remediation, log } => {
                     code = 1;

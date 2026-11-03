@@ -477,11 +477,18 @@ pub struct ChooseAssetParams {
 /// The longest model id or name a project keeps.
 const MAX_MODEL_CHARS: usize = 200;
 
-/// A character that has no place in a name shown on one line: a control character (a line break
-/// among them), a line or paragraph separator, a text-direction mark or override, a zero-width
-/// character or a byte-order mark. They can reorder or hide what the person reads.
+/// A character that has no place in a name shown on one line, because it can reorder or hide what
+/// the person reads: a control character (line breaks among them), the line and paragraph
+/// separators (U+2028, U+2029), a text-direction mark, embedding, override or isolate (U+061C,
+/// U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069), or an invisible one: the zero-width space
+/// and joiners (U+200B to U+200D), the word joiner and invisible operators (U+2060 to U+2064), the
+/// Mongolian vowel separator (U+180E) and the byte-order mark (U+FEFF).
 fn hides_text(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+        )
 }
 
 /// A price a client gives is in the unit the type is counted in and a number worth counting with.
@@ -1882,6 +1889,10 @@ mod tests {
                 .chain('\u{202A}'..='\u{202E}')
                 .chain('\u{2066}'..='\u{2069}')
                 .chain(['\u{FEFF}', '\u{0}', '\u{85}', '\r', '\n', '\t'])
+                // The Arabic letter mark, the Mongolian vowel separator, the word joiner and the
+                // invisible operators.
+                .chain(['\u{061C}', '\u{180E}'])
+                .chain('\u{2060}'..='\u{2064}')
                 .collect();
             for c in hiding {
                 for field in ["model", "model_name"] {

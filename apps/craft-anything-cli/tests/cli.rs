@@ -4,8 +4,15 @@ use craft_anything_platform::process::{Output, Process};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+/// The person's own command, even when the tests run in a shell an AI started (it carries the mark).
 fn cli(args: &[&str], config: &std::path::Path) -> Output {
-    Process::new(env!("CARGO_BIN_EXE_craft-anything-cli")).args(args).env("CRAFT_ANYTHING_CONFIG_DIR", config).timeout(Duration::from_secs(60)).run().unwrap()
+    Process::new(env!("CARGO_BIN_EXE_craft-anything-cli"))
+        .args(args)
+        .env("CRAFT_ANYTHING_CONFIG_DIR", config)
+        .env_remove("CRAFT_ANYTHING_AGENT")
+        .timeout(Duration::from_secs(60))
+        .run()
+        .unwrap()
 }
 
 /// The CLI lists installation-specific depths and refuses unsupported selections using an isolated agent fixture.

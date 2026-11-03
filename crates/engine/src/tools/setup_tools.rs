@@ -49,7 +49,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "settings_set",
             title: "Change a setting",
-            summary: "Set one setting by its dotted key from settings_show (`auto_mode`, `deep_mode`, `projects_dir`, `assets.usd_limit`…) to a JSON value, then save. Unknown keys and values of the wrong type are refused, and nothing is written.",
+            summary: "Set one setting by its dotted key from settings_show (`auto_mode`, `deep_mode`, `projects_dir`, `build.good_enough`…) to a JSON value, then save. Unknown keys and values of the wrong type are refused, and nothing is written. Keys under `assets.` (generated-asset defaults, limits and Ignore budget) are the person's: an AI client is refused for them.",
             beginner: "Changes one of your settings.",
             toolset: Toolset::Setup,
             effects: Effects::WRITES_FILESYSTEM.union(Effects::MUTATES_SESSION),
@@ -580,6 +580,16 @@ mod tests {
         assert!(set(Caller::Agent, "build.good_enough", json!(80.0)).is_ok(), "other settings stay open to an AI");
         let saved = std::fs::read_to_string(&config).unwrap();
         assert!(saved.contains("usd_limit = 12.0") && saved.contains("ignore_budget = true"), "{saved}");
+        // The tool's summary offers only keys an AI may set, and says the asset ones are refused.
+        let summary = e.registry().get("settings_set").unwrap().summary;
+        let examples: Vec<&str> = summary.split('`').skip(1).step_by(2).filter(|k| !k.ends_with('.')).collect();
+        assert!(examples.len() >= 3, "{summary}");
+        for key in examples {
+            assert!(!is_asset_setting(key), "{key} is offered as an example to an AI: {summary}");
+            let known = with_setting(&Settings::default(), key, json!(null)).map_or_else(|e| !e.message.starts_with("There's no setting"), |_| true);
+            assert!(known, "{key} is a real key");
+        }
+        assert!(summary.contains("`assets.`") && summary.contains("AI client is refused"), "{summary}");
     }
 
     #[test]

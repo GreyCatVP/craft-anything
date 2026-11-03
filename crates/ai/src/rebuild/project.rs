@@ -65,3 +65,15 @@ pub fn new_project(
     })?;
     Ok(ws)
 }
+
+/// Whether a new project starts with generated assets on when `caller` asked for them (`asked`).
+/// They spend the person's money, so only the person turns them on: when an AI asks (an agent or
+/// an MCP client, or a command line an AI started), the project starts with them off and the
+/// result says so in [`ASSETS_LEFT_OFF`]. There is no inbox to ask the person in before the
+/// project exists.
+pub fn generates_assets(asked: bool, caller: Caller) -> bool {
+    asked && matches!(caller, Caller::Ui | Caller::Cli)
+}
+
+/// What an AI is told when it asked for generated assets on a new project and they were left off.
+pub const ASSETS_LEFT_OFF: &str = "Generated assets are off for this project: only the person can turn them on, in the project's Generated assets panel.";
