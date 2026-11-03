@@ -177,6 +177,12 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**An answer with two parts, read as one.** An approval card has "Allow once" and "Always for this
+project": the answer carries `allow` and `always`. The consent card our MCP server shows for a tool
+that runs code read only `allow`, so "Always" was dropped and the same tool (a scripted web session)
+was asked about every time (#563). When a card offers a choice, whoever reads the answer handles
+every field of it, and a test answers it each way and asks again.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
