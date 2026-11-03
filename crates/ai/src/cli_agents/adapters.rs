@@ -375,10 +375,31 @@ impl AgentAdapter for ClaudeCode {
 }
 
 /// Claude Code's own folder: `CLAUDE_CONFIG_DIR` when it's set (the person's choice, which the
-/// agent we start keeps too), else `~/.claude`.
+/// agent we start keeps too), else our own under a Flatpak (see [`flatpak_claude_dir`]), else
+/// `~/.claude`.
 fn claude_config_dir() -> Option<std::path::PathBuf> {
     let set = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-    set.or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+    set.or_else(flatpak_claude_dir).or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+}
+
+/// Whether this app runs in a Flatpak sandbox (it sets `FLATPAK_ID` and makes `/.flatpak-info`).
+pub fn in_flatpak() -> bool {
+    static IN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IN.get_or_init(|| std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists())
+}
+
+/// Where Claude Code keeps its conversations when we start it under a Flatpak and the person
+/// hasn't chosen a folder: its own is `~/.claude`, which the sandbox only lets us read, so a
+/// conversation was never saved and `--resume` found nothing (#506). A folder of ours in the
+/// app's data folder is writable, and kept with the app. `None` outside a Flatpak, or when
+/// `CLAUDE_CONFIG_DIR` is set.
+pub fn flatpak_claude_dir() -> Option<std::path::PathBuf> {
+    let chosen = std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty());
+    flatpak_claude_dir_in(in_flatpak(), chosen, dirs::data_dir())
+}
+
+pub fn flatpak_claude_dir_in(flatpak: bool, chosen: bool, data: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    (flatpak && !chosen).then_some(data?.join("craft-anything").join("claude"))
 }
 
 /// Claude Code's name for the folder a session ran in: the path with everything but letters and

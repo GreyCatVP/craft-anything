@@ -185,12 +185,27 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool 
 /// The fix for a sign-in failure, in plain words. Sign-in always happens in Claude Code itself;
 /// we never see or handle the account.
 pub fn sign_in_hint(message: &str) -> Option<String> {
-    let m = message.to_ascii_lowercase();
-    ["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"]
-        .iter()
-        .any(|w| m.contains(w))
-        .then(|| "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string())
+    sign_in_hint_in(message, adapters::in_flatpak())
 }
+
+/// [`sign_in_hint`] for a Flatpak or not. In a Flatpak, Claude Code keeps its sign-in and
+/// conversations in a folder of the app's own (#506), so signing in from a normal terminal signs
+/// in the other copy: it's done through the sandbox, with that folder.
+fn sign_in_hint_in(message: &str, flatpak: bool) -> Option<String> {
+    let m = message.to_ascii_lowercase();
+    let wants_sign_in = ["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"].iter().any(|w| m.contains(w));
+    if !wants_sign_in {
+        return None;
+    }
+    Some(if flatpak {
+        format!("Sign in to Claude Code inside this app's sandbox: open a terminal and run `{FLATPAK_SIGN_IN}`, then try again.")
+    } else {
+        "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string()
+    })
+}
+
+/// Signing in for the Claude Code that a Flatpak build starts: the same folder it will use.
+const FLATPAK_SIGN_IN: &str = "flatpak run --command=sh ai.storyteller.craft-anything -c 'CLAUDE_CONFIG_DIR=\"$XDG_DATA_HOME/craft-anything/claude\" \"$HOME/.local/bin/claude\" auth login'";
 
 /// Words in an API's answer when the installed Claude Code is older than the model it was asked
 /// to use (#165).
@@ -561,7 +576,15 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     // raised to match, so nothing cuts a long clone short (its defaults stop a quiet tool call at
     // 30 minutes and a background build at 10).
     let (turn, quiet) = if builder { (24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60) };
-    let env = agent_env(builder, spec.options.effort);
+    let mut env = agent_env(builder, spec.options.effort);
+    // Under a Flatpak, Claude Code gets a folder it can write its conversations to (#506); on
+    // another computer over SSH it keeps its own.
+    if remote.is_none()
+        && let Some(dir) = adapters::flatpak_claude_dir()
+    {
+        let _ = std::fs::create_dir_all(&dir);
+        env.push(("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned()));
+    }
     let (prog, argv) = match &remote {
         Some(host) => ("ssh".to_string(), crate::ssh::ssh_args(host, &remote_command(&program, args, &env))),
         None => (program.clone(), args),
@@ -822,6 +845,23 @@ impl Drop for CliConversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #506: under a Flatpak `~/.claude` is read-only, so Claude Code gets a folder of ours to save
+    /// its conversations in (so `--resume` finds them); the person's own `CLAUDE_CONFIG_DIR` and a
+    /// normal install are left as they are, and the sign-in hint says how to sign in there.
+    #[test]
+    fn under_a_flatpak_claude_code_keeps_its_conversations_in_a_folder_it_can_write() {
+        let data = || Some(std::path::PathBuf::from("/home/u/.var/app/ai.storyteller.craft-anything/data"));
+        let dir = adapters::flatpak_claude_dir_in(true, false, data()).unwrap();
+        assert!(dir.ends_with("craft-anything/claude") && dir.starts_with("/home/u/.var/app/ai.storyteller.craft-anything/data"), "{dir:?}");
+        assert_eq!(adapters::flatpak_claude_dir_in(true, true, data()), None, "their own choice stays");
+        assert_eq!(adapters::flatpak_claude_dir_in(false, false, data()), None, "a normal install keeps ~/.claude");
+        assert_eq!(adapters::flatpak_claude_dir_in(true, false, None), None);
+        let hint = sign_in_hint_in("Not logged in", true).unwrap();
+        assert!(hint.contains("flatpak run") && hint.contains("CLAUDE_CONFIG_DIR") && hint.contains("auth login"), "{hint}");
+        assert!(sign_in_hint_in("Not logged in", false).unwrap().contains("`claude auth login`"));
+        assert_eq!(sign_in_hint_in("all fine", true), None);
+    }
 
     /// Over SSH our environment doesn't reach the other computer, so the chosen effort (and Claude
     /// Code's raised limits) go in the remote command itself.
