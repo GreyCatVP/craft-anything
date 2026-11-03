@@ -123,9 +123,13 @@ the bundled Clang toolchain. The guided installer still shows Visual Studio inst
 Clang is missing; platform-specific guidance in that flow remains a follow-up.
 
 Checked with isolated registry and SDK fixtures and with a native Fedora install of Unreal
-5.8.4. Readiness is a tool-presence check; a complete Unreal game build and SDK compatibility
-validation have not been run for this change. Windows and macOS detection retain their existing
-tests, without new live runs on those platforms.
+5.8.4. On Windows, Visual Studio C++ readiness also checks instances registered in
+`%ProgramData%\Microsoft\VisualStudio\Packages\_Instances\*\state.json` and explicit developer
+environment roots (`VSINSTALLDIR`, `VCINSTALLDIR`, `VCToolsInstallDir`), requiring an installed
+MSVC toolset directory rather than an empty `VC/Tools/MSVC` folder; checked with isolated
+fixtures and on Windows 11 against Visual Studio Community 2026 (`18.9.2`, MSVC `14.51.36231`).
+Readiness is a tool-presence check; a complete Unreal game build and SDK compatibility
+validation have not been run for this change.
 
 ### Provider error messages
 
