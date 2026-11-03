@@ -50,8 +50,10 @@ pub fn search_path() -> Option<OsString> {
 #[cfg(windows)]
 pub(crate) fn launch_target(program: &std::ffi::OsStr) -> (OsString, Vec<OsString>) {
     let Some(found) = which_in(&program.to_string_lossy(), search_path()).into_iter().next() else { return (program.to_owned(), Vec::new()) };
+    // Started by the path it was found at, not by name: a child with a cleared environment, or a
+    // lookup that differs from ours, would say "not found" for a program that is there (#152).
     if !found.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
-        return (program.to_owned(), Vec::new());
+        return (found.into_os_string(), Vec::new());
     }
     let dir = found.parent().map(Path::to_path_buf).unwrap_or_default();
     let shim = std::fs::metadata(&found)
@@ -363,8 +365,8 @@ mod tests {
         std::fs::write(dir.path().join("node.exe"), "").unwrap();
         // Found without its extension too, as a bare name is.
         assert_eq!(launch_target(dir.path().join("gemini").as_os_str()), (dir.path().join("node.exe").into_os_string(), vec![script.into_os_string()]));
-        // An .exe is left to the system's own lookup.
-        assert_eq!(launch_target(dir.path().join("node").as_os_str()), (dir.path().join("node").into_os_string(), Vec::new()));
+        // An .exe is started by the path it was found at.
+        assert_eq!(launch_target(dir.path().join("node").as_os_str()), (dir.path().join("node.exe").into_os_string(), Vec::new()));
     }
 
     /// A prompt with line breaks and quotes reaches the agent whole (needs Node; skipped without).

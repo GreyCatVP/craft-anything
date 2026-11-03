@@ -121,6 +121,11 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 - [ ] Sometimes starting the app shows nothing: after the release, see from `desktop.log` whether it
       still happens. DX12-only may have ended it; a GOG Galaxy Vulkan overlay layer was seen loading
       into the app
+- [x] A program that is found but can't start (an npm script whose `node` is missing) says where it is and
+      what to look at, not "isn't installed" (#152, #95); on Windows a program found is started by its
+      path, not its name
+- [ ] Live-check #152 on Windows 11 with OpenCode from npm, and on a machine with the agent but no
+      Node.js
 - [ ] Add to `docs/releasing.md`: before publishing, a Deep build through Claude Code from the
       finished package, on a Mac and on Windows. Starting the CLI from the package (#91) doesn't
       show whether Claude Code accepts its tools

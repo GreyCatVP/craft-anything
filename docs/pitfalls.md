@@ -177,6 +177,12 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**"Not installed" for a program that was there.** The system answers "not found" both for a missing
+program and for a file whose interpreter is missing (an npm script with no `node`), and we turned
+every one into "isn't installed or isn't on your PATH": #95, #130 and #152 reinstalled what they
+had. When a spawn says not found, look the program up yourself; if it's there, name the file and
+what it needs (`spawn_error_for`). Not run on Windows here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
