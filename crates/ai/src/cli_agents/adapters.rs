@@ -723,6 +723,27 @@ impl AgentAdapter for Codex {
         cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop)
     }
 
+    /// Codex lists its models and their reasoning levels in its own folder.
+    fn has_model_catalog(&self) -> bool {
+        true
+    }
+
+    fn model_catalog(
+        &self,
+        config: &BackendConfig,
+        _options: &BackendOptions,
+        _directory: Option<&Path>,
+        stop: &Stop,
+    ) -> Result<Vec<models::AgentModel>, ToolError> {
+        stop.check()?;
+        super::codex_models::catalog(config, super::codex_models::home().as_deref())
+    }
+
+    fn validate_model(&self, config: &BackendConfig, options: &BackendOptions, _directory: Option<&Path>, stop: &Stop) -> Result<(), ToolError> {
+        stop.check()?;
+        super::codex_models::validate(config, options, super::codex_models::home().as_deref())
+    }
+
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut v = vec!["exec".to_string(), "--json".into()];
         // Project folders aren't git repositories, and `codex exec` refuses to run outside one
@@ -745,6 +766,10 @@ impl AgentAdapter for Codex {
         }
         if let Some(m) = &cx.options.cli_model {
             v.extend(["-m".into(), m.clone()]);
+        }
+        // Its reasoning level, only when one is chosen: otherwise its own config.toml applies.
+        if let Some(depth) = cx.options.cli_thinking {
+            v.extend(["-c".into(), format!("model_reasoning_effort={}", toml_string(depth.as_str()))]);
         }
         v.extend(cx.options.args.iter().cloned());
         // The message itself goes in on stdin (see `stdin_text`).

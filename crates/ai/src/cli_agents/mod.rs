@@ -10,6 +10,7 @@
 
 pub mod acp;
 pub mod adapters;
+pub mod codex_models;
 pub mod models;
 mod shared;
 

@@ -617,7 +617,14 @@ impl AiHub {
         let mut cfg = self.config_to_change()?;
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
         if effort.is_some() && effort_in_use(&b.config, Some(&b.options)).is_none() {
-            return Err(ToolError::invalid(format!("{name} doesn't take an effort level.")).with_remediation("Effort is for the Claude API and Claude Code."));
+            // An agent with a model catalogue (OpenCode, Copilot, Codex) takes its depth with its model.
+            let catalog = b.config.kind == BackendKind::AgentCli && cli_agents::adapter_for(&b.config.model).has_model_catalog();
+            let remediation = if catalog {
+                format!("Set its thinking depth with its model: craft-anything-cli ai model {name:?} [model] --thinking <depth>.")
+            } else {
+                "Effort is for the Claude API and Claude Code.".into()
+            };
+            return Err(ToolError::invalid(format!("{name} doesn't take an effort level.")).with_remediation(remediation));
         }
         b.options.effort = effort;
         self.save_config(&cfg)?;

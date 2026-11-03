@@ -33,6 +33,55 @@ fn opencode_cli_lists_supported_depths_and_rejects_unsupported_choices() {
     assert_eq!(cli(&["ai", "model", "OpenCode", "test/model", "--default"], cfg.path()).code, Some(2));
 }
 
+/// The CLI with its settings and Codex's folder in temp folders (never the person's `~/.codex`).
+fn cli_codex(args: &[&str], config: &std::path::Path, codex_home: &std::path::Path) -> Value {
+    let out = Process::new(env!("CARGO_BIN_EXE_craft-anything-cli"))
+        .args(["--format", "json"])
+        .args(args)
+        .env("CRAFT_ANYTHING_CONFIG_DIR", config)
+        .env("CODEX_HOME", codex_home)
+        .timeout(Duration::from_secs(60))
+        .run()
+        .unwrap();
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{args:?}: {e}: {}", String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Codex's models and their depths come from its own list, through the same `ai model` as
+/// OpenCode's; a model the list doesn't name yet can still be chosen by name.
+#[test]
+fn codex_s_model_and_thinking_from_the_cli() {
+    let (cfg, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let run = |args: &[&str]| cli_codex(args, cfg.path(), home.path());
+    let list = r#"{"models":[
+        {"slug":"fake-big","display_name":"Fake Big","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"},{"effort":"minimal"}],"visibility":"list","priority":1},
+        {"slug":"fake-secret","visibility":"hide","priority":0},
+        {"slug":"fake-small","supported_reasoning_levels":[{"effort":"low"}],"visibility":"list","priority":2}
+    ]}"#;
+    std::fs::write(home.path().join("models_cache.json"), list).unwrap();
+    assert!(run(&["ai", "add", "Codex", "--kind", "agent_cli", "--model", "codex"])["added"].is_object());
+    let models = run(&["ai", "model", "Codex"]);
+    assert_eq!(
+        models["models"],
+        json!([{"id": "fake-big", "name": "Fake Big", "thinking": ["low", "high"]}, {"id": "fake-small", "name": "fake-small", "thinking": ["low"]}]),
+        "{models}"
+    );
+    assert_eq!(run(&["ai", "model", "Codex", "fake-big", "--thinking", "high"])["thinking"], "high");
+    let refused = run(&["ai", "model", "Codex", "fake-small", "--thinking", "high"]);
+    assert_eq!(refused["error"]["code"], "bad_input", "{refused}");
+    let saved = std::fs::read_to_string(cfg.path().join("config.toml")).unwrap();
+    assert!(saved.contains("cli_model = \"fake-big\"") && saved.contains("cli_thinking = \"high\""), "a refused choice changes nothing: {saved}");
+    let effort = run(&["ai", "effort", "Codex", "high"]);
+    assert!(effort["error"]["remediation"].as_str().is_some_and(|r| r.contains("--thinking")), "{effort}");
+    assert!(run(&["ai", "model", "Codex", "--default"])["found"] == true);
+    let saved = std::fs::read_to_string(cfg.path().join("config.toml")).unwrap();
+    assert!(!saved.contains("cli_model") && !saved.contains("cli_thinking"), "{saved}");
+    // No list yet: nothing listed, and a typed id still works.
+    std::fs::remove_file(home.path().join("models_cache.json")).unwrap();
+    assert_eq!(run(&["ai", "model", "Codex"])["models"], json!([]));
+    assert_eq!(run(&["ai", "model", "Codex", "typed-model-9"])["model"], "typed-model-9");
+    assert_eq!(run(&["ai", "model", "Codex", "two words"])["error"]["code"], "bad_input");
+}
+
 #[test]
 fn commands_and_exit_codes() {
     let cfg = tempfile::tempdir().unwrap();
