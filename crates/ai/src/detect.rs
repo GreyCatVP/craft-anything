@@ -1,5 +1,5 @@
 //! Find AI that's ready to use on this machine: env keys, local servers (also those set up in
-//! OpenCode), agent CLIs, ssh hosts. Probes run in parallel and the whole scan is bounded (about a
+//! OpenCode), and agent CLIs. Probes run in parallel and the whole scan is bounded (about a
 //! second).
 
 use crate::openai::{LOCAL_SERVERS, OpenAi};
@@ -171,7 +171,8 @@ fn local_servers() -> Vec<(String, String)> {
     all
 }
 
-/// Everything, bounded by [`TOTAL`].
+/// Local and configured API suggestions, bounded by [`TOTAL`]. SSH aliases are available in
+/// Settings, where the person can choose and test one; an alias alone isn't evidence of an agent.
 pub fn detect_all() -> Vec<Detected> {
     let start = Instant::now();
     let (tx, rx) = mpsc::channel::<(usize, Vec<Detected>)>();
@@ -212,17 +213,6 @@ pub fn detect_all() -> Vec<Detected> {
             Err(_) => break,
         }
     }
-    let mut hosts = crate::ssh::ssh_hosts();
-    hosts.truncate(5);
-    let ssh: Vec<Detected> = hosts
-        .into_iter()
-        .map(|h| {
-            let mut c = cfg(&format!("Claude Code on {h}"), BackendKind::AgentCli, "claude-code");
-            c.ssh_host = Some(h.clone());
-            Detected { suggestion: c, reason: format!("SSH host {h} from ~/.ssh/config (runs an agent CLI there)"), needs_key: false }
-        })
-        .collect();
-    parts.push((100, ssh));
     parts.sort_by_key(|(i, _)| *i);
     parts.into_iter().flat_map(|(_, v)| v).collect()
 }

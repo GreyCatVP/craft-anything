@@ -181,6 +181,11 @@ was run; other text-call formats remain unsupported.
 
 ## Known limits
 
+- Automatic AI discovery no longer offers Claude Code just because an SSH alias exists. The scan
+  does not start SSH. Hosts remain available in the manual Settings picker; after choosing and
+  configuring an agent, the existing Test action runs its version check with a fifteen-second limit.
+  A host alias or version response does not establish sign-in or build readiness. No real SSH account
+  was used for this correction.
 - Locks: every mutex but the browser viewer's goes through `platform::sync`. A deadlock on one thread or across
   threads is broken when it forms, with an error and a report in `logs/`; a watchdog looks every 5 s; a holder
   that isn't a labelled job is reported after 2 minutes and waited on for 15 at most. Tools are labelled, so they
