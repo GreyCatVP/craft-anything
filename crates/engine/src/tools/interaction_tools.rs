@@ -254,22 +254,20 @@ pub(crate) fn resolve(base: &Path, p: &str) -> Option<PathBuf> {
 
 /// [`resolve`], with `..` applied where the system applies it when the path is opened. Linux and
 /// macOS follow a link before the `..` after it, so `app/link/../x` is beside the link's target,
-/// not `app/x`; Windows takes `..` off the text first, as [`resolve`] does. For the checks that
-/// decide what a builder's own tools may open.
+/// not `app/x`; Windows takes `..` off the text first. And as every system does, `..` at the root
+/// stays at the root (`/..` is `/`), where [`resolve`] gives up. For the checks that decide what a
+/// builder's own tools may open, which mustn't read giving up as "not protected".
 pub(crate) fn resolve_as_opened(base: &Path, p: &str) -> Option<PathBuf> {
-    if !cfg!(unix) {
-        return resolve(base, p);
-    }
     let path = Path::new(p);
     let joined = if path.is_absolute() { path.to_path_buf() } else { base.join(path) };
     let mut out = PathBuf::new();
     for c in joined.components() {
         match c {
             Component::ParentDir => {
-                if out.symlink_metadata().is_ok() {
+                if cfg!(unix) && out.symlink_metadata().is_ok() {
                     out = crate::workspace::real_path(&out)?;
                 }
-                if !out.pop() {
+                if !out.pop() && !out.has_root() {
                     return None;
                 }
             }
@@ -755,6 +753,37 @@ mod tests {
             assert_eq!(opened, resolve(Path::new("/"), &raw).unwrap());
             assert!(inside(&w.app_dir(), &opened));
             assert_eq!(decide(Some(&w), "Write", &write), Decision::Allow);
+        }
+    }
+
+    #[test]
+    fn dot_dot_at_the_root_stays_at_the_root() {
+        let (_d, w) = ws();
+        std::fs::create_dir_all(w.app_dir()).unwrap();
+        let system = if cfg!(windows) { "Windows" } else { "etc" };
+        // More `..` than the path is deep: every system stops at the root.
+        let climbed = format!("{}/{}{system}/x.conf", w.app_dir().display(), "../".repeat(64));
+        let opened = resolve_as_opened(Path::new("/"), &climbed).unwrap();
+        assert!(opened.ends_with(format!("{system}/x.conf")) && opened.components().count() <= 4, "{}", opened.display());
+        assert!(never_unasked(Some(&w), "Write", &json!({"file_path": climbed})).is_some());
+
+        // A link to the root, then `..`, is still the root on Linux and macOS.
+        let root = w.app_dir().join("root");
+        if cfg!(unix) && link_dir(Path::new("/"), &root) {
+            let through = |rest: &str| json!({"file_path": format!("{}/../{rest}", root.display())});
+            assert!(never_unasked(Some(&w), "Write", &through("etc/x.conf")).is_some());
+
+            let dir = tempfile::tempdir().unwrap();
+            let game = dir.path().join("Some Game");
+            std::fs::create_dir_all(&game).unwrap();
+            let cw = Workspace::create(&dir.path().join("projects"), "g", "Recreate this game", TargetRef::Local { path: game.clone() }).unwrap();
+            std::fs::create_dir_all(cw.app_dir()).unwrap();
+            let croot = cw.app_dir().join("root");
+            assert!(link_dir(Path::new("/"), &croot));
+            let real_game = crate::workspace::real_path(&game).unwrap();
+            let rest = real_game.to_string_lossy().trim_start_matches('/').to_string();
+            let read = json!({"file_path": format!("{}/../{rest}/data.ini", croot.display())});
+            assert!(off_limits(Some(&cw), "Read", &read).is_some());
         }
     }
 
