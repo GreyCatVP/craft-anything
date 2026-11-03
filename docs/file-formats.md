@@ -11,7 +11,7 @@ version up to the current one, then turn the document into Rust types. The step 
 | `<project>/assets.json` | `engine::workspace` (`AssetRecord`; written by the asset tools under the project's spending lock) | `LEDGER_VERSION` = 1 (`{version, records}`; a bare list = 0, where each record had only a dollar `cost_usd`) | read as before (its records count as dollars of an unknown provider), saved as current at the next receipt | refused: no spending is counted or recorded, and the file is never written over |
 | `<project>/inbox/build-progress.json` | `engine::workspace::progress` (`BuildProgress`; written only by the rebuild run) | `BUILD_PROGRESS_VERSION` = 1 (`version`; missing = 0) | brought forward; an absent file starts with no counted turns | the build stops and the record is left unchanged |
 | `config.toml` (`settings::config_dir()`) | `engine::settings` (`Settings`) | `SETTINGS_VERSION` = 5 (`version`; missing = 0; 2 moved `[engines.ghidra] enabled` to `deep_mode`; 3 added more project folders and the answer about a picked folder's files; 4 added `[assets] model_3d`; 5 chose generated assets per type: `[assets] budget_usd` became `usd_limit`, next to `credit_limit` and `ignore_budget`, and `image_model` and `model_3d` became `[assets.defaults.image]` and `[assets.defaults.model_3d]`, each a provider, a model, its unit and its price; an old id the asset table never had is dropped, which leaves that type Off) | brought forward | loaded, never saved over |
-| `asset-models.json` (`settings::config_dir()`) | `ai::asset_models` (the model lists `assets_models_list` fetched; written only by that tool) | `CACHE_VERSION` = 1 (`{version, lists}`; each list is kept under `<provider>/<kind>` as `{fetched_ms, models, error}`) | brought forward (no earlier version exists); a file that isn't JSON or has no `version` holds nothing and is replaced | read as far as its fields are known, never written over |
+| `asset-models.json` (`settings::config_dir()`) | `ai::asset_models` (the model lists `assets_models_list` fetched; written only by that tool) | `CACHE_VERSION` = 1 (`{version, lists}`; each list is kept under `<provider>/<kind>` as `{fetched_ms, models, error}` and, after a failed refresh, `failed_ms`) | brought forward (no earlier version exists); a file that isn't JSON or has no `version` holds nothing and is replaced | read as far as its fields are known, never written over |
 | `<name>.cany/project.toml` | `engine::project` (`ProjectMeta`) | `FORMAT_VERSION` = 1 (`format_version`, required) | brought forward | refused, with "update Craft Anything" |
 | `<project>/transcript.json` | `ai::context` (the API builder's conversation) | `TRANSCRIPT_VERSION` = 1 (`{version, history}`) | read as before | not resumed; a fresh build replaces it |
 | `<project>/app/mechanics.json` | `engine::mechanics` (written by the builder, read by `MechanicsCheck`) | `MECHANICS_VERSION` = 1 (`version`; missing = 1) | — | the check fails and says so |
@@ -62,10 +62,14 @@ spending stops until it is repaired or Craft Anything is updated.
 
 `asset-models.json` is only a cache of what each provider whose key is saved last listed for an asset
 type, written with the one atomic writer (`platform::fs::write_atomic`). A list is used again while it
-is younger than `max_age_minutes` (default 10) and has no `error`. When asking a provider fails, the
-list from before is kept as it was, with its own `fetched_ms`, and `error` says why, so the next
-listing asks again; with nothing kept, the list is whatever the provider gave, with the `error`. A
-newer file's lists are used and the file is left alone, as are files too large to read (32 MiB).
+is younger than `max_age_minutes` (default 10) and has no `error`. A provider whose list is empty
+with no `error` does not make that type: it is left out of the result and nothing is kept of it. When
+asking a provider fails, the list from before is kept as it was, with its own `fetched_ms`, and
+`error` says why; `failed_ms` (omitted from a good list) is when that attempt was made, and for a
+minute after it a look that is not a refresh shows that list and error without asking again. With
+nothing kept, the list is whatever the provider gave, with the `error`. A cancelled call keeps what
+it had fetched. A newer file's lists are used and the file is left alone, as are files too large to
+read (32 MiB).
 
 ## Stand-in cached responses
 
