@@ -166,6 +166,14 @@ It happened again with Vulkan on Windows (#394): starting Vulkan loaded an Intel
 (`igvk64.dll`) that crashed with `0xc0000005` on startup. Windows now starts DX12 only by default
 (which includes WARP); `WGPU_BACKEND` still allows choosing other backends.
 
+**A shader compiler picked by a default that looks around the computer.** wgpu's DX12 `Auto`
+compiler takes a `dxcompiler.dll` it finds on the PATH; one without `dxil.dll` makes unsigned
+shaders, and on an RTX 5060 Ti the device was lost as the window opened ("Parent device is
+lost", #522). Where a library chooses a program or DLL by searching, name the one that ships
+with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) as the way to
+another. A window that can't start now says how to draw without the graphics card
+(`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
