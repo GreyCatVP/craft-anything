@@ -865,15 +865,34 @@ mod tests {
         assert!(pos("--mcp-config") > pos("--resume"));
     }
 
+    /// #540: only tools that ask the person themselves are approved on Codex's side.
+    #[test]
+    fn every_tool_approved_for_codex_is_registered_and_asks_for_consent() {
+        let e = craft_anything_engine::Engine::shared(craft_anything_engine::testing::session(), crate::rebuild::tools::specs());
+        for id in craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS {
+            let spec = e.registry().get(id).unwrap_or_else(|| panic!("{id} isn't registered"));
+            assert!(spec.effects.needs_consent(), "{id} must ask for consent itself");
+        }
+    }
+
     /// #540: a refused Codex tool call came back as "null"; it says why and how to fix it.
     #[test]
     fn a_codex_tool_refused_for_approval_explains_the_way_out() {
         let mut p = StreamParser::new(adapter_for("codex"));
-        let line = r#"{"type":"item.completed","item":{"id":"i1","type":"mcp_tool_call","tool":"rebuild_start","status":"failed","result":null,"error":{"message":"tool rebuild_start requires approval, but approval policy is never"}}}"#;
+        let line = r#"{"type":"item.completed","item":{"id":"i1","type":"mcp_tool_call","server":"craft-anything","tool":"rebuild_start","status":"failed","result":null,"error":{"message":"tool rebuild_start requires approval, but approval policy is never"}}}"#;
         let v: Value = serde_json::from_str(line).unwrap();
         let events = adapter_for("codex").parse(&mut p, &v);
         let text = format!("{events:?}");
-        assert!(text.contains("setup --client codex --yes") && text.contains("default_tools_approval_mode"), "{text}");
+        assert!(text.contains("setup --client codex --yes"), "{text}");
+        // Another server's refusal keeps Codex's words: our setup can't fix it.
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let theirs = line.replace("craft-anything", "other-server");
+        let text = format!("{:?}", adapter_for("codex").parse(&mut p, &serde_json::from_str::<Value>(&theirs).unwrap()));
+        assert!(text.contains("approval policy is never") && !text.contains("setup --client codex"), "{text}");
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let v: Value = serde_json::from_str(line).unwrap();
+        let events = adapter_for("codex").parse(&mut p, &v);
+        let text = format!("{events:?}");
         assert!(!text.contains("\"null\""), "{text}");
         // Any other failure shows its own message, not the JSON around it.
         let mut p = StreamParser::new(adapter_for("codex"));
@@ -896,8 +915,10 @@ mod tests {
         assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
         assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
         assert_eq!(a.last().unwrap(), "P:q");
-        // #540: `codex exec` can't ask, so our tools are approved in the same -c list.
-        assert!(a.contains(&"mcp_servers.craft-anything.default_tools_approval_mode=\"approve\"".to_string()));
+        // #540: `codex exec` can't ask, so the tools that ask for themselves are approved in the
+        // same -c list, and nothing wider.
+        assert!(a.contains(&"mcp_servers.craft-anything.tools.rebuild_start.approval_mode=\"approve\"".to_string()));
+        assert!(!a.iter().any(|x| x.contains("default_tools_approval_mode")));
         let g = build_args(adapter_for("gemini-cli").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
         assert!(g.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
         let o = BackendOptions { args: vec!["run".into()], ..Default::default() };

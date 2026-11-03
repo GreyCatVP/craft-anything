@@ -499,10 +499,12 @@ impl AgentAdapter for Codex {
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.command={}", toml_string(&cx.mcp.command))]);
         let args_toml = format!("[{}]", cx.mcp.args.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "));
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.args={args_toml}")]);
-        // `codex exec` can't ask, so without this it refuses every tool not marked read-only, such
-        // as rebuild_start, before our server sees the call (#540). Our server still asks the
-        // person itself before a tool that runs code.
-        v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.default_tools_approval_mode=\"approve\"")]);
+        // `codex exec` can't ask, so without this it refuses a tool not marked read-only, such as
+        // rebuild_start, before our server sees the call (#540). Only tools that ask the person
+        // themselves are approved; every other tool keeps the person's own Codex policy.
+        for tool in craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS {
+            v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.tools.{tool}.approval_mode=\"approve\"")]);
+        }
         if let Some(m) = &cx.options.cli_model {
             v.extend(["-m".into(), m.clone()]);
         }
@@ -545,7 +547,8 @@ impl AgentAdapter for Codex {
                 }
                 let failed = item.get("status").and_then(Value::as_str) == Some("failed") || item.get("error").is_some_and(|e| !e.is_null());
                 let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
-                let text = codex_tool_text(&item, tool);
+                let ours = item.get("server").and_then(Value::as_str) == Some(MCP_NAME);
+                let text = codex_tool_text(&item, tool, ours);
                 out.push(p.finished(&id, !failed, &text));
             }
             ("item.started", "command_execution") => {
@@ -570,8 +573,8 @@ impl AgentAdapter for Codex {
 
 /// What a finished Codex tool call says. A failed call carries `"result": null` beside its
 /// `error`, which showed as "null" (#540), so null fields are skipped and an error's message is
-/// used as written. Codex's refusal to run a tool it can't ask about gets the way out.
-fn codex_tool_text(item: &Value, tool: &str) -> String {
+/// used as written. Codex's refusal to run one of our tools it can't ask about gets the way out.
+fn codex_tool_text(item: &Value, tool: &str, ours: bool) -> String {
     let field = |k: &str| item.get(k).filter(|v| !v.is_null());
     let error = field("error").map(|e| e.get("message").and_then(Value::as_str).map_or_else(|| e.to_string(), str::to_string));
     let text = match (field("result"), error) {
@@ -579,10 +582,11 @@ fn codex_tool_text(item: &Value, tool: &str) -> String {
         (Some(r), None) => r.to_string(),
         (None, None) => String::new(),
     };
-    if text.contains(CODEX_NEEDS_APPROVAL) {
+    // Another MCP server's refusal isn't fixed by our setup: it keeps Codex's own words.
+    if ours && text.contains(CODEX_NEEDS_APPROVAL) {
         // The feed keeps 200 characters of a result, so the fix comes first and fits.
         return format!(
-            "Codex blocked {tool}. Fix: run `craft-anything-cli setup --client codex --yes` (or set default_tools_approval_mode = \"approve\" in ~/.codex/config.toml), then retry. See docs/codex.md."
+            "Codex blocked {tool}: it can't ask for approval here. Fix: run `craft-anything-cli setup --client codex --yes`, then retry. See docs/codex.md."
         );
     }
     text

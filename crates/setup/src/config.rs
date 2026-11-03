@@ -1,6 +1,6 @@
 //! Reading and editing one client's config text, per format. Pure text in, text out.
 
-use crate::clients::{Client, Format, SERVER_NAME};
+use crate::clients::{Client, Format, SERVER_NAME, Shape};
 use crate::yaml;
 use craft_anything_formats::jsonc;
 use serde_json::Value;
@@ -113,7 +113,20 @@ fn json_to_toml(v: &Value) -> Option<toml_edit::Value> {
     })
 }
 
+/// `over` laid onto `base`: objects are merged key by key, anything else is replaced.
+fn deep_merge(base: &mut Value, over: &Value) {
+    match (base, over) {
+        (Value::Object(b), Value::Object(o)) => {
+            for (k, v) in o {
+                deep_merge(b.entry(k.clone()).or_insert(Value::Null), v);
+            }
+        }
+        (b, o) => *b = o.clone(),
+    }
+}
+
 fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String> {
+    let old = read_entry(client, text)?;
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
     let table_name = client.table.first().copied().unwrap_or("mcp_servers");
     let Value::Object(fields) = entry else { return Err("entry must be a table".into()) };
@@ -129,6 +142,22 @@ fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String
     }
     let servers = doc.get_mut(table_name).and_then(|t| t.as_table_mut()).ok_or_else(|| format!("`{table_name}` exists but is not a table"))?;
     match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
+        Some(existing) if client.shape == Shape::Codex => {
+            // The person's own settings (env, enabled_tools, other tools' approvals…) stay; our
+            // keys are set, and a table of ours is merged into theirs rather than replacing it.
+            let mut merged = old.clone().unwrap_or(Value::Null);
+            for (k, v) in fields {
+                if let (Some(Value::Object(have)), Value::Object(want)) = (merged.get_mut(k), v) {
+                    for (name, setting) in want {
+                        deep_merge(have.entry(name.clone()).or_insert(Value::Null), setting);
+                    }
+                    let tv = json_to_toml(&Value::Object(have.clone())).ok_or_else(|| format!("cannot write {k} as TOML"))?;
+                    existing.insert(k, toml_edit::Item::Value(tv));
+                } else if let Some(item) = ours.get(k) {
+                    existing.insert(k, item.clone());
+                }
+            }
+        }
         Some(existing) => {
             // Keep the existing table's position and decor; replace its keys.
             existing.clear();
@@ -173,6 +202,26 @@ mod tests {
         assert_eq!(read_entry(&c, &removed).unwrap(), None);
         assert!(removed.contains("# theirs"));
         assert!(parse(&c, "a = [").is_err());
+    }
+
+    /// #540: moving an older Codex entry to the approving one keeps what the person added to it.
+    #[test]
+    fn a_codex_entry_keeps_the_persons_own_settings_when_it_gains_the_approval() {
+        let c = client("codex");
+        let text = "[mcp_servers.craft-anything]\ncommand = \"/old/craft-anything-cli\"\nargs = [\"mcp\"]\nenabled_tools = [\"core_a\"] # mine\ntools = { other = { approval_mode = \"prompt\" } }\n\n[mcp_servers.craft-anything.env]\nK = \"v\"\n";
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        assert!(!c.entry_is_current(&read_entry(&c, text).unwrap().unwrap(), &e));
+        let new = set_entry(&c, text, &e).unwrap();
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!(got["command"], "/b/craft-anything-cli");
+        assert_eq!(got["enabled_tools"][0], "core_a");
+        assert_eq!(got["env"]["K"], "v");
+        assert_eq!(got["tools"]["other"]["approval_mode"], "prompt", "their other approvals stay");
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert!(got.get("default_tools_approval_mode").is_none());
+        assert!(new.contains("# mine"));
+        assert!(c.entry_is_current(&got, &e), "their extra settings don't make it out of date");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
     }
 
     #[test]

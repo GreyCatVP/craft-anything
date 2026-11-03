@@ -131,7 +131,7 @@ pub fn doctor(host: &Host, req: &DoctorRequest) -> DoctorReport {
                     Check::new(name, CheckStatus::Warn, format!("{} lists Craft Anything as disabled.", c.display)).fix(setup_cmd)
                 } else if !program_ok {
                     Check::new(name, CheckStatus::Fail, format!("{} points to a craft-anything-cli that no longer exists.", c.display)).fix(setup_cmd)
-                } else if desired.as_ref() == Some(&e) {
+                } else if desired.as_ref().is_some_and(|d| c.entry_is_current(&e, d)) {
                     Check::new(name, CheckStatus::Ok, format!("{} is connected.", c.display))
                 } else {
                     Check::new(name, CheckStatus::Warn, format!("{} is connected to a different copy or shape of the command.", c.display)).fix(setup_cmd)
