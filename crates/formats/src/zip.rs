@@ -222,12 +222,16 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
     let tail = data.get(from..)?;
     // Search backwards so a stray signature in the comment can't shadow the real record.
     let mut i = tail.len().checked_sub(22)?;
+    let mut found = None;
     loop {
         if tail.get(i..i + 4) == Some(b"PK\x05\x06") {
-            return Some(from + i);
+            let comment_len = usize::from(u16::from_le_bytes([tail[i + 20], tail[i + 21]]));
+            if i + 22 + comment_len == tail.len() {
+                found = Some(from + i);
+            }
         }
         if i == 0 {
-            return None;
+            return found;
         }
         i -= 1;
     }
@@ -371,6 +375,17 @@ mod tests {
     fn an_ascii_name_is_preserved() {
         let zip = build_named_entry(b"dir/file.txt", 0);
         assert_eq!(parse(&zip, 10).unwrap().entries[0].name, "dir/file.txt");
+    }
+
+    #[test]
+    fn valid_entry_survives_eocd_signature_in_comment() {
+        let mut zip = build(&[("a.txt", b"hello")]);
+        let comment = b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        let eocd = zip.len() - 22;
+        zip[eocd + 20..eocd + 22].copy_from_slice(&(comment.len() as u16).to_le_bytes());
+        zip.extend_from_slice(comment);
+
+        assert_eq!(parse(&zip, 10).unwrap().entries.len(), 1);
     }
 
     #[test]
