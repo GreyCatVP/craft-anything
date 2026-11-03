@@ -99,6 +99,8 @@ Add a folder…	Přidat složku…
 Add a plugin	Přidat plugin
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Přidejte AI asistenta a já pro vás tyto důkazy přečtu, odpovím na doplňující otázky a odkážu na doklady.
 Add an AI by its address	Přidat AI podle adresy
+Add another	Přidat další
+Add it again, to choose another account's folder for it.	Přidat ho znovu a vybrat pro něj složku jiného účtu.
 Add more info. The builder reads it at its next step.	Doplňte informace. Sestavovací agent je přečte v dalším kroku.
 Add pictures	Přidat obrázky
 Add pictures of the original	Přidat obrázky originálu
@@ -245,6 +247,7 @@ Choose what the builder's questions get	Vybrat způsob odpovídání na otázky 
 Choose what to recreate, say what you want, then press Start.	Vyberte, co chcete znovu vytvořit, popište své přání a stiskněte Spustit.
 Choose…	Vybrat…
 Classes	Třídy
+Claude Code folder (CLAUDE_CONFIG_DIR)	Složka Claude Code (CLAUDE_CONFIG_DIR)
 Clean room	Čistá místnost
 Clean room / Deep	Čistá místnost / Hloubkový režim
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Režim Čistá místnost nikdy nečte kód, soubory ani zdrojový kód stránek originálu. Hloubkový režim je čte všemi nástroji, které Craft Anything nabízí.
@@ -572,6 +575,7 @@ It's mine, or I'm allowed to look	Patří mi nebo mám oprávnění jej zkoumat
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	Jeho kopie bude smazána včetně všeho, co se do ní uložilo. Samotný projekt zůstane beze změny.
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	Jeho složka bude smazána se vším, co obsahuje: výsledkem sestavení, kontrolami i konverzací.
 Its own code	Vlastní kód
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Vlastní přihlášení, nastavení a konverzace: jiná složka znamená jiný účet. Prázdné: jeho obvyklá složka.
 Java archive overview	Přehled archivu Java
 Java class	Třída v Javě
 Java method bytecode and pseudo-Java	Bajtkód metody v Javě a pseudokód Javy
@@ -1006,6 +1010,7 @@ Send now	Odeslat nyní
 Server address	Adresa serveru
 Session status	Stav relace
 Set a project's asset budget	Nastavit rozpočet podkladů projektu
+Set an AI's folder	Nastavit složku AI
 Set an AI's program	Nastavit program AI
 Set model options	Nastavit možnosti modelu
 Set one up	Nastavit
