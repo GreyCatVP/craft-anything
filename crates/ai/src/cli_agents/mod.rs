@@ -602,7 +602,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
         proc = proc.cwd(p);
     }
     if adapter.prompt_on_stdin() {
-        proc = proc.stdin_bytes(text);
+        proc = proc.stdin_bytes(adapter.stdin_text(&preamble, text));
     }
     let result = proc.run();
     let p = parser.lock().unwrap_or_else(PoisonError::into_inner);
@@ -877,11 +877,29 @@ mod tests {
         assert_eq!(skip(&build_args(adapter_for("codex").as_ref(), &o, "q", "P:", &mcp(), None, Access::Build)), 1);
         assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
         assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
-        assert_eq!(a.last().unwrap(), "P:q");
+        // #528: the message goes in on stdin; `-` tells `codex exec` to read it there.
+        assert_eq!(a.last().unwrap(), "-");
         let g = build_args(adapter_for("gemini-cli").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
         assert!(g.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
         let o = BackendOptions { args: vec!["run".into()], ..Default::default() };
         assert_eq!(build_args(adapter_for("aider").as_ref(), &o, "q", "", &mcp(), None, Access::Analyse), vec!["run".to_string(), "q".to_string()]);
+    }
+
+    #[test]
+    fn codex_long_prompt_goes_in_on_stdin() {
+        // #528: a long message in argv passes Windows' command-line limit (os error 206).
+        let codex = adapter_for("codex");
+        let prompt = "x".repeat(40_831);
+        let a = build_args(codex.as_ref(), &BackendOptions::default(), &prompt, "P:", &mcp(), None, Access::Build);
+        assert!(codex.prompt_on_stdin(), "codex must read its message from stdin");
+        assert!(!a.iter().any(|x| x.contains(&prompt) || x.contains("P:")), "{a:?}");
+        assert!(a.iter().map(|x| x.len() + 1).sum::<usize>() < 4096, "argv stays short");
+        assert_eq!(a.last().unwrap(), "-", "codex exec reads stdin when told to");
+        assert_eq!(&a[..2], &["exec".to_string(), "--json".to_string()]);
+        assert!(a.contains(&"--skip-git-repo-check".to_string()));
+        assert!(a.windows(2).any(|w| w[0] == "--sandbox" && w[1] == "workspace-write"));
+        assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
+        assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
     }
 
     #[test]
@@ -1256,6 +1274,86 @@ mod tests {
         }
         let text: String = all.iter().filter_map(|e| if let AgentEvent::TextDelta { text } = e { Some(text.clone()) } else { None }).collect();
         assert_eq!(text, "read 40000 bytes", "{all:?}");
+    }
+
+    /// #528: a stand-in `codex` gets the whole message (preamble first) on stdin and only short
+    /// options in argv, for a normal message and for one longer than Windows' command line.
+    #[cfg(unix)]
+    #[test]
+    fn codex_reads_its_message_on_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("codex");
+        let script = r#"#!/bin/sh
+d=$(dirname "$0")
+if [ "$2" = "--help" ]; then echo "--json"; exit 0; fi
+printf '%s\n' "$@" > "$d/argv"
+cat > "$d/stdin"
+echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+"#;
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for prompt in ["q".to_string(), "x".repeat(40_831)] {
+            let config =
+                BackendConfig { name: "Codex".into(), kind: BackendKind::AgentCli, model: "codex".into(), base_url: None, ssh_host: None, enabled: true };
+            let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, None);
+            spec.preamble = Some("P:".into());
+            let mut c = CliConversation::new(spec);
+            c.send(&prompt);
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut all = Vec::new();
+            while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                all.extend(c.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap_or_default();
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap_or_default();
+            assert_eq!(stdin.len(), prompt.len() + 2, "{all:?}");
+            assert!(stdin == format!("P:{prompt}"), "the whole message, preamble first");
+            assert!(!argv.contains("P:"), "{argv}");
+            assert_eq!(argv.lines().last(), Some("-"), "{argv}");
+            assert_eq!(argv.lines().take(2).collect::<Vec<_>>(), ["exec", "--json"]);
+        }
+    }
+
+    /// #528, on every platform: the Codex command line stays short, and a child process started
+    /// with a message longer than Windows' 32,767-character limit gets all of it on stdin. The
+    /// child is this test binary, running `stdin_echo_child`.
+    #[test]
+    fn codex_long_message_reaches_a_child_process_whole() {
+        let prompt = "x".repeat(40_831);
+        let codex = adapter_for("codex");
+        let a = build_args(codex.as_ref(), &BackendOptions::default(), &prompt, "P:", &mcp(), None, Access::Build);
+        assert!(a.iter().map(|x| x.len() + 1).sum::<usize>() < 32_767, "argv must fit Windows' command line");
+        assert!(codex.prompt_on_stdin());
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("received");
+        let exe = std::env::current_exe().unwrap();
+        let message = format!("P:{prompt}");
+        let run = Process::new(exe.as_os_str())
+            // The Codex argv rides along after `--` (extra name filters that match no test).
+            .args(["--exact", "--test-threads=1", "--", "cli_agents::tests::stdin_echo_child"])
+            .args(&a)
+            .env(STDIN_ECHO_ENV, out.as_os_str())
+            .stdin_bytes(message.clone())
+            .timeout(Duration::from_secs(60))
+            .run();
+        assert!(run.is_ok(), "{run:?}");
+        assert_eq!(std::fs::read_to_string(&out).unwrap_or_default(), message);
+    }
+
+    const STDIN_ECHO_ENV: &str = "CRAFT_ANYTHING_TEST_STDIN_ECHO";
+
+    /// Not a test on its own: when run as the child of the test above, writes its stdin to the
+    /// file it's told to.
+    #[test]
+    fn stdin_echo_child() {
+        if let Some(path) = std::env::var_os(STDIN_ECHO_ENV) {
+            let mut got = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut got).unwrap();
+            std::fs::write(path, got).unwrap();
+        }
     }
 
     /// Whoever reads `TurnDone` may send the next message at once (a session that wasn't there is

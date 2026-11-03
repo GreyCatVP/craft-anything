@@ -71,6 +71,11 @@ pub trait AgentAdapter: Send + Sync {
     fn prompt_on_stdin(&self) -> bool {
         false
     }
+    /// What goes in on stdin when [`prompt_on_stdin`](AgentAdapter::prompt_on_stdin) says so:
+    /// the message, with the preamble in front for an agent that takes no separate one.
+    fn stdin_text(&self, _preamble: &str, prompt: &str) -> String {
+        prompt.to_string()
+    }
     /// The process for a local run of `program` (an adapter may clean its environment).
     fn process(&self, program: &str) -> Process {
         Process::new(program)
@@ -481,6 +486,16 @@ impl AgentAdapter for Codex {
         &["codex"]
     }
 
+    /// `codex exec -` reads the message from stdin, so a long one can't pass Windows'
+    /// command-line limit (os error 206, #528).
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
+    }
+
     fn check_tool_server(&self, stop: &CancelToken) -> Result<(), ToolError> {
         cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop)
     }
@@ -503,7 +518,8 @@ impl AgentAdapter for Codex {
             v.extend(["-m".into(), m.clone()]);
         }
         v.extend(cx.options.args.iter().cloned());
-        v.push(format!("{}{}", cx.preamble, cx.prompt));
+        // The message itself goes in on stdin (see `stdin_text`).
+        v.push("-".into());
         v
     }
 
