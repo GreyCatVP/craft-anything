@@ -170,18 +170,18 @@ Every round spends the person's money or quota. One that can't do anything shoul
       across runs: a run ends at 7 checks (`max_rounds`) but check numbers carry on, so #44's check
       28 and #417's 35+ look like several runs (a guess: Try again is the only restart found, and
       Auto mode doesn't start runs)
-- [ ] A builder whose tools didn't start isn't resumed. `turn` (`rebuild/mod.rs`) tries 3 more times
+- [x] A builder whose tools didn't start isn't resumed. `turn` (`rebuild/mod.rs`) tries 3 more times
       ("Picking up where it left off", #377) because `worth_retrying` doesn't know this error. Give
       it a typed signal, as `Conversation::session_lost` does, not one more word in that function's
-      list. Say what failed and stop (pitfalls: never retry what can't succeed)
-- [ ] `worth_retrying` decides on English words in a message (AGENTS.md: structured results). Move
-      its other cases (sign-in, credit, a missing install) to the same typed signal
+      list. Say what failed and stop (pitfalls: never retry what can't succeed) — commit `f80a16a66834`
+- [x] `worth_retrying` decides on English words in a message (AGENTS.md: structured results). Move
+      its other cases (sign-in, credit, a missing install) to the same typed signal — commit `f80a16a66834`
 - [ ] Find what repeated #64's attempts and stop it: it logged 41, about 38 s apart, on 0.2.0, but
       `turn` allows 3 retries 30, 60 and 90 s apart, there too, so something else starts them
-- [ ] A rate limit is waited for only on agents with a session: `turn` retries only when
+- [x] A rate limit is waited for only on agents with a session: `turn` retries only when
       `agent.session_id()` is set, which API backends and OpenCode's plain adapter never set (read
       in the code, not run). So #148 didn't reach #142, which was OpenCode. Wait and send the turn
-      again for them too, then close #142
+      again for them too, then close #142 — commit `f80a16a66834`
 - [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds: #399 used
       9.4M tokens in 19 minutes of the first stage, then failed to compile
 
@@ -194,22 +194,26 @@ been run live.
       STATUS.md which models it worked with. Do this first: it shows which of the lines below matter
 - [ ] An assistant turn with no text sends `content: null` (`openai.rs`), which likely causes #403's
       `invalid message content type: <nil>`: send an empty string
-- [ ] Understand a tool call a model writes as JSON in its text (#417). The fallback protocol reads
+- [x] Understand a tool call a model writes as JSON in its text (#417; implementation `dfe9a4db2dcb3e27edbd67311cbb4202584e7af6`). The fallback protocol reads
       only `Action:` and `Action Input:` lines, so anything else ends the turn with nothing done
-- [ ] Accept a tool argument of a near type, such as a list for a string, or answer so the model
-      can correct it (#498)
+- [x] Preserve `length` and `content_filter` stop reasons on native tool-call streams; a parsed
+      call must not override truncation or refusal and execute tools. Pair other retained
+      unexecuted calls with results before the conversation continues — PR #544
+- [x] Return a rejected tool argument's JSON Pointer when known and guidance to correct the call
+      (#498), keeping schema types strict
+      — commit `0c3ae5cca569`
 - [ ] Find how each local server is told its context size and set it, or stop with a plain message
       when the prompt won't fit. We assume 24k and send no `num_ctx`, which an OpenAI-style endpoint
       may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73)
-- [ ] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
-      services whose real window differs from 150k (#374)
+- [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
+      services whose real window differs from 150k (#374) — implementation: `6bd94b84828ec89b805cb8a246f557d0a778c037`
 - [ ] Find LM Studio on another port (#73)
 - [ ] See why Bionic or LM Studio can't be picked (#140)
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
-- [ ] Show the provider's own reason: #369 bought $10 of credit and got only "OpenRouter answered
-      400: Provider returned error". Find the reason in the response body and show it
+- [x] Show the provider's own reason: #369 bought $10 of credit and got only "OpenRouter answered
+      400: Provider returned error". Find the reason in the response body and show it — PR #542
 - [ ] A live API-key build (needs a key on the test machine)
 - [ ] Failure logs for the other ways an AI stops (API backends, MCP server start-up), like the
       ones agent CLIs write to `logs/` in the config folder
@@ -313,8 +317,12 @@ Owner: open · Status: in progress
 - [ ] Aider has no adapter, so the plain one hands it the prompt as a file name, and it can open a
       browser sign-in nobody agreed to (#72). Give it an adapter, or stop offering it
 - [ ] Codex (#499): in a chat the tool server has no active target, tools turned on with
-      `enable_toolset` can't be called, and `rebuild_start` is refused by the approval policy. The
+      `enable_toolset` can't be called, The
       reporter attached a patch for chat continuity; look at that first
+- [x] Codex (#540): `rebuild_start` was refused by `codex exec`'s approval policy and showed as
+      `null`; setup and the builder now approve our tools for Codex (we still ask before running
+      code) and a refusal explains the fix (`docs/codex.md`)
+- [ ] Codex (#540): run `codex exec` on a real install and check `rebuild_start` gets through
 - [ ] Codex: resume support (`codex exec resume <id>`), verified on a real install
 - [ ] Every adapter but Claude Code's still takes the message in argv (`prompt_on_stdin`), so a long
       one can pass Windows' command-line limit as Claude Code's did (#402); hand each its message on
@@ -348,8 +356,9 @@ Owner: open · Status: in progress
 **ACP:**
 - [ ] Gemini CLI, opencode, goose via ACP or native adapters; each verified live, then turn ACP on
       by default for the ones that pass
-- [ ] Over ACP, a continued session shows the earlier conversation again: `session/load` replays it
-      as `session/update`s, which we show as new; drop updates until the load answers
+- [x] Over ACP, suppress `session/update` notifications until `session/load` answers, keeping
+      replayed messages and tool activity out of the current turn
+      — commit `38ffc39be084`
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
@@ -398,7 +407,8 @@ Owner: maintainers · Status: in progress
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
 Gaps found while using the app for real projects.
-- [ ] A prompt brought back with Up keeps its pictures (only the text comes back now) — in PR #216
+- [x] A prompt brought back with Up keeps its pictures (their paths are absolute, so they don't
+      come back after the project is moved)
 - [ ] Change a project's builder from its page (a tool, so the CLI and MCP can too) — in PR #245
 - [ ] When the builder decides a question, show the question and its choice as an answered card
       in the feed (the run sees only the tool call today; the builder's words say what it chose)
@@ -414,10 +424,12 @@ Gaps found while using the app for real projects.
 - [ ] Show a command's output while it runs: Claude Code reports a tool's result only when it
       ends, so a long `cargo build` is one quiet line until then. Watching the agent's child
       processes from outside could say what's running and for how long
-- [ ] The keep-awake helper once outlived a CLI `rebuild` on Windows by more than 9 minutes and held
-      the caller's output pipe; not reproduced in 8 more runs, where it ended with the CLI. Dropping
-      its guard only raises a flag (`RunningProcess::drop` waits only for `hands_off` programs), so
-      ending on time rests on the Job Object closing, and its time limit is 7 days
+- [x] Release the keep-awake helper before a rebuild reports `Finished`, waiting up to five seconds
+      for its supervised cleanup and logging a timeout. Real subprocess stand-ins checked on Linux (#541)
+      — claimed: Afloat16, branch bugfix/r2.9-keep-awake-cleanup-20261103
+- [ ] Recheck keep-awake cleanup with a real Windows CLI `rebuild`: the helper once outlived it by
+      more than 9 minutes and held the caller's output pipe; not reproduced in 8 more runs. The
+      bounded cleanup change has been checked with Linux stand-ins, not this Windows incident
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
 - [ ] Claude Code's own extras: its Ultracode switch (a setting, not an effort level; the
@@ -464,8 +476,10 @@ Owner: open · Status: in progress
 - [ ] Stand-in backend: writes that change later reads (recorded answers are replayed as they are)
 - [ ] Tell the builder about the stand-in backend in a website's brief, and start one from a
       recording
-- [ ] Stand-in backend: a 304 recorded with no body is replayed as a bare 304, which a fresh browser
-      can't use; say so or leave it out
+- [x] Stand-in backend: retain 304 samples without a usable cached body for diagnostics, skip them
+      during replay, and report `cached_body_unavailable` when the best matching group has no
+      usable answer. Build results count them; cached bodies still answer as 200 (#543)
+      — claimed: Afloat16, branch bugfix/r3.11-standin-empty-304-20261103
 - [ ] Godot format 4 and IL2CPP metadata 38 and 39 are header-only; read their tables once a real
       file can be checked
 - [ ] Bun: take source maps and bytecode out as files; a standalone `.pyz`

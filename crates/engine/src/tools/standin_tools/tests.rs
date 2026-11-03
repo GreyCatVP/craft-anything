@@ -130,6 +130,45 @@ fn build_start_request_show_stop_through_the_engine() {
 }
 
 #[test]
+fn a_fresh_client_gets_a_missing_cache_reason_instead_of_a_bare_304() {
+    within(60, || {
+        let dir = crate::testing::temp_dir();
+        let har = dir.join("cache.har");
+        let entries = [
+            entry("GET", "https://api.example.test/cached", 304, ""),
+            entry("GET", "https://api.example.test/mixed", 304, ""),
+            entry("GET", "https://api.example.test/mixed", 200, r#"{"n":1}"#),
+            entry("GET", "https://api.example.test/known", 304, r#"{"cached":true}"#),
+        ];
+        std::fs::write(&har, json!({"log": {"version": "1.2", "entries": entries}}).to_string()).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let out = dir.join("standin");
+        let built = call(&e, "web_standin_build", json!({"path": har, "output_dir": out})).unwrap();
+        assert_eq!(built["result"]["unavailable_cached_answers"], 2);
+        assert!(built["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "cached_body_unavailable"));
+        let cached = built["result"]["routes"].as_array().unwrap().iter().find(|r| r["template"] == "/cached").unwrap();
+        assert_eq!(cached["unavailable_cached_answers"], 1);
+        let started = call(&e, "web_standin_start", json!({"path": out})).unwrap();
+        let url = started["result"]["url"].as_str().unwrap();
+        let response = get(url, "/cached");
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        assert!(response.contains("X-Craft-Anything-Stand-In: no-recorded-answer"), "{response}");
+        let body: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["reason"], "cached_body_unavailable");
+        assert_eq!(body["nearest"][0]["template"], "/cached");
+        for path in ["/mixed", "/mixed", "/known"] {
+            let response = get(url, path);
+            assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
+        }
+        let shown = call(&e, "web_standin_show", json!({})).unwrap();
+        assert_eq!(shown["result"]["servers"][0]["requests_answered"], 3);
+        assert_eq!(shown["result"]["servers"][0]["requests_with_no_answer"], 1);
+        assert_eq!(shown["result"]["no_answer"]["items"][0]["reason"], "cached_body_unavailable");
+        call(&e, "web_standin_stop", json!({"all": true})).unwrap();
+    });
+}
+
+#[test]
 fn starting_twice_reuses_and_a_session_ending_stops_it() {
     within(60, || {
         let dir = crate::testing::temp_dir();

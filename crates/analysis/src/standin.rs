@@ -1035,6 +1035,8 @@ pub enum NoMatchReason {
     MethodNotRecorded,
     /// The URL was recorded, but not this GraphQL operation.
     OperationNotRecorded,
+    /// The matching responses need a cached body that is unavailable in the recording.
+    CachedBodyUnavailable,
 }
 
 /// A route close to what was asked for.
@@ -1165,7 +1167,7 @@ pub fn answer(standin: &StandIn, turns: &mut Turns, method: &str, path: &str, qu
         }
     }
 
-    let Some((ri, how, fit)) = picked else {
+    let Some((ri, how, mut fit)) = picked else {
         let path_known = standin.routes.iter().any(|r| template_fits(&r.template, &clean_path) || r.samples.iter().any(|s| s.path == clean_path));
         let reason = if operation_missing {
             NoMatchReason::OperationNotRecorded
@@ -1179,6 +1181,13 @@ pub fn answer(standin: &StandIn, turns: &mut Turns, method: &str, path: &str, qu
     let Some(route) = standin.routes.get(ri) else {
         return Answer::NoMatch(NoMatch { reason: NoMatchReason::PathNotRecorded, nearest: Vec::new() });
     };
+    // Usable cached 304 bodies become 200 at build time. Keep unavailable samples in the file
+    // as evidence, but a fresh client cannot use them. Filter only after choosing the best match:
+    // another query, resource or GraphQL operation is not a substitute for its missing body.
+    fit.retain(|i| route.samples.get(*i).is_some_and(|s| s.status != 304));
+    if fit.is_empty() {
+        return Answer::NoMatch(NoMatch { reason: NoMatchReason::CachedBodyUnavailable, nearest: nearest(standin, look_for, &clean_path) });
+    }
     let first = fit.first().copied().unwrap_or(0);
     let counter = turns.0.entry((ri, first, how)).or_insert(0);
     let at = counter.checked_rem(fit.len()).unwrap_or(0);

@@ -38,14 +38,15 @@ fn prop_type(schema: &Value, prop: &Value) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).find(|t| *t != "null").unwrap_or("string").to_string(),
         _ => {
-            // anyOf/oneOf of [X, null]
+            // anyOf/oneOf of [X, null] is X; a real choice (a string or an object) is "any", so the
+            // value keeps whatever JSON the person wrote.
             for key in ["anyOf", "oneOf"] {
                 if let Some(arr) = resolved.get(key).and_then(Value::as_array) {
-                    for alt in arr {
-                        let t = prop_type(schema, alt);
-                        if t != "null" {
-                            return t;
-                        }
+                    let mut types = arr.iter().map(|alt| prop_type(schema, alt)).filter(|t| t != "null");
+                    match (types.next(), types.next()) {
+                        (Some(t), None) => return t,
+                        (Some(_), Some(_)) => return "any".into(),
+                        (None, _) => {}
                     }
                 }
             }
@@ -328,6 +329,26 @@ mod tests {
         assert!(plan.contains("      steps."), "{plan}");
         let flat = help(r.get("core_target_open").unwrap());
         assert!(!flat.contains("      path."), "plain options have no nested lines");
+    }
+
+    #[test]
+    fn a_union_of_two_types_takes_any_json() {
+        let schema = json!({"type": "object", "properties": {"left": {"anyOf": [{"type": "string"}, {"type": "object"}]}}});
+        assert_eq!(prop_type(&schema, &schema["properties"]["left"]), "any");
+        // Option<T> is anyOf [T, null]: still T.
+        assert_eq!(prop_type(&schema, &json!({"anyOf": [{"type": "string"}, {"type": "null"}]})), "string");
+        // A lone null branch says nothing: fall back to "any".
+        assert_eq!(prop_type(&schema, &json!({"anyOf": [{"type": "null"}]})), "any");
+    }
+
+    #[test]
+    fn an_evidence_input_takes_a_bare_id_or_an_object() {
+        let r = Registry::with_all_tools();
+        let spec = r.get("runtime_captures_compare").unwrap();
+        let inv = parse(spec, &["--left".into(), r#"{"kind":"saved","evidence_id":"ev_1"}"#.into(), "--right".into(), "ev_2".into()]).unwrap();
+        assert!(inv.params["left"].is_object(), "{}", inv.params);
+        assert_eq!(inv.params["right"], json!("ev_2"));
+        assert!(help(spec).contains("any (required)"), "{}", help(spec));
     }
 
     #[test]

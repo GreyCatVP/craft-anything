@@ -37,6 +37,9 @@ added an app the new rule rejected; both were green on their own branch.
 - It happened again with translations: #117 added UI strings and #115, merged right after it,
   added a check that every string has a Chinese translation, so `cargo xtask ci` failed on
   `main`. A PR that adds a check, or adds what a check covers, is tested on top of the other.
+  And again with a new catalog: #555 added "Pausing…" to every catalog there was, and #486 (Russian)
+  merged after it without it. A new language and a new UI string merged together need the string
+  in the new catalog too.
 
 **A dependency change merged without its lockfile.** Changes were staged with
 `git add -A crates apps docs`, which leaves out the root `Cargo.lock`, so a new dependency reached
@@ -166,14 +169,7 @@ It happened again with Vulkan on Windows (#394): starting Vulkan loaded an Intel
 (`igvk64.dll`) that crashed with `0xc0000005` on startup. Windows now starts DX12 only by default
 (which includes WARP); `WGPU_BACKEND` still allows choosing other backends.
 
-**The fastest GPU isn't the one that drives the screen.** egui-wgpu asks for the high-performance
-adapter, so on a Linux laptop with an integrated and a discrete GPU the window was drawn on the
-discrete one while the integrated one drove the screen: 20 s to open and a lagging desktop (#571).
-`PowerPreference::None` alone isn't the answer either (Mesa may list the integrated GPU first on a
-desktop whose monitor is on the discrete one). `apps/craft-anything/src/gpu.rs` picks the GPU behind
-the built-in panel, else the only GPU with displays, else the discrete one as before, from
-`/sys/class/drm`; `WGPU_ADAPTER_NAME` (which egui-wgpu ignores) and `WGPU_POWER_PREF` still decide
-when set. Only tested with fake drm trees and on one single-GPU machine, not on a two-GPU laptop.
+
 
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
@@ -394,6 +390,11 @@ the final check failed a finished build; Try again then studied the original aga
 builder the first brief. A run decides what's left from what the project records, not from which
 button started it, and a check that couldn't look says nothing about the build.
 
+**A stopped tool call broke the next request.** Retaining a stopped assistant reply kept its
+tool calls without matching results. The next model request then carried unpaired calls.
+Every retained call needs a matching result, including an explicit non-execution result.
+Test the next serialized request as well as whether a tool ran.
+
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts
 broke, and "Basic Membership" lost a word. It also tested whole tokens, so a secret inside a URL or
@@ -488,3 +489,10 @@ naming a tool.
 branch; `git stash` keeps only tracked files, so a new file stayed in the tree and `git add -A`
 put it into the other PR. Use `git stash -u` (or commit the work in progress on its own branch),
 and read `git status` before `git add -A`.
+
+**Fence checks that disagreed about tool calls.** Suffix checks accepted malformed closing text,
+while requiring exactly three closing backticks rejected valid longer fences. Share one boundary
+parser between JSON recovery and ReAct: count the opener, require a standalone closing line at
+least that long, and reject an earlier matching close followed by more text. Shorter backtick
+lines inside a longer fence are content. Test both paths and the next HTTP request, including
+malformed suffixes and non-call JSON examples whose strings contain protocol markers.

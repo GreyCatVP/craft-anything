@@ -296,14 +296,14 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         self_check: None,
     };
     assert!(w.added(&mut ws).is_none(), "nothing added, nothing to say");
-    let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into() };
+    let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into(), pictures: Vec::new() };
     notes.lock().unwrap().extend([note(1, "Make it faster"), note(2, "A blue sky")]);
     let p = w.added(&mut ws).unwrap();
     assert!(p.contains("- Make it faster (pictures: a.png)\n- A blue sky"), "{p}");
     assert!(notes.lock().unwrap().is_empty(), "each note goes in once");
     // The notes join the feed as they're read, before the step that reads them.
     let events: Vec<RunEvent> = rx.try_iter().collect();
-    let shown: Vec<_> = events.iter().filter_map(|e| if let RunEvent::Note(s) = e { Some(s.as_str()) } else { None }).collect();
+    let shown: Vec<_> = events.iter().filter_map(|e| if let RunEvent::Note { shown, .. } = e { Some(shown.as_str()) } else { None }).collect();
     assert_eq!(shown, ["Make it faster", "A blue sky"]);
     assert!(matches!(events.last(), Some(RunEvent::Step { text, .. }) if text == "Reading what you added…"));
 }
@@ -323,35 +323,432 @@ fn pictures_of_the_original_reach_the_builder() {
     assert!(pictures_reminder(&ws).contains("1 picture(s)"));
 }
 
-#[test]
-fn a_cut_off_turn_is_resumed_unless_the_person_must_act() {
-    for resumable in ["Claude Code took longer than 86400 s and was stopped.", "API Error: 529 overloaded", "connection reset by peer"] {
-        assert!(worth_retrying(resumable), "{resumable}");
-    }
-    for needs_you in [
-        "Not logged in. Please run /login",
-        "Your credit balance is too low",
-        "Claude Code is not installed",
-        "Invalid API key · Please run /login",
-        "Claude Code 2.1.81 does not support this model",
-    ] {
-        assert!(!worth_retrying(needs_you), "{needs_you}");
-    }
-    assert_eq!(RunOptions::default().max_rounds, 6, "room to keep fixing until it works");
-}
+mod typed_retries {
+    use super::*;
+    use crate::{FailureKind, TurnFailure};
+    use std::collections::VecDeque;
 
-/// #142: a rate-limited service's own wait is followed (rounded up, capped), not a fixed one.
-#[test]
-fn a_services_requested_wait_is_read() {
-    assert_eq!(retry_after("OpenCode stopped with exit code 1: Please retry in 19.052906498s."), Some(20));
-    assert_eq!(retry_after("Rate limit reached. Retry after 2 minutes"), Some(120));
-    assert_eq!(retry_after("try again in 500ms"), Some(1));
-    assert_eq!(retry_after("Please try again in 3h"), Some(MAX_RETRY_WAIT));
-    assert_eq!(retry_after("Retry in 45 seconds"), Some(45));
-    for no_wait in ["API Error: 529 overloaded", "please retry in a moment", "retry in ."] {
-        assert_eq!(retry_after(no_wait), None, "{no_wait}");
+    struct FailingConversation {
+        failures: VecDeque<Option<TurnFailure>>,
+        failure: Option<TurnFailure>,
+        queued: Vec<AgentEvent>,
+        sent: Vec<String>,
+        session: Option<String>,
+        message: &'static str,
     }
-    assert!(worth_retrying("Please retry in 19.05s"), "a rate limit is waited out, not handed to the person");
+
+    impl FailingConversation {
+        fn new(failures: impl IntoIterator<Item = Option<TurnFailure>>, session: bool) -> Self {
+            Self {
+                failures: failures.into_iter().collect(),
+                failure: None,
+                queued: Vec::new(),
+                sent: Vec::new(),
+                session: session.then(|| "saved".into()),
+                message: "provider response",
+            }
+        }
+    }
+
+    impl Conversation for FailingConversation {
+        fn send(&mut self, text: &str) {
+            self.sent.push(text.into());
+            self.failure = self.failures.pop_front().flatten();
+            self.queued.push(if self.failure.is_some() {
+                AgentEvent::Error { message: self.message.into(), remediation: None, log: None }
+            } else {
+                AgentEvent::TextDelta { text: "Done".into() }
+            });
+            self.queued.push(AgentEvent::TurnDone { backend: "scripted".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false });
+        }
+        fn session_id(&self) -> Option<String> {
+            self.session.clone()
+        }
+        fn last_failure(&self) -> Option<TurnFailure> {
+            self.failure
+        }
+        fn poll(&mut self) -> Vec<AgentEvent> {
+            std::mem::take(&mut self.queued)
+        }
+        fn answer_consent(&mut self, _: &str, _: bool) {}
+        fn stop(&mut self) {}
+        fn is_busy(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn transient_failures_retry_without_requiring_an_external_session() {
+        for saved in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+            let mut worker = check_worker(&ws, false);
+            let failure = TurnFailure { kind: FailureKind::RateLimited, retry_after_secs: Some(2) };
+            let mut agent = FailingConversation::new([Some(failure), None], saved);
+            agent.message = "Authentication and billing service restarting. Please retry in 90s.";
+            let mut waits = Vec::new();
+            let result = worker.turn_with_wait(&mut ws, &mut agent, "Build the requested app", None, |_, seconds| {
+                waits.push(seconds);
+                Ok(())
+            });
+            assert_eq!(result.unwrap(), "Done");
+            assert_eq!(waits, [3], "typed provider wait overrides the text hint");
+            assert_eq!(agent.sent.len(), 2);
+            assert_eq!(agent.sent[0], "Build the requested app");
+            assert_eq!(agent.sent[1], if saved { crate::failure::CONTINUE_TURN } else { "Build the requested app" });
+        }
+    }
+
+    #[test]
+    fn setup_errors_do_not_retry_even_with_a_wait_in_the_message() {
+        for kind in [
+            FailureKind::Authentication,
+            FailureKind::Billing,
+            FailureKind::MissingProgram,
+            FailureKind::ToolsUnavailable,
+            FailureKind::Configuration,
+            FailureKind::Unknown,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+            let mut worker = check_worker(&ws, false);
+            let mut agent = FailingConversation::new([Some(TurnFailure::new(kind))], true);
+            agent.message = "需要修改设置。Please retry in 1s.";
+            let result = worker.turn_with_wait(&mut ws, &mut agent, "Build it", None, |_, _| panic!("a setup error must not wait and retry"));
+            assert!(result.is_err(), "{kind:?}");
+            assert_eq!(agent.sent.len(), 1, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn retries_are_bounded_and_cancelled_waits_send_nothing_more() {
+        assert_eq!(RunOptions::default().max_rounds, 6, "room to keep fixing until it works");
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+        let mut worker = check_worker(&ws, false);
+        let failure = TurnFailure::new(FailureKind::Transient);
+        let mut agent = FailingConversation::new([Some(failure); 5], false);
+        let mut waits = Vec::new();
+        assert!(
+            worker
+                .turn_with_wait(&mut ws, &mut agent, "Build it", None, |_, seconds| {
+                    waits.push(seconds);
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert_eq!(agent.sent.len(), 4, "initial attempt and at most three retries");
+        assert_eq!(waits, [30, 60, 90]);
+        let mut agent = FailingConversation::new([Some(failure)], false);
+        let error = worker
+            .turn_with_wait(&mut ws, &mut agent, "Build it", None, |stop, _| {
+                stop.cancel();
+                stop.check()
+            })
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::Cancelled);
+        assert_eq!(agent.sent.len(), 1);
+    }
+
+    #[test]
+    fn a_local_self_check_write_error_is_not_retried_as_a_backend_rate_limit() {
+        #[derive(Clone)]
+        struct BlockReply {
+            answer: PathBuf,
+        }
+        impl Check for BlockReply {
+            fn id(&self) -> &'static str {
+                "blocked-reply"
+            }
+            fn run(&self, cx: &mut CheckCx) -> Result<CheckResult, ToolError> {
+                // The request was pending when the run read it; its answer now cannot be
+                // written. The workspace itself remains writable, including retry status.
+                std::fs::create_dir_all(&self.answer).unwrap();
+                Ok(CheckResult::new(Check::id(self), cx.round, true, "The check finished."))
+            }
+        }
+        impl TargetKind for BlockReply {
+            fn id(&self) -> &'static str {
+                "blocked-reply"
+            }
+            fn words(&self) -> KindWords {
+                SlidesKind.words()
+            }
+            fn detect(&self, _: &DetectCx) -> Option<u32> {
+                Some(1)
+            }
+            fn default_stack(&self, cx: &DetectCx) -> &'static str {
+                SlidesKind.default_stack(cx)
+            }
+            fn goal(&self) -> &'static str {
+                SlidesKind.goal()
+            }
+            fn checks(&self, _: &Workspace) -> Vec<Box<dyn Check>> {
+                vec![Box::new(self.clone())]
+            }
+        }
+        struct RateLimited {
+            sent: usize,
+            first_poll: bool,
+        }
+        impl Conversation for RateLimited {
+            fn send(&mut self, _: &str) {
+                self.sent += 1;
+                self.first_poll = true;
+            }
+            fn poll(&mut self) -> Vec<AgentEvent> {
+                vec![if std::mem::take(&mut self.first_poll) {
+                    AgentEvent::Error { message: "The provider is rate limited.".into(), remediation: None, log: None }
+                } else {
+                    AgentEvent::TurnDone { backend: "scripted".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false }
+                }]
+            }
+            fn last_failure(&self) -> Option<TurnFailure> {
+                Some(TurnFailure::new(FailureKind::RateLimited))
+            }
+            fn answer_consent(&mut self, _: &str, _: bool) {}
+            fn stop(&mut self) {}
+            fn is_busy(&self) -> bool {
+                false
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+        let asks = Inbox::new(self_check::asks_dir(&ws.root));
+        let id = asks.post(craft_anything_engine::inbox::RequestKind::Question, "Check the build", "", Vec::new(), false, None).unwrap();
+        let mut worker = check_worker(&ws, false);
+        worker.self_check = Some((Arc::new(BlockReply { answer: asks.dir().join(format!("{id}.answer.json")) }), 90.0));
+        let mut agent = RateLimited { sent: 0, first_poll: false };
+        let mut waits = Vec::new();
+        let error = worker
+            .turn_with_wait(&mut ws, &mut agent, "Build the app", None, |_, seconds| {
+                waits.push(seconds);
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(agent.sent, 1, "a backend's retry hint cannot retry a local persistence failure");
+        assert!(waits.is_empty());
+        assert_ne!(error.code, ErrorCode::ProgramFailed);
+        assert!(error.message.contains(".answer.json"), "the original local failure is retained: {error:?}");
+    }
+
+    #[test]
+    fn an_api_rate_limit_continues_history_without_repeating_users_or_completed_tools() {
+        use crate::agent::tests::{Scripted, turn};
+        use crate::agent::{ApiConversation, EngineHost, LoopConfig, ModelSlot};
+        use crate::model::{Block, Speaker, StopReason};
+        for write_first in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = Workspace::create(dir.path(), "x", "Build a notes app", TargetRef::None).unwrap();
+            let mut worker = check_worker(&ws, false);
+            worker.attach(&ws).unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            worker.tx = tx;
+            let seen = Arc::default();
+            let mut script = Scripted { turns: VecDeque::new(), seen: Arc::clone(&seen) };
+            if write_first {
+                script.turns.push_back(turn(
+                    vec![Block::ToolUse {
+                        id: "write-once".into(),
+                        name: "build_file_write".into(),
+                        input: json!({"path":"app/README.md","content":"Built once"}),
+                    }],
+                    StopReason::ToolUse,
+                ));
+            }
+            script.turns.push_back(Err(ToolError::new(ErrorCode::OverLimit, "服务限流").with_details(json!({"status":429,"retry_after_secs":3}))));
+            script.turns.push_back(turn(vec![Block::Text { text: "Built the notes app".into() }], StopReason::EndTurn));
+            let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10, context_tokens: 0 };
+            let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
+            let mut api = ApiConversation::start_with(Arc::new(EngineHost(worker.engine.clone())), vec![slot], LoopConfig::default(), enabled).unwrap();
+            let mut waits = Vec::new();
+            assert_eq!(
+                worker
+                    .turn_with_wait(&mut ws, &mut api, "Build the notes app", None, |_, seconds| {
+                        waits.push(seconds);
+                        Ok(())
+                    })
+                    .unwrap(),
+                "Built the notes app"
+            );
+            assert_eq!(waits, [4]);
+            assert!(ws.manifest.agent_session.is_none());
+            let requests = seen.lock().unwrap();
+            assert_eq!(requests.len(), if write_first { 3 } else { 2 });
+            let before_retry = &requests[requests.len() - 2];
+            let after_retry = requests.last().unwrap();
+            assert_eq!(before_retry, after_retry, "retry must continue the same model request");
+            assert_eq!(after_retry.iter().filter(|m| m.role == Speaker::User && m.text() == "Build the notes app").count(), 1);
+            let calls = rx.try_iter().filter(|e| matches!(e, RunEvent::Agent(AgentEvent::ToolStarted { tool, .. }) if tool == "build_file_write")).count();
+            assert_eq!(calls, usize::from(write_first), "a completed write is not replayed");
+            if write_first {
+                assert_eq!(std::fs::read_to_string(ws.app_dir().join("README.md")).unwrap(), "Built once");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn executable_cli(ws: &Workspace, model: &str, script: &str) -> crate::cli_agents::CliConversation {
+        use std::os::unix::fs::PermissionsExt;
+        let program = ws.root.join("agent-stand-in.sh");
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config = crate::BackendConfig {
+            name: "Scripted CLI".into(),
+            kind: BackendKind::AgentCli,
+            model: model.into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        let options = crate::BackendOptions { command: Some(program.display().to_string()), timeout_secs: Some(10), ..Default::default() };
+        let mut spec = CliSpec::new(config, options, false, None);
+        spec.project = Some(ws.root.clone());
+        spec.preamble = Some(String::new());
+        crate::cli_agents::CliConversation::new(spec)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_required_tool_server_stops_the_owned_cli_without_resuming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+        let mut worker = check_worker(&ws, false);
+        let (tx, rx) = std::sync::mpsc::channel();
+        worker.tx = tx;
+        let mut cli = executable_cli(
+            &ws,
+            "claude-code",
+            concat!(
+                "#!/bin/sh\ncat >/dev/null\nprintf 'attempt\\n' >> attempts\n",
+                "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"cannot-build\",\"mcp_servers\":[{\"name\":\"craft-anything\",\"status\":\"failed\"}]}'\n",
+                "sleep 5\nprintf 'unreachable' > continued-without-tools\n"
+            ),
+        );
+        let error = worker.turn_with_wait(&mut ws, &mut cli, "Build the app", None, |_, _| panic!("missing tools must not be retried")).unwrap_err();
+        assert!(error.message.contains("tools did not start"), "{error:?}");
+        assert_eq!(cli.last_failure().unwrap().kind, FailureKind::ToolsUnavailable);
+        assert!(!cli.is_busy());
+        assert_eq!(std::fs::read_to_string(ws.root.join("attempts")).unwrap(), "attempt\n");
+        assert!(!ws.root.join("continued-without-tools").exists(), "the owned child was stopped at the failed init");
+        assert_eq!(rx.try_iter().filter(|e| matches!(e, RunEvent::Agent(AgentEvent::TurnDone { .. }))).count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_nonzero_cli_exit_resumes_its_saved_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+        let mut worker = check_worker(&ws, false);
+        let (tx, rx) = std::sync::mpsc::channel();
+        worker.tx = tx;
+        let mut cli = executable_cli(
+            &ws,
+            "claude-code",
+            concat!(
+                "#!/bin/sh\ncat >> prompts\nprintf '\\n' >> prompts\nprintf 'attempt\\n' >> attempts\n",
+                "case \" $* \" in *\" --resume interrupted-session \"*)\n",
+                "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Built after the interruption\"}]}}'\n",
+                "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"Built after the interruption\"}'\nexit 0;; esac\n",
+                "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"interrupted-session\"}'\nexit 1\n"
+            ),
+        );
+        let mut waits = Vec::new();
+        let result = worker.turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, seconds| {
+            waits.push(seconds);
+            Ok(())
+        });
+        assert_eq!(std::fs::read_to_string(ws.root.join("attempts")).unwrap(), "attempt\nattempt\n", "a plain nonzero exit must resume the reported session");
+        assert_eq!(result.unwrap(), "Built after the interruption");
+        assert_eq!(waits, [30]);
+        assert_eq!(std::fs::read_to_string(ws.root.join("prompts")).unwrap(), format!("Make a notes app\n{}\n", crate::failure::CONTINUE_TURN));
+        assert_eq!(cli.session_id().as_deref(), Some("interrupted-session"));
+        assert!(cli.last_failure().is_none(), "successful recovery clears the process failure");
+        assert!(!cli.is_busy());
+        assert_eq!(rx.try_iter().filter(|e| matches!(e, RunEvent::Agent(AgentEvent::TurnDone { .. }))).count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn typed_cli_setup_errors_take_precedence_over_a_nonzero_exit() {
+        for (code, kind) in
+            [("authentication_failed", FailureKind::Authentication), ("billing_error", FailureKind::Billing), ("model_not_found", FailureKind::Configuration)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+            let mut worker = check_worker(&ws, false);
+            let error = json!({"type":"assistant","error":code,"message":{"content":[{"type":"text","text":"Please retry in 1s."}]}});
+            let script = format!("#!/bin/sh\ncat >/dev/null\nprintf 'attempt\\n' >> attempts\nprintf '%s\\n' '{error}'\nexit 1\n");
+            let mut cli = executable_cli(&ws, "claude-code", &script);
+            let result = worker.turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, _| panic!("typed setup failures must not retry"));
+            assert!(result.is_err(), "{kind:?}");
+            assert_eq!(cli.last_failure().unwrap().kind, kind);
+            assert_eq!(std::fs::read_to_string(ws.root.join("attempts")).unwrap(), "attempt\n");
+            assert!(!cli.is_busy());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_retries_a_typed_rate_limit_with_its_whole_original_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+        let mut worker = check_worker(&ws, false);
+        let (tx, rx) = std::sync::mpsc::channel();
+        worker.tx = tx;
+        let mut cli = executable_cli(
+            &ws,
+            "opencode",
+            concat!(
+                "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format'; exit 0; fi\n",
+                "for arg do last=\"$arg\"; done\nprintf '%s\\n' \"$last\" >> prompts\n",
+                "if [ ! -f rate-was-returned ]; then touch rate-was-returned\n",
+                "printf '%s\\n' '{\"type\":\"error\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Please retry in 19.052906498s.\",\"statusCode\":429,\"isRetryable\":true}}}'\nexit 1\nfi\n",
+                "printf '%s\\n' '{\"type\":\"text\",\"part\":{\"text\":\"Built the app\"}}'\n"
+            ),
+        );
+        let mut waits = Vec::new();
+        assert_eq!(
+            worker
+                .turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, seconds| {
+                    waits.push(seconds);
+                    Ok(())
+                })
+                .unwrap(),
+            "Built the app"
+        );
+        assert_eq!(waits, [21]);
+        assert_eq!(std::fs::read_to_string(ws.root.join("prompts")).unwrap(), "Make a notes app\nMake a notes app\n");
+        assert!(cli.session_id().is_none());
+        assert!(cli.last_failure().is_none(), "successful retry clears the prior failure");
+        assert!(!cli.is_busy());
+        assert_eq!(rx.try_iter().filter(|e| matches!(e, RunEvent::Agent(AgentEvent::TurnDone { .. }))).count(), 2, "one final event per process attempt");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_untyped_opencode_exit_keeps_its_error_and_the_three_retry_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(dir.path(), "x", "Build a thing", TargetRef::None).unwrap();
+        let mut worker = check_worker(&ws, false);
+        let mut cli = executable_cli(
+            &ws,
+            "opencode",
+            "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf 'old help\\n'; exit 0; fi\nprintf 'attempt\\n' >> attempts\nprintf 'Unknown option: --format. Please retry in 1s.\\n' >&2\nexit 2\n",
+        );
+        let mut waits = Vec::new();
+        let error = worker
+            .turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, seconds| {
+                waits.push(seconds);
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.message.contains("Unknown option"), "{error:?}");
+        assert_eq!(cli.last_failure().unwrap().kind, FailureKind::Transient);
+        assert!(!cli.is_busy());
+        assert_eq!(waits, [2, 2, 2], "the display wait hint affects only the delay after a retryable exit");
+        assert_eq!(std::fs::read_to_string(ws.root.join("attempts")).unwrap(), "attempt\nattempt\nattempt\nattempt\n");
+    }
 }
 
 #[test]
@@ -609,7 +1006,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         ]),
         seen: Arc::default(),
     };
-    let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10 };
+    let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10, context_tokens: 0 };
     let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
     let mut api = ApiConversation::start_with(Arc::new(EngineHost(engine)), vec![slot], LoopConfig::default(), enabled).unwrap();
     let reply = w.turn(&mut ws, &mut api, "Build it.", None).unwrap();
@@ -1664,8 +2061,8 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
         inbox: Inbox::new(ws.inbox_dir()),
         editor: None,
         notes: Arc::new(Mutex::new(vec![
-            Note { id: 1, text: "make the header blue".into(), shown: "make the header blue".into() },
-            Note { id: 2, text: "add a footer".into(), shown: "add a footer".into() },
+            Note { id: 1, text: "make the header blue".into(), shown: "make the header blue".into(), pictures: Vec::new() },
+            Note { id: 2, text: "add a footer".into(), shown: "add a footer".into(), pictures: Vec::new() },
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
@@ -1681,7 +2078,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
     assert_eq!(notes::claim(&dir), ["make the header blue"]);
     std::fs::rename(dir.join("2.wait"), dir.join("2.json")).unwrap();
     w.relay_read_notes(&ws);
-    let shown: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Note(s) = e { Some(s) } else { None }).collect();
+    let shown: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Note { shown, .. } = e { Some(shown) } else { None }).collect();
     assert_eq!(shown, ["make the header blue"], "it joins the feed as soon as the builder took it");
     assert!(!notes::was_read(&dir, 1), "its files are gone");
     // After the turn, only the note nobody took is sent, and no hook can hand it over again.
@@ -1874,7 +2271,7 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         usage: None,
         self_check: None,
     };
-    let e = w.turn(&mut ws, &mut agent, "Carry on.", None).unwrap_err();
+    let e = w.turn_with_wait(&mut ws, &mut agent, "Carry on.", None, |_, _| panic!("a missing session without a fresh start must not be retried")).unwrap_err();
     assert!(e.message.contains("isn't on this computer"), "{e:?}");
     assert!(ws.manifest.agent_session.is_none());
 }

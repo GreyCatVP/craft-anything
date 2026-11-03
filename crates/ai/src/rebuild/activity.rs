@@ -251,7 +251,7 @@ impl Activity {
                     }
                 }
             },
-            RunEvent::Note(shown) => new.push((LineKind::Note, format!("You added: {shown}"))),
+            RunEvent::Note { shown, .. } => new.push((LineKind::Note, format!("You added: {shown}"))),
             RunEvent::Ask(r) => new.push((LineKind::Note, format!("Waiting for your answer: {}", r.title))),
             RunEvent::Checked(c) => {
                 let result = if c.passed { LineKind::Done } else { LineKind::Failed };

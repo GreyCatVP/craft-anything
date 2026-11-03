@@ -12,6 +12,7 @@ pub mod cli_agents;
 pub mod config;
 pub mod context;
 pub mod detect;
+mod failure;
 pub mod failure_log;
 pub mod http;
 pub mod key_tools;
@@ -24,6 +25,7 @@ pub mod rebuild;
 pub mod ssh;
 
 pub use config::{AiConfig, BackendEntry, BackendOptions, Price};
+pub use failure::{FailureKind, TurnFailure};
 pub use keys::KeyStore;
 pub use model::Effort;
 
@@ -213,6 +215,17 @@ pub enum AgentEvent {
 /// A chat with the agent about the current session.
 pub trait Conversation: Send {
     fn send(&mut self, text: &str);
+    /// Retry an interrupted turn. Stateless adapters resend `text`; a conversation that keeps
+    /// its own history can continue it without appending the user's message again.
+    fn retry(&mut self, text: &str) {
+        let prompt = if self.session_id().is_some() { failure::CONTINUE_TURN } else { text };
+        self.send(prompt);
+    }
+    /// Why the last turn failed, supplied by its protocol or process boundary. An unknown
+    /// failure is never retried automatically. Cleared when the next turn starts.
+    fn last_failure(&self) -> Option<TurnFailure> {
+        None
+    }
     /// A saved session to continue later, for agents that have one (agent CLIs).
     fn session_id(&self) -> Option<String> {
         None
@@ -587,7 +600,14 @@ impl AiHub {
             Some(t) => Box::new(Tunneled { inner: model, _tunnel: t }) as Box<dyn ChatModel>,
             None => model,
         };
-        Ok(ModelSlot { name: c.name.clone(), model, local, effort: e.options.effort, max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS) })
+        Ok(ModelSlot {
+            name: c.name.clone(),
+            model,
+            local,
+            effort: e.options.effort,
+            max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS),
+            context_tokens: e.options.context_tokens.unwrap_or(0),
+        })
     }
 
     fn project_root(&self) -> Option<PathBuf> {

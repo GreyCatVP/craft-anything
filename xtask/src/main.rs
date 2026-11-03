@@ -482,3 +482,16 @@ fn pending(root: &Path, count_only: bool) -> bool {
     println!("{total} open item(s) under {} roadmap entr{}", groups.len(), if groups.len() == 1 { "y" } else { "ies" });
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::workspace_root;
+
+    #[test]
+    fn readme_status_does_not_list_first_public_release_as_next() {
+        let readme = std::fs::read_to_string(workspace_root().join("README.md")).unwrap();
+        let status = readme.split("\n## Status").nth(1).unwrap();
+        let status = status.split("\n**Responsible use.**").next().unwrap().replace("\n> ", " ");
+        assert!(!status.contains("**Next:** the first public release"), "{status}");
+    }
+}

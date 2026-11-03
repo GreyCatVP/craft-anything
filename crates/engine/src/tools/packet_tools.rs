@@ -540,7 +540,6 @@ fn packets_inventory_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
             if cut {
                 lims.push(Limitation::new("tshark_output_capped", "tshark printed more than 64 MiB; packets after that point are not counted."));
             }
-            lims.push(Limitation::new("dns_answer_attribution", "DNS answer addresses are attributed to the first question of the same response."));
             ("tshark", inv)
         }
         None => {
@@ -557,7 +556,7 @@ fn packets_inventory_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
                 protocol_stacks: s.stacks,
                 endpoints: s.endpoints,
                 dns_queries: s.dns_queries,
-                dns_answers: s.dns_answers,
+                dns_answers: s.dns_addresses,
                 tls_sni: s.tls_sni,
                 http_requests: http,
             };
@@ -565,6 +564,7 @@ fn packets_inventory_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         }
     };
     ctx.cancel.check()?;
+    lims.push(Limitation::new("dns_answer_attribution", "DNS answer addresses are attributed to the first question of the same response."));
     lims.push(Limitation::new("no_credentials", "user:password parts of HTTP URIs are removed; query strings are kept as recorded."));
     let counts = json!({
         "protocol_stacks": inv.protocol_stacks.len(), "endpoints": inv.endpoints.len(), "dns_queries": inv.dns_queries.len(),
@@ -674,5 +674,43 @@ mod tests {
         assert_eq!(inv.http_requests[0].value, "GET h.example http://h.example/x");
         assert_eq!(inv.endpoints[0].value, "10.0.0.1");
         assert_eq!(inv.endpoints[0].count, 3);
+    }
+
+    /// Both engines list a CNAME-chained answer the same way: the address, keyed by the question (#510).
+    #[test]
+    fn dns_answers_agree_between_engines_for_cname_chains() {
+        fn name(n: &str) -> Vec<u8> {
+            let mut v = Vec::new();
+            for p in n.split('.') {
+                v.push(p.len() as u8);
+                v.extend(p.as_bytes());
+            }
+            v.push(0);
+            v
+        }
+        fn rr(owner: &str, rtype: u16, data: &[u8]) -> Vec<u8> {
+            let mut v = name(owner);
+            v.extend(rtype.to_be_bytes());
+            v.extend([0, 1, 0, 0, 0, 60]);
+            v.extend((data.len() as u16).to_be_bytes());
+            v.extend(data);
+            v
+        }
+        let mut dns = vec![0x12, 0x34, 0x81, 0x80, 0, 1, 0, 3, 0, 0, 0, 0];
+        dns.extend(name("audit.example"));
+        dns.extend([0, 1, 0, 1]);
+        dns.extend(rr("audit.example", 5, &name("alias.example")));
+        dns.extend(rr("alias.example", 5, &name("final.example")));
+        dns.extend(rr("final.example", 1, &[203, 0, 113, 9]));
+        let frame = fx::eth(0x0800, &fx::ipv4_pkt(17, [10, 0, 0, 2], [10, 0, 0, 1], &fx::udp(53, 40000, &dns)));
+        let e = Engine::new(crate::testing::session());
+        let p = temp_file("cname.pcap", &fx::pcap(&[frame]));
+        let v = call(&e, "packets_inventory_show", json!({"path": p, "engine": "built_in"}));
+        let built_in: Vec<String> = v["result"]["dns_answers"].as_array().unwrap().iter().map(|c| c["value"].as_str().unwrap().to_string()).collect();
+
+        let line = "eth:ethertype:ip:udp:dns\t10.0.0.2\t10.0.0.1\t\t\t1\taudit.example\t1\t203.0.113.9\t\t\t\t\t\n";
+        let tshark: Vec<String> = aggregate_tshark(line).dns_answers.into_iter().map(|c| c.value).collect();
+        assert_eq!(tshark, ["audit.example A 203.0.113.9"]);
+        assert_eq!(built_in, tshark);
     }
 }

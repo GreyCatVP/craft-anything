@@ -113,6 +113,7 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
                 rows: (3, 10),
                 attach: (!website).then_some("Add pictures of the original (optional: screenshots help it look right)"),
                 stop_button: None,
+                stopping: false,
                 send: false,
                 recall: false,
                 history: None,

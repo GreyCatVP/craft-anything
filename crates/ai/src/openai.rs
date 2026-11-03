@@ -38,7 +38,7 @@ pub struct OpenAi {
     pub extra_headers: Vec<(&'static str, String)>,
     /// Use the ReAct text protocol instead of function tools.
     pub react: bool,
-    /// Switch to ReAct automatically when the server rejects tools.
+    /// Recover JSON text calls automatically, and switch to ReAct when the server rejects tools.
     pub auto_react: bool,
 }
 
@@ -126,8 +126,8 @@ impl OpenAi {
         })?;
         stop.check()?;
         let mut r = st.finish(&self.model)?;
-        if self.react {
-            react_postprocess(&mut r);
+        if self.react || self.auto_react {
+            react_postprocess(&mut r, req.tools, self.react);
         }
         Ok(r)
     }
@@ -192,7 +192,7 @@ pub fn messages_json(m: &Msg, react: bool) -> Vec<Value> {
                 .into_iter()
                 .map(|(id, name, input)| json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
                 .collect();
-            let mut v = json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { Value::String(text) }});
+            let mut v = json!({"role": "assistant", "content": text});
             if !calls.is_empty()
                 && let Some(o) = v.as_object_mut()
             {
@@ -235,7 +235,11 @@ impl ChatStream {
             serde_json::from_str(data).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("The server sent a chunk we couldn't read: {e}")))?;
         if let Some(err) = v.get("error") {
             let msg = err.get("message").and_then(Value::as_str).unwrap_or("unknown error");
-            return Err(ToolError::new(ErrorCode::EngineMissing, format!("Stream error: {msg}")));
+            let provider = err.get("code").and_then(Value::as_str).or_else(|| err.get("type").and_then(Value::as_str));
+            let status = err.get("code").and_then(Value::as_u64);
+            return Err(
+                ToolError::new(ErrorCode::ProgramFailed, format!("Stream error: {msg}")).with_details(json!({"provider_error": provider, "status": status}))
+            );
         }
         if let Some(m) = v.get("model").and_then(Value::as_str) {
             self.model = m.to_string();
@@ -303,8 +307,8 @@ impl ChatStream {
             None if self.done => StopReason::EndTurn,
             None => return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")),
         };
-        // Some servers say "stop" even when they emitted tool calls.
-        let stop = if has_calls { StopReason::ToolUse } else { stop };
+        // Some servers say "stop" for tool calls. A limit or refusal must still prevent execution.
+        let stop = if has_calls && stop == StopReason::EndTurn { StopReason::ToolUse } else { stop };
         let model = if self.model.is_empty() { fallback_model.to_string() } else { self.model };
         Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model })
     }
@@ -333,8 +337,21 @@ pub enum ReactStep {
     Text(String),
 }
 
-/// Parse the model's text according to the ReAct protocol.
+/// Parse a ReAct step, accepting a complete JSON call as an alternative.
 pub fn parse_react(text: &str) -> ReactStep {
+    if let Some(step) = json_action(text) {
+        return step;
+    }
+    // Preserve a whole fenced ReAct step, but do not treat markers inside a JSON answer or
+    // ordinary code example as instructions.
+    let lead = text.trim();
+    let fenced_protocol = backtick_fence(lead).is_some_and(|(_, body)| {
+        let body = body.trim_start();
+        ["Action:", "Thought:", "Final Answer:"].into_iter().any(|marker| body.starts_with(marker))
+    });
+    if lead.starts_with(['{', '[']) || (lead.starts_with("```") && !fenced_protocol) {
+        return ReactStep::Text(text.trim().to_string());
+    }
     if let Some(pos) = text.find("Final Answer:") {
         return ReactStep::Final(text.get(pos + "Final Answer:".len()..).unwrap_or_default().trim().to_string());
     }
@@ -350,6 +367,68 @@ pub fn parse_react(text: &str) -> ReactStep {
         None => json!({}),
     };
     if tool.is_empty() { ReactStep::Text(text.trim().to_string()) } else { ReactStep::Action { tool, input } }
+}
+
+/// A complete backtick fence. Its standalone closing line can be longer than its opener,
+/// but an earlier closing line means the remaining text is outside that fence.
+fn backtick_fence(text: &str) -> Option<(&str, &str)> {
+    let (opening, rest) = text.trim().split_once('\n')?;
+    let length = opening.bytes().take_while(|byte| *byte == b'`').count();
+    if length < 3 {
+        return None;
+    }
+    let language = opening.get(length..)?.trim();
+    if language.contains('`') {
+        return None;
+    }
+    let (body, closing) = rest.rsplit_once('\n')?;
+    let closes = |line: &str| {
+        let line = line.trim();
+        line.len() >= length && line.bytes().all(|byte| byte == b'`')
+    };
+    if !closes(closing) || body.lines().any(closes) {
+        return None;
+    }
+    Some((language, body))
+}
+
+/// Accept a complete call, not a JSON object quoted somewhere in an explanation.
+fn json_action(text: &str) -> Option<ReactStep> {
+    let text = text.trim();
+    let raw = if text.starts_with("```") {
+        let (language, body) = backtick_fence(text)?;
+        if !matches!(language, "" | "json") {
+            return None;
+        }
+        body.trim()
+    } else {
+        text
+    };
+    let value: Value = serde_json::from_str(raw).ok()?;
+    let envelope = value.as_object()?;
+    if envelope.contains_key("function")
+        && (envelope.keys().any(|key| !matches!(key.as_str(), "function" | "type" | "id"))
+            || envelope.get("type").is_some_and(|kind| kind.as_str() != Some("function")))
+    {
+        return None;
+    }
+    let function = value.get("function").unwrap_or(&value);
+    let fields = function.as_object()?;
+    if fields.keys().any(|key| !matches!(key.as_str(), "name" | "arguments" | "parameters"))
+        || fields.contains_key("arguments") == fields.contains_key("parameters")
+    {
+        return None;
+    }
+    let tool = function.get("name")?.as_str()?.trim();
+    if tool.is_empty() {
+        return None;
+    }
+    let arguments = function.get("arguments").or_else(|| function.get("parameters"))?;
+    let input: Value = match arguments.as_str() {
+        Some(encoded) => serde_json::from_str(encoded).ok()?,
+        None => arguments.clone(),
+    };
+    input.is_object().then(|| ReactStep::Action { tool: tool.to_string(), input })
 }
 
 /// The first balanced `{…}` in `s`, parsed.
@@ -385,14 +464,22 @@ fn extract_json_object(s: &str) -> Option<Value> {
 
 static REACT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Turn ReAct text into neutral tool-use blocks.
-fn react_postprocess(r: &mut TurnResult) {
+/// Recover complete text calls as neutral tool-use blocks.
+fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
+    if !matches!(r.stop, StopReason::EndTurn | StopReason::ToolUse) || !r.message.tool_uses().is_empty() {
+        return;
+    }
     let text = r.message.text();
-    if let ReactStep::Action { tool, input } = parse_react(&text) {
+    let json_call = json_action(&text);
+    let from_json = json_call.is_some();
+    let step = json_call.or_else(|| react.then(|| parse_react(&text)));
+    if let Some(ReactStep::Action { tool, input }) = step
+        && (!from_json || tools.iter().any(|definition| definition.name == tool))
+    {
         let n = REACT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         r.message.blocks.push(Block::ToolUse { id: format!("react_{n}"), name: tool, input });
         r.stop = StopReason::ToolUse;
-    } else {
+    } else if react {
         r.stop = StopReason::EndTurn;
     }
 }
@@ -401,6 +488,80 @@ fn react_postprocess(r: &mut TurnResult) {
 mod tests {
     use super::*;
     use crate::model::Effort;
+
+    #[test]
+    fn json_text_calls_and_non_calls() {
+        for text in [
+            r#"{"name":"look","arguments":{"path":"app"}}"#,
+            r#"{"name":"look","parameters":{"path":"app"}}"#,
+            r#"{"name":"look","arguments":"{\"path\":\"app\"}"}"#,
+            r#"{"type":"function","function":{"name":"look","arguments":{"path":"app"}}}"#,
+            "```json\n{\"name\":\"look\",\"arguments\":{\"path\":\"app\"}}\n```",
+            "```\n{\"name\":\"look\",\"arguments\":{\"path\":\"app\"}}\n```",
+            "```json\n{\"name\":\"look\",\"arguments\":{\"path\":\"app\"}}\n````",
+            "````json\n{\"name\":\"look\",\"arguments\":{\"path\":\"app\"}}\n````",
+            "````\n{\"name\":\"look\",\"arguments\":{\"path\":\"app\"}}\n`````",
+        ] {
+            assert_eq!(parse_react(text), ReactStep::Action { tool: "look".into(), input: json!({"path": "app"}) }, "{text}");
+        }
+        for text in [
+            r#"{"name":"look","arguments":{"path":"app"}"#,
+            r#"{"name":"look","arguments":"not JSON"}"#,
+            r#"{"name":"look","arguments":["app"]}"#,
+            r#"{"name":"look"}"#,
+            r#"{"name":"look","arguments":{},"description":"This is an example"}"#,
+            r#"{"name":"look","arguments":{},"parameters":{"path":"different"}}"#,
+            r#"{"type":"example","function":{"name":"look","arguments":{}}}"#,
+            r#"{"name":"","arguments":{}}"#,
+            r#"{"answer":"Action: look\nAction Input: {}"}"#,
+            r#"[{"name":"look","arguments":{}}]"#,
+            r#"For example, use {"name":"look","arguments":{}}."#,
+            "```json\n{\"name\":\"look\",\"arguments\":{}}\n```\nThis is an example.",
+            "```json\n{\"name\":\"look\",\"arguments\":{}}```",
+            "```json`example\n{\"name\":\"look\",\"arguments\":{}}\n```",
+            "````json\n{\"name\":\"look\",\"arguments\":{}}\n```",
+            "```json\n{\"name\":\"look\",\"arguments\":{}}\n```\nThis is only an example.\n```",
+        ] {
+            assert!(matches!(parse_react(text), ReactStep::Text(_)), "{text}");
+        }
+        assert_eq!(
+            parse_react(r#"{"name":"look","arguments":{"text":"Final Answer: is a label"}}"#),
+            ReactStep::Action { tool: "look".into(), input: json!({"text":"Final Answer: is a label"}) }
+        );
+    }
+
+    #[test]
+    fn fenced_legacy_react_calls_still_parse() {
+        for text in [
+            "```\nAction: look\nAction Input: {\"path\":\"app\"}\n```",
+            "```text\nAction: look\nAction Input: {\"path\":\"app\"}\n```",
+            "```json\nThought: inspect the app\nAction: look\nAction Input: {\"path\":\"app\"}\n```",
+            " \n```\r\nAction: look\r\nAction Input: {\"path\":\"app\"}\r\n```\n ",
+            "```text\nAction: look\nAction Input: {\"path\":\"app\"}\n  ``` \t",
+            "```text\nAction: look\nAction Input: {\"path\":\"app\"}\n````",
+            "````text\nAction: look\nAction Input: {\"path\":\"app\"}\n````",
+            "````text\nAction: look\nAction Input: ```json\n{\"path\":\"app\"}\n```\n````",
+        ] {
+            assert_eq!(parse_react(text), ReactStep::Action { tool: "look".into(), input: json!({"path": "app"}) }, "{text}");
+        }
+        for text in [
+            "```json\n{\"answer\":\"Action: look\\nAction Input: {}\"}\n```",
+            "```\n[\"Action: look\\nAction Input: {}\"]\n```",
+            "```python\nprint(\"Action: look\\nAction Input: {}\")\n```",
+            "```\nThis is an example.\nAction: look\nAction Input: {}\n```",
+            "```\nAction: look\nAction Input: {}",
+            "```\nAction: look\nAction Input: {}\n```\nThis is only an example.",
+            "```text\nAction: look\nAction Input: {}\n```not a close```",
+            "```text\nAction: look\nAction Input: {}```",
+            "````text\nAction: look\nAction Input: {}\n```",
+            "```text\nAction: look\nAction Input: {}\n```\nThis is only an example.\n```",
+            "```text\nAction: look\nAction Input: {}\n````\nThis is only an example.\n```",
+            "````text\nAction: look\nAction Input: {}\n````\nThis is only an example.\n````",
+            "```json\n{\"name\":\"look\",\"arguments\":{}}```",
+        ] {
+            assert!(matches!(parse_react(text), ReactStep::Text(_)), "{text}");
+        }
+    }
 
     #[test]
     fn react_parsing() {
@@ -456,6 +617,33 @@ mod tests {
     }
 
     #[test]
+    fn native_tool_calls_preserve_terminal_stop_reasons() {
+        for (finish, expected) in [
+            (Some("length"), StopReason::MaxTokens),
+            (Some("content_filter"), StopReason::Refusal),
+            (Some("pause_turn"), StopReason::PauseTurn),
+            (Some("provider_stop"), StopReason::Other("provider_stop".into())),
+            (Some("tool_calls"), StopReason::ToolUse),
+            (Some("stop"), StopReason::ToolUse),
+            (None, StopReason::ToolUse),
+        ] {
+            let mut stream = ChatStream::default();
+            let call = json!({"choices":[{"delta":{"tool_calls":[{
+                "index":0,"id":"call_a","function":{"name":"core_session_show","arguments":"{}"}
+            }]}}]});
+            stream.apply(&SseEvent { event: None, data: call.to_string() }, &mut |_| {}).unwrap();
+            if let Some(reason) = finish {
+                let end = json!({"choices":[{"delta":{},"finish_reason":reason}]});
+                stream.apply(&SseEvent { event: None, data: end.to_string() }, &mut |_| {}).unwrap();
+            }
+            stream.apply(&SseEvent { event: None, data: "[DONE]".into() }, &mut |_| {}).unwrap();
+            let result = stream.finish("m").unwrap();
+            assert_eq!(result.stop, expected, "finish_reason={finish:?}");
+            assert_eq!(result.message.tool_uses(), vec![("call_a".into(), "core_session_show".into(), json!({}))]);
+        }
+    }
+
+    #[test]
     fn wire_messages() {
         let o = OpenAi::openrouter(None, "k".into(), "");
         assert!(o.headers().iter().any(|(k, _)| *k == "X-Title"));
@@ -477,6 +665,7 @@ mod tests {
         let m = b["messages"].as_array().unwrap();
         assert_eq!(m[0]["role"], "system");
         assert_eq!(m[2]["tool_calls"][0]["function"]["arguments"], "{\"a\":1}");
+        assert_eq!(m[2]["content"], "");
         assert_eq!(m[3]["role"], "tool");
         assert_eq!(m[4]["tool_call_id"], "c2");
         assert_eq!(b["tool_choice"], "auto");

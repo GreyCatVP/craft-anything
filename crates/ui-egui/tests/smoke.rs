@@ -225,7 +225,7 @@ fn deep_mode_without_ghidra_asks_to_get_it_before_using_it() {
 
 #[test]
 fn a_long_prompt_wraps_inside_the_window_in_the_project_and_the_chat() {
-    use craft_anything_ui_egui::state::{ChatItem, FeedItem};
+    use craft_anything_ui_egui::state::{ChatItem, FeedItem, UserItem};
     // Long sentences and one very long unbroken address.
     let long = format!("{}https://example.com/{}", "Make it exactly like the original, with the same menus, weapons and maps. ".repeat(8), "a".repeat(300));
     for in_chat in [false, true] {
@@ -238,8 +238,8 @@ fn a_long_prompt_wraps_inside_the_window_in_the_project_and_the_chat() {
                 a.state.chat.push(ChatItem::User("Make it blue".into()));
             } else {
                 demo::fill_project(&mut a);
-                a.state.feed.push(FeedItem::User(text));
-                a.state.feed.push(FeedItem::User("Make it blue".into()));
+                a.state.feed.push(FeedItem::User(UserItem::Text(text)));
+                a.state.feed.push(FeedItem::User(UserItem::Text("Make it blue".into())));
             }
             a
         });
@@ -305,7 +305,7 @@ fn an_engine_download_shows_in_the_title_bar_on_every_screen() {
 #[test]
 fn a_projects_conversation_and_place_come_back_after_a_restart() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
-    use craft_anything_ui_egui::state::FeedItem;
+    use craft_anything_ui_egui::state::{FeedItem, UserItem};
     struct Mem(std::collections::HashMap<String, String>);
     impl eframe::Storage for Mem {
         fn get_string(&self, key: &str) -> Option<String> {
@@ -325,7 +325,7 @@ fn a_projects_conversation_and_place_come_back_after_a_restart() {
     // One session: a conversation on the project, then the app closes.
     let mut first = demo::app(demo::engine(Mode::Beginner, true));
     first.open_workspace(ws);
-    first.state.feed.push(FeedItem::User("Make it faster".into()));
+    first.state.feed.push(FeedItem::User(UserItem::Text("Make it faster".into())));
     first.state.feed.push(FeedItem::Agent { text: "Done: the snake moves faster now.".into(), streaming: true });
     // A run keeps the feed in the project folder (here, as one would have).
     let root = first.workspace.as_ref().unwrap().root.clone();
@@ -339,7 +339,7 @@ fn a_projects_conversation_and_place_come_back_after_a_restart() {
     assert_eq!(next.state.screen, Screen::Project);
     assert_eq!(next.workspace.as_ref().map(|w| w.manifest.name.as_str()), Some("Snake"));
     let feed = &next.state.feed;
-    assert!(feed.iter().any(|f| matches!(f, FeedItem::User(t) if t == "Make it faster")), "{feed:?}");
+    assert!(feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text() == "Make it faster")), "{feed:?}");
     assert!(
         feed.iter().any(|f| matches!(f, FeedItem::Agent { text, streaming: false } if text.starts_with("Done:"))),
         "nothing is still streaming after a restart: {feed:?}"
@@ -426,7 +426,11 @@ fn the_prompt_box_sends_on_enter_with_its_pictures() {
     assert!(root.join("attachments/picture-1.png").is_file(), "the picture is copied into the project");
     assert!(h.state().state.project_input.is_empty() && h.state().state.project_attachments.is_empty());
     assert!(
-        h.state().state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.starts_with("Make it faster\nand louder") && t.contains("1 picture attached"))),
+        h.state()
+            .state
+            .feed
+            .iter()
+            .any(|f| matches!(f, FeedItem::User(t) if t.text().starts_with("Make it faster\nand louder") && t.text().contains("1 picture attached"))),
         "{:?}",
         h.state().state.feed
     );
@@ -1227,7 +1231,7 @@ fn a_note_waiting_for_the_builder_can_be_taken_back_into_the_prompt_box() {
         h.state_mut().send_message();
     }
     h.run_steps(3);
-    let in_feed = |app: &CraftApp, text: &str| app.state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t == text));
+    let in_feed = |app: &CraftApp, text: &str| app.state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text() == text));
     assert!(!in_feed(h.state(), "Make them blue"));
     h.get_by_label("Make them blue");
     h.get_by_label("And sortable");
@@ -1238,7 +1242,7 @@ fn a_note_waiting_for_the_builder_can_be_taken_back_into_the_prompt_box() {
     assert_eq!(h.state().state.project_input, "Make them blue\ndraft");
     assert!(h.query_by_label("Make them blue").is_none());
     // The builder reads the other: it joins the conversation and can't be taken back.
-    assert!(runs.send(&a.root, RunEvent::Note("And sortable".into())));
+    assert!(runs.send(&a.root, RunEvent::Note { shown: "And sortable".into(), pictures: Vec::new() }));
     h.run_steps(2);
     assert!(in_feed(h.state(), "And sortable"));
     h.state_mut().pause();
@@ -1289,7 +1293,7 @@ fn up_in_the_prompt_box_takes_back_the_last_waiting_note() {
 fn up_and_down_in_the_prompt_box_go_through_earlier_prompts() {
     use craft_anything_ai::rebuild::StandIns;
     use craft_anything_engine::workspace::{TargetRef, Workspace};
-    use craft_anything_ui_egui::state::FeedItem;
+    use craft_anything_ui_egui::state::{FeedItem, UserItem};
     let d = tempfile::tempdir().unwrap();
     let a = Workspace::create(d.path(), "Alpha", "A notes app", TargetRef::None).unwrap();
     let (dir, runs) = (d.path().to_path_buf(), StandIns::new());
@@ -1297,7 +1301,7 @@ fn up_and_down_in_the_prompt_box_go_through_earlier_prompts() {
     h.run_steps(2);
     h.state_mut().open_workspace(a);
     h.run_steps(2);
-    let user = |t: &str| FeedItem::User(t.into());
+    let user = |t: &str| FeedItem::User(UserItem::Text(t.into()));
     h.state_mut().state.feed = vec![user("A notes app"), user("Make it blue\n(1 picture attached)"), user("Make it blue"), user("First line\nSecond line")];
     h.state_mut().state.project_input = String::new();
     h.get_by_label("Ask for a change").focus();
