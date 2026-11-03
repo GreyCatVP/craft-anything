@@ -21,10 +21,11 @@ const USUAL_HOME_DIRS: &[&str] = &[".local/bin", ".claude/local", ".npm-global/b
 #[cfg(unix)]
 const USUAL_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 // Claude Code's installer, npm (without a custom prefix), WinGet's portable packages (Claude
-// Code's WinGet install), bun and cargo; PATH may not have them yet in an app started before
-// the install.
+// Code's WinGet install), bun, cargo and Hermes Agent's installer (`%LOCALAPPDATA%\hermes\bin`, #116);
+// PATH may not have them yet in an app started before the install.
 #[cfg(windows)]
-const USUAL_HOME_DIRS: &[&str] = &[r".local\bin", r"AppData\Roaming\npm", r"AppData\Local\Microsoft\WinGet\Links", r".bun\bin", r".cargo\bin"];
+const USUAL_HOME_DIRS: &[&str] =
+    &[r".local\bin", r"AppData\Roaming\npm", r"AppData\Local\Microsoft\WinGet\Links", r".bun\bin", r".cargo\bin", r"AppData\Local\hermes\bin"];
 #[cfg(not(any(unix, windows)))]
 const USUAL_HOME_DIRS: &[&str] = &[];
 // WinGet's portable packages installed for every user (`--scope machine`).
@@ -295,6 +296,20 @@ mod tests {
         let at = |p: &Path| dirs.iter().position(|d| d == p).unwrap();
         assert!(at(&home.path().join(".cargo/bin")) < at(&bins[0]) && at(&bins[2]) < at(Path::new("/usr/local/bin")));
         assert!(nvm_bins(Path::new("/nowhere")).is_empty());
+    }
+
+    /// #116: Hermes Agent's Windows installer puts `hermes.exe` in `%LOCALAPPDATA%\hermes\bin` and
+    /// adds that to the user's PATH, which an app started before the install (or by a launcher)
+    /// doesn't have, so Settings found no Hermes.
+    #[cfg(windows)]
+    #[test]
+    fn hermes_agents_windows_folder_is_searched() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(r"AppData\Local\hermes\bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("hermes.exe"), "").unwrap();
+        let path = with_usual_dirs(None, Some(home.path().to_path_buf()));
+        assert_eq!(which_in("hermes", path), [bin.join("hermes.exe")]);
     }
 
     /// #132: npm's own prefix setting says where it put the agents it installed.

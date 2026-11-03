@@ -330,6 +330,10 @@ Owner: open · Status: in progress
 - [ ] A note sent during a build reaches the builder at its next step on other coding agents with
       tool hooks, and on the API-backend loop between tool calls (Claude Code only today)
 - [ ] Session copies for other agents that keep sessions (ACP agents' `session/load`) (#451)
+- [x] Hermes Agent's native Windows install (`%LOCALAPPDATA%\hermes\bin`) is searched, so an app
+      started before the install, or by a launcher, finds it (#116)
+- [ ] Live-check #116 on Windows: install Hermes natively, start the app from a launcher, and see
+      Settings → AI offer it; #116's "error after every message" has no text yet (asked)
 - [ ] See whether Hermes still fails on 0.3.0 (#460: the fix its `fixed` label names was already in
       0.3.0 when it was filed, and it gives no version)
 
