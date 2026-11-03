@@ -255,7 +255,10 @@ fn an_oversized_reply_is_refused_and_the_connection_closed() {
         other => panic!("expected a protocol error, got {other:?}"),
     }
     // The rest of that reply is still on the wire, so the client must not read on.
-    assert!(client.request("ping", serde_json::json!({}), &no_cancel(), Instant::now() + Duration::from_secs(2)).is_err());
+    match client.request("ping", serde_json::json!({}), &no_cancel(), Instant::now() + Duration::from_secs(2)).unwrap_err() {
+        GhidraError::Connection(_) => {}
+        other => panic!("expected a connection error on the closed socket, got {other:?}"),
+    }
     drop(client);
     fake.join();
 }
