@@ -7,12 +7,15 @@ use super::model::{AssetOption, ListedModel, MAX_ASSET_CREDITS, ModelDetail, Mod
 use super::tables::{InputRoles, KnownModels};
 use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
+use http::{CURSOR_LENGTH, NAME_LENGTH, time_is_up, words};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub const ID: &str = "scenario";
+/// What people call it.
+const NAME: &str = "Scenario";
 /// Starter's $15 / 1500 CU. This is a budgeting conversion, not an invoice.
 const USD_PER_CU: f64 = 0.01;
 pub struct Scenario {
@@ -110,7 +113,7 @@ impl AssetProvider for Scenario {
     }
     /// Return the provider's display name.
     fn name(&self) -> &'static str {
-        "Scenario"
+        NAME
     }
     /// Name the environment variable containing the combined key and secret.
     fn key_env(&self) -> Option<&'static str> {
@@ -215,9 +218,7 @@ const MAX_PAGE_MODELS: usize = PAGE_SIZE;
 const MAX_DESCRIBED: usize = 300;
 /// How many of those requests are made at the same time.
 const WORKERS: usize = 4;
-/// The longest model name kept, the longest next-page token followed, and the longest input name read.
-const NAME_LENGTH: usize = 80;
-const CURSOR_LENGTH: usize = 200;
+/// The longest input name read.
 const FIELD_NAME_LENGTH: usize = 128;
 /// The most tags, capabilities and price variants of one model that are read.
 const MAX_LABELS: usize = 100;
@@ -285,22 +286,30 @@ impl Scenario {
         for (candidate, reading) in candidates.iter().zip(readings) {
             models.extend(match reading {
                 Reading::Runs { pricing, ignores } => Some(listed(candidate, pricing, ignores)),
-                Reading::LeftOut => None,
-                Reading::Failed(_) | Reading::NotReached => known(candidate, kind),
+                // Scenario's answer, or its word that this account may not use the model, says it
+                // cannot be run: the table's word does not stand against it.
+                Reading::LeftOut | Reading::Unusable => None,
+                // Nothing was heard about the model, or the request failed in a way that may pass.
+                Reading::Stopped(_) | Reading::Failed | Reading::NotReached => known(candidate, kind),
             });
         }
         Ok(ModelList { models, error: (!problems.is_empty()).then(|| problems.join(" ")) })
     }
 
     /// One model with all its inputs and its price, as `key` gets them. A model Scenario no longer
-    /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it.
+    /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it. Its kinds are those
+    /// its capabilities and tags settle, else the known-models table's.
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let auth = self.auth(key)?;
         if http::id(model).is_err() {
             return Err(http::bad("That is not an id Scenario gives its models.").with_remediation(REMEDIATION));
         }
-        let found = self.fetch(&auth, model)?.ok_or_else(|| gone(model))?;
-        detail_of(&found, model)
+        let found = self.fetch(&auth, model).map_err(Trouble::into_error)?.ok_or_else(|| http::gone(NAME, model))?;
+        let mut kinds = kinds_of(&found, model);
+        if kinds.is_empty() {
+            kinds = KnownModels::built_in().kinds(ID, model).unwrap_or_default().to_vec();
+        }
+        detail_of(&found, model, kinds)
     }
 
     /// The `Authorization` header for a key and secret. The key goes only to Scenario's API.
@@ -323,9 +332,9 @@ impl Scenario {
             }
             if time_is_up(deadline) {
                 if pages == 0 {
-                    return Err(too_slow());
+                    return Err(http::too_slow(NAME));
                 }
-                break Some(words(&too_slow()));
+                break Some(words(&http::too_slow(NAME)));
             }
             let page = match self.page(token.as_deref()) {
                 Ok(page) => page,
@@ -382,7 +391,7 @@ impl Scenario {
                                 let at = next.fetch_add(1, Ordering::Relaxed);
                                 let Some(candidate) = candidates.get(at).filter(|_| at < reach) else { break };
                                 let reading = self.read_one(auth, candidate, kind);
-                                if matches!(&reading, Reading::Failed(e) if is_fatal(e)) {
+                                if matches!(reading, Reading::Stopped(_)) {
                                     stop.store(true, Ordering::Relaxed);
                                 }
                                 mine.push((at, reading));
@@ -403,15 +412,15 @@ impl Scenario {
         }
         let mut problems = Vec::new();
         let refused = readings.iter().find_map(|r| match r {
-            Reading::Failed(e) if is_fatal(e) => Some(words(e)),
+            Reading::Stopped(e) => Some(words(e)),
             _ => None,
         });
-        let failed = readings.iter().filter(|r| matches!(r, Reading::Failed(e) if !is_fatal(e))).count();
+        let failed = readings.iter().filter(|r| matches!(r, Reading::Failed | Reading::Unusable)).count();
         let cut = readings.iter().take(reach).any(|r| matches!(r, Reading::NotReached));
         if let Some(why) = &refused {
             problems.push(format!("Inputs and prices could not be read: {why}"));
         } else if cut {
-            problems.push(format!("The list is incomplete: {}", words(&too_slow())));
+            problems.push(format!("The list is incomplete: {}", words(&http::too_slow(NAME))));
         }
         if failed > 0 {
             problems.push(format!("{failed} model{} could not be read.", if failed == 1 { "" } else { "s" }));
@@ -426,29 +435,46 @@ impl Scenario {
     /// if this app can run it as `kind`. Its inputs are not kept.
     fn read_one(&self, auth: &str, candidate: &Candidate, kind: AssetKind) -> Reading {
         match self.fetch(auth, &candidate.id) {
-            Ok(Some(model)) => match detail_of(&model, &candidate.id) {
-                Ok(detail) => match runnable(&detail.fields, kind, InputRoles::built_in()) {
-                    Ok(ignores) => Reading::Runs { pricing: detail.pricing, ignores },
+            Ok(Some(model)) => match read_inputs(&model, &candidate.id) {
+                // The price is that of the type asked for, whatever the answer says the model makes.
+                Ok(fields) => match runnable(&fields, kind, InputRoles::built_in()) {
+                    Ok(ignores) => Reading::Runs { pricing: pricing_of(&model, &[kind]), ignores },
                     Err(_) => Reading::LeftOut,
                 },
                 Err(_) => Reading::LeftOut,
             },
             Ok(None) => Reading::LeftOut,
-            Err(e) => Reading::Failed(e),
+            Err(Trouble::Stops(e)) => Reading::Stopped(e),
+            Err(Trouble::Passing(_)) => Reading::Failed,
+            Err(Trouble::Unusable(_)) => Reading::Unusable,
         }
     }
 
     /// The model `GET /models/{id}` answers with, or `None` when Scenario says there is none (404).
-    fn fetch(&self, auth: &str, id: &str) -> Result<Option<Value>, ToolError> {
-        let response = self.send(Some(auth), &format!("{}/models/{id}", self.base), MODEL_TIMEOUT)?;
-        if response.status().as_u16() == 404 {
+    fn fetch(&self, auth: &str, id: &str) -> Result<Option<Value>, Trouble> {
+        let response = self.send(Some(auth), &format!("{}/models/{id}", self.base), MODEL_TIMEOUT).map_err(Trouble::Passing)?;
+        let status = response.status().as_u16();
+        if status == 404 {
             return Ok(None);
         }
-        http::status(response.status().as_u16())?;
-        let mut answer = http::json_up_to(response.into_body(), http::MAX_JSON).map_err(|e| if e.code == ErrorCode::OverLimit { too_large() } else { e })?;
+        if let Err(e) = http::status(status) {
+            return Err(match status {
+                // The key is refused, or the account is out of credit or over a rate limit: so it is for every model.
+                401 | 402 | 429 => Trouble::Stops(e),
+                // This account may not use this model; others are another matter.
+                403 => Trouble::Unusable(e),
+                _ => Trouble::Passing(e),
+            });
+        }
+        let mut answer = http::json_up_to(response.into_body(), http::MAX_JSON).map_err(|e| match e.code {
+            ErrorCode::OverLimit => Trouble::Unusable(too_large()),
+            ErrorCode::GarbledOutput => Trouble::Unusable(e),
+            // The body broke off on the way.
+            _ => Trouble::Passing(e),
+        })?;
         match answer.get_mut("model").map(Value::take) {
             Some(model @ Value::Object(_)) => Ok(Some(model)),
-            _ => Err(http::garbled("Scenario's answer about the model could not be read.")),
+            _ => Err(Trouble::Unusable(http::garbled("Scenario's answer about the model could not be read."))),
         }
     }
 
@@ -510,30 +536,34 @@ enum Reading {
     Runs { pricing: Pricing, ignores: Vec<AssetOption> },
     /// Scenario has no such model any more, or it is retiring, or its inputs cannot be read or filled.
     LeftOut,
-    /// The request failed.
-    Failed(ToolError),
-    /// No request was made: the time was up, the key was refused, or the list was too long.
+    /// The request was refused for every model, and the reading stopped.
+    Stopped(ToolError),
+    /// The request failed in a way that may pass (the network, a server error): nothing is known of the model.
+    Failed,
+    /// The answer is no use, or the account may not use the model: the model cannot be run.
+    Unusable,
+    /// No request was made: the time was up, the reading stopped, or the list was too long.
     NotReached,
 }
 
-/// A failure that ends the reading: Scenario refused the key or its limit was reached, which every
-/// other request would meet as well.
-fn is_fatal(e: &ToolError) -> bool {
-    matches!(e.code, ErrorCode::BadSettings | ErrorCode::OverLimit)
+/// Why a model could not be got from Scenario, by what it says of the other models.
+enum Trouble {
+    /// Every other request would meet it too: the key was refused (401), or the account is out of
+    /// credit (402) or over a rate limit (429).
+    Stops(ToolError),
+    /// The request failed in a way that may pass: the network, a server error.
+    Passing(ToolError),
+    /// The answer is of no use (too large, unreadable, no model in it), or the account may not use
+    /// this model (403), which says nothing of the others.
+    Unusable(ToolError),
 }
 
-fn time_is_up(deadline: Instant) -> bool {
-    Instant::now() >= deadline
-}
-
-fn too_slow() -> ToolError {
-    ToolError::new(ErrorCode::TimedOut, "Reading Scenario's model list took too long, so it was cut short.")
-        .with_remediation("Refresh the list to read the rest.")
-}
-
-/// An error as one sentence or two for the list's `error`.
-fn words(e: &ToolError) -> String {
-    format!("{} {}", e.message, e.remediation.as_deref().unwrap_or_default()).trim().to_string()
+impl Trouble {
+    fn into_error(self) -> ToolError {
+        match self {
+            Trouble::Stops(e) | Trouble::Passing(e) | Trouble::Unusable(e) => e,
+        }
+    }
 }
 
 /// The answer's JSON, or why there is none.
@@ -542,26 +572,21 @@ fn read(response: ureq::http::Response<ureq::Body>, limit: u64) -> Result<Value,
     http::json_up_to(response.into_body(), limit)
 }
 
-fn gone(model: &str) -> ToolError {
-    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is no longer available at Scenario.", clipped(model, NAME_LENGTH)))
-        .with_remediation(REMEDIATION)
-}
-
-fn retiring(model: &str) -> ToolError {
-    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is being retired at Scenario.", clipped(model, NAME_LENGTH))).with_remediation(REMEDIATION)
-}
-
-/// What a model Scenario answered with comes to. A model that is gone or retiring is refused
+/// The inputs of a model Scenario answered with. A model that is gone or retiring is refused
 /// before anything else about it is read.
-fn detail_of(model: &Value, id: &str) -> Result<ModelDetail, ToolError> {
+fn read_inputs(model: &Value, id: &str) -> Result<Vec<InputField>, ToolError> {
     if is_deleted(model) {
-        return Err(gone(id));
+        return Err(http::gone(NAME, id));
     }
     if is_retiring(model) {
-        return Err(retiring(id));
+        return Err(http::retiring(NAME, id));
     }
-    let fields = scenario_fields(model.get("inputs").unwrap_or(&Value::Null))?;
-    let kinds = kinds_of(model, id);
+    scenario_fields(model.get("inputs").unwrap_or(&Value::Null))
+}
+
+/// What a model Scenario answered with comes to, as the `kinds` it makes (the answer need not say).
+fn detail_of(model: &Value, id: &str, kinds: Vec<AssetKind>) -> Result<ModelDetail, ToolError> {
+    let fields = read_inputs(model, id)?;
     let pricing = pricing_of(model, &kinds);
     Ok(ModelDetail { id: id.to_string(), name: name_of(model, id), kinds, fields, pricing })
 }
@@ -581,9 +606,14 @@ fn labels<'a>(model: &'a Value, key: &str) -> impl Iterator<Item = &'a str> {
     model.get(key).and_then(Value::as_array).into_iter().flatten().take(MAX_LABELS).filter_map(Value::as_str)
 }
 
-/// The model of a public list entry, if it is one this app may use for `kind`: a `custom` model (the
-/// kind the generate call for any model runs; trained styles are other types), with an id that is
-/// safe in a URL and that is not retiring.
+/// The model of a public list entry, if it is one this app may use for `kind`: a `custom` model, with
+/// an id that is safe in a URL and that is not retiring.
+///
+/// Only `custom` models (606 of the 766 public ones on 2026-11-03) are listed, not the LoRA-type ones
+/// (`flux.1-lora`, ... 160 of them, many with `txt2img`): they are style variants of base models, and
+/// they would use up the [`MAX_DESCRIBED`] models read for one list (Ruling 19). The run-any-model
+/// call would take them (https://docs.scenario.com/api/resources/generate/methods/run_model says
+/// "any model"), so offering them is a matter of dropping this check.
 fn candidate(model: &Value, kind: AssetKind) -> Option<Candidate> {
     let id = model.get("id")?.as_str().filter(|id| http::id(id).is_ok())?;
     if model.get("type").and_then(Value::as_str) != Some("custom") || is_retiring(model) || is_deleted(model) {
@@ -663,15 +693,12 @@ fn quoted(typical: Option<f64>) -> Pricing {
 }
 
 /// What a model costs: every run is quoted before it starts (`?dryRun=api`), so the price is a quote,
-/// and `typical` is the usual one if the model's statistics give it. A usual quote that is not a
-/// number this app can believe (negative, or more than a limit can be, Rulings 5 and 16) makes the
-/// price [`Pricing::Unknown`].
+/// and `typical` is the usual one if the model's statistics give it. A statistic that is not a
+/// number this app can believe (not finite, negative, or more than a limit can be) is no statistic
+/// (Ruling 17): the price is still a quote, so the model is still tracked, and a limit is checked
+/// against the run's own quote, not this number.
 fn pricing_of(model: &Value, kinds: &[AssetKind]) -> Pricing {
-    match typical_cost(model, kinds) {
-        None => quoted(None),
-        Some(cost) if cost.is_finite() && (0.0..=MAX_ASSET_CREDITS).contains(&cost) => quoted(Some(cost)),
-        Some(_) => Pricing::Unknown,
-    }
+    quoted(typical_cost(model, kinds).filter(|cost| cost.is_finite() && (0.0..=MAX_ASSET_CREDITS).contains(cost)))
 }
 
 /// The median credits of one asset (`performanceStats.variants[].costPerAssetP50CU`) of the variant
@@ -691,18 +718,18 @@ fn typical_cost(model: &Value, kinds: &[AssetKind]) -> Option<f64> {
     chosen.get("costPerAssetP50CU")?.as_f64()
 }
 
-/// Whether a model of `capability` makes any of `kinds` (any kind at all when none is known).
+/// Whether a model of `capability` makes any of `kinds`.
 fn can_make(capability: &str, kinds: &[AssetKind]) -> bool {
-    CAPABILITIES.iter().any(|(name, makes)| *name == capability && (kinds.is_empty() || makes.iter().any(|kind| kinds.contains(kind))))
+    CAPABILITIES.iter().any(|(name, makes)| *name == capability && makes.iter().any(|kind| kinds.contains(kind)))
 }
 
 /// The input fields of a model from its `inputs`
 /// (https://docs.scenario.com/api/resources/models/methods/retrieve, read 2026-11-03): each has a
 /// `name`, which is the key of the body that runs the model, and a `type`. Only kinds this app can
 /// fill are anything but [`FieldKind::Other`]: a string (a choice, when `allowedValues` lists some),
-/// a number (not one from a fixed set), a boolean, and a single picture (`file` of `kind` `image`,
-/// the default). A picture list (`file_array`), a list of anything and the inputs of other models
-/// are `Other`, and are not read into. An input is required when its `required.always` is true;
+/// a number (not one from a fixed set), a boolean, a single picture (`file` of `kind` `image`, the
+/// default) and a list of pictures (`file_array` likewise). A list of anything else and the inputs
+/// of other models are `Other`, and are not read into. An input is required when its `required.always` is true;
 /// one that is only required when another is, or is not, given is not, because this app gives only
 /// what it fills.
 ///
@@ -746,10 +773,17 @@ fn field_kind(item: &Value) -> Result<FieldKind, ToolError> {
         },
         Some("number") if allowed.is_none() => FieldKind::Number { min: limit("min"), max: limit("max") },
         Some("boolean") => FieldKind::Bool,
-        // A file is a picture unless its `kind` says otherwise.
-        Some("file") if item.get("kind").and_then(Value::as_str).unwrap_or("image") == "image" => FieldKind::Image,
+        // A file is a picture unless its `kind` says otherwise; a list of files likewise (Ruling 18).
+        Some("file") if is_picture(item) => FieldKind::Image,
+        Some("file_array") if is_picture(item) => FieldKind::Images,
         _ => FieldKind::Other,
     })
+}
+
+/// Whether a `file` or `file_array` input holds pictures: its `kind` is `image`, which is also what
+/// an input that does not say is taken to be.
+fn is_picture(item: &Value) -> bool {
+    item.get("kind").and_then(Value::as_str).unwrap_or("image") == "image"
 }
 
 /// Whether the model refuses a run without the input: `required.always` (a plain `true` is read too).
@@ -761,15 +795,18 @@ fn is_required(item: &Value) -> bool {
     }
 }
 
-/// One model's answer being too large is a fault of that model, not a refusal that ends a list.
+/// One model's answer is larger than this app reads. [`ErrorCode::OverLimit`] is this app's code for
+/// a size it will not read (as in `http::bytes` and `too_big`), never a word about Scenario's rate
+/// limit: that is told by the HTTP status, in [`Trouble`], and nothing here reads it from a code.
 fn too_large() -> ToolError {
-    ToolError::new(ErrorCode::ProgramFailed, "Scenario's description of this model is larger than this app reads.").with_remediation(REMEDIATION)
+    ToolError::new(ErrorCode::OverLimit, "Scenario's description of this model is larger than this app reads.").with_remediation(REMEDIATION)
 }
 
 fn unreadable() -> ToolError {
     ToolError::new(ErrorCode::GarbledOutput, "The description Scenario gives of this model's inputs could not be read.").with_remediation(REMEDIATION)
 }
 
+/// The inputs of a model are more than this app reads; the same code as [`too_large`], for the same reason.
 fn too_big() -> ToolError {
     ToolError::new(ErrorCode::OverLimit, "The description Scenario gives of this model's inputs is larger than this app reads.").with_remediation(REMEDIATION)
 }
@@ -1243,6 +1280,10 @@ mod listing_tests {
         // The table's kinds count only among the kinds the capability can make: this id makes pictures.
         assert!(kinds_of(&entry("model_google-gemini-3-1-flash", "X", &["txt2audio"], &[]), "model_google-gemini-3-1-flash").is_empty());
         assert!(kinds_of(&json!({"id": "model_x", "capabilities": "txt2img", "tags": 5}), "model_x").is_empty(), "lists of the wrong shape say nothing");
+        // A price is for the capabilities of the kinds asked for, and of no kind at all when none is.
+        assert!(can_make("txt2img", &[AssetKind::Image]) && can_make("txt2img", &[AssetKind::Model3d, AssetKind::Image]));
+        assert!(!can_make("txt2img", &[AssetKind::Model3d]) && !can_make("img2img", &[AssetKind::Image]) && !can_make("unheard-of", &[AssetKind::Image]));
+        assert!(!can_make("txt2img", &[]) && !can_make("txt2audio", &[]));
     }
 
     #[test]
@@ -1304,7 +1345,8 @@ mod listing_tests {
             model("model_odd-stats", Some(json!("nothing"))),
             // A variant with no capability named is as good as any.
             model("model_unnamed", Some(stats(json!([{"variantKey": "a", "costPerAssetP50CU": 4}]), None))),
-            // Rulings 5 and 16: a quote that is negative, or above the most a limit can be, is no price.
+            // Ruling 17: a statistic that is negative, or above the most a limit can be, is no statistic: a
+            // run is quoted by a dry run anyway, so the model is still tracked.
             model("model_negative", Some(stats(json!([variant("txt2img", "a", json!(-3))]), None))),
             model("model_huge", Some(stats(json!([variant("txt2img", "a", json!(1e300))]), None))),
             model("model_over", Some(stats(json!([variant("txt2img", "a", json!(MAX_ASSET_CREDITS + 1.0))]), None))),
@@ -1328,10 +1370,34 @@ mod listing_tests {
         }
         assert_eq!(price("model_unnamed"), quoted(Some(4.0)));
         for garbage in ["model_negative", "model_huge", "model_over"] {
-            assert_eq!(price(garbage), Pricing::Unknown, "{garbage}");
+            assert_eq!(price(garbage), quoted(None), "{garbage}");
         }
         assert_eq!(price("model_most"), quoted(Some(MAX_ASSET_CREDITS)));
         assert_eq!(price("model_free"), quoted(Some(0.0)));
+        // One model that makes pictures and 3D models is priced by the capability of the type asked for.
+        let both = entry("model_both-kinds", "Both", &["txt2img", "img23d"], &[]);
+        let both_stats = stats(json!([variant("txt2img", "a", json!(19)), variant("img23d", "b", json!(120))]), Some("a"));
+        let stand_both = serving(Library::new(vec![vec![both.clone()]]).with("model_both-kinds", 200, described(&both, prompt_only(), Some(both_stats))));
+        let of = |kind| stand_both.scenario().list(Some(KEY), kind).unwrap().models.remove(0).pricing;
+        assert_eq!((of(AssetKind::Image), of(AssetKind::Model3d)), (quoted(Some(19.0)), quoted(Some(120.0))));
+        // The model's own answer need not repeat the capabilities or tags the list gave: the price is
+        // that of the type the list put it under.
+        let bare = picture("model_bare-answer");
+        let mut answer: Value =
+            serde_json::from_str(&described(&bare, picture_inputs(), Some(stats(json!([variant("txt2img", "a", json!(23))]), None)))).unwrap();
+        answer["model"].as_object_mut().unwrap().remove("capabilities");
+        answer["model"].as_object_mut().unwrap().remove("tags");
+        let stand_bare = serving(Library::new(vec![vec![bare]]).with("model_bare-answer", 200, answer.to_string()));
+        assert_eq!(stand_bare.scenario().list(Some(KEY), AssetKind::Image).unwrap().models[0].pricing, quoted(Some(23.0)));
+        // describe has only the answer: no capabilities, no kinds, so no variant is the price of anything.
+        let detail = stand_bare.scenario().describe(KEY, "model_bare-answer").unwrap();
+        assert_eq!((detail.kinds.as_slice(), detail.pricing), (&[][..], quoted(None)));
+        // Unless the known-models table has it: that is what it is for.
+        let known = entry("model_google-gemini-3-1-flash", "", &["txt2img"], &[]);
+        let mut answer: Value = serde_json::from_str(&described(&known, prompt_only(), None)).unwrap();
+        answer["model"].as_object_mut().unwrap().remove("capabilities");
+        let stand_known = serving(Library::new(vec![vec![known]]).with("model_google-gemini-3-1-flash", 200, answer.to_string()));
+        assert_eq!(stand_known.scenario().describe(KEY, "model_google-gemini-3-1-flash").unwrap().kinds, [AssetKind::Image]);
         assert_eq!(found(&list, "model_default").pricing.shown(AssetKind::Image), "~19 credits a picture");
         assert_eq!(found(&list, "model_no-stats").pricing.shown(AssetKind::Image), "quoted before each run");
         assert_eq!(list.error, None);
@@ -1365,6 +1431,13 @@ mod listing_tests {
         assert!(requests.iter().all(|r| !r.to_ascii_lowercase().contains("authorization")));
         // Of another type, none is known.
         assert!(stand.scenario().list(None, AssetKind::Music).unwrap().models.is_empty());
+        // The 3D model this app offers is Meshy 7.1: the Meshy 6 endpoint it replaced is deprecated.
+        let meshy = vec![
+            entry("model_meshy-7-1-img23d", "Meshy 7.1 - Image to 3D", &["img23d"], &[]),
+            entry("model_meshy-img23d", "Meshy 6 Image-to-3D", &["img23d"], &["Deprecated", "deprecated:model_meshy-7-1-img23d", "sc:legacy"]),
+        ];
+        let list = serving(Library::new(vec![meshy])).scenario().list(None, AssetKind::Model3d).unwrap();
+        assert_eq!(ids(&list), ["model_meshy-7-1-img23d"]);
     }
 
     // ---- describe: inputs, price, and models that are gone --------------------------------------
@@ -1461,6 +1534,8 @@ mod listing_tests {
             {"name": "photo", "type": "file"},
             {"name": "sound", "type": "file", "kind": "audio", "required": {"always": true}},
             {"name": "references", "type": "file_array", "kind": "image"},
+            {"name": "gallery", "type": "file_array"},
+            {"name": "clips", "type": "file_array", "kind": "video"},
             {"name": "tags", "type": "string_array"},
             {"name": "weights", "type": "number_array"},
             {"name": "loras", "type": "model_array"},
@@ -1475,7 +1550,7 @@ mod listing_tests {
         ]);
         let fields = scenario_fields(&inputs).unwrap();
         let field = |name: &str| fields.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no {name}")).clone();
-        assert_eq!(fields.len(), 21, "a name given twice is read once");
+        assert_eq!(fields.len(), 23, "a name given twice is read once");
         assert_eq!(field("prompt").kind, FieldKind::Text, "the first of two inputs of one name");
         let prompt = field("prompt");
         assert!(prompt.required && !prompt.has_default);
@@ -1491,7 +1566,9 @@ mod listing_tests {
         assert_eq!((field("image").kind, field("image").required), (FieldKind::Image, true));
         assert_eq!(field("photo").kind, FieldKind::Image, "a file is a picture unless it says otherwise");
         assert_eq!(field("sound").kind, FieldKind::Other);
-        for other in ["references", "tags", "weights", "loras", "base", "layers", "mystery"] {
+        // Ruling 18: a list of pictures is one this app can fill (with the one picture); a list of anything else is not.
+        assert_eq!((field("references").kind, field("gallery").kind), (FieldKind::Images, FieldKind::Images));
+        for other in ["clips", "tags", "weights", "loras", "base", "layers", "mystery"] {
             assert_eq!(field(other).kind, FieldKind::Other, "{other}");
         }
         // Required only when something else is, or is not, given: this app never gives those.
@@ -1559,8 +1636,19 @@ mod listing_tests {
         .unwrap();
         let request = AssetRequest::Model3d { image_url: Some("asset_abc"), prompt: None, textured: true, faces: 3000 };
         let mapped = map_request(&solid, &request, roles).unwrap();
-        assert_eq!(Value::Object(mapped.body), json!({"image": "asset_abc", "targetPolycount": 3000.0, "shouldTexture": true}));
+        // A face count is a whole number, though Scenario has only one kind of number (Ruling 18).
+        assert_eq!(Value::Object(mapped.body), json!({"image": "asset_abc", "targetPolycount": 3000, "shouldTexture": true}));
         assert_eq!(runnable(&solid, AssetKind::Model3d, roles), Ok(vec![]));
+
+        // A model that takes its picture as a list, as Scenario's image-to-3D models may, is sent a list.
+        let listed = scenario_fields(&json!([
+            {"name": "image", "type": "file_array", "kind": "image", "required": {"always": true}},
+            {"name": "targetPolycount", "type": "number"}
+        ]))
+        .unwrap();
+        let mapped = map_request(&listed, &request, roles).unwrap();
+        assert_eq!(Value::Object(mapped.body), json!({"image": ["asset_abc"], "targetPolycount": 3000}));
+        assert_eq!(runnable(&listed, AssetKind::Model3d, roles), Ok(vec![AssetOption::Textured]));
     }
 
     #[test]
@@ -1595,17 +1683,39 @@ mod listing_tests {
         assert_eq!((list.models.len(), list.error), (0, None), "a model that went between the list and its answer is not a failure");
     }
 
-    /// An answer too large to read is that model's fault, not a refusal: the rest of the list is read.
+    /// One model's answer that is no use (too large, not JSON, no model in it) or that refuses this account
+    /// that model is not a model to run, though this app knows its id: it is left out, and the rest of the
+    /// list is read. A request that merely failed (the server's 500) says nothing of the model, so the
+    /// table's word for it stands.
     #[test]
-    fn one_huge_answer_does_not_end_the_list() {
+    fn what_one_models_answer_says_is_not_what_the_list_says() {
+        const KNOWN: &str = "model_google-gemini-3-1-flash";
         let huge = "x".repeat(usize::try_from(http::MAX_JSON).unwrap() + 1);
-        let stand = serving(Library::new(vec![vec![picture("model_huge"), picture("model_fine")]]).with("model_huge", 200, huge));
-        let list = stand.scenario().list(Some(KEY), AssetKind::Image).unwrap();
-        assert_eq!(ids(&list), ["model_fine"]);
-        let error = list.error.as_deref().unwrap();
-        assert!(error.contains("1 model") && error.contains("could not be read") && !error.contains("xxxx"), "{error}");
+        let cases = [
+            ("too large", 200, huge, false),
+            ("not json", 200, "not json".to_string(), false),
+            ("no model", 200, "{}".to_string(), false),
+            ("forbidden", 403, "{}".to_string(), false),
+            ("server error", 500, "oops".to_string(), true),
+            ("bad gateway", 502, "oops".to_string(), true),
+        ];
+        for (what, status, body, offered) in cases {
+            let known = entry(KNOWN, "", &["txt2img"], &[]);
+            let stand = serving(Library::new(vec![vec![known, picture("model_fine")]]).with(KNOWN, status, body));
+            let list = stand.scenario().list(Some(KEY), AssetKind::Image).unwrap();
+            assert!(list.models.iter().any(|m| m.id == "model_fine"), "{what}: the rest of the list is read");
+            assert_eq!(list.models.iter().any(|m| m.id == KNOWN), offered, "{what}: {:?}", ids(&list));
+            if offered {
+                assert_eq!(found(&list, KNOWN).pricing, quoted(None), "{what}");
+            }
+            let error = list.error.as_deref().unwrap();
+            assert!(error.contains("1 model") && error.contains("could not be read") && !error.contains("xxxx") && !error.contains("oops"), "{what}: {error}");
+        }
+        // describe says why, without repeating what the provider sent.
+        let huge = "x".repeat(usize::try_from(http::MAX_JSON).unwrap() + 1);
+        let stand = serving(Library::new(vec![vec![picture("model_huge")]]).with("model_huge", 200, huge));
         let err = stand.scenario().describe(KEY, "model_huge").unwrap_err();
-        assert_eq!(err.code, ErrorCode::ProgramFailed);
+        assert_eq!(err.code, ErrorCode::OverLimit, "the code for an answer larger than this app reads");
         assert!(err.remediation.is_some() && !err.message.contains("xxxx"), "{}", err.message);
     }
 
@@ -1751,20 +1861,32 @@ mod listing_tests {
     }
 
     #[test]
-    fn a_key_the_provider_refuses_stops_the_reading_and_keeps_what_is_known() {
-        let mut page: Vec<Value> = (0..20).map(|i| picture(&format!("model_p{i}"))).collect();
-        page.push(entry("model_google-gemini-3-1-flash", "", &["txt2img"], &[]));
-        let mut library = Library::new(vec![page]);
-        for id in library.models.keys().cloned().collect::<Vec<_>>() {
-            library = library.with(&id, 401, "{}".into());
+    fn a_key_the_provider_refuses_or_a_limit_it_reaches_stops_the_reading_and_keeps_what_is_known() {
+        let everything_answers = |status: u16| {
+            let mut page: Vec<Value> = (0..20).map(|i| picture(&format!("model_p{i}"))).collect();
+            page.push(entry("model_google-gemini-3-1-flash", "", &["txt2img"], &[]));
+            let mut library = Library::new(vec![page]);
+            for id in library.models.keys().cloned().collect::<Vec<_>>() {
+                library = library.with(&id, status, "{}".into());
+            }
+            serving(library)
+        };
+        for (status, said) in [(401, "credential"), (402, "limit"), (429, "limit")] {
+            let stand = everything_answers(status);
+            let list = stand.scenario().list(Some(KEY), AssetKind::Image).unwrap();
+            assert!(stand.model_requests().len() <= 4, "{status}: the first refusal ends it: {}", stand.model_requests().len());
+            assert_eq!(ids(&list), ["model_google-gemini-3-1-flash"], "{status}: the models this app knows are still offered");
+            assert_eq!(found(&list, "model_google-gemini-3-1-flash").pricing, quoted(None));
+            let error = list.error.as_deref().unwrap();
+            assert!(error.contains("could not be read") && error.contains(said), "{status}: {error}");
         }
-        let stand = serving(library);
+        // A 403 is this account being kept from one model, not from the rest: every model is asked for,
+        // none is offered (not even the one this app knows), and each is counted.
+        let stand = everything_answers(403);
         let list = stand.scenario().list(Some(KEY), AssetKind::Image).unwrap();
-        assert!(stand.model_requests().len() <= 4, "the first refusal ends it: {}", stand.model_requests().len());
-        assert_eq!(ids(&list), ["model_google-gemini-3-1-flash"], "the models this app knows are still offered");
-        assert_eq!(found(&list, "model_google-gemini-3-1-flash").pricing, quoted(None));
-        let error = list.error.as_deref().unwrap();
-        assert!(error.contains("could not be read") && error.contains("credential"), "{error}");
+        assert_eq!(stand.model_requests().len(), 21);
+        assert!(list.models.is_empty(), "{:?}", ids(&list));
+        assert!(list.error.as_deref().is_some_and(|e| e.contains("21 models could not be read")), "{:?}", list.error);
     }
 
     #[test]

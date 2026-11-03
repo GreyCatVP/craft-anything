@@ -39,6 +39,8 @@ pub enum FieldKind {
     Choice(Vec<String>),
     /// A picture, given as a web address or a `data:` URI.
     Image,
+    /// A list of pictures, each a web address or a `data:` URI.
+    Images,
     /// Something this app has no way to fill: a list, an object, a number from a fixed set. A model
     /// that insists on one cannot be run; one that merely allows it is left to use its own.
     Other,
@@ -142,7 +144,7 @@ fn option_of(role: Role) -> Option<AssetOption> {
 fn holds(role: Role, kind: &FieldKind) -> bool {
     match role {
         Role::Prompt => matches!(kind, FieldKind::Text),
-        Role::Image => matches!(kind, FieldKind::Text | FieldKind::Image),
+        Role::Image => matches!(kind, FieldKind::Text | FieldKind::Image | FieldKind::Images),
         Role::Shape => matches!(kind, FieldKind::Choice(_)),
         Role::Width | Role::Height | Role::Faces | Role::Duration => matches!(kind, FieldKind::Integer { .. } | FieldKind::Number { .. }),
         Role::Textured | Role::Instrumental => matches!(kind, FieldKind::Bool),
@@ -189,6 +191,16 @@ fn bounded_int(x: i64, min: Option<i64>, max: Option<i64>) -> i64 {
     max.map_or(x, |m| x.min(m))
 }
 
+/// A whole number held to the limits of a number field: no lower than the lowest whole number at
+/// or above its lower limit, no higher than the highest at or below its upper one. A limit that
+/// is not a finite number is no limit.
+fn bounded_whole(x: i64, min: Option<f64>, max: Option<f64>) -> i64 {
+    // `as` saturates, so a huge limit is the largest whole number rather than a panic.
+    let lowest = min.filter(|m| m.is_finite()).map(|m| m.ceil() as i64);
+    let highest = max.filter(|m| m.is_finite()).map(|m| m.floor() as i64);
+    bounded_int(x, lowest, highest)
+}
+
 fn float(x: f64) -> Option<Value> {
     Number::from_f64(x).map(Value::Number)
 }
@@ -207,12 +219,15 @@ fn place(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) ->
     }
     match (offered, &field.kind) {
         (Supply::Text(text), FieldKind::Text | FieldKind::Image) => Some(Value::String(text.to_string())),
+        (Supply::Text(text), FieldKind::Images) => Some(Value::Array(vec![Value::String(text.to_string())])),
         (Supply::Text(text), FieldKind::Choice(values)) => values.iter().any(|v| v == text).then(|| Value::String(text.to_string())),
         (Supply::Shape(shape), FieldKind::Choice(values)) => roles.shape_value(shape, values).map(Value::String),
         (Supply::Shape(shape), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(i64::from(side(shape, role)), *min, *max))),
-        (Supply::Shape(shape), FieldKind::Number { min, max }) => float(bounded(f64::from(side(shape, role)), *min, *max)),
+        // A size or a face count is a whole number even for a field declared as a number, which may
+        // not take 3000.0 where it wants 3000.
+        (Supply::Shape(shape), FieldKind::Number { min, max }) => Some(Value::from(bounded_whole(i64::from(side(shape, role)), *min, *max))),
         (Supply::Count(n), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(i64::from(n), *min, *max))),
-        (Supply::Count(n), FieldKind::Number { min, max }) => float(bounded(f64::from(n), *min, *max)),
+        (Supply::Count(n), FieldKind::Number { min, max }) => Some(Value::from(bounded_whole(i64::from(n), *min, *max))),
         // `as` saturates, and `round` of a finite number is finite: no overflow, no panic.
         (Supply::Seconds(x), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(x.round() as i64, *min, *max))),
         (Supply::Seconds(x), FieldKind::Number { min, max }) => float(bounded(x, *min, *max)),
@@ -427,7 +442,7 @@ mod tests {
         assert_eq!(body(&map(&fields, picture(Shape::Tall))), json!({"prompt": "crate", "width": 576, "height": 1024}));
         // The model's own limits win over the shape.
         let small = [field("prompt", FieldKind::Text), field("width", int(None, Some(512))), field("height", num(Some(600.0), None))];
-        assert_eq!(body(&map(&small, picture(Shape::Square))), json!({"prompt": "crate", "width": 512, "height": 1024.0}));
+        assert_eq!(body(&map(&small, picture(Shape::Square))), json!({"prompt": "crate", "width": 512, "height": 1024}));
         // One side alone says nothing about the shape: it is sent, and the shape reported ignored.
         let lone = [field("prompt", FieldKind::Text), field("width", int(None, None))];
         let mapped = map(&lone, picture(Shape::Wide));
@@ -444,11 +459,49 @@ mod tests {
         assert_eq!(map(&fields, faces(u32::MAX)).body.get("target_face_count"), Some(&json!(20_000)));
         // A model that counts faces in fractions, and limits that contradict each other, don't panic.
         let decimal = [field("image_url", FieldKind::Image), field("polycount", num(Some(10.0), Some(50.0)))];
-        assert_eq!(map(&decimal, faces(100)).body.get("polycount"), Some(&json!(50.0)));
+        assert_eq!(map(&decimal, faces(100)).body.get("polycount"), Some(&json!(50)));
         let backwards = [field("image_url", FieldKind::Image), field("target_face_count", int(Some(900), Some(100)))];
         assert_eq!(map(&backwards, faces(300)).body.get("target_face_count"), Some(&json!(100)));
         let backwards = [field("image_url", FieldKind::Image), field("polycount", num(Some(f64::NAN), Some(f64::NEG_INFINITY)))];
         assert!(map_request(&backwards, &faces(300), InputRoles::built_in()).is_ok());
+    }
+
+    /// Ruling 18: a face count or a size is a whole number whatever kind of number the field is
+    /// declared as. JSON writes 3000.0 for a float, which an integer input may refuse.
+    #[test]
+    fn faces_width_and_height_are_sent_as_whole_numbers_to_a_number_field() {
+        let faces = |n| AssetRequest::Model3d { image_url: Some("https://example.invalid/a.png"), prompt: None, textured: false, faces: n };
+        let free = [field("image_url", FieldKind::Image), field("targetPolycount", num(None, None))];
+        let sent = map(&free, faces(3000)).body.get("targetPolycount").cloned().unwrap();
+        assert_eq!(sent, json!(3000));
+        assert!(sent.is_i64() || sent.is_u64(), "{sent}");
+        // A fractional limit is met from the inside: the lowest whole number above a lower limit, the highest below an upper one.
+        let fractional = [field("image_url", FieldKind::Image), field("targetPolycount", num(Some(100.5), Some(2000.5)))];
+        assert_eq!(map(&fractional, faces(10)).body.get("targetPolycount"), Some(&json!(101)));
+        assert_eq!(map(&fractional, faces(9000)).body.get("targetPolycount"), Some(&json!(2000)));
+        let sides = [field("prompt", FieldKind::Text), field("width", num(None, None)), field("height", num(Some(64.0), Some(2048.0)))];
+        let sent = body(&map(&sides, picture(Shape::Wide)));
+        assert_eq!(sent, json!({"prompt": "crate", "width": 1024, "height": 576}));
+        assert!(sent["width"].is_u64() && sent["height"].is_u64(), "{sent}");
+        // A length of sound can have a fraction, so it stays a float.
+        let sound = AssetRequest::SoundEffect { prompt: "wind", duration_seconds: 2.5 };
+        assert_eq!(map(&[field("prompt", FieldKind::Text), field("duration", num(None, None))], sound).body.get("duration"), Some(&json!(2.5)));
+    }
+
+    /// Ruling 18: a field that takes a list of pictures is given the one picture, as a list.
+    #[test]
+    fn a_list_of_pictures_is_filled_with_the_one_picture() {
+        let roles = InputRoles::built_in();
+        let fields = [required(field("image", FieldKind::Images)), field("targetPolycount", int(None, None))];
+        assert_eq!(body(&map(&fields, solid())), json!({"image": ["https://example.invalid/a.png"], "targetPolycount": 100}));
+        assert_eq!(runnable(&fields, AssetKind::Model3d, roles), Ok(vec![AssetOption::Textured]));
+        // Only the picture goes into it: not the prompt, and nothing for a type that starts from words.
+        let text_only = AssetRequest::Model3d { image_url: None, prompt: Some("a barrel"), textured: false, faces: 1000 };
+        assert_eq!(map_request(&fields, &text_only, roles).unwrap_err().code, ErrorCode::BadSettings, "a required picture list with no picture");
+        assert!(map_request(&[field("image", FieldKind::Images), field("prompt", FieldKind::Text)], &text_only, roles).is_ok());
+        assert!(runnable(&fields, AssetKind::Image, roles).is_err());
+        assert!(runnable(&[field("prompt", FieldKind::Images)], AssetKind::Image, roles).is_err(), "a list of pictures cannot hold a prompt");
+        assert!(runnable(&[required(field("image_url", FieldKind::Images))], AssetKind::Model3d, roles).is_ok());
     }
 
     #[test]

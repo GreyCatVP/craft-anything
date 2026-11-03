@@ -23,7 +23,9 @@
 
 version = 1
 
-# The models the previous fixed table offered (assets.toml), under the provider's own ids.
+# The models the previous fixed table offered (assets.toml), under the provider's own ids. Its
+# Scenario 3D model, `model_meshy-img23d` (Meshy 6), is deprecated at Scenario, so the entry here is
+# the model that replaces it, `model_meshy-7-1-img23d`.
 [[model]]
 provider = "fal"
 id = "fal-ai/nano-banana-pro"
@@ -56,8 +58,8 @@ kinds = ["model_3d"]
 
 [[model]]
 provider = "scenario"
-id = "model_meshy-img23d"
-name = "Scenario Meshy 6"
+id = "model_meshy-7-1-img23d"
+name = "Scenario Meshy 7.1"
 kinds = ["model_3d"]
 
 [[model]]

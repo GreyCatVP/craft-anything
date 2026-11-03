@@ -1,6 +1,10 @@
 //! Bounded HTTP shared by the asset adapters. Never include remote bodies or URLs in errors.
+use super::inputs::{REMEDIATION, clipped};
 use craft_anything_evidence::{ErrorCode, ToolError};
-use std::{io::Read, time::Duration};
+use std::{
+    io::Read,
+    time::{Duration, Instant},
+};
 
 pub(super) const MAX_BYTES: u64 = 200 << 20;
 pub(super) const MAX_JSON: u64 = 2 << 20;
@@ -34,6 +38,40 @@ pub(super) fn network() -> ToolError {
     ToolError::new(ErrorCode::EngineMissing, "The asset service could not be reached or its request timed out.")
         .with_remediation("Check your connection and provider account before retrying; an accepted job may already have been charged.")
 }
+// Shared by the providers' model lists (`Fal::list`, `Scenario::list`, ...).
+
+/// The longest model name kept, and the longest next-page cursor or token followed.
+pub(super) const NAME_LENGTH: usize = 80;
+pub(super) const CURSOR_LENGTH: usize = 200;
+
+/// Whether `deadline` has passed. A list checks it before each request it starts.
+pub(super) fn time_is_up(deadline: Instant) -> bool {
+    Instant::now() >= deadline
+}
+
+/// An error as one sentence or two, for a list's `error`.
+pub(super) fn words(e: &ToolError) -> String {
+    format!("{} {}", e.message, e.remediation.as_deref().unwrap_or_default()).trim().to_string()
+}
+
+/// The list ran out of time. `provider` is the name its people know it by ("fal.ai", "Scenario").
+pub(super) fn too_slow(provider: &str) -> ToolError {
+    ToolError::new(ErrorCode::TimedOut, format!("Reading {provider}'s model list took too long, so it was cut short."))
+        .with_remediation("Refresh the list to read the rest.")
+}
+
+/// A chosen model its provider no longer serves; its name is the provider's, so it is clipped.
+pub(super) fn gone(provider: &str, model: &str) -> ToolError {
+    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is no longer available at {provider}.", clipped(model, NAME_LENGTH)))
+        .with_remediation(REMEDIATION)
+}
+
+/// A chosen model its provider has marked as one it is retiring.
+pub(super) fn retiring(provider: &str, model: &str) -> ToolError {
+    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is being retired at {provider}.", clipped(model, NAME_LENGTH)))
+        .with_remediation(REMEDIATION)
+}
+
 /// `text` for a query string: everything but letters, digits, `-_.~` and `/` as `%XX`.
 pub(super) fn encode(text: &str) -> String {
     use std::fmt::Write;
@@ -188,6 +226,22 @@ pub(super) mod tests {
             }
         });
         (base, seen)
+    }
+
+    #[test]
+    fn the_messages_of_a_list_name_the_provider_and_tidy_the_model() {
+        let hostile = format!("evil\nmodel{}", "x".repeat(200));
+        for (error, said) in [(gone("Acme", &hostile), "no longer available at Acme."), (retiring("Acme", &hostile), "being retired at Acme.")] {
+            assert_eq!(error.code, ErrorCode::BadSettings);
+            assert!(error.message.ends_with(said) && error.message.contains("evilmodelxxx"), "{}", error.message);
+            assert!(!error.message.chars().any(char::is_control) && error.message.chars().count() < 160, "{}", error.message);
+            assert_eq!(error.remediation.as_deref(), Some(REMEDIATION));
+        }
+        let slow = too_slow("Acme");
+        assert_eq!(slow.code, ErrorCode::TimedOut);
+        assert_eq!(words(&slow), "Reading Acme's model list took too long, so it was cut short. Refresh the list to read the rest.");
+        assert_eq!(words(&ToolError::new(ErrorCode::BadSettings, "No remedy.")), "No remedy.");
+        assert!(!time_is_up(Instant::now() + Duration::from_secs(60)) && time_is_up(Instant::now()));
     }
 
     #[test]

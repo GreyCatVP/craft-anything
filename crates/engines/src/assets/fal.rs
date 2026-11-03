@@ -11,7 +11,7 @@ use super::openapi::input_fields;
 use super::tables::{InputRoles, KnownModels};
 use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, SizeBy, charged, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
-use http::encode;
+use http::{CURSOR_LENGTH, NAME_LENGTH, encode, time_is_up, words};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 
 /// The provider id the asset table names.
 pub const ID: &str = "fal";
+/// What people call it.
+const NAME: &str = "fal.ai";
 const BASE: &str = "https://fal.run";
 /// fal's platform API, which lists models and prices (generations are run at [`BASE`]).
 const API_BASE: &str = "https://api.fal.ai";
@@ -59,7 +61,7 @@ impl AssetProvider for Fal {
     }
 
     fn name(&self) -> &'static str {
-        "fal.ai"
+        NAME
     }
 
     fn keys_page(&self) -> Option<&'static str> {
@@ -147,11 +149,8 @@ const MAX_PAGES: usize = 40;
 const MAX_PAGE_MODELS: usize = 100;
 /// How many ids one price request carries (fal accepts 1 to 50).
 const PRICE_BATCH: usize = 50;
-/// The longest model name kept.
-const NAME_LENGTH: usize = 80;
-/// The longest model id kept, and the longest cursor followed.
+/// The longest model id kept.
 const ID_LENGTH: usize = 100;
-const CURSOR_LENGTH: usize = 200;
 /// How long one request of the platform API may take.
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a whole [`Fal::list`] (every page, then every batch of prices) goes on starting
@@ -181,7 +180,7 @@ impl Fal {
                     break 'categories;
                 }
                 if time_is_up(deadline) {
-                    stopped = Some(too_slow());
+                    stopped = Some(http::too_slow(NAME));
                     break 'categories;
                 }
                 let page = match self.page(key, category, cursor.as_deref()) {
@@ -240,16 +239,16 @@ impl Fal {
         let url = format!("{}/v1/models?endpoint_id={}&expand=openapi-3.0", self.api_base, encode(model));
         let response = self.send(Some(key), &url)?;
         if response.status().as_u16() == 404 {
-            return Err(gone(model));
+            return Err(http::gone(NAME, model));
         }
         let answer = read(response, http::MAX_LIST_PAGE, true)?;
         let found = answer
             .get("models")
             .and_then(Value::as_array)
             .and_then(|models| models.iter().find(|m| m.get("endpoint_id").and_then(Value::as_str) == Some(model)))
-            .ok_or_else(|| gone(model))?;
+            .ok_or_else(|| http::gone(NAME, model))?;
         if is_retiring(found) {
-            return Err(retiring(model));
+            return Err(http::retiring(NAME, model));
         }
         let fields = input_fields(found.get("openapi").unwrap_or(&Value::Null))?;
         let mut priced = self.fetch_prices(key, &[model])?;
@@ -359,15 +358,6 @@ struct Prices {
     more: bool,
 }
 
-fn time_is_up(deadline: Instant) -> bool {
-    Instant::now() >= deadline
-}
-
-fn too_slow() -> ToolError {
-    ToolError::new(ErrorCode::TimedOut, "Reading fal.ai's model list took too long, so it was cut short.")
-        .with_remediation("Refresh the list to read the rest.")
-}
-
 /// The answer's JSON, or why there is none. fal's rate limit is told apart because it is the one
 /// failure that is the person's to fix: a key raises it.
 fn read(response: ureq::http::Response<ureq::Body>, limit: u64, key_given: bool) -> Result<Value, ToolError> {
@@ -382,20 +372,6 @@ fn read(response: ureq::http::Response<ureq::Body>, limit: u64, key_given: bool)
     }
     http::status(status)?;
     http::json_up_to(response.into_body(), limit)
-}
-
-/// An error as one sentence or two for the list's `error`.
-fn words(e: &ToolError) -> String {
-    format!("{} {}", e.message, e.remediation.as_deref().unwrap_or_default()).trim().to_string()
-}
-
-fn gone(model: &str) -> ToolError {
-    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is no longer available at fal.ai.", clipped(model, NAME_LENGTH)))
-        .with_remediation(REMEDIATION)
-}
-
-fn retiring(model: &str) -> ToolError {
-    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is being retired at fal.ai.", clipped(model, NAME_LENGTH))).with_remediation(REMEDIATION)
 }
 
 /// Whether fal has marked the model as one it is retiring.

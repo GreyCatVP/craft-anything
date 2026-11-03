@@ -297,7 +297,9 @@ mod tests {
         // Today's models, under the provider's own id.
         assert_eq!(known.kinds("fal", "fal-ai/flux/dev"), Some(&[AssetKind::Image][..]));
         assert_eq!(known.kinds("fal", "tripo3d/p1/image-to-3d"), Some(&[AssetKind::Model3d][..]));
-        assert_eq!(known.kinds("scenario", "model_meshy-img23d"), Some(&[AssetKind::Model3d][..]));
+        assert_eq!(known.kinds("scenario", "model_meshy-7-1-img23d"), Some(&[AssetKind::Model3d][..]));
+        // Scenario has deprecated the Meshy 6 endpoint that table named before; its replacement is the model.
+        assert_eq!(known.kinds("scenario", "model_meshy-img23d"), None);
         assert_eq!(known.kinds("elevenlabs", "eleven_multilingual_v2"), Some(&[AssetKind::Speech][..]));
         // Audio models the providers can't tell apart.
         assert_eq!(known.kinds("fal", "fal-ai/kokoro/french"), Some(&[AssetKind::Speech][..]));
