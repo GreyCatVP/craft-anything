@@ -10,6 +10,7 @@ pub mod fal;
 mod http;
 pub mod inputs;
 pub mod model;
+pub mod openapi;
 pub mod scenario;
 pub mod tables;
 
@@ -552,19 +553,53 @@ impl AssetProviders {
     }
 }
 
+/// Whether an amount of dollars or credits is a real one too small for two decimals to show, so
+/// it is written "under 0.01…". The one place that decides this, so no amount reads two ways.
+pub(crate) fn under_a_cent(x: f64) -> bool {
+    x > 0.0 && x < 0.005
+}
+
 /// A price in prompt text: "$0.53", or "under $0.01" for a fraction of a cent.
 pub fn usd(x: f64) -> String {
-    if x > 0.0 && x < 0.005 { "under $0.01".into() } else { format!("${x:.2}") }
+    if under_a_cent(x) { "under $0.01".into() } else { format!("${x:.2}") }
 }
 
 /// "about $0.53", or "under $0.01".
 pub fn about_usd(x: f64) -> String {
-    if x > 0.0 && x < 0.005 { usd(x) } else { format!("about {}", usd(x)) }
+    if under_a_cent(x) { usd(x) } else { format!("about {}", usd(x)) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `AssetKind::ALL` is what the screens and the model lists walk. `next` names every variant
+    /// with no catch-all, so a new variant fails to compile here until it has a place in the chain,
+    /// and the chain then differs from `ALL` until the variant is added there too.
+    #[test]
+    fn all_lists_every_kind_in_order() {
+        fn next(kind: AssetKind) -> Option<AssetKind> {
+            match kind {
+                AssetKind::Image => Some(AssetKind::Model3d),
+                AssetKind::Model3d => Some(AssetKind::Speech),
+                AssetKind::Speech => Some(AssetKind::SoundEffect),
+                AssetKind::SoundEffect => Some(AssetKind::Music),
+                AssetKind::Music => None,
+            }
+        }
+        let mut chain = vec![AssetKind::Image];
+        while let Some(kind) = chain.last().copied().and_then(next) {
+            assert!(chain.len() <= AssetKind::ALL.len(), "the chain never ends: {chain:?}");
+            chain.push(kind);
+        }
+        assert_eq!(chain, AssetKind::ALL);
+    }
+
+    #[test]
+    fn amounts_under_half_a_cent_read_as_under_a_cent() {
+        assert!(under_a_cent(0.0049) && !under_a_cent(0.005) && !under_a_cent(0.0));
+        assert_eq!((usd(0.0049), usd(0.005)), ("under $0.01".to_string(), "$0.01".to_string()));
+    }
 
     #[test]
     fn the_table_parses_and_its_defaults_match_the_code() {

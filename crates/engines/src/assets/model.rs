@@ -2,7 +2,8 @@
 //! which of our options it ignores. Prices come from the provider; where it gives none, the
 //! model's [`Pricing`] is [`Pricing::Unknown`] and its usage is counted without an amount.
 
-use super::{AssetKind, usd};
+use super::inputs::InputField;
+use super::{AssetKind, under_a_cent, usd};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -76,10 +77,10 @@ impl Rate {
     fn shown(&self, unit: Unit, kind: AssetKind) -> String {
         let (amount, per) = match *self {
             Rate::PerRequest(x) => (amount(unit, x), request_noun(kind)),
-            Rate::PerMegapixel(x) => (amount(unit, x), "a megapixel"),
-            Rate::PerSecond(x) => (amount(unit, x), "a second"),
-            Rate::PerCharacter(x) => (amount(unit, x), "a character"),
-            Rate::Quoted { typical: Some(x) } => (approximately(amount(unit, x)), request_noun(kind)),
+            Rate::PerMegapixel(x) => (rate_amount(unit, x), "a megapixel"),
+            Rate::PerSecond(x) => (rate_amount(unit, x), "a second"),
+            Rate::PerCharacter(x) => (rate_amount(unit, x), "a character"),
+            Rate::Quoted { typical: Some(x) } => (quoted(unit, x), request_noun(kind)),
             Rate::Quoted { typical: None } => return "quoted before each run".into(),
         };
         format!("{amount} {per}")
@@ -104,19 +105,47 @@ fn amount(unit: Unit, x: f64) -> String {
     }
 }
 
+/// The amount of a rate for one unit (a megapixel, a second, a character). Credits are shown as
+/// they always are; a dollar rate is often a fraction of a cent, so it is not rounded to the cent.
+fn rate_amount(unit: Unit, x: f64) -> String {
+    match unit {
+        Unit::Usd => usd_rate(x),
+        Unit::Credits => credits(x),
+    }
+}
+
+/// A dollar rate with up to three significant digits and at least two decimals: "$0.003",
+/// "$0.025", "$0.10", "$12.00". Below a millionth of a dollar it reads "under".
+fn usd_rate(x: f64) -> String {
+    const SMALLEST: f64 = 1e-6;
+    if x <= 0.0 || !x.is_finite() {
+        return format!("${x:.2}");
+    }
+    if x < SMALLEST {
+        return format!("under {}", usd_rate(SMALLEST));
+    }
+    // Two places past the first nonzero one keeps three significant digits.
+    let decimals = if x >= 1.0 { 2 } else { (2.0 - x.log10().floor()) as usize };
+    let fixed = format!("{x:.decimals$}");
+    let trimmed = fixed.trim_end_matches('0');
+    let (whole, fraction) = trimmed.split_once('.').unwrap_or((trimmed, ""));
+    format!("${whole}.{fraction:0<2}")
+}
+
+/// A typical quote: "~$0.20", or just the amount when that already reads "under …".
+fn quoted(unit: Unit, x: f64) -> String {
+    let shown = amount(unit, x);
+    if under_a_cent(x) { shown } else { format!("~{shown}") }
+}
+
 /// "20 credits", "1 credit", "0.05 credits", or "under 0.01 credits" for a fraction of that.
 fn credits(x: f64) -> String {
-    if x > 0.0 && x < 0.005 {
+    if under_a_cent(x) {
         return "under 0.01 credits".into();
     }
     let fixed = format!("{x:.2}");
     let n = fixed.trim_end_matches('0').trim_end_matches('.');
     format!("{n} {}", if n == "1" { "credit" } else { "credits" })
-}
-
-/// Put "~" before an amount, unless it already says "under".
-fn approximately(amount: String) -> String {
-    if amount.starts_with("under") { amount } else { format!("~{amount}") }
 }
 
 /// Something a model may not use of what we pass it. The picker shows these so the person knows
@@ -152,6 +181,20 @@ pub struct ListedModel {
     pub pricing: Pricing,
     /// Options we pass that this model does nothing with.
     pub ignores: Vec<AssetOption>,
+}
+
+/// One model with what the app needs to run it: the inputs it takes and what it costs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelDetail {
+    /// The model's id at the provider.
+    pub id: String,
+    /// Shown to the person.
+    pub name: String,
+    /// The asset types the model makes.
+    pub kinds: Vec<AssetKind>,
+    /// Every input the provider describes for it.
+    pub fields: Vec<InputField>,
+    pub pricing: Pricing,
 }
 
 /// The models fetched for one asset type, with the reason the fetch failed if it did.
@@ -204,6 +247,40 @@ mod tests {
         assert_eq!(credit_rate(Rate::Quoted { typical: None }).shown(AssetKind::Image), "quoted before each run");
         assert_eq!(usd_rate(Rate::Quoted { typical: Some(0.2) }).shown(AssetKind::Image), "~$0.20 a picture");
         assert_eq!(usd_rate(Rate::Quoted { typical: Some(0.001) }).shown(AssetKind::Image), "under $0.01 a picture");
+    }
+
+    /// fal bills a megapixel, a second or a character in fractions of a cent, and the picker exists
+    /// to compare them: a dollar rate per unit keeps up to three significant digits.
+    #[test]
+    fn dollar_rates_per_unit_keep_three_significant_digits() {
+        let per = |rate| Pricing::Before { unit: Unit::Usd, rate }.shown(AssetKind::Image);
+        assert_eq!(per(Rate::PerMegapixel(0.003)), "$0.003 a megapixel");
+        assert_eq!(per(Rate::PerMegapixel(0.025)), "$0.025 a megapixel");
+        assert_eq!(per(Rate::PerMegapixel(0.0262144)), "$0.0262 a megapixel");
+        assert_eq!(per(Rate::PerSecond(0.0015)), "$0.0015 a second");
+        assert_eq!(per(Rate::PerCharacter(0.00003)), "$0.00003 a character");
+        assert_eq!(per(Rate::PerMegapixel(0.03)), "$0.03 a megapixel", "a round rate keeps two decimals, not more");
+        assert_eq!(per(Rate::PerSecond(0.1)), "$0.10 a second");
+        assert_eq!(per(Rate::PerSecond(12.0)), "$12.00 a second");
+        assert_eq!(per(Rate::PerMegapixel(0.0099999)), "$0.01 a megapixel", "rounding up to the next place is not shown as 0.010");
+        assert_eq!(per(Rate::PerCharacter(0.0)), "$0.00 a character");
+        assert_eq!(per(Rate::PerCharacter(1e-9)), "under $0.000001 a character");
+        // A price for a whole generation is still shown to the cent, and credits are untouched.
+        assert_eq!(per(Rate::PerRequest(0.003)), "under $0.01 a picture");
+        let credits = |rate| Pricing::Before { unit: Unit::Credits, rate }.shown(AssetKind::Speech);
+        assert_eq!(credits(Rate::PerCharacter(0.003)), "under 0.01 credits a character");
+    }
+
+    /// The "~" says a quote is only typical. It is left off when the amount reads "under …", and
+    /// that is decided on the number, never on the words the amount was written with.
+    #[test]
+    fn the_approximate_mark_follows_the_number() {
+        let quoted = |unit, x| Pricing::Before { unit, rate: Rate::Quoted { typical: Some(x) } }.shown(AssetKind::Image);
+        assert_eq!(quoted(Unit::Usd, 0.004), "under $0.01 a picture");
+        assert_eq!(quoted(Unit::Credits, 0.004), "under 0.01 credits a picture");
+        assert_eq!(quoted(Unit::Usd, 0.005), "~$0.01 a picture", "half a cent rounds to a cent: not under");
+        assert_eq!(quoted(Unit::Credits, 20.0), "~20 credits a picture");
+        assert_eq!(quoted(Unit::Credits, 0.0), "~0 credits a picture");
     }
 
     #[test]

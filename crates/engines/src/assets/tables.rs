@@ -92,6 +92,11 @@ impl KnownModels {
         self.models.iter().find(|m| m.provider == provider && m.id == model)
     }
 
+    /// The name this table gives the model, or `None` when it doesn't know it.
+    pub fn name(&self, provider: &str, model: &str) -> Option<&str> {
+        self.find(provider, model).map(|m| m.name.as_str())
+    }
+
     /// The asset types the model makes, or `None` when this table doesn't know it.
     pub fn kinds(&self, provider: &str, model: &str) -> Option<&[AssetKind]> {
         self.find(provider, model).map(|m| m.kinds.as_slice())
@@ -297,6 +302,8 @@ mod tests {
         // Audio models the providers can't tell apart.
         assert_eq!(known.kinds("fal", "fal-ai/kokoro/french"), Some(&[AssetKind::Speech][..]));
         assert_eq!(known.kinds("scenario", "model_meta-musicgen"), Some(&[AssetKind::Music][..]));
+        assert_eq!(known.name("fal", "fal-ai/flux/dev"), Some("FLUX.1 [dev]"));
+        assert_eq!(known.name("fal", "no-such-model"), None);
         // The id is the provider's, and a provider's models are its own.
         assert_eq!(known.kinds("scenario", "eleven_text_to_sound_v2"), None);
         assert_eq!(known.kinds("elevenlabs", "no-such-model"), None);

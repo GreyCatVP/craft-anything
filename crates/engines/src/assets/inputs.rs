@@ -39,6 +39,9 @@ pub enum FieldKind {
     Choice(Vec<String>),
     /// A picture, given as a web address or a `data:` URI.
     Image,
+    /// Something this app has no way to fill: a list, an object, a number from a fixed set. A model
+    /// that insists on one cannot be run; one that merely allows it is left to use its own.
+    Other,
 }
 
 /// One input of a model, as its provider describes it.
@@ -233,18 +236,24 @@ fn fill(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) -> 
     }
 }
 
-const REMEDIATION: &str = "Choose another model for this type of asset in the project's Generated Assets settings.";
+/// What to do about a model this app cannot use.
+pub(super) const REMEDIATION: &str = "Choose another model for this type of asset in the project's Generated Assets settings.";
 
 /// A name the provider gave, as it may appear in a message: no control characters (a line break
 /// would start a line of its own) and at most 64 characters.
 fn shown(name: &str) -> String {
-    const LONGEST: usize = 64;
-    let mut shown: String = name.chars().filter(|c| !c.is_control()).take(LONGEST + 1).collect();
-    if shown.chars().count() > LONGEST {
-        shown = shown.chars().take(LONGEST).collect();
-        shown.push('\u{2026}');
+    clipped(name, 64)
+}
+
+/// `text` as it may appear in a message or a list: no control characters, and at most `longest`
+/// characters, with "…" in place of what was cut. For text a provider supplied.
+pub(super) fn clipped(text: &str, longest: usize) -> String {
+    let mut clipped: String = text.chars().filter(|c| !c.is_control()).take(longest.saturating_add(1)).collect();
+    if clipped.chars().count() > longest {
+        clipped = clipped.chars().take(longest).collect();
+        clipped.push('\u{2026}');
     }
-    shown
+    clipped
 }
 
 /// Why a list of fields is too long to read, if it is.
@@ -487,6 +496,25 @@ mod tests {
         assert!(runnable(&[prompt.clone(), size], AssetKind::Speech, roles).is_err());
         // Nor is a field that is the wrong type for its role.
         assert!(runnable(&[required(field("prompt", int(None, None)))], AssetKind::Image, roles).is_err());
+    }
+
+    /// An input of a kind this app cannot fill (a list, an object) is no obstacle unless the model
+    /// insists on it, whatever the input is called.
+    #[test]
+    fn an_input_of_a_kind_nothing_fills_stops_a_model_only_when_it_is_needed() {
+        let roles = InputRoles::built_in();
+        let prompt = required(field("prompt", FieldKind::Text));
+        let loras = field("loras", FieldKind::Other);
+        assert_eq!(runnable(&[prompt.clone(), loras.clone()], AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+        assert_eq!(body(&map(&[prompt.clone(), loras], picture(Shape::Square))), json!({"prompt": "crate"}));
+        for needed in [required(field("loras", FieldKind::Other)), required(field("image_url", FieldKind::Other))] {
+            let err = runnable(&[prompt.clone(), needed.clone()], AssetKind::Image, roles).unwrap_err();
+            assert!(err.contains(&needed.name), "{err}");
+            assert!(map_request(&[prompt.clone(), needed], &picture(Shape::Square), roles).is_err());
+        }
+        // Not even the prompt's own name makes a list a prompt.
+        assert!(runnable(&[required(field("prompt", FieldKind::Other))], AssetKind::Image, roles).is_err());
+        assert_eq!(runnable(&[prompt, with_default(required(field("loras", FieldKind::Other)))], AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
     }
 
     #[test]

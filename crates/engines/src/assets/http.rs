@@ -4,6 +4,10 @@ use std::{io::Read, time::Duration};
 
 pub(super) const MAX_BYTES: u64 = 200 << 20;
 pub(super) const MAX_JSON: u64 = 2 << 20;
+/// The largest page of a model list that is read. A page carries each model's OpenAPI document (a
+/// page of ten is about 100 KB), which a model with long lists of values can make several times
+/// larger; this keeps room for that and still stops a server that never ends.
+pub(super) const MAX_LIST_PAGE: u64 = 16 << 20;
 
 /// Build a client with a request deadline, redirects disabled, and explicit status handling.
 pub(super) fn agent(timeout: Duration) -> ureq::Agent {
@@ -84,7 +88,12 @@ pub(super) fn bytes(body: ureq::Body, limit: u64) -> Result<Vec<u8>, ToolError> 
 }
 /// Parse a size-bounded JSON response without including its contents in parse errors.
 pub(super) fn json(body: ureq::Body) -> Result<serde_json::Value, ToolError> {
-    serde_json::from_slice(&bytes(body, MAX_JSON)?).map_err(|_| garbled("The asset provider returned unreadable JSON."))
+    json_up_to(body, MAX_JSON)
+}
+/// [`json`] with a size limit of the caller's choosing, for the few answers that are meant to be
+/// larger than [`MAX_JSON`] (a page of a model list: [`MAX_LIST_PAGE`]).
+pub(super) fn json_up_to(body: ureq::Body, limit: u64) -> Result<serde_json::Value, ToolError> {
+    serde_json::from_slice(&bytes(body, limit)?).map_err(|_| garbled("The asset provider returned unreadable JSON."))
 }
 /// Require HTTPS without embedded credentials, allowing loopback HTTP only in tests.
 pub(super) fn media_url(url: &str) -> Result<(), ToolError> {
