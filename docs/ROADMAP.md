@@ -495,6 +495,10 @@ Owner: open · Status: in progress
       never written
 - [ ] Ghidra's raw loader is given no entry point, so a raw program has no functions until one is
       asked for (each is made on demand)
+- [ ] `deep::prepare` (the builder's analysis ahead of time) builds its cache key without a target's
+      own `language_id` or raw load address, so for raw code (or a target opened with its own
+      language) it analyses separately, loading the code at 0, and the builder's tools never reuse
+      it (found in review); pass the target's settings through
 
 ---
 
