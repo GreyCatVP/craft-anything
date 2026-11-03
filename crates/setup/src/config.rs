@@ -1,6 +1,6 @@
 //! Reading and editing one client's config text, per format. Pure text in, text out.
 
-use crate::clients::{Client, Format, SERVER_NAME, Shape};
+use crate::clients::{Client, Format, SERVER_NAME, Shape, is_owned_entry};
 use crate::yaml;
 use craft_anything_formats::jsonc;
 use serde_json::Value;
@@ -46,6 +46,12 @@ pub fn is_disabled(client: &Client, text: &str) -> bool {
         return false;
     }
     parse(client, text).ok().and_then(|v| v.get("disabled_mcp_servers").and_then(|d| d.as_array()).map(|a| a.iter().any(|x| x == SERVER_NAME))).unwrap_or(false)
+}
+
+/// True when the person turned our entry off themselves (Codex's `enabled = false`). Setup leaves
+/// that as it is; the doctor says so.
+pub fn entry_turned_off(client: &Client, text: &str) -> bool {
+    client.shape == Shape::Codex && read_entry(client, text).ok().flatten().is_some_and(|e| e.get("enabled") == Some(&Value::Bool(false)))
 }
 
 /// Text with our entry set to `entry`.
@@ -142,7 +148,9 @@ fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String
     }
     let servers = doc.get_mut(table_name).and_then(|t| t.as_table_mut()).ok_or_else(|| format!("`{table_name}` exists but is not a table"))?;
     match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
-        Some(existing) if client.shape == Shape::Codex => {
+        // Only our own entry is merged into; a foreign one (an HTTP `url` Codex would refuse beside
+        // a `command`) is replaced, as the plan says it will be.
+        Some(existing) if client.shape == Shape::Codex && old.as_ref().is_some_and(is_owned_entry) => {
             // The person's own settings (env, enabled_tools, other tools' approvals…) stay; our
             // keys are set, and a table of ours is merged into theirs rather than replacing it.
             let mut merged = old.clone().unwrap_or(Value::Null);
@@ -222,6 +230,21 @@ mod tests {
         assert!(new.contains("# mine"));
         assert!(c.entry_is_current(&got, &e), "their extra settings don't make it out of date");
         assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
+    }
+
+    /// #540: a foreign entry (here an HTTP one) is replaced whole, not merged into, and an entry the
+    /// person turned off is reported as such.
+    #[test]
+    fn a_foreign_codex_entry_is_replaced_and_a_disabled_one_is_noticed() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let foreign = "[mcp_servers.craft-anything]\nurl = \"https://example.test/mcp\"\n";
+        let got = read_entry(&c, &set_entry(&c, foreign, &e).unwrap()).unwrap().unwrap();
+        assert!(got.get("url").is_none(), "{got}");
+        assert_eq!(got, e);
+        let off = set_entry(&c, "", &e).unwrap().replace("startup_timeout_sec", "enabled = false\nstartup_timeout_sec");
+        assert!(entry_turned_off(&c, &off) && !entry_turned_off(&c, &set_entry(&c, "", &e).unwrap()));
+        assert!(c.entry_is_current(&read_entry(&c, &off).unwrap().unwrap(), &e), "setup keeps their choice");
     }
 
     #[test]
