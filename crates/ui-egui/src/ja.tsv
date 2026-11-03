@@ -680,6 +680,7 @@ Theme	テーマ
 There's no /{name} command. You can use {commands}.	/{name} というコマンドはありません。{commands} が使えます。
 There's no AI brain set up yet, so here's what the built-in engines found:	まだ AI が設定されていないため、内蔵エンジンが見つけた内容を示します:
 There's no picture on the clipboard to paste.	貼り付けられる画像がクリップボードにありません。
+A picture is still being pasted. Paste the next one once it's in.	画像をまだ貼り付けています。貼り付けが終わってから次の画像を貼り付けてください。
 They're my app: edit them in place	自分のアプリなので、その場で編集する
 Things we couldn't establish yet are listed here, with what would settle them.	まだ確定できていないことを、確定に必要な情報とともにここに表示します。
 This answer won't be there after a restart:	この回答は再起動後には残りません:
