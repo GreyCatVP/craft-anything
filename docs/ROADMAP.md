@@ -127,6 +127,11 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
       (`apps/craft-anything/src/start_guard.rs`)
 - [ ] Live-check the start fallback on Windows: make a start die before its window (kill the
       process at launch), start again, and see `desktop.log` say it drew without the graphics card
+      and log `drawing with` an adapter of type `Cpu` (WARP), and that the window opens
+- [ ] The software retry still lets wgpu start every DX12 adapter before `pick_adapter` runs, so a
+      driver that crashes while its device is created crashes the retry too. wgpu has no way to
+      skip hardware adapters; needs a different route (another renderer, or a helper that starts
+      the app with only WARP visible)
 - [ ] Add to `docs/releasing.md`: before publishing, a Deep build through Claude Code from the
       finished package, on a Mac and on Windows. Starting the CLI from the package (#91) doesn't
       show whether Claude Code accepts its tools

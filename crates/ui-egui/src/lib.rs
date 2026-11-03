@@ -331,12 +331,22 @@ pub struct Prefs {
 pub const PREFS_KEY: &str = "craft-anything-ui";
 const LEDGER_VIEW_CAP: usize = 300;
 
+/// Frames that must have been shown before [`CraftApp::after_first_frames`] runs its callback.
+const FIRST_FRAMES: u32 = 2;
+
+struct FirstFrames {
+    drawn: u32,
+    done: Box<dyn FnOnce() + Send>,
+}
+
 pub struct CraftApp {
     pub engine: Arc<Engine>,
     pub hub: Arc<AiHub>,
     pub state: UiState,
     /// The UI's copy of the settings; pushed into the session (and saved) when changed.
     pub settings: Settings,
+    /// Run once after the first frames have been drawn and shown (see [`CraftApp::after_first_frames`]).
+    first_frames: Option<FirstFrames>,
     /// Write settings to disk (off in tests and snapshots).
     pub persist: bool,
     /// Never open native dialogs (tests and snapshots).
@@ -441,6 +451,7 @@ impl CraftApp {
             hub,
             state: UiState::default(),
             settings,
+            first_frames: None,
             persist: true,
             headless: false,
             view: SessionView::default(),
@@ -498,6 +509,13 @@ impl CraftApp {
     pub fn setup_context(ctx: &egui::Context) {
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
+    }
+
+    /// Call `done` once [`FIRST_FRAMES`] frames have been drawn and shown: the window is really up by
+    /// then. eframe opens the window hidden and draws its first frame after the app is built, so
+    /// a graphics driver that crashes while presenting does so after that (#74).
+    pub fn after_first_frames(&mut self, done: impl FnOnce() + Send + 'static) {
+        self.first_frames = Some(FirstFrames { drawn: 0, done: Box::new(done) });
     }
 
     /// Restore remembered preferences.
@@ -1693,6 +1711,18 @@ pub fn guard_ui(ui: &mut egui::Ui, what: &str, f: impl FnOnce(&mut egui::Ui)) {
 
 impl eframe::App for CraftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // This frame is being built, so the ones before it have been shown.
+        if let Some(f) = self.first_frames.as_mut() {
+            f.drawn += 1;
+            if f.drawn > FIRST_FRAMES
+                && let Some(f) = self.first_frames.take()
+            {
+                (f.done)();
+            } else {
+                // egui only draws when something changed; keep drawing until the frames have been shown.
+                ui.ctx().request_repaint();
+            }
+        }
         self.show(ui);
     }
 
@@ -1703,6 +1733,10 @@ impl eframe::App for CraftApp {
     }
 
     fn on_exit(&mut self) {
+        // Closed before the frames were counted: the window opened, so nothing crashed.
+        if let Some(f) = self.first_frames.take() {
+            (f.done)();
+        }
         // A running build saves the project's conversation itself (rebuild::feed).
         if let Some(c) = self.conversation.as_mut() {
             c.stop();

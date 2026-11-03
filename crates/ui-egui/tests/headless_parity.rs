@@ -140,7 +140,7 @@ const PLUMBING: &[(&str, &str)] = &[
     ("acted", "shows a button tool's result (toast, open the preview)"),
     ("engines_found", "a job's result"), ("engine_got", "a job's result"), ("ghidra_got", "a job's result"),
     ("ghidra_ready", "a query"), ("ghidra_missing", "a query"),
-    ("load_prefs", "startup"), ("log", "the log panel"), ("toast", "a message"),
+    ("load_prefs", "startup"), ("after_first_frames", "startup"), ("log", "the log panel"), ("toast", "a message"),
     ("settings_changed", "marks settings dirty; each setting has its row"), ("flush_settings", "saves settings"),
     ("refresh_view", "redraw data"), ("resolve_chat_evidence", "redraw data"), ("mark_dirty", "redraw data"),
     ("poll_conversation", "polling"), ("allow_for_project", "part of answer_consent"),

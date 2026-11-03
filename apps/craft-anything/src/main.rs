@@ -77,9 +77,11 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             log::info!("window open");
-            start_guard::opened(&config);
             CraftApp::setup_context(&cc.egui_ctx);
             let mut app = CraftApp::new(engine, hub);
+            // The window is built hidden and its first frame is drawn afterwards, where a graphics
+            // driver may still crash: the mark stays until frames have been shown (#74).
+            app.after_first_frames(move || start_guard::opened(&config));
             app.load_prefs(cc.storage);
             if let Some(p) = open {
                 app.open_path(p);

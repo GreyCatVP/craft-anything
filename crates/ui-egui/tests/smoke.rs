@@ -2202,3 +2202,25 @@ fn a_narrow_window_folds_the_sidebar_and_puts_the_project_details_above_the_feed
     let send = h.get_by_label("Send (Enter)").rect();
     assert!(send.max.x <= 760.0 && send.max.y <= 820.0, "the prompt box fits: {send:?}");
 }
+
+/// #74: a graphics driver can crash while the first frames are presented, so the start's mark is
+/// cleared only after frames were shown; the callback runs once, keeps frames coming until then,
+/// and also runs when the window is closed before that.
+#[test]
+fn the_first_frames_callback_runs_once_after_frames_were_shown() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let mut h = harness(move || {
+        let mut app = demo::app(demo::engine(Mode::Beginner, false));
+        app.after_first_frames(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
+        });
+        app
+    });
+    h.run_steps(8);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "once the frames were shown, and only once");
+    h.run_steps(8);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

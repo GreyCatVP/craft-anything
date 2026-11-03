@@ -3,9 +3,10 @@
 //! A graphics driver that crashes natively as the window opens takes the whole process with it:
 //! no Rust code runs afterwards, so no dialog and no log line can say what happened, and the app
 //! just vanishes. What can be done is to leave a mark before trying and remove it once the window
-//! is open; a mark found at the next start means the last one never got there, and the app draws
-//! without the graphics card that time (see `main`). A start that does open the window clears the
-//! mark, so the next one is back to normal.
+//! is open and has shown its first frames (the driver may crash while presenting them, after
+//! eframe's setup callback has run); a mark found at the next start means the last one never got
+//! there, and the app draws without the graphics card that time (see `main`). A start that does
+//! open the window clears the mark, so the next one is back to normal.
 
 use std::path::{Path, PathBuf};
 
