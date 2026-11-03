@@ -854,3 +854,25 @@ fn hub_config_keys_and_test_backend() {
     }
     assert!(h.compare("Local", "Local", true).is_err());
 }
+
+/// #369: when OpenRouter has no provider that supports tools for a model (404 once only those are
+/// asked for), the turn goes on with the text protocol instead of failing; the first request
+/// required parameters, the second sends no tools.
+#[test]
+fn openrouter_with_no_provider_for_tools_falls_back_to_the_text_protocol() {
+    use crate::model::{Effort, Msg, Stop, ToolDef, TurnRequest};
+    let tools = [ToolDef { name: "look".into(), description: "Look at a file".into(), schema: json!({"type":"object"}) }];
+    let messages = [Msg::user_text("hi")];
+    let request = TurnRequest { system: "S", messages: &messages, tools: &tools, effort: Effort::Low, max_tokens: 100 };
+    let none = json!({"error": {"code": 404, "message": "No endpoints found that can handle the requested parameters."}}).to_string();
+    let reply = chat_sse(&[json!({"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]})]);
+    let (url, seen) = mock(vec![(404, "application/json", none), (200, "text/event-stream", reply)]);
+    let mut model = openai::OpenAi::openrouter(Some(&url), "k".into(), "moonshotai/kimi-k3");
+    let result = model.turn(&request, &mut |_| {}, &Stop::default()).unwrap();
+    assert_eq!(result.message.text(), "hello");
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2, "one retry");
+    assert_eq!(seen[0].body["provider"], json!({"require_parameters": true}));
+    assert!(seen[0].body.get("tools").is_some());
+    assert!(seen[1].body.get("provider").is_none() && seen[1].body.get("tools").is_none(), "the second asks in text: {}", seen[1].body);
+}

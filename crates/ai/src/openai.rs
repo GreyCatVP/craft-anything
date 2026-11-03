@@ -40,6 +40,8 @@ pub struct OpenAi {
     pub react: bool,
     /// Recover JSON text calls automatically, and switch to ReAct when the server rejects tools.
     pub auto_react: bool,
+    /// Talking to OpenRouter, which routes each request to one of several upstream providers.
+    pub openrouter: bool,
 }
 
 impl OpenAi {
@@ -50,6 +52,7 @@ impl OpenAi {
     pub fn openrouter(base: Option<&str>, key: String, model: &str) -> Self {
         let mut o = Self::compatible("OpenRouter", base.unwrap_or(OPENROUTER_BASE), Some(key), if model.is_empty() { OPENROUTER_DEFAULT_MODEL } else { model });
         o.extra_headers = vec![("HTTP-Referer", APP_REFERER.to_string()), ("X-Title", APP_TITLE.to_string())];
+        o.openrouter = true;
         o
     }
 
@@ -62,6 +65,7 @@ impl OpenAi {
             extra_headers: Vec::new(),
             react: false,
             auto_react: true,
+            openrouter: false,
         }
     }
 
@@ -103,6 +107,12 @@ impl OpenAi {
                 .collect();
             o.insert("tools".into(), Value::Array(tools));
             o.insert("tool_choice".into(), json!("auto"));
+            // OpenRouter picks an upstream provider per request, and one that can't do tool calls
+            // answers "400: Provider returned error" (#369). Only a provider that supports every
+            // parameter in the request is used.
+            if self.openrouter {
+                o.insert("provider".into(), json!({"require_parameters": true}));
+            }
         }
         body
     }
@@ -142,7 +152,7 @@ fn rejects_tools(e: &ToolError) -> bool {
 impl ChatModel for OpenAi {
     fn turn(&mut self, req: &TurnRequest<'_>, on_delta: &mut dyn FnMut(Delta), stop: &Stop) -> Result<TurnResult, ToolError> {
         match self.stream_once(req, on_delta, stop) {
-            Err(e) if !self.react && self.auto_react && !req.tools.is_empty() && rejects_tools(&e) => {
+            Err(e) if !self.react && self.auto_react && !req.tools.is_empty() && (rejects_tools(&e) || self.no_provider_for_tools(&e)) => {
                 log::info!("{} rejected tool calling; switching to the text protocol", self.label);
                 self.react = true;
                 self.stream_once(req, on_delta, stop)
@@ -153,6 +163,14 @@ impl ChatModel for OpenAi {
 
     fn model(&self) -> String {
         self.model.clone()
+    }
+}
+
+impl OpenAi {
+    /// OpenRouter answers 404 when no provider supports all the request's parameters (see
+    /// [`OpenAi::body`]): tool calling isn't available for this model, so the text protocol is.
+    fn no_provider_for_tools(&self, e: &ToolError) -> bool {
+        self.openrouter && e.details.as_ref().and_then(|d| d.get("status")).and_then(Value::as_u64) == Some(404)
     }
 }
 
@@ -641,6 +659,27 @@ mod tests {
             assert_eq!(result.stop, expected, "finish_reason={finish:?}");
             assert_eq!(result.message.tool_uses(), vec![("call_a".into(), "core_session_show".into(), json!({}))]);
         }
+    }
+
+    /// #369: OpenRouter routes to an upstream provider per request, and one without tool calling
+    /// answered "400: Provider returned error". With tools in the request, only providers that
+    /// support every parameter are used; nothing else changes.
+    #[test]
+    fn openrouter_only_routes_a_tool_request_to_providers_that_support_tools() {
+        use crate::model::{Effort, ToolDef, TurnRequest};
+        let tools = [ToolDef { name: "look".into(), description: "d".into(), schema: json!({"type": "object"}) }];
+        let messages = [Msg::user_text("hi")];
+        let with_tools = TurnRequest { system: "S", messages: &messages, tools: &tools, effort: Effort::Low, max_tokens: 100 };
+        let without = TurnRequest { system: "S", messages: &messages, tools: &[], effort: Effort::Low, max_tokens: 100 };
+        let router = OpenAi::openrouter(None, "k".into(), "moonshotai/kimi-k3");
+        assert_eq!(router.body(&with_tools)["provider"], json!({"require_parameters": true}));
+        assert!(router.body(&without).get("provider").is_none(), "nothing to require without tools");
+        let mut text_protocol = router.clone();
+        text_protocol.react = true;
+        assert!(text_protocol.body(&with_tools).get("provider").is_none(), "the text protocol sends no tools");
+        let other = OpenAi::compatible("Ollama", "http://127.0.0.1:11434/v1", None, "llama3");
+        assert!(other.body(&with_tools).get("provider").is_none(), "only OpenRouter knows `provider`");
+        assert_eq!(router.body(&with_tools)["tool_choice"], "auto");
     }
 
     #[test]

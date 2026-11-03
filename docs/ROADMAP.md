@@ -214,6 +214,12 @@ been run live.
 Owner: open · Status: todo
 - [x] Show the provider's own reason: #369 bought $10 of credit and got only "OpenRouter answered
       400: Provider returned error". Find the reason in the response body and show it — PR #542
+- [x] OpenRouter picks an upstream provider per request, and one without tool calling answered
+      "400: Provider returned error" (#369): a request with tools now sets
+      `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
+      text protocol like any server that rejects tools
+- [ ] Check #369 live with Kimi K3 and a key limited to Kimi/Moonshot models (needs the person's
+      OpenRouter key): that the build starts, or that the error now names the provider's reason
 - [ ] A live API-key build (needs a key on the test machine)
 - [ ] Failure logs for the other ways an AI stops (API backends, MCP server start-up), like the
       ones agent CLIs write to `logs/` in the config folder
