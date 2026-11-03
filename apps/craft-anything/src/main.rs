@@ -2,6 +2,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "linux")]
+mod gpu;
+
 use craft_anything_ai::AiHub;
 use craft_anything_engine::{Engine, Session, Settings};
 use craft_anything_ui_egui::CraftApp;
@@ -44,7 +47,7 @@ fn main() -> eframe::Result {
     // the bundle's; no icon at all would bring eframe's own.
     let icon = if cfg!(target_os = "macos") { None } else { eframe::icon_data::from_png_bytes(craft_anything_ui_egui::APP_ICON_PNG).ok() };
     let viewport = viewport.with_icon(Arc::new(icon.unwrap_or_default()));
-    #[cfg_attr(not(windows), expect(unused_mut, reason = "only Windows picks its own graphics adapter"))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), expect(unused_mut, reason = "only Windows and Linux pick their own graphics adapter"))]
     let mut options = eframe::NativeOptions { viewport, ..Default::default() };
     #[cfg(windows)]
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
@@ -54,6 +57,12 @@ fn main() -> eframe::Result {
         // window. DX12 (with WARP) covers all Windows systems; `WGPU_BACKEND` still asks for others.
         setup.instance_descriptor.backends = windows_backends(eframe::wgpu::Backends::from_env());
         setup.native_adapter_selector = Some(Arc::new(pick_adapter));
+    }
+    // On a laptop with two GPUs egui-wgpu draws on the discrete one while the integrated one drives
+    // the screen: 20 s to open and a lagging desktop (#571). The GPU that drives the screen draws.
+    #[cfg(target_os = "linux")]
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+        setup.native_adapter_selector = Some(Arc::new(gpu::pick_adapter));
     }
     let run = eframe::run_native(
         "Craft Anything",

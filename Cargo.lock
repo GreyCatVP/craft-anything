@@ -1132,6 +1132,7 @@ dependencies = [
  "eframe",
  "log",
  "rfd",
+ "tempfile",
  "winresource",
 ]
 

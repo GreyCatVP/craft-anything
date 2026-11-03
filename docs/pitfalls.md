@@ -166,6 +166,15 @@ It happened again with Vulkan on Windows (#394): starting Vulkan loaded an Intel
 (`igvk64.dll`) that crashed with `0xc0000005` on startup. Windows now starts DX12 only by default
 (which includes WARP); `WGPU_BACKEND` still allows choosing other backends.
 
+**The fastest GPU isn't the one that drives the screen.** egui-wgpu asks for the high-performance
+adapter, so on a Linux laptop with an integrated and a discrete GPU the window was drawn on the
+discrete one while the integrated one drove the screen: 20 s to open and a lagging desktop (#571).
+`PowerPreference::None` alone isn't the answer either (Mesa may list the integrated GPU first on a
+desktop whose monitor is on the discrete one). `apps/craft-anything/src/gpu.rs` picks the GPU behind
+the built-in panel, else the only GPU with displays, else the discrete one as before, from
+`/sys/class/drm`; `WGPU_ADAPTER_NAME` (which egui-wgpu ignores) and `WGPU_POWER_PREF` still decide
+when set. Only tested with fake drm trees and on one single-GPU machine, not on a two-GPU laptop.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
