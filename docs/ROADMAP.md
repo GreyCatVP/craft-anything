@@ -435,6 +435,12 @@ Gaps found while using the app for real projects.
 - [ ] Claude Code's own extras: its Ultracode switch (a setting, not an effort level; the
       effort environment variable we use can't turn it on) and its model names beyond the list
       (`opusplan`, `[1m]` variants) offered in Settings → AI; `ai model` already takes any name
+- [ ] Linux: draw on the GPU that drives the screen. egui-wgpu's default picks the discrete GPU, so
+      on a laptop whose integrated GPU drives the panel the window took 20 s to open and the whole
+      desktop lagged (#571). Pick by the connected displays in `/sys/class/drm`: the built-in
+      panel's GPU, else the only GPU with displays, else the discrete one; `WGPU_POWER_PREF` and
+      `WGPU_ADAPTER_NAME` still decide when set
+      — claimed: Nghiathan13, branch bugfix/r2.9-linux-gpu-choice
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
