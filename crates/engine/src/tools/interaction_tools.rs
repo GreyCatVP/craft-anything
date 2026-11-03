@@ -756,13 +756,34 @@ mod tests {
         }
     }
 
+    /// A project folder behind a link (macOS's temp folders are) is still the project, also when
+    /// a path in it uses `..` and so comes back resolved.
+    #[test]
+    fn a_project_behind_a_link_is_still_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let linked = dir.path().join("linked");
+        if !link_dir(&real, &linked) {
+            eprintln!("skipped: this system won't make links for tests");
+            return;
+        }
+        let w = Workspace::create(&linked, "t", "r", TargetRef::None).unwrap();
+        std::fs::create_dir_all(w.app_dir().join("src")).unwrap();
+        let write = |p: String| decide(Some(&w), "Write", &json!({"file_path": p}));
+        assert_eq!(write(format!("{}/src/../main.rs", w.app_dir().display())), Decision::Allow);
+        assert_eq!(write(w.app_dir().join("main.rs").display().to_string()), Decision::Allow);
+        assert!(matches!(write(format!("{}/../../outside.txt", w.app_dir().display())), Decision::Ask { .. }));
+    }
+
     #[test]
     fn dot_dot_at_the_root_stays_at_the_root() {
         let (_d, w) = ws();
         std::fs::create_dir_all(w.app_dir()).unwrap();
-        let system = if cfg!(windows) { "Windows" } else { "etc" };
+        // On the drive the protected folders are on, wherever the temp folder is.
+        let (start, system) = if cfg!(windows) { ("C:/Users/a/b", "Windows") } else { ("/tmp/a/b", "etc") };
         // More `..` than the path is deep: every system stops at the root.
-        let climbed = format!("{}/{}{system}/x.conf", w.app_dir().display(), "../".repeat(64));
+        let climbed = format!("{start}/{}{system}/x.conf", "../".repeat(64));
         let opened = resolve_as_opened(Path::new("/"), &climbed).unwrap();
         assert!(opened.ends_with(format!("{system}/x.conf")) && opened.components().count() <= 4, "{}", opened.display());
         assert!(never_unasked(Some(&w), "Write", &json!({"file_path": climbed})).is_some());

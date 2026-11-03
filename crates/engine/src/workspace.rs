@@ -966,10 +966,12 @@ pub fn real_path(p: &Path) -> Option<PathBuf> {
     Some(real)
 }
 
-/// [`inside`], after following links: `p` is inside `dir` both as written and where the file
-/// system really puts it, so a link inside `dir` can't lead out of it.
+/// [`inside`], after following links: `p` is inside `dir` where the file system really puts
+/// them both, so a link inside `dir` can't lead out of it. Only the real paths are compared: `p`
+/// may already be partly resolved (`..` after a link) while `dir` is as written, and a `dir`
+/// that sits behind a link (macOS's `/var` → `/private/var`) is still the same folder.
 pub fn really_inside(dir: &Path, p: &Path) -> bool {
-    inside(dir, p) && matches!((real_path(dir), real_path(p)), (Some(d), Some(p)) if inside(&d, &p))
+    matches!((real_path(dir), real_path(p)), (Some(d), Some(p)) if inside(&d, &p))
 }
 
 /// The other side of [`really_inside`], for places that must be kept out of: `p` may land in
