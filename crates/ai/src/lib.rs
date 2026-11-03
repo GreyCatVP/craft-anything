@@ -375,6 +375,21 @@ impl AiHub {
         self.config().backends.into_iter().filter_map(|b| Some((b.config.name, b.options.command?))).collect()
     }
 
+    /// The model a coding agent is asked for (`None` or empty: the agent's own choice, which is
+    /// what OpenCode and Claude Code do by default). Returns false when there was no such backend.
+    pub fn set_cli_model(&self, name: &str, model: Option<&str>) -> Result<bool, ToolError> {
+        let mut cfg = self.config();
+        let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
+        b.options.cli_model = model.map(str::trim).filter(|m| !m.is_empty()).map(str::to_string);
+        self.save_config(&cfg)?;
+        Ok(true)
+    }
+
+    /// The model each coding agent is asked for, by backend name.
+    pub fn cli_models(&self) -> std::collections::BTreeMap<String, String> {
+        self.config().backends.into_iter().filter_map(|b| Some((b.config.name, b.options.cli_model?))).collect()
+    }
+
     /// Remove a backend and its stored key. Returns false when there was no such backend.
     pub fn remove_backend(&self, name: &str) -> Result<bool, ToolError> {
         let mut cfg = self.config();

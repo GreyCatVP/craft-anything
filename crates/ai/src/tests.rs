@@ -172,6 +172,19 @@ fn an_agent_apps_program_is_set_and_cleared() {
     assert!(h.commands().is_empty(), "blank finds it by its usual name again");
 }
 
+/// #123: the model a coding agent is asked for is set (and cleared, so it chooses its own).
+#[test]
+fn an_agent_apps_model_is_set_and_cleared() {
+    let (h, _d) = hub();
+    add(&h, "OpenCode", BackendKind::AgentCli, "http://127.0.0.1:9", None);
+    assert!(h.cli_models().is_empty(), "no model: the agent chooses its own");
+    assert!(h.set_cli_model("OpenCode", Some(" anthropic/claude-sonnet-4-5 ")).unwrap());
+    assert_eq!(h.cli_models().get("OpenCode").map(String::as_str), Some("anthropic/claude-sonnet-4-5"));
+    assert!(!h.set_cli_model("Nobody", Some("x")).unwrap(), "only a configured backend");
+    assert!(h.set_cli_model("OpenCode", Some(" ")).unwrap());
+    assert!(h.cli_models().is_empty(), "blank leaves the agent to choose its own");
+}
+
 fn add(h: &AiHub, name: &str, kind: BackendKind, base: &str, key: Option<&str>) {
     h.add_backend(
         BackendConfig { name: name.into(), kind, model: String::new(), base_url: Some(base.into()), ssh_host: None, enabled: true },

@@ -508,6 +508,9 @@ Owner: open · Status: in progress
 - [x] Builder runs over ACP: with `acp = true`, rebuild runs use `AcpConversation`; the agent's
       permission requests go through the approval policy (`interaction_tools::approve_with`:
       allowed, refused, or asked through the project's inbox; Auto mode honoured)
+- [x] The model a coding agent is asked for is chosen in Settings → AI (`ai model <name> <model>`
+      in the CLI); an empty one leaves the agent to its own model, as OpenCode and Claude Code
+      pick by default (#123)
 - [ ] Gemini CLI, opencode, goose via ACP or native adapters; each verified live, then turn ACP on
       by default for the ones that pass
 

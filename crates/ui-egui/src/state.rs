@@ -457,6 +457,10 @@ pub struct UiState {
     /// Settings → Plugins: the plugin being added.
     #[serde(default)]
     pub plugin_form: PluginForm,
+    /// Settings → AI: the model being typed for each coding agent, by backend name (not kept
+    /// between sessions: it follows what is saved).
+    #[serde(skip)]
+    pub agent_models: BTreeMap<String, String>,
     /// The Game files screen.
     #[serde(default)]
     pub game: GameFiles,
@@ -561,6 +565,7 @@ impl Default for UiState {
             pin_draft: Default::default(),
             answers: BTreeMap::new(),
             plugin_form: PluginForm::default(),
+            agent_models: BTreeMap::new(),
             game: GameFiles::default(),
         }
     }

@@ -307,10 +307,14 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
+    // The model a coding agent is asked for, as it is typed.
+    let mut model_edit: Option<(String, String)> = None;
     // The AI whose Remove was pressed once: asked again before its key is deleted.
     let confirm_id = egui::Id::new("remove-ai");
     let confirming: Option<String> = ui.data(|d| d.get_temp(confirm_id));
-    for b in &app.backends {
+    // A copy of the list: the loop below writes what the person types for each agent.
+    let backends = app.backends.clone();
+    for b in &backends {
         widgets::panel(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
             // The name and model on their own row (shortened, full text on hover), the buttons on a
@@ -341,6 +345,29 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                             }
                             if program.is_some() && widgets::link(ui, "Find it automatically").clicked() {
                                 usual_program = Some(b.name.clone());
+                            }
+                        });
+                    }
+                    // The model a coding agent is asked for; empty means it chooses its own (#123).
+                    if b.kind == BackendKind::AgentCli {
+                        let saved = app.agent_models.get(&b.name).cloned().unwrap_or_default();
+                        let text = app.state.agent_models.entry(b.name.clone()).or_insert_with(|| saved.clone());
+                        ui.horizontal_wrapped(|ui| {
+                            ui.style_mut().override_font_id = Some(egui::FontId::proportional(theme::CAPTION));
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(text)
+                                    .hint_text(tr("model id (empty: the agent's own)"))
+                                    .desired_width(170.0)
+                                    .frame(widgets::text_field_frame_compact(&t)),
+                            );
+                            widgets::named(resp.clone(), "Model");
+                            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            // The field shows what is saved, unless the person is typing in it.
+                            if !resp.has_focus() && !enter && !saved.is_empty() && *text != saved {
+                                *text = saved.clone();
+                            }
+                            if enter {
+                                model_edit = Some((b.name.clone(), text.trim().to_string()));
                             }
                         });
                     }
@@ -411,6 +438,9 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     if let Some(name) = usual_program {
         app.set_agent_program(&name, None);
+    }
+    if let Some((name, model)) = model_edit {
+        app.set_agent_model(&name, (!model.is_empty()).then_some(model));
     }
     if let Some(name) = remove {
         ui.data_mut(|d| d.remove::<String>(confirm_id));

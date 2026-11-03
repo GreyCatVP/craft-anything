@@ -944,6 +944,33 @@ fn an_agent_apps_program_is_set_in_settings() {
     assert!(wait(&mut h, |a| a.agent_programs.is_empty()));
 }
 
+/// #123: the model a coding agent is asked for is set in Settings → AI, and an empty one leaves
+/// the agent to choose its own.
+#[test]
+fn an_agent_apps_model_is_set_in_settings() {
+    use craft_anything_ai::{BackendConfig, BackendKind};
+    let mut h = harness(|| {
+        let a = demo::app(demo::engine(Mode::Experienced, true));
+        let cfg =
+            BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+        a.hub.add_backend(cfg, None).unwrap();
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "OpenCode")));
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    h.get_by_label("Model");
+    h.state_mut().set_agent_model("OpenCode", Some("anthropic/claude-sonnet-4-5".into()));
+    assert!(wait(&mut h, |a| a.agent_models.get("OpenCode").map(String::as_str) == Some("anthropic/claude-sonnet-4-5")));
+    h.run_steps(2);
+    assert_eq!(h.state().state.agent_models.get("OpenCode").map(String::as_str), Some("anthropic/claude-sonnet-4-5"), "the field shows the model");
+    // No model: the agent picks its own, as OpenCode does.
+    h.state_mut().set_agent_model("OpenCode", None);
+    assert!(wait(&mut h, |a| a.agent_models.is_empty()));
+}
+
 #[test]
 fn settings_window_tabs_draw() {
     let mut h = harness(|| {

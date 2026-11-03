@@ -649,6 +649,7 @@ Medium	中
 Memory for Ghidra	Ghidra 記憶體用量
 Minimise	最小化
 Mode	模式
+Model	模型
 Modules	模組
 More detail	更多詳細資訊
 More makes a big program's first look faster.	分配更多記憶體可加快大型程式的首次分析。
@@ -955,6 +956,7 @@ Send (Enter)	傳送 (Enter)
 Send now	立即傳送
 Session status	工作階段狀態
 Set a project's asset budget	設定專案素材預算
+Set an AI's model	設定 AI 的模型
 Set an AI's program	設定 AI 的程式
 Set one up	設定一個
 Set up a brain…	設定 AI 助手…
@@ -1258,6 +1260,7 @@ job result	工作結果
 job {title} panicked: {what}	工作 {title} 發生異常：{what}
 just now	剛剛
 managed	由應用程式管理
+model id (empty: the agent's own)	模型 ID（留空則由代理程式自行選擇）
 must be a number	必須是數字
 must be a whole number	必須是整數
 number	數字

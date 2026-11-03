@@ -151,9 +151,9 @@ pub enum Done {
         result: Result<Value, ToolError>,
     },
     Detected(Vec<Detected>),
-    /// The configured backends, the ones chosen to build with and to extract with, and the
-    /// program each agent app set to one runs.
-    Backends(Vec<BackendConfig>, Option<String>, Option<String>, std::collections::BTreeMap<String, String>),
+    /// The configured backends, the ones chosen to build with and to extract with, the program
+    /// each agent app set to one runs and the model each coding agent is asked for.
+    Backends(Vec<BackendConfig>, Option<String>, Option<String>, std::collections::BTreeMap<String, String>, std::collections::BTreeMap<String, String>),
     Picked {
         pick: Pick,
         path: Option<PathBuf>,
@@ -331,6 +331,8 @@ pub struct CraftApp {
     pub backends: Vec<BackendConfig>,
     /// The program each agent app set to one runs, by backend name (Settings → AI).
     pub agent_programs: std::collections::BTreeMap<String, String>,
+    /// The model each coding agent is asked for, by backend name (Settings → AI).
+    pub agent_models: std::collections::BTreeMap<String, String>,
     /// The agent app whose program the file dialog is choosing.
     pub picking_program_for: Option<String>,
     /// The backend the person chose to build with (Settings → AI), if any.
@@ -424,6 +426,7 @@ impl CraftApp {
             conversation: None,
             backends: Vec::new(),
             agent_programs: Default::default(),
+            agent_models: Default::default(),
             picking_program_for: None,
             builder: None,
             extractor: None,
@@ -1262,7 +1265,7 @@ impl CraftApp {
                 self.log(false, format!("Found {} AI option(s) on this computer", d.len()));
                 self.detected = Some(d);
             }
-            Done::Backends(b, builder, extractor, programs) => {
+            Done::Backends(b, builder, extractor, programs, models) => {
                 if self.state.backend.as_ref().is_some_and(|n| !b.iter().any(|c| &c.name == n)) {
                     self.state.backend = None;
                 }
@@ -1270,6 +1273,7 @@ impl CraftApp {
                 self.builder = builder;
                 self.extractor = extractor;
                 self.agent_programs = programs;
+                self.agent_models = models;
             }
             Done::BackendAdded { name, result } => match result {
                 Ok(()) => {
@@ -1620,7 +1624,13 @@ pub fn app_icon(size: f32) -> egui::Image<'static> {
 /// Run an action; a panic is logged and swallowed so one bad action never takes the app down.
 /// The configured backends and the ones chosen to build and to extract (read off the UI thread).
 pub(crate) fn backends(hub: &AiHub) -> Done {
-    Done::Backends(hub.backends(), hub.chosen(craft_anything_ai::Role::Builder), hub.chosen(craft_anything_ai::Role::Extractor), hub.commands())
+    Done::Backends(
+        hub.backends(),
+        hub.chosen(craft_anything_ai::Role::Builder),
+        hub.chosen(craft_anything_ai::Role::Extractor),
+        hub.commands(),
+        hub.cli_models(),
+    )
 }
 
 pub fn guard<R>(what: &str, f: impl FnOnce() -> R) -> Option<R> {

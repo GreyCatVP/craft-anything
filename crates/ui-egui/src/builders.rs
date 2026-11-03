@@ -92,6 +92,15 @@ impl CraftApp {
         });
     }
 
+    /// Ask a coding agent for a model (`None`: it chooses its own).
+    pub fn set_agent_model(&mut self, name: &str, model: Option<String>) {
+        let (hub, name) = (self.hub.clone(), name.to_string());
+        self.jobs.spawn(tr("Set an AI's model"), false, move |_| {
+            hub.set_cli_model(&name, model.as_deref()).map_err(|e| e.message)?;
+            Ok(crate::backends(&hub))
+        });
+    }
+
     /// Remove an AI and its stored key.
     pub fn remove_backend(&mut self, name: &str) {
         let (hub, name) = (self.hub.clone(), name.to_string());

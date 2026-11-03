@@ -48,6 +48,7 @@ const ACTIONS: &[Action] = &[
     a("set_backend_enabled", "turn an AI on or off",                           Cli("ai on <name> / ai off <name>")),
     a("remove_backend",      "remove an AI and its key",                       Cli("ai remove <name>")),
     a("set_agent_program",   "run an agent app from a program it isn't found as", Cli("ai program <name> <path>")),
+    a("set_agent_model",     "ask a coding agent for a model (or let it choose its own)", Cli("ai model <name> <model>")),
     a("refresh_projects",    "list the projects",                              Tool(&["project_list"])),
     a("remember_project",    "keep a project in a picked folder in the list",  Tool(&["rebuild_start"])),
     a("add_project_folder",  "list projects from another folder too",          Tool(&["settings_set"])),
