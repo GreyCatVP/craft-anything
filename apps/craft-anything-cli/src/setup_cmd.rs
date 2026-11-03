@@ -12,7 +12,7 @@ pub struct SetupArgs {
     /// Show what would change without writing anything.
     #[arg(long)]
     pub dry_run: bool,
-    /// Client to configure (repeatable): claude_code, codex, cursor, …
+    /// Client to configure (repeatable): antigravity, claude_code, codex, cursor, …
     #[arg(long = "client")]
     pub clients: Vec<String>,
     /// Configure every detected client.

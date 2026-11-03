@@ -5,7 +5,7 @@
 
 use super::*;
 
-mod antigravity;
+pub mod antigravity;
 mod hermes;
 mod maki;
 mod opencode;
@@ -133,7 +133,7 @@ impl Default for AgentAdapters {
 }
 
 impl AgentAdapters {
-    /// Claude Code, Codex, Gemini CLI, OpenCode, Antigravity, Hermes and Maki.
+    /// Claude Code, Codex, OpenCode, Antigravity, Hermes and Maki.
     pub fn built_in() -> AgentAdapters {
         AgentAdapters {
             adapters: vec![
@@ -640,7 +640,6 @@ impl AgentAdapter for Codex {
         out
     }
 }
-
 /// What a finished Codex tool call says. A failed call carries `"result": null` beside its
 /// `error`, which showed as "null" (#540), so null fields are skipped and an error's message is
 /// used as written. Codex's refusal to run one of our tools it can't ask about gets the way out.
@@ -710,17 +709,24 @@ impl AgentAdapter for GeminiCli {
             }
             "tool_result" => {
                 let id = s("tool_id");
-                let ok = s("status") != "error";
-                let text = v.get("output").map(content_text).unwrap_or_default();
-                out.push(p.finished(&id, ok, &text));
+                let text = v.get("content").and_then(Value::as_str).unwrap_or_default();
+                out.push(p.finished(&id, s("status") != "error", text));
             }
-            "error" => out.push(AgentEvent::Error { message: format!("Gemini CLI: {}", s("message")), remediation: None, log: None }),
             "result" => {
                 p.saw_result = true;
-                if let Some(st) = v.get("stats") {
-                    p.input_tokens = st.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
-                    p.output_tokens = st.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+                if let Some(u) = v.get("stats") {
+                    p.input_tokens = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+                    p.output_tokens = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
                 }
+            }
+            "error" => {
+                let why = s("message");
+                let remediation = if why.contains("not logged in") || why.contains("Run `gemini login`") {
+                    Some("Sign in to Gemini CLI: open a terminal and run `gemini login`, then try again.".into())
+                } else {
+                    None
+                };
+                out.push(AgentEvent::Error { message: format!("Gemini CLI: {why}"), remediation, log: None });
             }
             _ => {}
         }

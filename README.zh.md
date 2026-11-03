@@ -143,7 +143,7 @@
 
 ## AI
 
-构建需要你电脑上有一个已登录的编码 agent。**Claude Code** 是首选支持对象：Craft Anything 运行你自己那份未经改动的 `claude` 程序，它用你自己的登录；Craft Anything 从不查看也不接触你的账号，你对它的使用适用你与 Anthropic 自己的协议。原因与做法见 [docs/claude-code.md](docs/claude-code.md)。Codex 适配器已存在，但还没在真实安装上验证过。提问和分析可选用 Anthropic、OpenAI、OpenRouter 以及本地 OpenAI 兼容服务（设置 → AI）。
+构建需要你电脑上有一个已登录的编码 agent。支持 **Antigravity (agy)** 和 **Claude Code**：Craft Anything 运行你自己那份未经改动的 `agy` 或 `claude` 程序，它用你自己的登录；Craft Anything 从不查看也不接触你的账号，你对它的使用适用你与 Google 或 Anthropic 自己的协议。原因与做法见 [docs/antigravity.md](docs/antigravity.md) 和 [docs/claude-code.md](docs/claude-code.md)。Codex 适配器已存在，但还没在真实安装上验证过。提问和分析可选用 Antigravity、Anthropic、OpenAI、OpenRouter 以及本地 OpenAI 兼容服务（设置 → AI）。
 
 <a id="built-for-agents"></a>
 

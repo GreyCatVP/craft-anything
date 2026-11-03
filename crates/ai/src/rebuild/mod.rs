@@ -140,7 +140,7 @@ pub struct RunOptions {
     pub beginner: bool,
     /// The kinds of thing this run can make (website, app, game, and any a fork registers).
     pub kinds: KindRegistry,
-    /// How each coding agent is driven (Claude Code, Codex, Gemini CLI, and any a fork registers).
+    /// How each coding agent is driven (Claude Code, Codex, Antigravity, and any a fork registers).
     pub adapters: crate::cli_agents::AgentAdapters,
     /// Told after each event (the app repaints).
     pub wake: Wake,

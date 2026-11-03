@@ -140,7 +140,7 @@ Craft Anything で対象を指定し、欲しいものを伝えて「Start」を
 
 ## AI
 
-ビルドには、お使いのコンピュータ上のコーディングエージェントが必要です。まず **Claude Code** に対応しています。Craft Anything は、あなた自身の改変されていない `claude` プログラムを実行します。これはあなた自身のサインイン情報を使います。Craft Anything がアカウントを見たり扱ったりすることはありません。利用は Anthropic とのあなた自身の契約に従います。方法と理由は [docs/claude-code.md](docs/claude-code.md) を参照してください。Codex アダプターもありますが、実際のインストール環境ではまだ検証されていません。質問と分析には、Anthropic、OpenAI、OpenRouter、ローカルの OpenAI 互換サーバーが使えます (Settings → AI)。
+ビルドには、お使いのコンピュータ上のコーディングエージェントが必要です。**Antigravity (agy)** と **Claude Code** に対応しています。Craft Anything は、あなた自身の改変されていない `agy` または `claude` プログラムを実行します。これはあなた自身のサインイン情報を使います。Craft Anything がアカウントを見たり扱ったりすることはありません。利用は Google または Anthropic とのあなた自身の契約に従います。方法と理由は [docs/antigravity.md](docs/antigravity.md) および [docs/claude-code.md](docs/claude-code.md) を参照してください。Codex アダプターもありますが、実際のインストール環境ではまだ検証されていません。質問と分析には、Antigravity、Anthropic、OpenAI、OpenRouter、ローカルの OpenAI 互換サーバーが使えます (Settings → AI)。
 
 <a name="built-for-agents"></a>
 

@@ -231,6 +231,14 @@ fn an_ais_model_is_changed() {
     let claude = h.options().get("Claude Code").and_then(|o| o.cli_model.clone());
     assert_eq!(claude.as_deref(), Some("claude-sonnet-5-5"), "the CLI is asked for it; the agent stays Claude Code");
     assert_eq!(h.backends().into_iter().find(|b| b.name == "Claude Code").unwrap().model, "claude-code");
+    let agy =
+        BackendConfig { name: "Antigravity".into(), kind: BackendKind::AgentCli, model: "antigravity".into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend(agy, None).unwrap();
+    assert_eq!(h.model_choices("Antigravity").unwrap(), crate::cli_agents::adapters::antigravity::MODELS);
+    assert!(h.set_model("Antigravity", "gemini-3.8-flash-high").unwrap());
+    let agy_opt = h.options().get("Antigravity").and_then(|o| o.cli_model.clone());
+    assert_eq!(agy_opt.as_deref(), Some("gemini-3.8-flash-high"), "the CLI is asked for it; the agent stays Antigravity");
+    assert_eq!(h.backends().into_iter().find(|b| b.name == "Antigravity").unwrap().model, "antigravity");
     assert!(!h.set_model("Nobody", "m").unwrap());
     assert!(h.set_model("Box", " ").is_err());
 }

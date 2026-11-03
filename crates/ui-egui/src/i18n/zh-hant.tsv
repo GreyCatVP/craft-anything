@@ -182,7 +182,7 @@ Build with {name} instead	改用 {name} 建置
 Build without it	不使用它，繼續建置
 Builder's questions:	建置助手的問題：
 Building	建置中
-Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	建置需要此電腦上的程式設計代理程式 (Claude Code、Codex 或 Gemini CLI：安裝其中一個，並在其視窗中登入一次)，或設定了 API 金鑰的 AI。Craft Anything 不會接觸你的帳戶。
+Building needs a coding agent on this computer (Antigravity (agy), Claude Code or Codex: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	建置需要此電腦上的程式設計代理程式 (Antigravity (agy)、Claude Code 或 Codex：安裝其中一個，並在其視窗中登入一次)，或設定了 API 金鑰的 AI。Craft Anything 不會接觸你的帳戶。
 Building needs a coding agent such as Claude Code, or an AI with an API key.	建置需要 Claude Code 等程式設計代理，或設定了 API 金鑰的 AI。
 Builds	建置
 Builds and answers may use it again.	建置和回答時可以再次使用它。

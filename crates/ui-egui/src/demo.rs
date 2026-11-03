@@ -200,6 +200,11 @@ pub fn detected() -> Vec<Detected> {
     let cfg = |name: &str, kind, model: &str| BackendConfig { name: name.into(), kind, model: model.into(), base_url: None, ssh_host: None, enabled: true };
     vec![
         Detected {
+            suggestion: cfg("Antigravity", BackendKind::AgentCli, "antigravity"),
+            reason: "Found the agy command on this computer.".into(),
+            needs_key: false,
+        },
+        Detected {
             suggestion: cfg("Claude Code", BackendKind::AgentCli, "claude-code"),
             reason: "Found the claude command on this computer.".into(),
             needs_key: false,

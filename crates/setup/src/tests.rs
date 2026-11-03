@@ -217,6 +217,8 @@ fn unknown_client_and_manual_client() {
     assert!(!p.blocked);
     let p = plan(&fx.host, &req(&fx, &["claude-code"])).unwrap();
     assert_eq!(p.actions[0].client, "claude_code");
+    let p = plan(&fx.host, &req(&fx, &["agy"])).unwrap();
+    assert_eq!(p.actions[0].client, "antigravity");
 }
 
 #[test]
