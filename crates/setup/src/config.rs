@@ -137,7 +137,16 @@ fn merge_in_place(target: &mut dyn toml_edit::TableLike, want: &serde_json::Map<
             }
             *new.decor_mut() = have.decor().clone();
         }
-        target.insert(k, toml_edit::Item::Value(new));
+        // Through the entry, so the key stays as written (a comment on the line above it is part of
+        // the key); `insert` would put in a fresh key.
+        match target.entry(k) {
+            toml_edit::Entry::Occupied(mut entry) => {
+                entry.insert(toml_edit::Item::Value(new));
+            }
+            toml_edit::Entry::Vacant(entry) => {
+                entry.insert(toml_edit::Item::Value(new));
+            }
+        }
     }
     Ok(())
 }
@@ -284,6 +293,18 @@ mod tests {
         let got = read_entry(&c, &new).unwrap().unwrap();
         assert_eq!(got["tools"]["other"]["approval_mode"], "prompt");
         assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
+    }
+
+    /// #540: a comment on the line above a key stays when that key's value changes.
+    #[test]
+    fn a_comment_above_a_key_stays_when_its_value_changes() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let text = "[mcp_servers.craft-anything]\n# the program\ncommand = \"/old/craft-anything-cli\"\nargs = [\"mcp\"]\n# how long to wait\nstartup_timeout_sec = 10\n";
+        let new = set_entry(&c, text, &e).unwrap();
+        assert!(new.contains("# the program\ncommand = \"/b/craft-anything-cli\""), "{new}");
+        assert!(new.contains("# how long to wait\nstartup_timeout_sec = 30"), "{new}");
         assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
     }
 
