@@ -957,6 +957,32 @@ fn website_kind_compares_only_when_there_is_an_original() {
     assert_eq!(ids(&scratch), [CheckResult::BUILD]);
 }
 
+/// #494: the website check, run for real with no site to look at, fails with a note that names the
+/// places a site is accepted and where the app is: `app/`, or the project folder for a project
+/// that edits its own folder.
+#[test]
+fn the_website_check_with_no_site_says_where_it_looked() {
+    let d = tempfile::tempdir().unwrap();
+    for in_root in [false, true] {
+        let mut ws = Workspace::create(
+            &d.path().join(if in_root { "root" } else { "app" }),
+            "Site",
+            "Clone it",
+            TargetRef::Website { url: "https://example.com".into() },
+        )
+        .unwrap();
+        ws.manifest.app_in_root = in_root;
+        let place = if in_root { "the project folder" } else { "app/" };
+        let r = check_worker(&ws, false).run_checks(&ws, &kinds::WebsiteKind, 1).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(!r[0].passed && r[0].check == CheckResult::WEB_VISUAL, "{:?}", r[0]);
+        let note = &r[0].note;
+        assert!(note.contains(&format!("No built site found in {place} yet")), "{note}");
+        assert!(note.contains(&format!("index.html straight in {place}")) && note.contains("dist/, build/ or out/"), "{note}");
+        assert!(in_root || !note.contains("project folder"), "{note}");
+    }
+}
+
 #[test]
 fn a_picked_game_is_rebuilt_with_its_own_engine_when_we_can() {
     let d = tempfile::tempdir().unwrap();

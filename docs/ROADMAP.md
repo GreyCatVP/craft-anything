@@ -396,8 +396,9 @@ Owner: open · Status: in progress
 - [ ] Make: a game whose request names a technology the stack table doesn't know (Phaser, Bevy…)
       still needs the default engine installed to start, though the builder is told to use what
       was named; ask the person, or let such a game start without an engine
-- [ ] The website check's "No built site found in app/dist, app/out or app/build yet" leaves out
-      plain HTML in `app/`, which `site_dir` accepts: name it too (#494)
+- [x] The website check's missing-site note names every place `site_dir` accepts (dist/, build/,
+      out/, or a plain index.html with no package.json) and the app's real place, "app/" or "the
+      project folder" (#494)
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
