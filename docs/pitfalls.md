@@ -177,6 +177,13 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**Every tool offered to a model that can only use a few.** The builder on an API backend was sent
+all 33-41 Core and Build tools, about 23,000-30,000 characters of descriptions. A local 14B model
+(#417) called the study tools (`core_session_show`, `core_journal_read`) 35 times and never
+`build_file_write`, and Ollama's default context is smaller than the list. Offer a model the tools
+the job needs (`LOCAL_BUILDER_CORE`), measure the list's size with the real registry, and run a
+small local model before saying it works. Not run live here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias

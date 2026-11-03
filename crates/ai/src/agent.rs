@@ -256,6 +256,33 @@ pub struct LoopConfig {
     /// Override the input tokens the conversation may grow to before it's trimmed. Zero uses
     /// the active backend's budget, or its local/cloud default (see [`crate::context`]).
     pub context_tokens: u64,
+    /// A builder on a local model is offered the tools for building, not the whole Core set (see
+    /// [`lean_for_local`]).
+    pub lean_for_local: bool,
+}
+
+/// The Core tools a builder on a local model keeps. The Core set is 25-odd tools for studying a
+/// target (evidence, unknowns, hypotheses, reports…) that make a building model explore instead
+/// of writing; their descriptions alone take about 5,000 tokens, more than Ollama's default
+/// context holds (#417). Kept are the Build tools, every other enabled toolset, and the Core tools
+/// the builder's brief names: asking the person, the check, the generated assets and the unknowns.
+const LOCAL_BUILDER_CORE: &[&str] = &[
+    "core_person_ask",
+    "rebuild_check",
+    "rebuild_words",
+    "assets_image_generate",
+    "assets_model_generate",
+    "assets_spent",
+    "assets_note",
+    "core_unknowns_show",
+    "core_unknown_add",
+    "core_unknown_edit",
+];
+
+/// Drop the Core tools a local builder doesn't need (the models that can take them all don't pass
+/// through here).
+fn lean_for_local(tools: Vec<ToolDef>, host: &dyn ToolHost) -> Vec<ToolDef> {
+    tools.into_iter().filter(|t| host.toolset_of(&t.name) != Some(Toolset::Core) || LOCAL_BUILDER_CORE.contains(&t.name.as_str())).collect()
 }
 
 /// The state the worker keeps between user messages.
@@ -286,6 +313,9 @@ impl AgentLoop {
 
     fn tool_defs(&self) -> Vec<ToolDef> {
         let mut tools = self.host.tools(&self.enabled);
+        if self.cfg.lean_for_local && self.chain.get(self.current).is_some_and(|s| s.local) {
+            tools = lean_for_local(tools, self.host.as_ref());
+        }
         tools.push(ToolDef {
             name: "list_toolsets".into(),
             description: "List the groups of tools (toolsets), which are enabled, and what each covers.".into(),
@@ -877,6 +907,60 @@ pub(crate) mod tests {
         let mut bad = Vec::new();
         boolean_subschemas(&clean_schema(deep), "", &mut bad);
         assert_eq!(bad.len(), 1);
+    }
+
+    /// #417: a builder on a local model gets the Build tools and the question tool, not the whole
+    /// Core set; other toolsets stay.
+    #[test]
+    fn a_local_builder_is_not_offered_the_study_tools() {
+        let host = FakeHost { calls: Mutex::default(), journal: Mutex::default() };
+        let all = host.tools(&BTreeSet::from([Toolset::Core, Toolset::Runtime]));
+        let names = |v: &[ToolDef]| v.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&all), ["look", "danger"]);
+        // `look` is a Core tool that isn't kept; `danger` belongs to another toolset.
+        assert_eq!(names(&lean_for_local(all, &host)), ["danger"]);
+        let ask = vec![ToolDef { name: "core_person_ask".into(), description: "d".into(), schema: json!({"type":"object"}) }];
+        struct CoreHost;
+        impl ToolHost for CoreHost {
+            fn tools(&self, _: &BTreeSet<Toolset>) -> Vec<ToolDef> {
+                Vec::new()
+            }
+            fn toolset_of(&self, _: &str) -> Option<Toolset> {
+                Some(Toolset::Core)
+            }
+            fn call(&self, _: &str, _: Value, _: bool, _: CancelToken) -> Result<ToolOutput, ToolError> {
+                Err(ToolError::internal("unused"))
+            }
+            fn journal(&self, _: &str, _: Value) {}
+            fn investigation(&self) -> String {
+                "{}".into()
+            }
+            fn clean_room(&self) -> bool {
+                true
+            }
+            fn title(&self, id: &str) -> String {
+                id.into()
+            }
+        }
+        assert_eq!(names(&lean_for_local(ask, &CoreHost)), ["core_person_ask"], "the question tool stays");
+    }
+
+    /// #417, with the real tools: the tool descriptions a local builder is sent in Clean room fell
+    /// from 33-41 tools (23,000-30,000 characters) to 13 (about 10,000).
+    #[test]
+    fn the_real_local_builder_tool_list_is_small_and_can_write_files() {
+        let engine = craft_anything_engine::Engine::shared(craft_anything_engine::testing::session(), crate::tools());
+        let host = EngineHost(engine);
+        let enabled = BTreeSet::from([Toolset::Core, Toolset::Build]);
+        let all = host.tools(&enabled);
+        let lean = lean_for_local(all.clone(), &host);
+        let names: Vec<&str> = lean.iter().map(|t| t.name.as_str()).collect();
+        let size = |v: &[ToolDef]| v.iter().map(|t| t.description.len() + t.schema.to_string().len()).sum::<usize>();
+        for needed in ["build_file_write", "build_file_edit", "build_file_read", "build_files_list", "build_command_run", "core_person_ask", "rebuild_check"] {
+            assert!(names.contains(&needed), "{needed} in {names:?}");
+        }
+        assert!(!names.contains(&"core_journal_read") && !names.contains(&"core_session_show"), "{names:?}");
+        assert!(lean.len() <= 20 && size(&lean) * 2 < size(&all), "{} tools, {} of {} characters", lean.len(), size(&lean), size(&all));
     }
 
     /// A scripted model: returns canned turns and records requests.

@@ -192,6 +192,12 @@ The built-in agent loop assumes a capable tool-calling model. Reports #24, #44, 
 been run live.
 - [ ] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
       STATUS.md which models it worked with. Do this first: it shows which of the lines below matter
+- [x] A builder on a local model is offered 13 tools (about 10,000 characters of descriptions)
+      instead of 33-41 (23,000-30,000): the Build tools and the Core tools the brief names, not the
+      study set a model explores with instead of writing (#417, `LOCAL_BUILDER_CORE`). Measured as
+      text, not on a model; Ollama's default context (4k) was too small for the old list alone
+- [ ] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
+      after this: does it call `build_file_write` now? If it still doesn't, the model can't build
 - [ ] An assistant turn with no text sends `content: null` (`openai.rs`), which likely causes #403's
       `invalid message content type: <nil>`: send an empty string
 - [x] Understand a tool call a model writes as JSON in its text (#417; implementation `dfe9a4db2dcb3e27edbd67311cbb4202584e7af6`). The fallback protocol reads
