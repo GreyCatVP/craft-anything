@@ -223,15 +223,18 @@ fn find_eocd(data: &[u8]) -> Option<usize> {
     // Search backwards so a stray signature in the comment can't shadow the real record.
     let mut i = tail.len().checked_sub(22)?;
     let mut found = None;
+    let mut last_signature = None;
     loop {
         if tail.get(i..i + 4) == Some(b"PK\x05\x06") {
-            let comment_len = usize::from(u16::from_le_bytes([tail[i + 20], tail[i + 21]]));
-            if i + 22 + comment_len == tail.len() {
+            last_signature.get_or_insert(from + i);
+            if let Some(comment_len) = tail.get(i + 20..i + 22).and_then(|bytes| <[u8; 2]>::try_from(bytes).ok()).map(u16::from_le_bytes)
+                && i + 22 + usize::from(comment_len) == tail.len()
+            {
                 found = Some(from + i);
             }
         }
         if i == 0 {
-            return found;
+            return found.or(last_signature);
         }
         i -= 1;
     }
@@ -384,6 +387,14 @@ mod tests {
         let eocd = zip.len() - 22;
         zip[eocd + 20..eocd + 22].copy_from_slice(&(comment.len() as u16).to_le_bytes());
         zip.extend_from_slice(comment);
+
+        assert_eq!(parse(&zip, 10).unwrap().entries.len(), 1);
+    }
+
+    #[test]
+    fn valid_entry_survives_bytes_after_eocd_comment() {
+        let mut zip = build(&[("a.txt", b"hello")]);
+        zip.extend_from_slice(b"tail");
 
         assert_eq!(parse(&zip, 10).unwrap().entries.len(), 1);
     }
