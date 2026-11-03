@@ -8,6 +8,9 @@ use craft_anything_ui_egui::CraftApp;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(any(target_os = "linux", test))]
+mod linux_gpu;
+
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
@@ -44,8 +47,15 @@ fn main() -> eframe::Result {
     // the bundle's; no icon at all would bring eframe's own.
     let icon = if cfg!(target_os = "macos") { None } else { eframe::icon_data::from_png_bytes(craft_anything_ui_egui::APP_ICON_PNG).ok() };
     let viewport = viewport.with_icon(Arc::new(icon.unwrap_or_default()));
-    #[cfg_attr(not(windows), expect(unused_mut, reason = "only Windows picks its own graphics adapter"))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), expect(unused_mut, reason = "only Windows and Linux pick their own graphics adapter"))]
     let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    #[cfg(target_os = "linux")]
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+        // egui-wgpu's default is the discrete GPU; on a laptop whose integrated GPU drives the
+        // panel, the window took 20 s to open and the whole desktop lagged (#571). Draw on the
+        // GPU that drives the screen; `WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF` still decide.
+        setup.native_adapter_selector = Some(Arc::new(linux_gpu::pick_adapter));
+    }
     #[cfg(windows)]
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
         // Starting GL loads the system's OpenGL driver before any adapter is picked, and some

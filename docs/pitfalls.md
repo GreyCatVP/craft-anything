@@ -177,6 +177,13 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**A graphics default that drew on the other card.** egui-wgpu picks the discrete GPU unless told
+otherwise; on a Linux laptop whose integrated GPU drives the panel, every frame was copied across
+to it, the window took 20 s to open and the whole desktop lagged (#571). Forcing the low-power GPU
+instead breaks desktops whose monitors are on the discrete card. Draw on the GPU that drives the
+screen, read from the connected displays, and keep wgpu's environment variables as the override;
+when a window is slow to open, check which adapter `desktop.log` says it drew with.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias

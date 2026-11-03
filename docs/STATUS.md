@@ -179,6 +179,20 @@ Checked with parser fixtures, HTTP/SSE stand-ins exercising real engine tool exe
 protocols, and non-action, stop-reason and duplicate-call controls. No live local-model build
 was run; other text-call formats remain unsupported.
 
+### Linux graphics card choice
+
+On Linux the desktop app draws on the GPU that drives the screen (#571), read from the connected
+displays in `/sys/class/drm`: the built-in panel's GPU on a laptop, the only GPU with monitors on a
+desktop, and the discrete GPU when monitors are on more than one GPU or nothing can be read.
+`WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF` still decide when set. `desktop.log` says which adapter
+was chosen and why.
+
+Checked live on one laptop (AMD Renoir iGPU driving the panel, NVIDIA RTX 3050, CachyOS, KDE
+Plasma on Wayland): the window opens in 3 s on the AMD GPU instead of 18–25 s on NVIDIA, and the
+desktop no longer lags; `WGPU_POWER_PREF=high`, `WGPU_ADAPTER_NAME=nvidia` and `DRI_PRIME=1` with
+`WGPU_POWER_PREF=none` still draw on NVIDIA. Desktops with monitors on one or two GPUs and Intel
+laptops are covered by unit tests on fake `/sys/class/drm` folders only.
+
 ## Known limits
 
 - Locks: every mutex but the browser viewer's goes through `platform::sync`. A deadlock on one thread or across
