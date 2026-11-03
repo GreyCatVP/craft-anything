@@ -377,7 +377,19 @@ fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
     let providers = ctx.session.ext.get::<AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default();
     let not_project = || ToolError::new(ErrorCode::FeatureMissing, "Assets can only be generated inside a Craft Anything project.");
     let inbox = inbox(ctx).ok_or_else(not_project)?;
-    let ws = workspace_of(&inbox).ok_or_else(not_project)?;
+    let mut ws = workspace_of(&inbox).ok_or_else(not_project)?;
+    generation_permitted(&ws)?;
+    // Held through the budget check, the paid calls and their receipts: another process sharing
+    // this project then sees every earlier receipt and never writes the ledger at the same time.
+    let spending = ws.lock_spending(SPEND_LOCK_WAIT)?;
+    // The person may have changed their choices (generation, providers, budget) while this waited.
+    ws.reload()?;
+    generation_permitted(&ws)?;
+    Ok(Job { keys, providers, inbox, ws, _spending: spending })
+}
+
+/// Generation needs a manifest this build can update and the person's opt-in for the project.
+fn generation_permitted(ws: &Workspace) -> Result<(), ToolError> {
     if ws.is_read_only() {
         return Err(ToolError::new(ErrorCode::NoPermission, "This project's settings were written by a newer Craft Anything; asset generation is disabled.")
             .with_remediation("Update Craft Anything before generating assets for this project."));
@@ -387,10 +399,7 @@ fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
             "Make these assets with simple shapes and colours instead, and tell the person they can turn on generated assets for this game in the app.",
         ));
     }
-    // Held through the budget check, the paid calls and their receipts: another process sharing
-    // this project then sees every earlier receipt and never writes the ledger at the same time.
-    let spending = ws.lock_spending(SPEND_LOCK_WAIT)?;
-    Ok(Job { keys, providers, inbox, ws, _spending: spending })
+    Ok(())
 }
 
 /// Explain which provider lacks credentials and offer a fallback that requires no paid assets.
@@ -1052,6 +1061,26 @@ mod tests {
         assert_eq!(*probe.1.lock().unwrap(), Some(true), "held during the paid call");
         assert_eq!(w.try_assets().unwrap().len(), 1);
         w.lock_spending(Duration::ZERO).expect("released once the receipt is written");
+    }
+
+    /// A generation that waited for the spending lock re-reads the person's choices first: turned
+    /// off while it waited, it stops before any estimate, paid call or receipt.
+    #[test]
+    fn a_generation_that_waited_for_the_lock_rereads_the_projects_choices() {
+        let (_d, w) = ws();
+        let (engine, stub) = recording_engine(&w, "elevenlabs", None);
+        let held = w.lock_spending(Duration::ZERO).unwrap();
+        let call = std::thread::spawn(move || {
+            let params = json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"});
+            engine.call("assets_sound_generate", params, crate::CallOptions::new(crate::Caller::Mcp)).map(|_| ()).unwrap_err().code
+        });
+        // Long enough for the call to pass its first checks and wait on the lock.
+        std::thread::sleep(Duration::from_millis(500));
+        Workspace::open(&w.root).unwrap().set_person(|m| m.generate_assets = false).unwrap();
+        drop(held);
+        assert_eq!(call.join().unwrap(), ErrorCode::NoPermission);
+        assert!(stub.calls.lock().unwrap().is_empty() && stub.estimates.lock().unwrap().is_empty());
+        assert!(w.try_assets().unwrap().is_empty());
     }
 
     /// Where the app is the project folder, an asset never lands on Craft Anything's records, named
