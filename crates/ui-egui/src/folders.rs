@@ -65,14 +65,7 @@ fn clear(app: &mut CraftApp) {
 /// they are (or uses the answer from Settings).
 pub fn picked(app: &mut CraftApp, folder: PathBuf) {
     match workspace::folder_state(&folder) {
-        Ok(FolderState::Project) => match Workspace::open(&folder) {
-            Ok(ws) => {
-                app.toast(tr("That folder is already a project, so it's open now."), false);
-                app.open_workspace(ws);
-                app.remember_project(&folder);
-            }
-            Err(e) => app.toast(e.for_people(), true),
-        },
+        Ok(FolderState::Project) => open_project(app, &folder),
         Ok(FolderState::Empty) => {
             clear(app);
             app.state.make.folder = Some(folder);
@@ -86,6 +79,34 @@ pub fn picked(app: &mut CraftApp, folder: PathBuf) {
                 Some(choice) => choose(app, choice),
                 None => app.state.modal = Some(Modal::ExistingFiles),
             }
+        }
+        Err(e) => app.toast(e.for_people(), true),
+    }
+}
+
+/// "Work on my project" picked a folder: its files are the app, edited in place (nothing asked).
+/// An existing project opens; an empty folder has nothing to work on.
+pub fn picked_own(app: &mut CraftApp, folder: PathBuf) {
+    match workspace::folder_state(&folder) {
+        Ok(FolderState::Project) => open_project(app, &folder),
+        Ok(FolderState::Empty) => app.toast(tr("That folder is empty. Pick the folder your project's files are in."), true),
+        Ok(FolderState::HasFiles { names, count }) => {
+            clear(app);
+            let d = &mut app.state.make;
+            d.folder = Some(folder);
+            d.folder_files = Some((names, count));
+            choose(app, ExistingFiles::Edit);
+        }
+        Err(e) => app.toast(e.for_people(), true),
+    }
+}
+
+fn open_project(app: &mut CraftApp, folder: &std::path::Path) {
+    match Workspace::open(folder) {
+        Ok(ws) => {
+            app.toast(tr("That folder is already a project, so it's open now."), false);
+            app.open_workspace(ws);
+            app.remember_project(folder);
         }
         Err(e) => app.toast(e.for_people(), true),
     }

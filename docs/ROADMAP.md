@@ -503,6 +503,12 @@ Owner: open · Status: in progress
 - [x] The website check's missing-site note names every place `site_dir` accepts (dist/, build/,
       out/, or a plain index.html with no package.json) and the app's real place, "app/" or "the
       project folder" (#494)
+- [ ] A project edited in place (Work on my project, or `rebuild --existing edit`) gets its stack
+      from the request's words, as a new one does: a request that reads as a game asks for Unity
+      unless it names another engine, even when the folder is a Godot project, and a run with no
+      stack picks the kind's default (`kinds.choose`); `stacks::used_in` reads only package.json,
+      after the first turn. Read the stack from the folder's own files first (`project.godot`,
+      `Cargo.toml`, `pyproject.toml`, `package.json`…)
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
@@ -560,10 +566,11 @@ Gaps found while using the app for real projects.
       — claimed: Nghiathan13, branch bugfix/r2.9-linux-gpu-choice
 - [ ] Linux GPU choice on a desktop with monitors on two GPUs, and on an Intel + NVIDIA laptop:
       covered by unit tests on fake `/sys/class/drm` folders, not run on such a machine yet (#571)
-- [ ] "Work on my project" on New project, beside "Make my own version" and "Just look inside":
+- [x] "Work on my project" on New project, beside "Make my own version" and "Just look inside":
       pick the folder of a project you already have, say what to change, and its files are edited
-      in place. Until now that was only reachable through "Choose a folder…" under Make's Start,
-      on a screen that asks what to recreate
+      in place, with nothing asked; the project takes the folder's name, an empty folder is
+      refused and a folder that's already a project opens. Until now that was only reachable
+      through "Choose a folder…" under Make's Start, on a screen that asks what to recreate
       — claimed: xerenon, branch feature/r2.9-work-on-my-project
 
 ### R2.10 Pinned builds

@@ -264,6 +264,8 @@ pub enum Pick {
     ProjectsDir,
     /// The folder a new project starts in (it may already have the person's files).
     ProjectFolder,
+    /// The folder of a project the person already has ("Work on my project").
+    OwnProject,
     /// Another folder whose projects are listed (Settings).
     ExtraProjectsDir,
     /// Pictures of the original to match (several at once).
@@ -1007,6 +1009,7 @@ impl CraftApp {
                 Pick::TargetFolder => pollster::block_on(d.set_title(tr("Pick the app or game folder")).pick_folder()),
                 Pick::ProjectsDir => pollster::block_on(d.set_title(tr("Where should new projects go?")).pick_folder()),
                 Pick::ProjectFolder => pollster::block_on(d.set_title(tr("Pick the folder for this project")).pick_folder()),
+                Pick::OwnProject => pollster::block_on(d.set_title(tr("Pick your project's folder")).pick_folder()),
                 Pick::ExtraProjectsDir => pollster::block_on(d.set_title(tr("Pick a folder with projects in it")).pick_folder()),
                 Pick::GameFolder => pollster::block_on(d.set_title(tr("Pick the game's folder")).pick_folder()),
                 Pick::SavePicture => pollster::block_on(d.set_title(tr("Save the picture")).add_filter("PNG", &["png"]).set_file_name(&suggested).save_file()),
@@ -1405,6 +1408,7 @@ impl CraftApp {
                             self.refresh_projects();
                         }
                         Pick::ProjectFolder => folders::picked(self, path),
+                        Pick::OwnProject => folders::picked_own(self, path),
                         Pick::ExtraProjectsDir => self.add_project_folder(path),
                         Pick::GameFolder => game_files::folder_picked(self, path),
                         Pick::SavePicture => game_files::save_to(self, path),

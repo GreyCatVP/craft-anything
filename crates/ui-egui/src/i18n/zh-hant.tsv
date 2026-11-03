@@ -578,6 +578,15 @@ Jobs ({n})	工作（{n}）
 Just a question: nothing was changed. Answered by	僅回答問題，未作任何修改。回答者：
 Just ask	只提問
 Just look inside	只檢視內部
+Work on my project	繼續做自己的專案
+Work on a project you already have	繼續做你已有的專案
+Pick its folder, say what you want, then press Start.	選擇它的資料夾，描述你的需求，然後點選開始。
+Where is your project?	你的專案在哪裡？
+Choose your project's folder…	選擇你的專案資料夾…
+For example: add a dark mode	例如：加上深色模式
+Pick your project's folder first.	請先選擇你的專案資料夾。
+Pick your project's folder	選擇你的專案資料夾
+That folder is empty. Pick the folder your project's files are in.	該資料夾是空的。請選擇存放你專案檔案的資料夾。
 Keep going without asking	繼續執行，無須詢問
 Keep it	保留
 Keep it in the sidebar to open any time, whatever later builds change.	將其保留在側邊欄中，隨時開啟，不受後續建置變更的影響。

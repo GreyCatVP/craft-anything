@@ -73,7 +73,9 @@ impl CraftApp {
         if self.creating.is_some() {
             return;
         }
-        let name = suggest_name(&request, &target);
+        // The person's own project keeps its folder's name; anything else is named for what's made.
+        let own = draft.folder.as_deref().and_then(Path::file_name).filter(|_| draft.mine);
+        let name = own.map_or_else(|| suggest_name(&request, &target), |n| n.to_string_lossy().into_owned());
         let (projects_dir, budget, generate) = (self.settings.projects_dir(), self.settings.assets.budget(), game && draft.generate_assets);
         // The folder, its records and copies of the pictures are written on a worker (a slow or
         // network drive must not freeze the window); `created` starts the build.

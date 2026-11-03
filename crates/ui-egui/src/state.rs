@@ -52,6 +52,9 @@ pub struct MakeDraft {
     /// The front door is on "Just look inside" rather than "Make my own version".
     #[serde(default)]
     pub look: bool,
+    /// The front door is on "Work on my project": the person's own folder, edited in place.
+    #[serde(default)]
+    pub mine: bool,
     /// The folder the person picked for the project (else a new one in the projects folder).
     #[serde(default)]
     pub folder: Option<PathBuf>,
@@ -86,6 +89,7 @@ impl Default for MakeDraft {
             generate_assets: false,
             skip_ghidra: false,
             look: false,
+            mine: false,
             folder: None,
             folder_files: None,
             existing: None,

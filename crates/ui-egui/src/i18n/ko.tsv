@@ -578,6 +578,15 @@ Jobs ({n})	작업 ({n})
 Just a question: nothing was changed. Answered by	질문에만 답했고 바뀐 것은 없습니다. 답변:
 Just ask	질문만 하기
 Just look inside	살펴보기만
+Work on my project	내 프로젝트 작업하기
+Work on a project you already have	이미 있는 프로젝트 작업하기
+Pick its folder, say what you want, then press Start.	폴더를 고르고 원하는 내용을 적은 뒤 시작을 누릅니다.
+Where is your project?	프로젝트는 어디에 있나요?
+Choose your project's folder…	프로젝트 폴더 고르기…
+For example: add a dark mode	예: 다크 모드 추가
+Pick your project's folder first.	먼저 프로젝트 폴더를 고르세요.
+Pick your project's folder	프로젝트 폴더 고르기
+That folder is empty. Pick the folder your project's files are in.	그 폴더는 비어 있습니다. 프로젝트 파일이 있는 폴더를 고르세요.
 Keep going without asking	묻지 않고 계속하기
 Keep it	남겨 두기
 Keep it in the sidebar to open any time, whatever later builds change.	나중 빌드가 무엇을 바꾸든 사이드바에 두고 언제든 열 수 있습니다.

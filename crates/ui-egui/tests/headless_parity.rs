@@ -45,6 +45,7 @@ const fn a(ui: &'static str, does: &'static str, headless: Headless) -> Action {
 const ACTIONS: &[Action] = &[
     // ---- Projects: making something --------------------------------------------------------
     a("start_make",          "start a new project from the Home prompt",       Cli("rebuild <target> <request> --build-with --backend --generate-assets")),
+    a("New project › Work on my project", "edit a project the person already has, in place", Cli("rebuild <target> <request> --project-folder --existing")),
     a("set_backend_enabled", "turn an AI on or off",                           Cli("ai on <name> / ai off <name>")),
     a("remove_backend",      "remove an AI and its key",                       Cli("ai remove <name>")),
     a("set_agent_program",   "run an agent app from a program it isn't found as", Cli("ai program <name> <path>")),

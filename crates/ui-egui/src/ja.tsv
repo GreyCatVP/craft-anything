@@ -324,6 +324,15 @@ Jobs ({n_jobs})	ジョブ({n_jobs})
 Just a question: nothing was changed. Answered by	質問のみ: 何も変更されていません。回答者:
 Just ask	質問するだけ
 Just look inside	中を覗くだけ
+Work on my project	自分のプロジェクトで作業する
+Work on a project you already have	すでにあるプロジェクトで作業する
+Pick its folder, say what you want, then press Start.	フォルダを選び、欲しいものを伝えて開始を押してください。
+Where is your project?	プロジェクトはどこにありますか?
+Choose your project's folder…	プロジェクトのフォルダを選ぶ…
+For example: add a dark mode	例: ダークモードを追加
+Pick your project's folder first.	まずプロジェクトのフォルダを選んでください。
+Pick your project's folder	プロジェクトのフォルダを選ぶ
+That folder is empty. Pick the folder your project's files are in.	そのフォルダは空です。プロジェクトのファイルがあるフォルダを選んでください。
 Keep going without asking	確認せずに続行
 Keep it	残す
 Keep it in the sidebar to open any time, whatever later builds change.	サイドバーに残して、後のビルドが変わってもいつでも開けるようにします。

@@ -1886,6 +1886,58 @@ fn a_new_project_can_start_in_a_folder_that_already_has_the_persons_files() {
     h.run_steps(2);
 }
 
+/// "Work on my project": the person's own folder, its files edited in place without a question,
+/// and the project named after it. An empty folder isn't taken; a folder that's a project opens.
+#[test]
+fn the_front_door_works_on_a_project_the_person_already_has() {
+    use craft_anything_ai::rebuild::StandIns;
+    use craft_anything_engine::workspace::{ExistingFiles, TargetRef, Workspace};
+    let (d, mine, empty) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(mine.path().join("index.html"), "<p>hi</p>").unwrap();
+    let runs = StandIns::new();
+    let (dir, r) = (d.path().to_path_buf(), runs.clone());
+    let mut h = harness(move || stand_in_app(dir, &r));
+    h.run_steps(2);
+    h.state_mut().state.make.target = TargetRef::Website { url: "https://example.com".into() };
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    assert!(h.state().state.make.mine && !h.state().state.make.look);
+    assert_eq!(h.state().state.make.target, TargetRef::None, "nothing to recreate");
+    h.get_by_label("Work on a project you already have");
+    h.state_mut().state.make.request = "Add a contact form".into();
+    h.run_steps(2);
+    h.get_by_label("Start").click();
+    h.run_steps(2);
+    assert!(h.state().creating.is_none() && h.state().workspace.is_none(), "Start waits for a folder");
+
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), empty.path().to_path_buf());
+    h.run_steps(2);
+    assert!(h.state().state.make.folder.is_none(), "an empty folder has nothing to work on");
+    assert!(h.state().state.toasts.iter().any(|(text, err)| *err && text.contains("empty")));
+
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.run_steps(3);
+    assert!(h.state().state.modal.is_none(), "nothing asked: they're the app");
+    assert_eq!(h.state().state.make.existing, Some(ExistingFiles::Edit));
+    assert_eq!(h.state().settings.existing_files, None, "the answer in Settings is left alone");
+    h.get_by_label("Pick another folder…");
+    h.get_by_label("Start").click();
+    assert!(wait(&mut h, |a| a.creating.is_none() && a.workspace.is_some()), "made on a worker");
+    let ws = Workspace::open(mine.path()).expect("the project is the person's folder");
+    assert!(ws.manifest.app_in_root && ws.app_dir() == mine.path());
+    assert_eq!(ws.manifest.name, mine.path().file_name().unwrap().to_string_lossy(), "named after its folder");
+    assert_eq!(std::fs::read_to_string(mine.path().join("index.html")).unwrap(), "<p>hi</p>");
+    assert_eq!(runs.started(), [mine.path().to_path_buf()]);
+    assert_eq!(std::fs::read_dir(d.path()).map(|r| r.count()).unwrap_or(0), 0, "nothing in the projects folder");
+
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.run_steps(2);
+    assert!(h.state().state.toasts.iter().any(|(text, err)| !*err && text.contains("already a project")));
+    h.state_mut().pause();
+    assert!(runs.finish(mine.path()));
+    h.run_steps(2);
+}
+
 #[test]
 fn settings_list_projects_from_more_folders_and_remove_them_from_the_list_only() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
