@@ -181,7 +181,7 @@ pub struct MusicParams {
 }
 
 /// What generations of `kind` are called, many of them and one.
-fn type_words(kind: AssetKind) -> (&'static str, &'static str) {
+pub(crate) fn type_words(kind: AssetKind) -> (&'static str, &'static str) {
     match kind {
         AssetKind::Image => ("pictures", "picture"),
         AssetKind::Model3d => ("3D models", "3D model"),

@@ -22,6 +22,22 @@ pub enum Unit {
     Credits,
 }
 
+impl Unit {
+    /// The most a limit, or a price per unit, can be in this unit.
+    pub fn max_amount(self) -> f64 {
+        match self {
+            Unit::Usd => MAX_ASSET_BUDGET_USD,
+            Unit::Credits => MAX_ASSET_CREDITS,
+        }
+    }
+
+    /// Whether `x` is an amount to count with in this unit: a number from nothing up to
+    /// [`Unit::max_amount`]. The one place that decides whether a price is believed.
+    pub fn accepts(self, x: f64) -> bool {
+        x.is_finite() && (0.0..=self.max_amount()).contains(&x)
+    }
+}
+
 /// How a price is measured.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -214,6 +230,18 @@ pub struct ModelList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_unit_accepts_amounts_from_nothing_up_to_its_maximum() {
+        for (unit, max) in [(Unit::Usd, MAX_ASSET_BUDGET_USD), (Unit::Credits, MAX_ASSET_CREDITS)] {
+            assert_eq!(unit.max_amount(), max);
+            assert!(unit.accepts(0.0) && unit.accepts(0.003) && unit.accepts(max));
+            for bad in [-0.001, -1e300, max * 1.000001, 1e300, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(!unit.accepts(bad), "{unit:?} {bad}");
+            }
+        }
+        assert!(Unit::Credits.accepts(10_001.0) && !Unit::Usd.accepts(10_001.0), "credits go far above dollars");
+    }
 
     #[test]
     fn kinds_and_units_keep_their_names() {

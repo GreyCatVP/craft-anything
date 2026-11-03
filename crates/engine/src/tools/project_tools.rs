@@ -6,10 +6,11 @@ use crate::asset_choice::AssetChoice;
 use crate::feed;
 use crate::inbox::{Answer, Inbox};
 use crate::settings::AssetSettings;
-use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
-use crate::tools::asset_tools::{limit_applies, round, unit_words};
-use crate::workspace::{AssetRecord, MAX_ASSET_BUDGET_USD, Workspace, type_usage};
-use craft_anything_engines::assets::model::{MAX_ASSET_CREDITS, Pricing, Rate, Unit};
+use crate::tool::{Caller, Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
+use crate::tools::asset_tools::{limit_applies, round, type_words, unit_words};
+use crate::tools::interaction_tools::{Approval, ask_approval_or_always};
+use crate::workspace::{AssetRecord, Manifest, TypeUsage, Workspace, type_usage};
+use craft_anything_engines::assets::model::{Pricing, Rate, Unit, amount};
 use craft_anything_engines::assets::{AssetKind, AssetProviders};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use craft_anything_platform::sync::Mutex;
@@ -161,7 +162,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_assets_allow",
             title: "Let a project generate assets",
-            summary: "Turn asset generation on or off for a project (allow), and the project-wide Ignore budget switch (ignore_budget), which switches every limit off at once while usage is still counted. Omit both to only read them. Pictures, 3D models and audio need their provider's key and a provider chosen for the type (project_assets_choose). Off until the person turns it on. The result's `types` lists every asset type (image, model_3d, speech, sound_effect, music) with its provider, model, model_name, unit (usd or credits), limit and limit_on (the number set and the type's own switch), enforced (whether the limit is applied: its switch on, the budget not ignored and a price to count with), tracked (whether the model's price lets usage be counted as an amount), and used, generations and cost_missing (what the type has used since its provider was chosen; used is a lower bound while cost_missing). project_assets_choose and project_assets_limit return the same `types`.",
+            summary: "Turn asset generation on or off (allow) and the project-wide Ignore budget switch (ignore_budget: every limit off, usage still counted); omit both to read. Returns `types`: per asset type provider, model, unit, limit, limit_on, enforced (limit applied), tracked (price countable), used, generations, cost_missing (null plus usage_error if assets.json is unreadable). An AI asks the person before turning spending on.",
             beginner: "Chooses whether your project may generate pictures, 3D models and audio, and whether its limits apply.",
             toolset: Toolset::Projects,
             effects: Effects::WRITES_FILESYSTEM,
@@ -172,7 +173,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_assets_choose",
             title: "Choose how a project makes one kind of asset",
-            summary: "Choose the provider and model a project uses for one asset type (kind: image, model_3d, speech, sound_effect or music), or provider null for Off: nothing of that type is generated. `provider` is required (null is Off, leaving it out is refused) and must be a registered provider id; `unit` (default: the provider's own) must be the unit it bills in, usd for fal.ai and credits for Scenario and ElevenLabs. Give `model` as its id at the provider, `model_name` as it is shown to the person (default: the id) and `pricing` as the model list gave it (left out: price unknown, so usage is counted without an amount and no limit applies). The same provider and unit keep the type's limit, its switch and its count; another provider or unit starts the count afresh with the default limit in the new unit, switched on. Returns the same `types` as project_assets_allow.",
+            summary: "Choose the provider and model a project uses for one asset type (kind: image, model_3d, speech, sound_effect or music), or provider null for Off. `provider` is required and must be registered; `unit` (default: its own) must be the unit it bills in, usd for fal.ai, credits for Scenario and ElevenLabs. `model` is its id at the provider; `model_name` and `pricing`, as the model list gave them, are stored for display: generation always re-reads the model's current price, and `tracked` and `enforced` in the result describe the stored one. The same provider and unit keep the type's limit, switch and count; another starts afresh with the default limit, switched on. Using a provider for a type asks the person when an AI calls. Returns `types` as project_assets_allow.",
             beginner: "Chooses which service and model make your project's pictures, 3D models, voices, sounds or music.",
             toolset: Toolset::Projects,
             effects: Effects::WRITES_FILESYSTEM,
@@ -183,7 +184,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "project_assets_limit",
             title: "Set a project's limit for one kind of asset",
-            summary: "Set what a project may use of one asset type before the person is asked (limit, in the unit of the type's provider: 0 to 10 000 dollars, or 0 to 10 000 000 credits) and/or switch that limit on or off (enabled). Usage is counted either way. Omit both to only read. A limit outside its range is refused and nothing changes. The project's Ignore budget switch (project_assets_allow) overrides every limit. Returns the same `types` as project_assets_allow.",
+            summary: "Set what a project may use of one asset type before the person is asked (limit, in the unit of the type's provider: 0 to 10 000 dollars, or 0 to 10 000 000 credits) and/or switch that limit on or off (enabled). Usage is counted either way. Omit both to only read. A limit outside its range is refused and nothing changes. Raising a limit or switching it off asks the person when an AI calls. The project's Ignore budget switch (project_assets_allow) overrides every limit. Returns `types` as project_assets_allow.",
             beginner: "Changes how much your project may use for one kind of generated asset.",
             toolset: Toolset::Projects,
             effects: Effects::WRITES_FILESYSTEM,
@@ -297,8 +298,9 @@ pub struct AllowAssetsParams {
 }
 
 /// Read or update the master switch and "Ignore budget" in one save from the latest manifest, and
-/// report every asset type. A damaged ledger is an error before anything changes: spending is never
-/// shown as none.
+/// report every asset type. Turning spending on is the person's to allow: an AI asks first (see
+/// [`approve_loosening`]). The change is saved even when the spending ledger is damaged; the report
+/// then shows usage as unreadable.
 ///
 /// Temporary: `provider` keeps editing the project's old provider list (`assets.legacy_providers`)
 /// until the project panel chooses providers per type (Task 14 of the per-type assets plan), which
@@ -313,9 +315,8 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
     }
     let settings = ctx.session.settings.assets.clone();
     let mut ws = open(&p.project)?;
-    let records = ws.try_assets()?;
     if p.allow.is_some() || p.ignore_budget.is_some() {
-        ws.set_person(|m| {
+        let change = |m: &mut Manifest| {
             if let Some(allow) = p.allow {
                 if let Some(id) = &p.provider {
                     // Work from the freshly merged manifest, including changes made during a build.
@@ -338,15 +339,87 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
             if let Some(ignore) = p.ignore_budget {
                 m.assets.ignore_budget = ignore;
             }
-        })?;
+        };
+        // Tried on a copy first, to see whether it loosens anything; then made on what is on disk now.
+        let mut after = ws.manifest.clone();
+        change(&mut after);
+        approve_loosening(ctx, &ws, &loosenings(&ws.manifest, &after, &providers, &settings))?;
+        ws.set_person(change)?;
     }
     let statuses: Vec<_> = providers.ids().into_iter().map(|id| json!({"id": id, "enabled": ws.manifest.asset_provider_allowed(id)})).collect();
-    let mut report = assets_report(&ws, &settings, &records);
+    let mut report = assets_report(&ws, &settings, &ws.try_assets());
     if let Some(o) = report.as_object_mut() {
         o.insert("asset_providers".into(), json!(ws.manifest.assets.legacy_providers));
         o.insert("providers".into(), json!(statuses));
     }
     Ok(ToolOutput::Value(report))
+}
+
+/// The kind of approval card that asks about a loosening change.
+const LOOSEN_CARD: &str = "assets:loosen";
+
+/// What a change from `before` to `after` loosens in what the project may spend, in sentences for the
+/// person; empty when it only tightens or leaves things as they are. Loosening is turning generation
+/// on, ignoring the budget, switching a limit off or raising it, allowing a provider on the old
+/// provider list, and using a provider for a type: Off to a provider, or one provider (or unit) to
+/// another, which starts that type's count afresh. Choosing Off, lowering a limit, switching one on,
+/// and the budget back to the types' own switches tighten.
+fn loosenings(before: &Manifest, after: &Manifest, providers: &AssetProviders, settings: &AssetSettings) -> Vec<String> {
+    let mut out = Vec::new();
+    if !before.generate_assets && after.generate_assets {
+        out.push("Turn generated assets on for this project.".to_owned());
+    }
+    if !before.assets.ignore_budget && after.assets.ignore_budget {
+        out.push("Ignore this project's budget, which switches every limit off.".to_owned());
+    }
+    for id in providers.ids() {
+        if after.asset_provider_chosen(id) && !before.asset_provider_chosen(id) {
+            out.push(format!("Allow {id} to generate assets."));
+        }
+    }
+    for kind in AssetKind::ALL {
+        let (was, now) = (before.assets.effective(kind, settings), after.assets.effective(kind, settings));
+        let (many, _) = type_words(kind);
+        let moved = was.choice.provider != now.choice.provider || was.choice.unit != now.choice.unit;
+        if let Some(provider) = &now.choice.provider
+            && moved
+        {
+            let afresh = if was.choice.provider.is_some() { " Its count starts afresh." } else { "" };
+            out.push(format!("Use {provider} ({}) for {many}.{afresh}", now.choice.model_name));
+        }
+        if was.limit_on && !now.limit_on {
+            out.push(format!("Switch the limit for {many} off."));
+        }
+        if !moved && now.limit > was.limit {
+            out.push(format!("Raise the limit for {many} from {} to {}.", amount(was.choice.unit, was.limit), amount(now.choice.unit, now.limit)));
+        }
+    }
+    out
+}
+
+/// Loosening what a project may spend is the person's to decide. An AI (`Caller::Agent`, `Caller::Mcp`)
+/// asks them through an approval card in the project's inbox, and with no answer, a no, or in Auto
+/// mode (which doesn't ask) nothing is changed; the card's "Always" counts as a yes and remembers
+/// nothing. The app and the CLI are the person, and apply it directly, as does a change that
+/// only tightens.
+fn approve_loosening(ctx: &mut Ctx<'_>, ws: &Workspace, changes: &[String]) -> Result<(), ToolError> {
+    if changes.is_empty() || !matches!(ctx.caller, Caller::Agent | Caller::Mcp) {
+        return Ok(());
+    }
+    let list = changes.join(" ");
+    let refused = |why: &str| {
+        ToolError::new(ErrorCode::NoPermission, format!("Not changed: {list} {why}"))
+            .with_remediation("The person can make this change in the project's Generated Assets settings. Carry on with the limits as they are.")
+    };
+    if ctx.session.settings.auto_mode {
+        return Err(refused("This needs the person's OK, and Auto mode doesn't ask."));
+    }
+    let detail = format!("The assistant asks to: {list} Nothing changes unless you allow it.");
+    let asked = ask_approval_or_always(ctx, &Inbox::new(ws.inbox_dir()), "Let the assistant loosen this project's asset spending?", &detail, LOOSEN_CARD)?;
+    match asked {
+        Approval::Once | Approval::Always => Ok(()),
+        Approval::Refused => Err(refused("The person didn't allow it.")),
+    }
 }
 
 /// A field that must be present but may be null (`provider`: null is Off). Serde reads a missing
@@ -381,21 +454,14 @@ pub struct ChooseAssetParams {
     /// What the provider bills in: usd or credits. Default: the provider's own; another is refused.
     #[serde(default)]
     pub unit: Option<Unit>,
-    /// What the model costs, as the model list gave it (default: price unknown).
+    /// The price stored with the choice and shown to the person, as the model list gave it
+    /// (default: unknown). Generation re-reads the model's current price whatever is stored here.
     #[serde(default)]
     pub pricing: Option<Pricing>,
 }
 
 /// The longest model id or name a project keeps.
 const MAX_MODEL_CHARS: usize = 200;
-
-/// The most a price per unit can be before it isn't believed: the same ceiling as a limit.
-fn ceiling(unit: Unit) -> f64 {
-    match unit {
-        Unit::Usd => MAX_ASSET_BUDGET_USD,
-        Unit::Credits => MAX_ASSET_CREDITS,
-    }
-}
 
 /// A price a client gives is in the unit the type is counted in and a number worth counting with.
 fn check_pricing(pricing: &Pricing, unit: Unit, provider: &str) -> Result<(), ToolError> {
@@ -411,9 +477,8 @@ fn check_pricing(pricing: &Pricing, unit: Unit, provider: &str) -> Result<(), To
         return Err(ToolError::invalid(format!("The price is in {}, but {provider} bills in {}.", unit_words(priced_in), unit_words(unit)))
             .with_remediation("Give the price the model list showed, or leave pricing out."));
     }
-    let max = ceiling(unit);
-    if typical.is_some_and(|x| !x.is_finite() || !(0.0..=max).contains(&x)) {
-        return Err(ToolError::invalid(format!("A price must be a number from 0 to {max:.0} {}.", unit_words(unit)))
+    if typical.is_some_and(|x| !unit.accepts(x)) {
+        return Err(ToolError::invalid(format!("A price must be a number from 0 to {:.0} {}.", unit.max_amount(), unit_words(unit)))
             .with_remediation("Give the price the model list showed, or leave pricing out."));
     }
     Ok(())
@@ -457,16 +522,21 @@ fn asset_choice(providers: &AssetProviders, p: &ChooseAssetParams) -> Result<Ass
 }
 
 /// Change the provider and model a project makes one asset type with, and report every type. A
-/// refused choice or a damaged ledger is an error before anything changes.
+/// refused choice is an error before anything changes; using a provider for a type is loosening, so
+/// an AI asks first (see [`approve_loosening`]). The choice is saved even when the spending ledger is
+/// damaged; the report then shows usage as unreadable.
 fn project_assets_choose(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ChooseAssetParams = parse_params(params)?;
     let providers = ctx.session.ext.get::<AssetProviders>().unwrap_or_default();
     let choice = asset_choice(&providers, &p)?;
     let settings = ctx.session.settings.assets.clone();
     let mut ws = open(&p.project)?;
-    let records = ws.try_assets()?;
-    ws.set_person(|m| m.assets.choose(p.kind, choice, &settings, crate::inbox::now_ms()))?;
-    Ok(ToolOutput::Value(assets_report(&ws, &settings, &records)))
+    let now = crate::inbox::now_ms();
+    let mut after = ws.manifest.clone();
+    after.assets.choose(p.kind, choice.clone(), &settings, now);
+    approve_loosening(ctx, &ws, &loosenings(&ws.manifest, &after, &providers, &settings))?;
+    ws.set_person(|m| m.assets.choose(p.kind, choice, &settings, now))?;
+    Ok(ToolOutput::Value(assets_report(&ws, &settings, &ws.try_assets())))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -485,33 +555,49 @@ pub struct LimitAssetParams {
     pub enabled: Option<bool>,
 }
 
-/// Change a type's limit and/or its switch, and report every type. A limit out of range or a damaged
-/// ledger is an error before anything changes.
+/// Change a type's limit and/or its switch, and report every type. A limit out of range is an error
+/// before anything is asked or changed; raising a limit or switching it off is loosening, so an AI
+/// asks first (see [`approve_loosening`]). The change is saved even when the spending ledger is
+/// damaged; the report then shows usage as unreadable.
 fn project_assets_limit(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: LimitAssetParams = parse_params(params)?;
+    let providers = ctx.session.ext.get::<AssetProviders>().unwrap_or_default();
     let settings = ctx.session.settings.assets.clone();
     let mut ws = open(&p.project)?;
-    let records = ws.try_assets()?;
     if p.limit.is_some() || p.enabled.is_some() {
-        // Refused here, so a refusal writes nothing; the save below starts from what is on disk now.
-        ws.manifest.assets.clone().set_limit(p.kind, p.limit, p.enabled, &settings)?;
+        // The change is tried on a copy first, for two reasons: a limit out of range is refused before
+        // anyone is asked or anything is saved (`set_person` saves whatever its closure leaves), and
+        // the copy shows whether it loosens anything. It is then made again inside `set_person`, which
+        // starts from what is on disk now, and that result is checked too.
+        let mut after = ws.manifest.clone();
+        after.assets.set_limit(p.kind, p.limit, p.enabled, &settings)?;
+        approve_loosening(ctx, &ws, &loosenings(&ws.manifest, &after, &providers, &settings))?;
         let mut applied = Ok(());
         ws.set_person(|m| applied = m.assets.set_limit(p.kind, p.limit, p.enabled, &settings))?;
         applied?;
     }
-    Ok(ToolOutput::Value(assets_report(&ws, &settings, &records)))
+    Ok(ToolOutput::Value(assets_report(&ws, &settings, &ws.try_assets())))
 }
 
 /// The master switch, "Ignore budget" and every asset type as the project has it, with what each
 /// has used: what all three project asset tools return. `limit` is the number set and `limit_on` the
-/// type's switch; `enforced` is the rule generation applies (see [`limit_applies`]), judged by the
-/// price stored with the choice, so a generation that finds the provider now gives a price can
-/// enforce a limit this reports as not enforced.
-fn assets_report(ws: &Workspace, settings: &AssetSettings, records: &[AssetRecord]) -> Value {
+/// type's switch; `enforced` is the rule generation applies (see [`limit_applies`]) and `tracked`
+/// whether the price stored with the choice can be counted, both judged by that stored price: a
+/// generation re-reads the model's current price, so one that is now known can enforce a limit this
+/// reports as not enforced.
+///
+/// Usage needs the ledger. When it can't be read, a type with a provider reports `used`,
+/// `generations` and `cost_missing` as null and says why in `usage_error`: damaged spending is never
+/// shown as none. A type that is Off counts nothing whatever the ledger says.
+fn assets_report(ws: &Workspace, settings: &AssetSettings, ledger: &Result<Vec<AssetRecord>, ToolError>) -> Value {
     let mut types = serde_json::Map::new();
     for kind in AssetKind::ALL {
         let t = ws.manifest.assets.effective(kind, settings);
-        let usage = type_usage(records, kind, &t);
+        let usage = match ledger {
+            _ if t.choice.provider.is_none() => Ok(TypeUsage::default()),
+            Ok(records) => Ok(type_usage(records, kind, &t)),
+            Err(e) => Err(e.message.as_str()),
+        };
         types.insert(
             kind.id().to_owned(),
             json!({
@@ -522,9 +608,10 @@ fn assets_report(ws: &Workspace, settings: &AssetSettings, records: &[AssetRecor
                 "limit": round(t.limit),
                 "limit_on": t.limit_on,
                 "enforced": limit_applies(ws, &t),
-                "used": round(usage.amount),
-                "generations": usage.generations,
-                "cost_missing": usage.cost_missing,
+                "used": usage.as_ref().ok().map(|u| round(u.amount)),
+                "generations": usage.as_ref().ok().map(|u| u.generations),
+                "cost_missing": usage.as_ref().ok().map(|u| u.cost_missing),
+                "usage_error": usage.as_ref().err(),
                 "tracked": t.choice.pricing.tracked(),
             }),
         );
@@ -1176,7 +1263,7 @@ mod tests {
             kinds.sort();
             assert_eq!(kinds, ["image", "model_3d", "music", "sound_effect", "speech"]);
             let nothing = json!({"provider": null, "model": "", "model_name": "", "unit": "usd", "limit": 5.0, "limit_on": true, "enforced": false,
-                "used": 0.0, "generations": 0, "cost_missing": false, "tracked": false});
+                "used": 0.0, "generations": 0, "cost_missing": false, "usage_error": null, "tracked": false});
             for kind in kinds {
                 assert_eq!(off["types"][&kind], nothing, "a type nobody chose is Off with the built-in dollar limit: {kind}");
             }
@@ -1185,7 +1272,7 @@ mod tests {
             assert_eq!(
                 image["types"]["image"],
                 json!({"provider": "fal", "model": "fal-ai/flux/dev", "model_name": "fal-ai/flux/dev", "unit": "usd", "limit": 5.0, "limit_on": true,
-                    "enforced": true, "used": 0.0, "generations": 0, "cost_missing": false, "tracked": true})
+                    "enforced": true, "used": 0.0, "generations": 0, "cost_missing": false, "usage_error": null, "tracked": true})
             );
             let model = call(
                 &e,
@@ -1202,7 +1289,7 @@ mod tests {
             assert_eq!(
                 (&music["types"]["music"]["tracked"], &music["types"]["music"]["enforced"], &music["types"]["music"]["model_name"]),
                 (&json!(false), &json!(false), &json!("music_v1")),
-                "no price: usage is counted without an amount and no limit applies; the name defaults to the id"
+                "no stored price: reported as not tracked and not enforced (generation reads the model's current price itself); the name defaults to the id"
             );
 
             // The ledger: two pictures (one cost unread), a 3D model, and a track of a model with no price.
@@ -1241,7 +1328,7 @@ mod tests {
                         (&json!(1.25), &json!(5.0)),
                         "usage is still counted and the limit still shown"
                     );
-                    assert_eq!(r["types"]["music"]["enforced"], false, "no price, no limit");
+                    assert_eq!(r["types"]["music"]["enforced"], false, "no stored price: not reported as enforced");
                 }
             }
         }
@@ -1320,12 +1407,7 @@ mod tests {
             refused(choose(json!({"pricing": priced(Rate::Quoted { typical: Some(10_001.0) })})), "price");
             refused(choose(json!({"kind": "video"})), "kind");
             refused(choose(json!({"surprise": 1})), "surprise");
-            // Leaving the provider out is not the same as choosing Off, and the schema says so.
-            let schema = crate::tool::schema_of::<ChooseAssetParams>();
-            let required: Vec<_> = schema["required"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-            assert!(required.contains(&"provider") && !required.contains(&"model"), "{schema}");
-            assert_eq!(schema["properties"]["provider"]["type"], json!(["string", "null"]), "{schema}");
-            assert!(schema["properties"]["provider"]["description"].as_str().is_some_and(|d| d.contains("Off")), "the field keeps its description: {schema}");
+            // Leaving the provider out is not the same as choosing Off.
             let mut no_provider = json!({"project": ws.root, "kind": "image"});
             refused(call(&e, "project_assets_choose", no_provider.clone()), "provider");
             // An Off choice has nothing else to say.
@@ -1397,20 +1479,293 @@ mod tests {
         }
 
         #[test]
-        fn a_damaged_ledger_stops_the_asset_tools_before_they_change_anything() {
+        fn the_choose_schema_requires_a_provider_that_may_be_null() {
+            let schema = crate::tool::schema_of::<ChooseAssetParams>();
+            let required: Vec<_> = schema["required"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+            assert!(required.contains(&"provider") && !required.contains(&"model"), "{schema}");
+            assert_eq!(schema["properties"]["provider"]["type"], json!(["string", "null"]), "{schema}");
+            assert!(schema["properties"]["provider"]["description"].as_str().is_some_and(|d| d.contains("Off")), "the field keeps its description: {schema}");
+        }
+
+        #[test]
+        fn the_master_switch_and_ignore_budget_change_in_one_call() {
+            let (_d, ws, e) = project();
+            let both = call(&e, "project_assets_allow", json!({"project": ws.root, "allow": true, "ignore_budget": true})).unwrap();
+            assert_eq!((&both["generate_assets"], &both["ignore_budget"]), (&json!(true), &json!(true)));
+            let disk = Workspace::open(&ws.root).unwrap().manifest;
+            assert!(disk.generate_assets && disk.assets.ignore_budget, "both saved");
+            let neither = call(&e, "project_assets_allow", json!({"project": ws.root, "allow": false, "ignore_budget": false})).unwrap();
+            assert_eq!((&neither["generate_assets"], &neither["ignore_budget"]), (&json!(false), &json!(false)));
+            let disk = Workspace::open(&ws.root).unwrap().manifest;
+            assert!(!disk.generate_assets && !disk.assets.ignore_budget);
+        }
+
+        #[test]
+        fn a_limit_can_be_set_on_a_type_that_is_off_or_still_on_the_settings_default() {
+            let mut session = crate::testing::session();
+            let default = AssetChoice {
+                provider: Some("elevenlabs".into()),
+                model: "music_v1".into(),
+                model_name: "Music v1".into(),
+                unit: Unit::Credits,
+                pricing: Pricing::After { unit: Unit::Credits },
+            };
+            session.settings.assets.defaults.insert(AssetKind::Music, default.clone());
+            session.settings.assets.credit_limit = 750.0;
+            let e = Engine::new(session);
+            let (_d, ws, _) = project();
+            assert!(ws.manifest.assets.types.is_empty(), "nothing chosen in this project yet");
+            let read = call(&e, "project_assets_allow", json!({"project": ws.root})).unwrap();
+            assert_eq!(
+                (&read["types"]["music"]["provider"], &read["types"]["music"]["limit"]),
+                (&json!("elevenlabs"), &json!(750.0)),
+                "Settings' default shows"
+            );
+
+            // A type that is Off keeps the limit for when a provider is chosen.
+            let r = call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "sound_effect", "limit": 8})).unwrap();
+            let t = &r["types"]["sound_effect"];
+            assert_eq!((&t["provider"], &t["limit"], &t["limit_on"], &t["unit"]), (&json!(null), &json!(8.0), &json!(true), &json!("usd")));
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.assets.types[&AssetKind::SoundEffect].limit, 8.0);
+
+            // A type on Settings' default is chosen as it shows, with the new limit and its switch off.
+            let r = call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "music", "limit": 900, "enabled": false})).unwrap();
+            let t = &r["types"]["music"];
+            assert_eq!((&t["provider"], &t["limit"], &t["limit_on"], &t["unit"]), (&json!("elevenlabs"), &json!(900.0), &json!(false), &json!("credits")));
+            let saved = &Workspace::open(&ws.root).unwrap().manifest.assets.types[&AssetKind::Music];
+            assert_eq!((&saved.choice, saved.since_ms), (&default, 0), "the default is kept as shown, counted from the start of the project");
+            // The credit maximum applies to it, not the dollar one.
+            assert!(call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "music", "limit": MAX_ASSET_CREDITS + 1.0})).is_err());
+            assert!(call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "music", "limit": 10_001})).is_ok());
+        }
+
+        /// A damaged ledger never blocks a change, and what it should have counted is never shown as
+        /// nothing: usage reads as null with the reason, and only a type that is Off still reads 0.
+        #[test]
+        fn a_damaged_ledger_does_not_block_a_change_and_is_never_shown_as_no_spending() {
             let (_d, ws, e) = project();
             choose_image(&e, &ws, "fal", "fal-ai/flux/dev");
-            let before = saved(&ws);
-            std::fs::write(ws.root.join("assets.json"), "not JSON").unwrap();
-            for (id, p) in [
-                ("project_assets_allow", json!({"project": ws.root})),
-                ("project_assets_allow", json!({"project": ws.root, "allow": true, "ignore_budget": true})),
-                ("project_assets_choose", json!({"project": ws.root, "kind": "image", "provider": null})),
-                ("project_assets_limit", json!({"project": ws.root, "kind": "image", "limit": 9})),
-            ] {
-                assert!(call(&e, id, p.clone()).is_err(), "{id} {p}: damaged spending is never shown as none");
-                assert_eq!(saved(&ws), before, "{id} {p}: and nothing was changed");
+            call(&e, "project_assets_allow", json!({"project": ws.root, "allow": true})).unwrap();
+            let ledger = ws.root.join("assets.json");
+            for damaged in ["not JSON", r#"{"version":999,"records":[]}"#] {
+                std::fs::write(&ledger, damaged).unwrap();
+                let unreadable = |r: &Value| {
+                    let (image, speech) = (&r["types"]["image"], &r["types"]["speech"]);
+                    assert_eq!((&image["used"], &image["generations"], &image["cost_missing"]), (&json!(null), &json!(null), &json!(null)), "{damaged}: {r}");
+                    assert!(image["usage_error"].as_str().is_some_and(|m| !m.is_empty()), "{damaged}: says why: {r}");
+                    assert_eq!(
+                        (&speech["used"], &speech["generations"], &speech["usage_error"]),
+                        (&json!(0.0), &json!(0), &json!(null)),
+                        "{damaged}: Off counts nothing"
+                    );
+                };
+                unreadable(&call(&e, "project_assets_allow", json!({"project": ws.root})).unwrap());
+                unreadable(&call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "image"})).unwrap());
+                // Writes land, whichever the tool, and the report says usage is unreadable.
+                let off = call(&e, "project_assets_allow", json!({"project": ws.root, "allow": false, "ignore_budget": true})).unwrap();
+                unreadable(&off);
+                assert_eq!((&off["generate_assets"], &off["ignore_budget"]), (&json!(false), &json!(true)));
+                let disk = Workspace::open(&ws.root).unwrap().manifest;
+                assert!(!disk.generate_assets && disk.assets.ignore_budget, "{damaged}: saved");
+                unreadable(&call(&e, "project_assets_allow", json!({"project": ws.root, "allow": true, "ignore_budget": false})).unwrap());
+                let limited = call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "image", "limit": 3, "enabled": true})).unwrap();
+                unreadable(&limited);
+                assert_eq!(Workspace::open(&ws.root).unwrap().manifest.assets.types[&AssetKind::Image].limit, 3.0, "{damaged}: saved");
+                let model = call(&e, "project_assets_choose", json!({"project": ws.root, "kind": "model_3d", "provider": "scenario", "model": "m3"})).unwrap();
+                assert_eq!((&model["types"]["model_3d"]["provider"], &model["types"]["model_3d"]["used"]), (&json!("scenario"), &json!(null)), "{damaged}");
+                let off = call(&e, "project_assets_choose", json!({"project": ws.root, "kind": "image", "provider": null})).unwrap();
+                assert_eq!(
+                    (&off["types"]["image"]["provider"], &off["types"]["image"]["used"]),
+                    (&json!(null), &json!(0.0)),
+                    "{damaged}: Off from a damaged ledger"
+                );
+                assert_eq!(std::fs::read_to_string(&ledger).unwrap(), damaged, "{damaged}: the ledger itself is never touched");
+                choose_image(&e, &ws, "fal", "fal-ai/flux/dev");
             }
+        }
+
+        /// How the person answers a card a tool posts: yes, "always", no, or by not answering.
+        #[derive(Clone, Copy)]
+        enum Reply {
+            Yes,
+            Always,
+            No,
+            Nothing,
+        }
+
+        /// An engine outside Auto mode, which asks the person.
+        fn asking() -> Engine {
+            let mut session = crate::testing::session();
+            session.settings.auto_mode = false;
+            Engine::new(session)
+        }
+
+        /// Call `id` as `caller` while the person answers any card as `reply`, and return the result with
+        /// the cards that were asked. A card nobody answers is withdrawn after a few seconds, so a call
+        /// that asks when it should not fails here instead of waiting half an hour.
+        fn call_as(e: &Engine, ws: &Workspace, caller: Caller, id: &str, p: Value, reply: Reply) -> (Result<Value, ToolError>, Vec<String>) {
+            let inbox = Inbox::new(ws.inbox_dir());
+            let token = crate::tool::CancelToken::default();
+            let done = std::sync::atomic::AtomicBool::new(false);
+            std::thread::scope(|s| {
+                let person = s.spawn(|| {
+                    let mut cards = Vec::new();
+                    let started = std::time::Instant::now();
+                    while !done.load(std::sync::atomic::Ordering::SeqCst) && started.elapsed() < std::time::Duration::from_secs(5) {
+                        if let Some(r) = inbox.pending().first() {
+                            cards.push(format!("{} {}", r.title, r.detail));
+                            if matches!(reply, Reply::Nothing) {
+                                token.cancel();
+                                break;
+                            }
+                            let answer = Answer { allow: Some(!matches!(reply, Reply::No)), always: matches!(reply, Reply::Always), ..Default::default() };
+                            inbox.answer(&r.id, &answer).unwrap();
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    cards
+                });
+                let result = e.call(id, p, CallOptions::new(caller).with_cancel(token.clone())).map(|o| o.to_json()["result"].clone());
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                (result, person.join().unwrap())
+            })
+        }
+
+        /// A project with generation on and pictures at fal, set up as the person (the CLI).
+        fn set_up(e: &Engine) -> (tempfile::TempDir, Workspace) {
+            let (d, ws, _) = project();
+            choose_image(e, &ws, "fal", "fal-ai/flux/dev");
+            call(e, "project_assets_allow", json!({"project": ws.root, "allow": true})).unwrap();
+            (d, ws)
+        }
+
+        #[test]
+        fn an_ai_loosening_spending_needs_the_persons_ok() {
+            let e = asking();
+            let (_d, ws) = set_up(&e);
+            let raise = |limit: u32| json!({"project": ws.root, "kind": "image", "limit": limit});
+            for caller in [Caller::Agent, Caller::Mcp] {
+                for reply in [Reply::Nothing, Reply::No] {
+                    let before = saved(&ws);
+                    let (r, cards) = call_as(&e, &ws, caller, "project_assets_limit", raise(50), reply);
+                    let err = r.expect_err("not allowed");
+                    assert_eq!(err.code, ErrorCode::NoPermission, "{err:?}");
+                    assert!(err.message.starts_with("Not changed: Raise the limit for pictures from $5.00 to $50.00."), "{err:?}");
+                    assert_eq!(cards.len(), 1, "asked once: {cards:?}");
+                    assert!(cards[0].contains("Raise the limit for pictures from $5.00 to $50.00."), "{cards:?}");
+                    assert_eq!(saved(&ws), before, "no answer or no: nothing written");
+                }
+            }
+            let (r, cards) = call_as(&e, &ws, Caller::Agent, "project_assets_limit", raise(50), Reply::Yes);
+            assert_eq!((&r.unwrap()["types"]["image"]["limit"], cards.len()), (&json!(50.0), 1), "yes: applied");
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.assets.types[&AssetKind::Image].limit, 50.0);
+            // "Always" is a yes and remembers nothing: the next loosening asks again.
+            let (r, cards) = call_as(&e, &ws, Caller::Mcp, "project_assets_limit", raise(60), Reply::Always);
+            assert_eq!((r.is_ok(), cards.len()), (true, 1));
+            assert!(Workspace::open(&ws.root).unwrap().manifest.allowed_actions.is_empty(), "no hidden permission");
+            let (r, cards) = call_as(&e, &ws, Caller::Mcp, "project_assets_limit", raise(70), Reply::No);
+            assert_eq!((r.is_err(), cards.len()), (true, 1));
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.assets.types[&AssetKind::Image].limit, 60.0);
+            // A limit out of range is refused before anyone is asked.
+            let (r, cards) = call_as(&e, &ws, Caller::Agent, "project_assets_limit", raise(10_001), Reply::Nothing);
+            assert_eq!((r.unwrap_err().code, cards.len()), (ErrorCode::BadInput, 0));
+        }
+
+        #[test]
+        fn each_way_to_loosen_spending_asks_in_its_own_words() {
+            let e = asking();
+            let (_d, ws) = set_up(&e);
+            let id = |kind: &str, provider: Value| json!({"project": ws.root, "kind": kind, "provider": provider, "model": "m"});
+            let ask = |tool: &str, p: Value| {
+                let (r, cards) = call_as(&e, &ws, Caller::Agent, tool, p, Reply::Yes);
+                (r.unwrap(), cards)
+            };
+            let said = |cards: &[String], words: &str| assert!(cards.len() == 1 && cards[0].contains(words), "{words}: {cards:?}");
+
+            let (_, cards) = ask("project_assets_limit", json!({"project": ws.root, "kind": "image", "enabled": false}));
+            said(&cards, "Switch the limit for pictures off.");
+            let (_, cards) = ask("project_assets_allow", json!({"project": ws.root, "ignore_budget": true}));
+            said(&cards, "Ignore this project's budget");
+            let (_, cards) = ask("project_assets_choose", id("sound_effect", json!("elevenlabs")));
+            said(&cards, "Use elevenlabs (m) for sound effects.");
+            assert!(!cards[0].contains("afresh"), "{cards:?}");
+            let (_, cards) = ask("project_assets_choose", id("image", json!("scenario")));
+            said(&cards, "Use scenario (m) for pictures. Its count starts afresh.");
+            let (_, cards) = ask("project_assets_allow", json!({"project": ws.root, "allow": false}));
+            assert!(cards.is_empty(), "turning generation off is tightening: {cards:?}");
+            let (_, cards) = ask("project_assets_allow", json!({"project": ws.root, "allow": true}));
+            said(&cards, "Turn generated assets on for this project.");
+            // The older per-provider switch is the same thing: it turns generation on.
+            call(&e, "project_assets_allow", json!({"project": ws.root, "allow": false})).unwrap();
+            let (_, cards) = ask("project_assets_allow", json!({"project": ws.root, "allow": true, "provider": "scenario"}));
+            said(&cards, "Turn generated assets on for this project.");
+        }
+
+        #[test]
+        fn tightening_spending_and_the_persons_own_callers_apply_without_asking() {
+            let e = asking();
+            let (_d, ws) = set_up(&e);
+            let direct = |caller: Caller, tool: &str, p: Value| {
+                let (r, cards) = call_as(&e, &ws, caller, tool, p, Reply::Nothing);
+                assert!(cards.is_empty(), "{caller:?} {tool}: asked {cards:?}");
+                r.unwrap_or_else(|err| panic!("{caller:?} {tool}: {err:?}"))
+            };
+            let manifest = || Workspace::open(&ws.root).unwrap().manifest;
+            let limit = |extra: Value| {
+                let mut p = json!({"project": ws.root, "kind": "image"});
+                p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+                p
+            };
+            call(&e, "project_assets_allow", json!({"project": ws.root, "ignore_budget": true})).unwrap();
+            call(&e, "project_assets_limit", json!({"project": ws.root, "kind": "image", "enabled": false})).unwrap();
+
+            for caller in [Caller::Agent, Caller::Mcp] {
+                // The way back to a limit that applies is tightening, and so is a lower limit.
+                direct(caller, "project_assets_limit", limit(json!({"enabled": true, "limit": 2})));
+                assert_eq!(manifest().assets.types[&AssetKind::Image].limit, 2.0);
+                direct(caller, "project_assets_allow", json!({"project": ws.root, "ignore_budget": false}));
+                assert!(!manifest().assets.ignore_budget);
+                // Changing nothing is not loosening, nor is another model of the same provider.
+                direct(caller, "project_assets_limit", limit(json!({"limit": 2})));
+                direct(caller, "project_assets_allow", json!({"project": ws.root, "allow": true}));
+                direct(caller, "project_assets_choose", json!({"project": ws.root, "kind": "image", "provider": "fal", "model": "fal-ai/flux/schnell"}));
+                assert_eq!(manifest().assets.types[&AssetKind::Image].choice.model, "fal-ai/flux/schnell");
+                assert_eq!(manifest().assets.types[&AssetKind::Image].limit, 2.0, "the same provider keeps the limit");
+                direct(caller, "project_assets_allow", json!({"project": ws.root, "allow": false}));
+                assert!(!manifest().generate_assets);
+                direct(caller, "project_assets_choose", json!({"project": ws.root, "kind": "image", "provider": null}));
+                assert_eq!(manifest().assets.types[&AssetKind::Image].choice.provider, None);
+                // Back as the person, to go again.
+                choose_image(&e, &ws, "fal", "fal-ai/flux/dev");
+                call(&e, "project_assets_limit", limit(json!({"enabled": false}))).unwrap();
+                call(&e, "project_assets_allow", json!({"project": ws.root, "allow": true, "ignore_budget": true})).unwrap();
+            }
+
+            // The app and the CLI are the person: they loosen directly.
+            for caller in [Caller::Cli, Caller::Ui] {
+                direct(caller, "project_assets_limit", limit(json!({"limit": 500, "enabled": false})));
+                direct(caller, "project_assets_allow", json!({"project": ws.root, "allow": true, "ignore_budget": true}));
+                direct(caller, "project_assets_choose", json!({"project": ws.root, "kind": "music", "provider": "elevenlabs", "model": "music_v1"}));
+                direct(caller, "project_assets_choose", json!({"project": ws.root, "kind": "image", "provider": "scenario", "model": "m"}));
+                let t = &manifest().assets.types[&AssetKind::Image];
+                assert_eq!((t.choice.provider.as_deref(), t.limit), (Some("scenario"), 500.0), "a new provider starts with the default credit limit");
+                direct(caller, "project_assets_allow", json!({"project": ws.root, "allow": false, "ignore_budget": false}));
+                choose_image(&e, &ws, "fal", "fal-ai/flux/dev");
+            }
+        }
+
+        #[test]
+        fn auto_mode_does_not_ask_so_an_ai_cannot_loosen_spending() {
+            let (_d, ws, e) = project();
+            let before = saved(&ws);
+            let (r, cards) = call_as(&e, &ws, Caller::Agent, "project_assets_allow", json!({"project": ws.root, "allow": true}), Reply::Yes);
+            let err = r.unwrap_err();
+            assert!(err.message.contains("Auto mode doesn't ask"), "{err:?}");
+            assert!(cards.is_empty(), "no card in Auto mode: {cards:?}");
+            assert_eq!(saved(&ws), before);
+            // The person still can.
+            let (r, _) = call_as(&e, &ws, Caller::Cli, "project_assets_allow", json!({"project": ws.root, "allow": true}), Reply::Nothing);
+            assert_eq!(r.unwrap()["generate_assets"], true);
         }
 
         #[test]
