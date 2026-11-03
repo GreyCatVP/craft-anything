@@ -328,6 +328,8 @@ Owner: open · Status: in progress
       sidecar when busy, then recover against the latest committed AI settings at startup.
 - [x] Discard superseded deferred settings after a successful full exit save; document model-only
       and model-with-variant command forms, and share transport selection between preflight and runs.
+- [x] Rebase after #567 and translate the ten model-selection strings and two agent tool titles
+      in the Russian catalogue, restoring coverage and catalogue key parity.
 - [ ] Supply and verify the run's Craft Anything MCP server in native OpenCode before enabling
       explicit model/thinking execution (currently refused for chat and builds, locally and over SSH).
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,

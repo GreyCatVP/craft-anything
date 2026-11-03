@@ -129,6 +129,7 @@ Answers come from {brain}. To build, set up a coding agent in Settings → AI.	�
 App	Приложение
 App details on device	Сведения о приложении на устройстве
 Apple apps	Приложения Apple
+Apply	Применить
 Approve an agent action	Одобрить действие агента
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Приложения и игры: продолжать уточнение, пока они не станут похожи на ваши изображения настолько. Выключено — сходство только сообщается.
 Architectures	Архитектуры
@@ -225,6 +226,7 @@ Choose a file	Выбрать файл
 Choose a folder…	Выбрать папку…
 Choose a function, string or section to see it here.	Выберите функцию, строку или раздел, чтобы увидеть их здесь.
 Choose an AI's job	Выбрать задачу ИИ
+Choose an agent's model and thinking	Выбрать модель агента и глубину размышления
 Choose the folder Ghidra is installed in.	Выберите папку, в которую установлен Ghidra.
 Choose what the builder's questions get	Выберите, что получают вопросы конструктора
 Choose what to recreate, say what you want, then press Start.	Выберите, что пересоздать, скажите, что хотите, затем нажмите «Старт».
@@ -599,6 +601,7 @@ List a node's event listeners	Список слушателей событий �
 List an AI's models	Список моделей ИИ
 List an Unreal IoStore container	Список контейнера Unreal IoStore
 List an Unreal pak	Список пака Unreal
+List an agent's models	Список моделей агента
 List bookmarks	Список закладок
 List browser pages	Список страниц браузера
 List documents	Список документов
@@ -664,6 +667,7 @@ Memory for Ghidra	Память для Ghidra
 Minimise	Свернуть
 Mode	Режим
 Model	Модель
+Model default	По умолчанию для модели
 Model: {model}	Модель: {model}
 Modules	Модули
 More detail	Подробнее
@@ -772,6 +776,9 @@ Open the folder	Открыть папку
 Open the installer app	Открыть приложение-установщик
 Open the website	Открыть веб-сайт
 Open {name}	Открыть {name}
+OpenCode default	По умолчанию для OpenCode
+OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	В OpenCode нет доступных моделей для чата. Подключите провайдера в OpenCode и обновите список.
+OpenCode model	Модель OpenCode
 Opened {name}	Открыто: {name}
 Opened {name}. Taking a first look…	Открыто: {name}. Делаем первый взгляд…
 Opened {}	Открыто: {}
@@ -885,7 +892,9 @@ Refining rounds	Раунды уточнения
 Refresh plugins	Обновить плагины
 Regions of a program file, each with one purpose: code, text, pictures, settings.	Регионы файла программы, каждый с одной целью: код, текст, изображения, настройки.
 Reload	Перезагрузить
+Reload models	Обновить модели
 Remember permission	Запомнить разрешение
+Remote program	Программа на удалённом компьютере
 Remove	Удалить
 Remove a pin	Удалить закрепление
 Remove a pinned build	Удалить закреплённую сборку
@@ -1078,6 +1087,8 @@ The packed contents of an Electron app (a website inside a desktop app)	Упак
 The program's machine code written out as one tiny instruction per line.	Машинный код программы, записанный в виде одной крошечной инструкции на строку.
 The project's name and round	Название проекта и раунд
 The raw result	Сырой результат
+The saved model is no longer visible. Choose another model or the OpenCode default.	Сохранённая модель больше не доступна. Выберите другую модель или модель OpenCode по умолчанию.
+The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	Сохранённая глубина размышления недоступна для этой модели. Выберите значение по умолчанию или одно из предложенных.
 The smallest unit of data in a file: a number from 0 to 255.	Наименьшая единица данных в файле: число от 0 до 255.
 The smallest units of data in a file: numbers from 0 to 255.	Наименьшие единицы данных в файле: числа от 0 до 255.
 The {name} view isn't available yet in this build.	Вид «{name}» пока недоступен в этой сборке.
@@ -1089,6 +1100,7 @@ They're my app: edit them in place	Это моё приложение: реда�
 Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	То, что программа берёт у операционной системы или библиотек, например «открыть файл» или «нарисовать окно».
 Things a program or library offers for other programs to use.	То, что программа или библиотека предлагает другим программам для использования.
 Things we couldn't establish yet are listed here, with what would settle them.	То, что мы пока не смогли установить, перечислено здесь вместе с тем, что помогло бы это разрешить.
+Thinking depth	Глубина размышления
 This answer won't be there after a restart:	Этот ответ не сохранится после перезапуска:
 This build stopped part-way	Эта сборка остановилась на полпути
 This can't be undone.	Это нельзя отменить.
