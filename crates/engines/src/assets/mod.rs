@@ -97,10 +97,8 @@ impl Shape {
     }
 
     pub fn megapixels(self) -> f64 {
-        match self {
-            Shape::Square => 1024.0 * 1024.0 / 1e6,
-            Shape::Wide | Shape::Tall => 1024.0 * 576.0 / 1e6,
-        }
+        let (width, height) = self.size();
+        f64::from(width) * f64::from(height) / 1e6
     }
 
     /// The picture's width and height in pixels.
@@ -585,6 +583,13 @@ mod tests {
             assert!(AssetProviders::built_in().get(&m.provider).is_some(), "{} names an unknown provider", m.id);
             assert_eq!(m.round_up_megapixels, matches!(m.id.as_str(), "flux-dev" | "flux-schnell"));
         }
+    }
+
+    /// The size and the megapixels come from one place: a price per megapixel follows the pixels.
+    #[test]
+    fn shape_sizes_and_megapixels_agree() {
+        assert_eq!([Shape::Square, Shape::Wide, Shape::Tall].map(Shape::size), [(1024, 1024), (1024, 576), (576, 1024)]);
+        assert_eq!([Shape::Square, Shape::Wide, Shape::Tall].map(Shape::megapixels), [1.048576, 0.589824, 0.589824]);
     }
 
     #[test]

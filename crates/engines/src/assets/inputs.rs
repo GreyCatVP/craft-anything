@@ -3,9 +3,12 @@
 //! [`Role`], from `input_roles.toml`) and by what it can hold (its [`FieldKind`]).
 //!
 //! A value that no field takes is not an error: the model does its own thing instead, and the
-//! option is reported as ignored so the person is told. What is an error is an input the model
-//! cannot do without (a required field with no default that this request can't fill, or no field
-//! for the prompt at all). The lists a provider hands us are bounded by [`MAX_FIELDS`] and
+//! option is reported as ignored so the person is told. A picture shape is only taken in full by a
+//! model that can make wide and tall pictures (a field with a value for each, or a width and a
+//! height); a required shape field that lacks the requested shape is given its square value (else
+//! any shape's) and the shape is reported ignored. What is an error is an input the model cannot
+//! do without (a required field with no default that this request can't fill, or no field for the
+//! prompt at all). The lists a provider hands us are bounded by [`MAX_FIELDS`] and
 //! [`MAX_CHOICES`]; a longer one is refused before anything is read from it.
 
 use super::model::AssetOption;
@@ -73,28 +76,33 @@ fn supply<'a>(req: &AssetRequest<'a>, role: Role) -> Option<Supply<'a>> {
     use AssetRequest as R;
     match (*req, role) {
         (R::Image { prompt, .. } | R::SoundEffect { prompt, .. } | R::Music { prompt, .. }, Role::Prompt) => Some(Supply::Text(prompt)),
-        (R::Model3d { prompt, .. }, Role::Prompt) => prompt.map(Supply::Text),
+        (R::Model3d { prompt, .. }, Role::Prompt) => filled(prompt).map(Supply::Text),
         (R::Speech { text, .. }, Role::Prompt) => Some(Supply::Text(text)),
-        (R::Model3d { image_url, .. }, Role::Image) => image_url.map(Supply::Text),
+        (R::Model3d { image_url, .. }, Role::Image) => filled(image_url).map(Supply::Text),
         (R::Image { shape, .. }, Role::Shape | Role::Width | Role::Height) => Some(Supply::Shape(shape)),
         (R::Model3d { faces, .. }, Role::Faces) => Some(Supply::Count(faces)),
         (R::Model3d { textured, .. }, Role::Textured) => Some(Supply::Flag(textured)),
         (R::SoundEffect { duration_seconds, .. } | R::Music { duration_seconds, .. }, Role::Duration) => Some(Supply::Seconds(duration_seconds)),
         (R::Music { instrumental, .. }, Role::Instrumental) => Some(Supply::Flag(instrumental)),
         // No voice asked for is no voice sent.
-        (R::Speech { voice_id, .. }, Role::Voice) => Some(voice_id).filter(|v| !v.trim().is_empty()).map(Supply::Text),
+        (R::Speech { voice_id, .. }, Role::Voice) => filled(Some(voice_id)).map(Supply::Text),
         _ => None,
     }
+}
+
+/// The text, unless it is missing or blank: a blank value is as good as none.
+fn filled(text: Option<&str>) -> Option<&str> {
+    text.filter(|t| !t.trim().is_empty())
 }
 
 /// A request of this kind with every value present, to ask which roles it ever uses.
 fn sample(kind: AssetKind) -> AssetRequest<'static> {
     match kind {
-        AssetKind::Image => AssetRequest::Image { prompt: "", shape: Shape::Square },
-        AssetKind::Model3d => AssetRequest::Model3d { image_url: Some(""), prompt: Some(""), textured: true, faces: 0 },
-        AssetKind::Speech => AssetRequest::Speech { text: "", voice_id: "voice" },
-        AssetKind::SoundEffect => AssetRequest::SoundEffect { prompt: "", duration_seconds: 0.0 },
-        AssetKind::Music => AssetRequest::Music { prompt: "", duration_seconds: 0.0, instrumental: true },
+        AssetKind::Image => AssetRequest::Image { prompt: "x", shape: Shape::Square },
+        AssetKind::Model3d => AssetRequest::Model3d { image_url: Some("x"), prompt: Some("x"), textured: true, faces: 0 },
+        AssetKind::Speech => AssetRequest::Speech { text: "x", voice_id: "x" },
+        AssetKind::SoundEffect => AssetRequest::SoundEffect { prompt: "x", duration_seconds: 0.0 },
+        AssetKind::Music => AssetRequest::Music { prompt: "x", duration_seconds: 0.0, instrumental: true },
     }
 }
 
@@ -149,6 +157,18 @@ fn takes_some(role: Role, kind: &FieldKind, roles: &InputRoles) -> bool {
         }
 }
 
+/// Whether a shape field offers a value for both the wide and the tall picture, the shapes that
+/// tell a model which makes only square ones apart.
+fn covers_wide_and_tall(kind: &FieldKind, roles: &InputRoles) -> bool {
+    matches!(kind, FieldKind::Choice(values) if roles.shape_value(Shape::Wide, values).is_some() && roles.shape_value(Shape::Tall, values).is_some())
+}
+
+/// A value of a shape field for a shape it has no value for: its square value, else the first
+/// value that stands for any shape.
+fn nearest_shape_value(values: &[String], roles: &InputRoles) -> Option<String> {
+    [Shape::Square, Shape::Wide, Shape::Tall].into_iter().find_map(|s| roles.shape_value(s, values))
+}
+
 /// A field the model cannot be run without: nothing may leave it unset.
 fn must_be_filled(field: &InputField) -> bool {
     field.required && !field.has_default
@@ -198,7 +218,34 @@ fn place(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) ->
     }
 }
 
+/// `place`, and for a required shape field that has no value for the requested shape, its nearest
+/// value (an optional one is left to the model's own shape). Also whether the value is what the
+/// request asked for.
+fn fill(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) -> Option<(Value, bool)> {
+    if let Some(value) = place(field, role, offered, roles) {
+        return Some((value, true));
+    }
+    match (&field.kind, offered) {
+        (FieldKind::Choice(values), Supply::Shape(_)) if role == Role::Shape && must_be_filled(field) => {
+            nearest_shape_value(values, roles).map(|value| (Value::String(value), false))
+        }
+        _ => None,
+    }
+}
+
 const REMEDIATION: &str = "Choose another model for this type of asset in the project's Generated Assets settings.";
+
+/// A name the provider gave, as it may appear in a message: no control characters (a line break
+/// would start a line of its own) and at most 64 characters.
+fn shown(name: &str) -> String {
+    const LONGEST: usize = 64;
+    let mut shown: String = name.chars().filter(|c| !c.is_control()).take(LONGEST + 1).collect();
+    if shown.chars().count() > LONGEST {
+        shown = shown.chars().take(LONGEST).collect();
+        shown.push('\u{2026}');
+    }
+    shown
+}
 
 /// Why a list of fields is too long to read, if it is.
 fn too_long(fields: &[InputField]) -> Option<String> {
@@ -207,14 +254,14 @@ fn too_long(fields: &[InputField]) -> Option<String> {
     }
     fields.iter().find_map(|f| match &f.kind {
         FieldKind::Choice(values) if values.len() > MAX_CHOICES => {
-            Some(format!("The input \"{}\" of the model offers {} values; at most {MAX_CHOICES} are read.", f.name, values.len()))
+            Some(format!("The input \"{}\" of the model offers {} values; at most {MAX_CHOICES} are read.", shown(&f.name), values.len()))
         }
         _ => None,
     })
 }
 
 fn cannot_fill(field: &InputField) -> String {
-    format!("The model needs the input \"{}\", which this app has nothing to put in.", field.name)
+    format!("The model needs the input \"{}\", which this app has nothing to put in.", shown(&field.name))
 }
 
 fn needs_a_prompt(kind: AssetKind) -> String {
@@ -225,14 +272,15 @@ fn needs_a_prompt(kind: AssetKind) -> String {
 }
 
 /// What is left of a request once fields have taken the roles in `taken`: an error when nothing
-/// tells the model what to make, else the options no field took.
-fn leftovers(kind: AssetKind, taken: &[Role]) -> Result<Vec<AssetOption>, String> {
+/// tells the model what to make, else the options no field took. A shape field takes the shape
+/// option when `shape_field_serves` (it has the shape asked for, or for every shape); a width and
+/// a height together take it as well.
+fn leftovers(kind: AssetKind, taken: &[Role], shape_field_serves: bool) -> Result<Vec<AssetOption>, String> {
     let told = taken.contains(&Role::Prompt) || (kind == AssetKind::Model3d && taken.contains(&Role::Image));
     if !told {
         return Err(needs_a_prompt(kind));
     }
-    // A shape needs a field for it, or a width and a height together.
-    let shaped = taken.contains(&Role::Shape) || (taken.contains(&Role::Width) && taken.contains(&Role::Height));
+    let shaped = shape_field_serves || (taken.contains(&Role::Width) && taken.contains(&Role::Height));
     let took = |option| if option == AssetOption::Shape { shaped } else { taken.iter().any(|&role| option_of(role) == Some(option)) };
     Ok(options_of(kind).iter().copied().filter(|&option| !took(option)).collect())
 }
@@ -253,37 +301,48 @@ pub fn map_request(fields: &[InputField], req: &AssetRequest, roles: &InputRoles
     let kind = req.kind();
     let mut body = Map::new();
     let mut taken: Vec<Role> = Vec::new();
+    let mut shape_asked_for = false;
     for field in fields {
-        let value = roles.role_of(&field.name).and_then(|role| Some((role, place(field, role, supply(req, role)?, roles)?)));
+        let value = roles.role_of(&field.name).and_then(|role| {
+            let (value, exact) = fill(field, role, supply(req, role)?, roles)?;
+            Some((role, value, exact))
+        });
         match value {
-            Some((role, value)) => {
+            Some((role, value, exact)) => {
                 taken.push(role);
+                shape_asked_for |= role == Role::Shape && exact;
                 body.insert(field.name.clone(), value);
             }
             None if must_be_filled(field) => return Err(refuse(cannot_fill(field))),
             None => {}
         }
     }
-    let ignored = leftovers(kind, &taken).map_err(refuse)?;
+    let ignored = leftovers(kind, &taken, shape_asked_for).map_err(refuse)?;
     Ok(Mapped { body, ignored })
 }
 
 /// Whether a model with these `fields` can make `kind` at all: `Ok` with the options it would
 /// ignore, or `Err` with why it can't run. It looks at the fields only, so a model that offers a
-/// value for some shapes (or voices) but not all is still runnable; [`map_request`] decides per request.
+/// value for some shapes (or voices) but not all is still runnable; [`map_request`] decides per
+/// request. A model makes pictures of every shape only with a shape field that has values for the
+/// wide and the tall one, or a width and a height; otherwise the shape is among what it ignores.
 pub fn runnable(fields: &[InputField], kind: AssetKind, roles: &InputRoles) -> Result<Vec<AssetOption>, String> {
     if let Some(message) = too_long(fields) {
         return Err(message);
     }
     let mut fit: Vec<Role> = Vec::new();
+    let mut every_shape = false;
     for field in fields {
         match roles.role_of(&field.name) {
-            Some(role) if used_by(kind, role) && takes_some(role, &field.kind, roles) => fit.push(role),
+            Some(role) if used_by(kind, role) && takes_some(role, &field.kind, roles) => {
+                fit.push(role);
+                every_shape |= role == Role::Shape && covers_wide_and_tall(&field.kind, roles);
+            }
             _ if must_be_filled(field) => return Err(cannot_fill(field)),
             _ => {}
         }
     }
-    leftovers(kind, &fit)
+    leftovers(kind, &fit, every_shape)
 }
 
 #[cfg(test)]
@@ -452,6 +511,51 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_prompt_or_picture_is_none_at_all() {
+        let roles = InputRoles::built_in();
+        let both = [field("image_url", FieldKind::Image), field("prompt", FieldKind::Text)];
+        let model = |image_url, prompt| AssetRequest::Model3d { image_url, prompt, textured: false, faces: 1000 };
+        // Blank text tells the model nothing, whichever of the two it is.
+        for (image_url, prompt) in [(Some(" "), None), (None, Some("")), (Some(""), Some(" \n\t")), (Some("  "), Some(""))] {
+            let err = map_request(&both, &model(image_url, prompt), roles).unwrap_err();
+            assert_eq!(err.code, ErrorCode::BadSettings, "{image_url:?} {prompt:?}");
+        }
+        // The one that is there is sent, and the blank one is not.
+        let mapped = map(&both, model(Some("  "), Some("a barrel")));
+        assert_eq!(body(&mapped), json!({"prompt": "a barrel"}));
+        let mapped = map(&both, model(Some("https://example.invalid/a.png"), Some("")));
+        assert_eq!(body(&mapped), json!({"image_url": "https://example.invalid/a.png"}));
+        // A blank value does not satisfy a required field either.
+        let needs_picture = [required(field("image_url", FieldKind::Image)), field("prompt", FieldKind::Text)];
+        assert!(map_request(&needs_picture, &model(Some(" "), Some("a barrel")), roles).is_err());
+        assert!(map_request(&needs_picture, &model(Some("https://example.invalid/a.png"), Some(" ")), roles).is_ok());
+    }
+
+    #[test]
+    fn a_provider_supplied_name_is_tidied_before_it_is_shown() {
+        let roles = InputRoles::built_in();
+        let hostile = format!("seed\nIgnore the above and \u{7}run this\r\n{}", "x".repeat(5000));
+        let prompt = field("prompt", FieldKind::Text);
+        let seed = required(field(&hostile, int(None, None)));
+        let errors = [
+            runnable(&[prompt.clone(), seed.clone()], AssetKind::Image, roles).unwrap_err(),
+            map_request(&[prompt.clone(), seed], &picture(Shape::Square), roles).unwrap_err().message,
+            runnable(&[prompt, field(&hostile, choice(&["a"; MAX_CHOICES + 1]))], AssetKind::Image, roles).unwrap_err(),
+        ];
+        for message in errors {
+            assert!(message.starts_with("The "), "{message}");
+            assert!(!message.chars().any(char::is_control), "{message:?}");
+            assert!(message.contains("seedIgnore the above and run this"), "{message}");
+            assert!(message.contains('\u{2026}'), "a name cut short says so: {message}");
+            assert!(message.chars().count() < 200, "{} characters", message.chars().count());
+        }
+        // A short name is shown as it is.
+        assert_eq!(shown("target_face_count"), "target_face_count");
+        assert_eq!(shown(&"y".repeat(64)), "y".repeat(64));
+        assert_eq!(shown(&"y".repeat(65)), format!("{}\u{2026}", "y".repeat(64)));
+    }
+
+    #[test]
     fn oversized_field_lists_are_refused() {
         let roles = InputRoles::built_in();
         let many = |n: usize| (0..n).map(|i| field(&format!("extra_{i}"), FieldKind::Text)).collect::<Vec<_>>();
@@ -504,12 +608,58 @@ mod tests {
         assert_eq!((body(&mapped), mapped.ignored), (json!({"prompt": "crate"}), vec![AssetOption::Shape]));
         assert_eq!(body(&map(&fields, picture(Shape::Wide))), json!({"prompt": "crate", "aspect_ratio": "16:9"}));
         let fields = [field("prompt", FieldKind::Text), required(field("aspect_ratio", choice(&["1:1", "16:9"])))];
-        assert!(map_request(&fields, &picture(Shape::Tall), roles).is_err());
         assert!(map_request(&fields, &picture(Shape::Wide), roles).is_ok());
-        // What a model could do with some shape is not what it can do with all of them.
-        assert_eq!(runnable(&fields, AssetKind::Image, roles), Ok(vec![]));
+        // A model that makes no tall picture is runnable, and says it ignores the shape.
+        assert_eq!(runnable(&fields, AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
         let nothing = [field("prompt", FieldKind::Text), field("aspect_ratio", choice(&["3:2"]))];
         assert_eq!(runnable(&nothing, AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+    }
+
+    #[test]
+    fn a_required_shape_field_without_the_requested_shape_gets_the_nearest_one() {
+        let roles = InputRoles::built_in();
+        let shaped = |values: &[&str]| [field("prompt", FieldKind::Text), required(field("aspect_ratio", choice(values)))];
+        let ask = |fields: &[InputField], shape| {
+            let mapped = map(fields, picture(shape));
+            (body(&mapped), mapped.ignored)
+        };
+        let square_only = shaped(&["1:1"]);
+        // A tall picture on a model with only a square one: the square value, and the shape reported.
+        assert_eq!(ask(&square_only, Shape::Tall), (json!({"prompt": "crate", "aspect_ratio": "1:1"}), vec![AssetOption::Shape]));
+        assert_eq!(ask(&square_only, Shape::Wide), (json!({"prompt": "crate", "aspect_ratio": "1:1"}), vec![AssetOption::Shape]));
+        // The shape it can make is made as asked, and nothing is reported for that request.
+        assert_eq!(ask(&square_only, Shape::Square), (json!({"prompt": "crate", "aspect_ratio": "1:1"}), vec![]));
+        // The model is still offered, and its shape reported ignored, by `runnable`.
+        assert_eq!(runnable(&square_only, AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+        // No square value: the first value that stands for any shape (a named size here).
+        let wide_only = shaped(&["3:2", "landscape_16_9"]);
+        assert_eq!(ask(&wide_only, Shape::Square), (json!({"prompt": "crate", "aspect_ratio": "landscape_16_9"}), vec![AssetOption::Shape]));
+        let no_tall = shaped(&["1:1", "16:9"]);
+        assert_eq!(ask(&no_tall, Shape::Tall), (json!({"prompt": "crate", "aspect_ratio": "1:1"}), vec![AssetOption::Shape]));
+        assert_eq!(ask(&no_tall, Shape::Wide), (json!({"prompt": "crate", "aspect_ratio": "16:9"}), vec![]));
+        // A model with a value for every shape takes the shape in full.
+        let every = shaped(&["1:1", "16:9", "9:16"]);
+        assert_eq!(ask(&every, Shape::Tall), (json!({"prompt": "crate", "aspect_ratio": "9:16"}), vec![]));
+        assert_eq!(runnable(&every, AssetKind::Image, roles), Ok(vec![]));
+        // Without a square value, it is the wide and tall ones that carry the shape.
+        let wide_and_tall = shaped(&["16:9", "9:16"]);
+        assert_eq!(runnable(&wide_and_tall, AssetKind::Image, roles), Ok(vec![]));
+        assert_eq!(ask(&wide_and_tall, Shape::Square), (json!({"prompt": "crate", "aspect_ratio": "16:9"}), vec![AssetOption::Shape]));
+        // An optional field is left to the model's own shape instead.
+        let optional = [field("prompt", FieldKind::Text), field("aspect_ratio", choice(&["1:1"]))];
+        assert_eq!(ask(&optional, Shape::Tall), (json!({"prompt": "crate"}), vec![AssetOption::Shape]));
+        // A pair of width and height beside the field serves every shape.
+        let both = [
+            field("prompt", FieldKind::Text),
+            required(field("aspect_ratio", choice(&["1:1"]))),
+            field("width", int(None, None)),
+            field("height", int(None, None)),
+        ];
+        assert_eq!(ask(&both, Shape::Tall), (json!({"prompt": "crate", "aspect_ratio": "1:1", "width": 576, "height": 1024}), vec![]));
+        // But a field with no value for any shape has nothing to put in it.
+        let none = shaped(&["3:2"]);
+        assert!(map_request(&none, &picture(Shape::Wide), roles).is_err());
+        assert!(runnable(&none, AssetKind::Image, roles).is_err());
     }
 
     #[test]
@@ -559,7 +709,11 @@ mod tests {
             field("duration", int(None, None)),
             field("instrumental", FieldKind::Bool),
         ];
-        assert_eq!(runnable(&all, AssetKind::Image, roles), Ok(vec![]));
+        // One square value says nothing of a wide or a tall picture; a value for each does.
+        assert_eq!(runnable(&all, AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+        let mut every_shape = all.clone();
+        every_shape[1] = field("aspect_ratio", choice(&["1:1", "16:9", "9:16"]));
+        assert_eq!(runnable(&every_shape, AssetKind::Image, roles), Ok(vec![]));
         assert_eq!(runnable(&all, AssetKind::Speech, roles), Ok(vec![]));
         assert_eq!(runnable(&all, AssetKind::Music, roles), Ok(vec![]));
         // Width and height are a pair; a voice with no values to pick from can't be set.

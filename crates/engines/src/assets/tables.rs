@@ -361,6 +361,9 @@ mod tests {
             "",
         ];
         for text in broken {
+            // Each is really broken for both parsers, so the empty table is the fallback and not the text.
+            assert!(InputRoles::parse(text).is_err(), "{text:?}");
+            assert!(KnownModels::parse(text).is_err(), "{text:?}");
             let roles = InputRoles::from_text_or_empty(text);
             assert_eq!(roles.role_of("prompt"), None, "{text:?}");
             assert_eq!(roles.shape_value(Shape::Square, &strings(&["square_hd"])), None, "{text:?}");
