@@ -74,6 +74,14 @@ pub enum Out {
 /// while the person is asked. True allows it.
 pub type Approver = Arc<dyn Fn(&str, &Value) -> bool + Send + Sync>;
 
+/// The approver for a chat in Clean room (#564): the agent's own reading, writing, commands and
+/// fetching are refused (they'd reach the original), and what's left (planning, our tools, which
+/// our tool server limits itself) is allowed. There is no project to check paths against in a chat,
+/// so nothing of the agent's own is let through.
+pub fn clean_room_chat_approver() -> Approver {
+    Arc::new(|tool, _input| !matches!(tool, "Read" | "Write" | "Bash" | "WebFetch"))
+}
+
 /// An ACP tool call in the approval policy's shape.
 fn policy_action(call: &Value) -> (String, Value) {
     let s = |p: &str| call.pointer(p).and_then(Value::as_str).map(str::to_string);

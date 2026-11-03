@@ -190,6 +190,10 @@ pub fn notes_hook_settings(cli: &str, dir: &std::path::Path) -> String {
 const CHANGING_TOOLS: &[&str] =
     &["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Task", "TodoWrite", "AskUserQuestion"];
 
+/// Claude Code's tools that read files, refused outright in Clean room (#564): its defaults let it
+/// read in its own folder and refuse elsewhere only until a release or a setting changes that.
+const READING_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS", "NotebookRead"];
+
 /// Claude Code answering a question about a build: the builder's session copied
 /// (`--fork-session`) and the copy not kept, no tool server, and only Read, Glob and Grep (none in
 /// Clean room).
@@ -209,7 +213,9 @@ fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
     }
     a.extend(["--no-session-persistence".into(), "--strict-mcp-config".into(), "--disallowedTools".into()]);
     a.extend(CHANGING_TOOLS.iter().map(|t| t.to_string()));
-    if !cx.reads_checked {
+    if cx.reads_checked {
+        a.extend(READING_TOOLS.iter().map(|t| t.to_string()));
+    } else {
         a.extend(["--allowedTools", "Read", "Glob", "Grep"].map(String::from));
     }
     a
@@ -273,6 +279,11 @@ impl AgentAdapter for ClaudeCode {
             a.push("TodoWrite".into());
         } else if cx.builder {
             a.extend(["Read", "Glob", "Grep", "TodoWrite"].map(String::from));
+        } else if cx.reads_checked {
+            // A Clean room chat works only through our tools, which keep the original out of reach.
+            // Refused outright: neither its defaults nor an allow rule added later can open them (#564).
+            a.push("--disallowedTools".into());
+            a.extend(READING_TOOLS.iter().chain(CHANGING_TOOLS).map(|t| t.to_string()));
         }
         a
     }

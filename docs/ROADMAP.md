@@ -338,8 +338,16 @@ Owner: open · Status: in progress
       differs by agent: Claude Code asks our approval tool; OpenCode's builder runs with `--auto`;
       Hermes's `-z` turns its approvals off on every run, chats included. Clean room's approval
       rule doesn't reach an agent that never asks us
+- [x] Clean room outside builds (#564): a chat or question with Claude Code refuses the agent's own
+      file, shell and web tools outright (`--disallowedTools`), not through its defaults; an ACP chat
+      refuses them through an approver instead of a consent card (`docs/claude-code.md`)
 - [ ] Say on each adapter, as typed data, what it can be held to (asks us, its own sandbox,
-      nothing), and have runs act on that, once the decision above is made
+      nothing), in a build, a chat and a question, and have runs act on that, once the decision above
+      is made. Today Codex, Gemini CLI, OpenCode, Antigravity, Hermes and Maki are not held to
+      Clean room in a chat (their own sandbox, if any, is not established)
+- [ ] Check live that a Clean room chat with Claude Code can't read a file outside its folder, and
+      that an ACP chat in Clean room still reaches our tools (its permission requests for them are
+      allowed, only its own read/write/command/fetch are refused)
 - [ ] Check live what Hermes over ACP asks about: whether its file reads reach our approval policy
 - [ ] Maki's plain `maki -p` builder doesn't ask us before commands, and in Clean room its reads
       aren't checked (as with every agent that never asks us): say so in the approval decision

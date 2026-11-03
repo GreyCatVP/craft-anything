@@ -138,6 +138,10 @@ pub const APPROVAL_TOOL: &str = craft_anything_engine::tools::interaction_tools:
 pub enum Access {
     /// Only analyse: no edits.
     Analyse,
+    /// The same in Clean room (#564): the agent's own file, shell and web tools are refused outright,
+    /// so it works only through our tool server, which keeps the original out of reach. It isn't
+    /// left to the agent's defaults (they allow reads in its folder and may change).
+    CleanRoomAnalyse,
     /// Build: read freely, edit through our approval tool (which asks the person when needed).
     Build,
     /// Build in Clean room: every read and edit goes through our approval tool, which keeps the
@@ -164,8 +168,21 @@ pub fn build_args(
     let prompt = if prompt.starts_with('-') { format!(" {prompt}") } else { prompt.to_string() };
     let builder = matches!(access, Access::Build | Access::CleanRoomBuild);
     let question = matches!(access, Access::Question | Access::CleanRoomQuestion);
-    let reads_checked = matches!(access, Access::CleanRoomBuild | Access::CleanRoomQuestion);
+    let reads_checked = matches!(access, Access::CleanRoomBuild | Access::CleanRoomQuestion | Access::CleanRoomAnalyse);
     adapter.args(&ArgsCx { options: opts, prompt: &prompt, preamble, mcp, resume, builder, reads_checked, question })
+}
+
+/// What a run may do with files: a question reads only, a builder builds, anything else analyses;
+/// Deep mode or not decides whether the original is in reach (#564).
+fn access_for(builder: bool, deep: bool, question: bool) -> Access {
+    match (builder, deep, question) {
+        (_, true, true) => Access::Question,
+        (_, false, true) => Access::CleanRoomQuestion,
+        (true, true, false) => Access::Build,
+        (true, false, false) => Access::CleanRoomBuild,
+        (false, true, false) => Access::Analyse,
+        (false, false, false) => Access::CleanRoomAnalyse,
+    }
 }
 
 /// True when `program`'s help mentions every required flag (10 s limit, stdin closed).
@@ -409,6 +426,9 @@ impl CliSpec {
 /// agent speaks it (a local, non-building run), else one CLI run per message.
 pub fn conversation(spec: CliSpec) -> Box<dyn Conversation> {
     match acp_for(&spec).filter(|_| spec.builder.is_none()) {
+        // In Clean room the agent's own file, shell and web requests are refused, not put to the
+        // person as a card they could allow with one click (#564).
+        Some(c) if !spec.deep => Box::new(c.with_approver(acp::clean_room_chat_approver())),
         Some(c) => Box::new(c),
         None => Box::new(CliConversation::new(spec)),
     }
@@ -562,13 +582,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
         });
         return nothing_done(&name);
     }
-    let access = match (&spec.builder, spec.deep, spec.question) {
-        (_, true, true) => Access::Question,
-        (_, false, true) => Access::CleanRoomQuestion,
-        (Some(_), true, false) => Access::Build,
-        (Some(_), false, false) => Access::CleanRoomBuild,
-        (None, _, false) => Access::Analyse,
-    };
+    let access = access_for(spec.builder.is_some(), spec.deep, spec.question);
     let args = build_args(adapter.as_ref(), &spec.options, text, &preamble, &mcp, if adapter.resumes() { resume.as_deref() } else { None }, access);
     let shown = FailureContext::new(&program, &args, text, remote.as_deref(), spec);
     // A builder turn may take hours and sit silent for long stretches: Ghidra's first look at a big
@@ -1129,6 +1143,53 @@ mod tests {
         let m = McpCommand::local_or_remote(false, Some("/p/inv.cany".into()), Some("/p/inbox".into()));
         assert!(m.args.windows(2).any(|w| w[0] == "--inbox" && w[1] == "/p/inbox"));
         assert!(!McpCommand::local_or_remote(true, None, Some("/p/inbox".into())).args.contains(&"--inbox".to_string()));
+    }
+
+    /// #564: in Clean room a chat's reads aren't left to Claude Code's defaults. Its own file, shell
+    /// and web tools are refused outright (a deny rule beats any allow), so only our tool server,
+    /// which keeps the original out of reach, is left; Deep mode is unchanged.
+    #[test]
+    fn a_clean_room_chat_refuses_the_agents_own_file_tools_outright() {
+        let args = |access| build_args(adapter_for("claude-code").as_ref(), &BackendOptions::default(), "q", "PRE", &mcp(), None, access);
+        let clean = args(Access::CleanRoomAnalyse);
+        let denied = &clean[clean.iter().position(|x| x == "--disallowedTools").expect("a deny list") + 1..];
+        for t in ["Read", "Glob", "Grep", "LS", "NotebookRead", "Write", "Edit", "Bash", "PowerShell", "WebFetch", "WebSearch"] {
+            assert!(denied.contains(&t.to_string()), "{t} is refused: {denied:?}");
+        }
+        let allowed = &clean[clean.iter().position(|x| x == "--allowedTools").unwrap() + 1..clean.iter().position(|x| x == "--disallowedTools").unwrap()];
+        assert_eq!(allowed, ["mcp__craft-anything__*"], "only our tools are allowed");
+        let deep = args(Access::Analyse);
+        assert!(!deep.contains(&"--disallowedTools".to_string()), "Deep mode keeps its defaults: {deep:?}");
+        // A Clean room question refuses reading too (it used to leave that to the default).
+        let q = args(Access::CleanRoomQuestion);
+        let denied = &q[q.iter().position(|x| x == "--disallowedTools").unwrap() + 1..];
+        for t in ["Read", "Glob", "Grep", "LS", "NotebookRead", "Write", "Bash"] {
+            assert!(denied.contains(&t.to_string()), "{t} is refused in a Clean room question");
+        }
+        assert!(!q.contains(&"--allowedTools".to_string()));
+    }
+
+    /// #564: chats take their access from the mode, as builds and questions do.
+    #[test]
+    fn a_run_gets_its_access_from_what_it_is_and_the_mode() {
+        assert_eq!(access_for(false, true, false), Access::Analyse);
+        assert_eq!(access_for(false, false, false), Access::CleanRoomAnalyse);
+        assert_eq!(access_for(true, true, false), Access::Build);
+        assert_eq!(access_for(true, false, false), Access::CleanRoomBuild);
+        assert_eq!(access_for(false, true, true), Access::Question);
+        assert_eq!(access_for(false, false, true), Access::CleanRoomQuestion);
+        assert_eq!(access_for(true, false, true), Access::CleanRoomQuestion);
+    }
+
+    /// #564: an ACP chat in Clean room refuses the agent's own reads, writes, commands and fetches
+    /// instead of putting them to the person.
+    #[test]
+    fn a_clean_room_acp_chat_refuses_the_agents_own_actions() {
+        let approve = acp::clean_room_chat_approver();
+        for tool in ["Read", "Write", "Bash", "WebFetch"] {
+            assert!(!approve(tool, &serde_json::json!({"file_path": "/original/secret.txt"})), "{tool}");
+        }
+        assert!(approve("TodoWrite", &serde_json::Value::Null));
     }
 
     #[test]
