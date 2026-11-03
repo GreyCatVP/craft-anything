@@ -1047,6 +1047,20 @@ mod tests {
         draw(&mut app);
         assert!(app.agent_model_picker.is_none(), "a confirmed settings change still invalidates the picker");
     }
+
+    /// An AI that finishes connecting is chosen, unless another choice (here "No AI for now") was
+    /// made while it connected.
+    #[test]
+    fn a_late_add_does_not_undo_a_choice_made_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Beginner, false));
+        let added = |choices| Ok(Done::BackendAdded { name: "Home server".into(), result: Ok(()), choices });
+        let started = app.backend_choices;
+        app.choose_backend(None);
+        app.handle_done(Finished { job: 0, result: added(started) });
+        assert_eq!(app.state.backend, None, "the late add must not override No AI for now");
+        app.handle_done(Finished { job: 0, result: added(app.backend_choices) });
+        assert_eq!(app.state.backend.as_deref(), Some("Home server"), "with no choice meanwhile, the added AI is chosen");
+    }
 }
 
 #[cfg(test)]

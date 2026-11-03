@@ -283,9 +283,10 @@ impl CraftApp {
         let hub = self.hub.clone();
         let f = &self.server_form;
         let (name, address, model, key) = (f.name.trim().to_string(), f.address.clone(), f.model.trim().to_string(), Some(f.key.clone()));
+        let choices = self.backend_choices;
         self.jobs.spawn(trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_server(&name, &address, Some(model.as_str()).filter(|m| !m.is_empty()), key).map(|_| ());
-            Ok(crate::Done::BackendAdded { name, result })
+            Ok(crate::Done::BackendAdded { name, result, choices })
         });
     }
 

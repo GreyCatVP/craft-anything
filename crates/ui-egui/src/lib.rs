@@ -220,6 +220,8 @@ pub enum Done {
     BackendAdded {
         name: String,
         result: Result<(), ToolError>,
+        /// `CraftApp::backend_choices` when the add started: a choice made since then stands.
+        choices: u64,
     },
     /// The projects folder was listed.
     Projects(Vec<craft_anything_engine::workspace::Workspace>),
@@ -431,6 +433,8 @@ pub struct CraftApp {
     pub extractor: Option<String>,
     pub detected: Option<Vec<Detected>>,
     pub detecting: bool,
+    /// Counts AI choices, so an add that finishes later doesn't undo one made meanwhile.
+    pub backend_choices: u64,
     pub log: Vec<LogLine>,
     pub key_inputs: std::collections::BTreeMap<String, String>,
     /// Settings → AI's "Add an AI by its address" form. Not kept with the UI state: its key goes
@@ -536,6 +540,7 @@ impl CraftApp {
             extractor: None,
             detected: None,
             detecting: false,
+            backend_choices: 0,
             log: Vec::new(),
             key_inputs: Default::default(),
             server_form: ServerForm::default(),
@@ -1159,13 +1164,15 @@ impl CraftApp {
     pub fn add_backend(&mut self, config: BackendConfig, key: Option<String>) {
         let hub = self.hub.clone();
         let name = config.name.clone();
+        let choices = self.backend_choices;
         self.jobs.spawn(i18n::trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_backend(config, key);
-            Ok(Done::BackendAdded { name, result })
+            Ok(Done::BackendAdded { name, result, choices })
         });
     }
 
     pub fn choose_backend(&mut self, name: Option<String>) {
+        self.backend_choices = self.backend_choices.wrapping_add(1);
         if self.state.backend != name {
             self.state.backend = name;
             if let Some(mut c) = self.conversation.take() {
@@ -1485,13 +1492,16 @@ impl CraftApp {
                     self.toast(error.for_people(), true);
                 }
             }
-            Done::BackendAdded { name, result } => match result {
+            Done::BackendAdded { name, result, choices } => match result {
                 Ok(()) => {
                     if self.server_form.name.trim() == name {
                         self.server_form = ServerForm::default();
                     }
                     self.toast(i18n::trf("{name} is ready", &[("name", &name)]), false);
-                    self.choose_backend(Some(name));
+                    // Picking another AI (or none) while this one connected wins.
+                    if choices == self.backend_choices {
+                        self.choose_backend(Some(name));
+                    }
                     self.refresh_backends();
                 }
                 Err(e) => self.toast(e.for_people(), true),
