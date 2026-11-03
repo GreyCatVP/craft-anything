@@ -250,7 +250,7 @@ Generate original pictures and models, speech, sound effects and music with your
 Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	fal.ai または Scenario で画像と 3D モデルを、ElevenLabs で読み上げ、効果音、音楽を生成します。モデルは約 {model}、各プロジェクトの予算は {budget} です。設定 → ビルドで視覚モデルを選択できます。
 3D model generator	3D モデル生成サービス
 What pictures are turned into 3D models with.	画像を 3D モデルに変換するサービス。
-What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	承認を求める前に、新しいゲームが画像、3D モデル、音声の生成に使用できる金額です。各プロジェクトが独自の予算を保持します。
+What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	承認を求める前に、新しいプロジェクトが画像、3D モデル、音声の生成に使用できる金額です。各プロジェクトが独自の予算を保持します。
 Generated art (games)	生成アート(ゲーム)
 Generated assets	生成アセット
 Generated pictures and 3D models are made with fal.ai.	生成画像と 3D モデルは fal.ai で作成します。

@@ -162,7 +162,7 @@ Generate original pictures and models, speech, sound effects and music with your
 Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Images et modèles 3D via fal.ai ou Scenario ; voix, effets sonores et musique via ElevenLabs. Environ {model} par modèle, avec un budget de {budget} par projet. Choisissez les modèles visuels dans Réglages → Créations.
 3D model generator	Générateur de modèles 3D
 What pictures are turned into 3D models with.	Le service qui transforme les images en modèles 3D.
-What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Ce qu'un nouveau jeu peut dépenser en images, modèles 3D et sons générés avant de vous demander. Chaque projet conserve son propre budget.
+What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Ce qu'un nouveau projet peut dépenser en images, modèles 3D et sons générés avant de vous demander. Chaque projet conserve son propre budget.
 Needs a fal.ai key. Until then the game is built without them.	Nécessite une clé fal.ai. En attendant, le jeu est construit sans.
 Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Faits avec fal.ai et payés depuis votre compte : {model} par modèle 3D, {picture} par image. Désactivé, le jeu est construit sans.
 Add a fal.ai key	Ajouter une clé fal.ai

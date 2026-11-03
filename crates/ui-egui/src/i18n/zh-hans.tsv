@@ -1401,7 +1401,7 @@ Generate original pictures and models, speech, sound effects and music with your
 Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	通过 fal.ai 或 Scenario 生成图片和 3D 模型；通过 ElevenLabs 生成语音、音效和音乐。每个模型估算 {model}，每个项目预算为 {budget}。在设置 → 构建中选择视觉模型。
 3D model generator	3D 模型生成器
 What pictures are turned into 3D models with.	用于将图片转换为 3D 模型的服务。
-What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	新游戏在请求你批准之前可用于生成图片、3D 模型和音频的金额。每个项目保留自己的预算。
+What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	新项目在请求你批准之前可用于生成图片、3D 模型和音频的金额。每个项目保留自己的预算。
 API secret	API 密钥机密
 {name} API secret	{name} API 密钥机密
 Paste your {name} API secret	粘贴你的 {name} API 密钥机密

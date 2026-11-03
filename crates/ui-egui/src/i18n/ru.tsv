@@ -1400,7 +1400,7 @@ Generate original pictures and models, speech, sound effects and music with your
 Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Изображения и 3D-модели от fal.ai или Scenario; речь, звуковые эффекты и музыка от ElevenLabs. Оценочно {model} за модель, с бюджетом {budget} на проект. Визуальные модели выберите в Настройки → Сборки.
 3D model generator	Генератор 3D-моделей
 What pictures are turned into 3D models with.	Чем изображения превращаются в 3D-модели.
-What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Сколько новая игра может потратить на сгенерированные изображения, 3D-модели и звук, прежде чем вас спросят. У каждого проекта свой бюджет.
+What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Сколько новый проект может потратить на сгенерированные изображения, 3D-модели и звук, прежде чем вас спросят. У каждого проекта свой бюджет.
 API secret	Секрет API
 {name} API secret	Секрет API {name}
 Paste your {name} API secret	Вставьте секрет API {name}

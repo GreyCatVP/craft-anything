@@ -667,12 +667,12 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
         changed |= number(ui, &mut b.parallel, 1..=8, "", "");
     });
     ui.add_space(8.0);
-    widgets::caption(ui, "Generated art (games)");
+    widgets::caption(ui, "Generated assets");
     let a = &mut app.settings.assets;
     row(
         ui,
         "Budget for a new project",
-        "What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.",
+        "What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.",
         |ui| {
             changed |= number(ui, &mut a.budget_usd, 0.0..=10_000.0, "$", "");
         },
