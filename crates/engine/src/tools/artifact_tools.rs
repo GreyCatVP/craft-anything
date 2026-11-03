@@ -315,6 +315,8 @@ pub(crate) fn safe_components(name: &str) -> Result<Vec<String>, &'static str> {
             "" | "." => {}
             ".." => return Err("path climbs out of the folder (..)"),
             c if c.len() == 2 && c.ends_with(':') => return Err("drive-letter path"),
+            c if c.contains(':') => return Err("name contains ':' (a Windows stream or drive separator)"),
+            c if c.ends_with('.') || c.ends_with(' ') => return Err("name ends with a dot or space, which Windows drops"),
             c => out.push(c.to_string()),
         }
     }
@@ -851,6 +853,25 @@ mod tests {
     }
 
     #[test]
+    fn extraction_refuses_names_windows_would_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let z = dir.path().join("names.zip");
+        std::fs::write(&z, fx::zip_stored(&[("dot.txt.", b"wrong"), ("dot.txt", b"real"), ("ads.txt:hidden", b"hidden")])).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let x = call(&e, "core_archive_extract", json!({"path": z})).unwrap();
+        let out = PathBuf::from(x["result"]["output_directory"].as_str().unwrap());
+        let real = std::fs::read(out.join("dot.txt")).unwrap();
+        let ads_exists = out.join("ads.txt").exists();
+        std::fs::remove_dir_all(out).unwrap();
+        assert_eq!(real, b"real");
+        let skipped = x["result"]["skipped"].as_array().unwrap();
+        assert!(skipped.iter().any(|s| s["path"] == "dot.txt."));
+        assert!(skipped.iter().any(|s| s["path"] == "ads.txt:hidden"));
+        assert!(!ads_exists);
+        assert_eq!(x["result"]["files_written"], 1);
+    }
+
+    #[test]
     fn compare_two_folders_and_evidence_inputs() {
         let dir = tempfile::tempdir().unwrap();
         let a = fx::write_files(&dir.path().join("v1"), &fx::notes_app_files()).unwrap();
@@ -935,7 +956,14 @@ mod tests {
         assert!(safe_components("../x").is_err());
         assert!(safe_components("/x").is_err());
         assert!(safe_components("a\\..\\..\\x").is_err());
-        assert!(safe_components("C:\\x").is_err());
+        assert_eq!(safe_components("C:\\x"), Err("drive-letter path"));
+        assert_eq!(safe_components("C:x"), Err("name contains ':' (a Windows stream or drive separator)"));
+        for name in ["ads.txt:hidden", "dir/a:b", "dot.txt.", "space.txt ", "dir./x"] {
+            assert!(safe_components(name).is_err(), "{name:?} must be refused");
+        }
+        assert_eq!(safe_components("a.b.txt").unwrap(), vec!["a.b.txt"]);
+        assert_eq!(safe_components(".hidden").unwrap(), vec![".hidden"]);
+        assert_eq!(safe_components("dir/file.txt").unwrap(), vec!["dir", "file.txt"]);
         assert_eq!(safe_components("./a//b").unwrap(), vec!["a", "b"]);
         assert!(safe_components("").is_err());
     }
