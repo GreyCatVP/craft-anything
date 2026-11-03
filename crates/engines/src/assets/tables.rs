@@ -423,7 +423,17 @@ mod tests {
             ("prompt", Role::Prompt),
             ("text", Role::Prompt),
             ("image_url", Role::Image),
+            // fal's Hunyuan 3D models name their picture so (Ruling 15).
+            ("input_image_url", Role::Image),
             ("aspect_ratio", Role::Shape),
+            // Scenario writes its input names in camelCase: the ones its generate calls have always
+            // sent (`aspectRatio`, `targetPolycount`, `shouldTexture`, `enablePbr`) and the
+            // face count its 3D guide names (`targetFaceNum`, https://docs.scenario.com/get-started/generation/3d-model-generation/).
+            ("aspectRatio", Role::Shape),
+            ("targetPolycount", Role::Faces),
+            ("targetFaceNum", Role::Faces),
+            ("shouldTexture", Role::Textured),
+            ("enablePbr", Role::Textured),
             ("width", Role::Width),
             ("height", Role::Height),
             ("target_face_count", Role::Faces),

@@ -517,6 +517,16 @@ mod tests {
         assert_eq!(runnable(&[prompt, with_default(required(field("loras", FieldKind::Other)))], AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
     }
 
+    /// fal's Hunyuan 3D models take their picture as `input_image_url`, not `image_url` (Ruling 15):
+    /// without that name they were hidden as models this app has nothing to put a picture in.
+    #[test]
+    fn a_picture_input_called_input_image_url_is_filled() {
+        let roles = InputRoles::built_in();
+        let fields = [required(field("input_image_url", FieldKind::Text)), field("enable_pbr", FieldKind::Bool)];
+        assert!(runnable(&fields, AssetKind::Model3d, roles).is_ok());
+        assert_eq!(body(&map(&fields, solid())), json!({"input_image_url": "https://example.invalid/a.png", "enable_pbr": true}));
+    }
+
     #[test]
     fn three_d_from_text_needs_a_prompt_field() {
         let roles = InputRoles::built_in();

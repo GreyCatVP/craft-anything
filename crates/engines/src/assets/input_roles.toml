@@ -1,9 +1,10 @@
 # What the input fields of a provider's model mean to us.
 #
 # fal publishes an OpenAPI schema for each model and Scenario lists each model's `inputs`; every
-# model names its fields its own way. A field whose name is listed here under a role is filled from
-# our request: the prompt, the picture to start from, the shape, the number of faces, and so on. A
-# required field with no role is one we can't fill, so the model isn't offered as runnable.
+# model names its fields its own way (fal mostly in snake_case, Scenario in camelCase). A field
+# whose name is listed here under a role is filled from our request: the prompt, the picture to
+# start from, the shape, the number of faces, and so on. A required field with no role is one we
+# can't fill, so the model isn't offered as runnable.
 #
 # A field name belongs to one role. `music_length_ms` is deliberately not a `duration` name: it is
 # in milliseconds, and a role only passes seconds.
@@ -12,13 +13,13 @@ version = 1
 
 [roles]
 prompt = ["prompt", "text"]
-image = ["image_url", "image", "input_image"]
+image = ["image_url", "image", "input_image", "input_image_url"]
 # A named size or an aspect ratio; `[shape_values]` says which values mean which shape.
-shape = ["image_size", "aspect_ratio"]
+shape = ["image_size", "aspect_ratio", "aspectRatio"]
 width = ["width"]
 height = ["height"]
-faces = ["target_face_count", "face_limit", "polycount", "target_polycount"]
-textured = ["texture", "should_texture", "enable_pbr"]
+faces = ["target_face_count", "face_limit", "polycount", "target_polycount", "targetPolycount", "targetFaceNum"]
+textured = ["texture", "should_texture", "enable_pbr", "shouldTexture", "enablePbr"]
 duration = ["duration", "seconds_total", "duration_seconds"]
 instrumental = ["instrumental", "force_instrumental"]
 voice = ["voice", "voice_id"]

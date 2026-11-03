@@ -34,6 +34,18 @@ pub(super) fn network() -> ToolError {
     ToolError::new(ErrorCode::EngineMissing, "The asset service could not be reached or its request timed out.")
         .with_remediation("Check your connection and provider account before retrying; an accepted job may already have been charged.")
 }
+/// `text` for a query string: everything but letters, digits, `-_.~` and `/` as `%XX`.
+pub(super) fn encode(text: &str) -> String {
+    use std::fmt::Write;
+    text.bytes().fold(String::with_capacity(text.len()), |mut out, b| {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {
+            out.push(char::from(b));
+        } else {
+            let _ = write!(out, "%{b:02X}");
+        }
+        out
+    })
+}
 /// Accept only bounded, nonempty identifiers safe to embed in provider URL paths.
 pub(super) fn id(value: &str) -> Result<(), ToolError> {
     if value.is_empty() || value.len() > 200 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
@@ -176,6 +188,14 @@ pub(super) mod tests {
             }
         });
         (base, seen)
+    }
+
+    #[test]
+    fn query_values_are_escaped() {
+        assert_eq!(encode("fal-ai/flux/dev"), "fal-ai/flux/dev");
+        assert_eq!(encode("Mg=="), "Mg%3D%3D");
+        assert_eq!(encode("a b&c=d#e+f%"), "a%20b%26c%3Dd%23e%2Bf%25");
+        assert_eq!(encode("\u{e9}"), "%C3%A9");
     }
 
     /// Reject unsafe identifiers and download schemes while allowing signed HTTPS media URLs.

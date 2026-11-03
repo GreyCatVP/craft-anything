@@ -11,6 +11,7 @@ use super::openapi::input_fields;
 use super::tables::{InputRoles, KnownModels};
 use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, SizeBy, charged, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
+use http::encode;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -483,19 +484,6 @@ fn endpoint_ok(id: &str) -> bool {
         && id.split('/').all(|part| {
             !part.is_empty() && !part.bytes().all(|b| b == b'.') && part.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
         })
-}
-
-/// `text` for a query string: everything but letters, digits, `-_.~` and `/` as `%XX`.
-fn encode(text: &str) -> String {
-    use std::fmt::Write;
-    text.bytes().fold(String::with_capacity(text.len()), |mut out, b| {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {
-            out.push(char::from(b));
-        } else {
-            let _ = write!(out, "%{b:02X}");
-        }
-        out
-    })
 }
 
 /// A model's id and price out of one row of fal's price list. A row with a price that is not a
@@ -1353,11 +1341,7 @@ mod listing_tests {
     }
 
     #[test]
-    fn query_values_are_escaped_and_ids_checked() {
-        assert_eq!(encode("fal-ai/flux/dev"), "fal-ai/flux/dev");
-        assert_eq!(encode("Mg=="), "Mg%3D%3D");
-        assert_eq!(encode("a b&c=d#e+f%"), "a%20b%26c%3Dd%23e%2Bf%25");
-        assert_eq!(encode("\u{e9}"), "%C3%A9");
+    fn endpoint_ids_are_checked() {
         for ok in ["fal-ai/flux/dev", "tripo3d/p1/image-to-3d", "fal-ai/flux-2/klein/9b", "a.b/c_d"] {
             assert!(endpoint_ok(ok), "{ok}");
         }
