@@ -192,7 +192,7 @@ pub fn messages_json(m: &Msg, react: bool) -> Vec<Value> {
                 .into_iter()
                 .map(|(id, name, input)| json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
                 .collect();
-            let mut v = json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { Value::String(text) }});
+            let mut v = json!({"role": "assistant", "content": text});
             if !calls.is_empty()
                 && let Some(o) = v.as_object_mut()
             {
@@ -303,8 +303,8 @@ impl ChatStream {
             None if self.done => StopReason::EndTurn,
             None => return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")),
         };
-        // Some servers say "stop" even when they emitted tool calls.
-        let stop = if has_calls { StopReason::ToolUse } else { stop };
+        // Some servers say "stop" for tool calls. A limit or refusal must still prevent execution.
+        let stop = if has_calls && stop == StopReason::EndTurn { StopReason::ToolUse } else { stop };
         let model = if self.model.is_empty() { fallback_model.to_string() } else { self.model };
         Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model })
     }
@@ -456,6 +456,33 @@ mod tests {
     }
 
     #[test]
+    fn native_tool_calls_preserve_terminal_stop_reasons() {
+        for (finish, expected) in [
+            (Some("length"), StopReason::MaxTokens),
+            (Some("content_filter"), StopReason::Refusal),
+            (Some("pause_turn"), StopReason::PauseTurn),
+            (Some("provider_stop"), StopReason::Other("provider_stop".into())),
+            (Some("tool_calls"), StopReason::ToolUse),
+            (Some("stop"), StopReason::ToolUse),
+            (None, StopReason::ToolUse),
+        ] {
+            let mut stream = ChatStream::default();
+            let call = json!({"choices":[{"delta":{"tool_calls":[{
+                "index":0,"id":"call_a","function":{"name":"core_session_show","arguments":"{}"}
+            }]}}]});
+            stream.apply(&SseEvent { event: None, data: call.to_string() }, &mut |_| {}).unwrap();
+            if let Some(reason) = finish {
+                let end = json!({"choices":[{"delta":{},"finish_reason":reason}]});
+                stream.apply(&SseEvent { event: None, data: end.to_string() }, &mut |_| {}).unwrap();
+            }
+            stream.apply(&SseEvent { event: None, data: "[DONE]".into() }, &mut |_| {}).unwrap();
+            let result = stream.finish("m").unwrap();
+            assert_eq!(result.stop, expected, "finish_reason={finish:?}");
+            assert_eq!(result.message.tool_uses(), vec![("call_a".into(), "core_session_show".into(), json!({}))]);
+        }
+    }
+
+    #[test]
     fn wire_messages() {
         let o = OpenAi::openrouter(None, "k".into(), "");
         assert!(o.headers().iter().any(|(k, _)| *k == "X-Title"));
@@ -477,6 +504,7 @@ mod tests {
         let m = b["messages"].as_array().unwrap();
         assert_eq!(m[0]["role"], "system");
         assert_eq!(m[2]["tool_calls"][0]["function"]["arguments"], "{\"a\":1}");
+        assert_eq!(m[2]["content"], "");
         assert_eq!(m[3]["role"], "tool");
         assert_eq!(m[4]["tool_call_id"], "c2");
         assert_eq!(b["tool_choice"], "auto");

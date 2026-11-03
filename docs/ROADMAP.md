@@ -94,14 +94,16 @@ Issues are ranked by people affected and how badly, after leaving out what's alr
 
 ### R5.1 The next release
 Owner: maintainers · Status: todo
-Two reported failures are fixed on `main` and still broken for everyone on 0.3.0. This is the
+Two reported failures, the Windows start-up crash (#414) and a builder resuming another's
+session (#471), are fixed on `main` and still broken for everyone on 0.3.0. This is the
 cheapest help we can give anyone, so nothing below should hold it up for long.
-- [ ] Settle #490 before the release, so a fix can go in it: a real Deep build through Claude Code
-      with the published 0.3.0 CLI, on macOS and on Windows, with Claude Code 2.1.179 (the
-      reporter's) as well as a current one. A source build with 2.1.316 mounted 314 of 315 tools,
-      so this isn't reproduced and isn't ruled out. Find which tool didn't mount: one boolean schema
-      is left, nested in `core_evidence_browse`, below what
-      `every_mcp_input_property_has_an_object_schema` looks at. Then merge or decline #490
+- [ ] #490 has changes requested: a JSON object given to `--left` or `--right` becomes text, and
+      its new test passes without the fix. Merge it once that's fixed, or decline it; it doesn't
+      hold up the release. What it reports is 0.2.0's, fixed by #93 (`f6725c2`): on Windows the
+      published 0.3.0 CLI with Claude Code 2.1.179 mounted 314 of 315 tools (the 315th is the
+      approval tool, which Claude Code doesn't list but calls), and a real Deep build reached Ready
+      with `core_action_approve` answering five prompts. The reporter was asked for `--version`.
+      macOS is still owed (R5.7)
 - [ ] Cut the next release (`docs/releasing.md`). 0.3.0 lacks `0748ef1` (#414: Windows starts DX12
       only, the crash behind "it won't open"), `1e8f661` (#471: a builder never continues another
       builder's session) and `3357daf` (#430: Claude Code's message on stdin). Take #357 (R5.2) too
@@ -194,20 +196,23 @@ been run live.
       `invalid message content type: <nil>`: send an empty string
 - [ ] Understand a tool call a model writes as JSON in its text (#417). The fallback protocol reads
       only `Action:` and `Action Input:` lines, so anything else ends the turn with nothing done
+- [x] Preserve `length` and `content_filter` stop reasons on native tool-call streams; a parsed
+      call must not override truncation or refusal and execute tools. Pair other retained
+      unexecuted calls with results before the conversation continues — PR #544
 - [ ] Accept a tool argument of a near type, such as a list for a string, or answer so the model
       can correct it (#498)
 - [ ] Find how each local server is told its context size and set it, or stop with a plain message
       when the prompt won't fit. We assume 24k and send no `num_ctx`, which an OpenAI-style endpoint
       may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73)
-- [ ] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
-      services whose real window differs from 150k (#374)
+- [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
+      services whose real window differs from 150k (#374) — implementation: `6bd94b84828ec89b805cb8a246f557d0a778c037`
 - [ ] Find LM Studio on another port (#73)
 - [ ] See why Bionic or LM Studio can't be picked (#140)
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
-- [ ] Show the provider's own reason: #369 bought $10 of credit and got only "OpenRouter answered
-      400: Provider returned error". Find the reason in the response body and show it
+- [x] Show the provider's own reason: #369 bought $10 of credit and got only "OpenRouter answered
+      400: Provider returned error". Find the reason in the response body and show it — PR #542
 - [ ] A live API-key build (needs a key on the test machine)
 - [ ] Failure logs for the other ways an AI stops (API backends, MCP server start-up), like the
       ones agent CLIs write to `logs/` in the config folder
@@ -259,6 +264,9 @@ yet, and the quick start is how every new person begins.
 - [ ] Ghidra setup tried for real on Linux and macOS (the Java pins were checked by tests only)
 - [ ] Follow the README quick start on a clean machine (Windows, and Linux or macOS)
 - [ ] Build the new DMG on a Mac (release dry run) and look at the window once
+- [ ] #490 on macOS: a real Deep build through Claude Code with the published 0.3.0 CLI, with
+      2.1.179 and a current version. Windows passed; the Mac CLI was only checked to contain the
+      fixed schema
 - [ ] macOS CLI zip blocked by Gatekeeper when downloaded in a browser (#94), though Apple has its
       notarization tickets: find why the online lookup fails for people (it passes on our Mac, which
       may be exempt), on a machine that shows it
@@ -310,8 +318,12 @@ Owner: open · Status: in progress
 - [ ] Aider has no adapter, so the plain one hands it the prompt as a file name, and it can open a
       browser sign-in nobody agreed to (#72). Give it an adapter, or stop offering it
 - [ ] Codex (#499): in a chat the tool server has no active target, tools turned on with
-      `enable_toolset` can't be called, and `rebuild_start` is refused by the approval policy. The
+      `enable_toolset` can't be called, The
       reporter attached a patch for chat continuity; look at that first
+- [x] Codex (#540): `rebuild_start` was refused by `codex exec`'s approval policy and showed as
+      `null`; setup and the builder now approve our tools for Codex (we still ask before running
+      code) and a refusal explains the fix (`docs/codex.md`)
+- [ ] Codex (#540): run `codex exec` on a real install and check `rebuild_start` gets through
 - [ ] Codex: resume support (`codex exec resume <id>`), verified on a real install
 - [ ] Every adapter but Claude Code's still takes the message in argv (`prompt_on_stdin`), so a long
       one can pass Windows' command-line limit as Claude Code's did (#402); hand each its message on
@@ -345,8 +357,9 @@ Owner: open · Status: in progress
 **ACP:**
 - [ ] Gemini CLI, opencode, goose via ACP or native adapters; each verified live, then turn ACP on
       by default for the ones that pass
-- [ ] Over ACP, a continued session shows the earlier conversation again: `session/load` replays it
-      as `session/update`s, which we show as new; drop updates until the load answers
+- [x] Over ACP, suppress `session/update` notifications until `session/load` answers, keeping
+      replayed messages and tool activity out of the current turn
+      — commit `38ffc39be084`
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
@@ -411,10 +424,12 @@ Gaps found while using the app for real projects.
 - [ ] Show a command's output while it runs: Claude Code reports a tool's result only when it
       ends, so a long `cargo build` is one quiet line until then. Watching the agent's child
       processes from outside could say what's running and for how long
-- [ ] The keep-awake helper once outlived a CLI `rebuild` on Windows by more than 9 minutes and held
-      the caller's output pipe; not reproduced in 8 more runs, where it ended with the CLI. Dropping
-      its guard only raises a flag (`RunningProcess::drop` waits only for `hands_off` programs), so
-      ending on time rests on the Job Object closing, and its time limit is 7 days
+- [x] Release the keep-awake helper before a rebuild reports `Finished`, waiting up to five seconds
+      for its supervised cleanup and logging a timeout. Real subprocess stand-ins checked on Linux (#541)
+      — claimed: Afloat16, branch bugfix/r2.9-keep-awake-cleanup-20261103
+- [ ] Recheck keep-awake cleanup with a real Windows CLI `rebuild`: the helper once outlived it by
+      more than 9 minutes and held the caller's output pipe; not reproduced in 8 more runs. The
+      bounded cleanup change has been checked with Linux stand-ins, not this Windows incident
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
 - [ ] Claude Code's own extras: its Ultracode switch (a setting, not an effort level; the
@@ -461,8 +476,10 @@ Owner: open · Status: in progress
 - [ ] Stand-in backend: writes that change later reads (recorded answers are replayed as they are)
 - [ ] Tell the builder about the stand-in backend in a website's brief, and start one from a
       recording
-- [ ] Stand-in backend: a 304 recorded with no body is replayed as a bare 304, which a fresh browser
-      can't use; say so or leave it out
+- [x] Stand-in backend: retain 304 samples without a usable cached body for diagnostics, skip them
+      during replay, and report `cached_body_unavailable` when the best matching group has no
+      usable answer. Build results count them; cached bodies still answer as 200 (#543)
+      — claimed: Afloat16, branch bugfix/r3.11-standin-empty-304-20261103
 - [ ] Godot format 4 and IL2CPP metadata 38 and 39 are header-only; read their tables once a real
       file can be checked
 - [ ] Bun: take source maps and bytecode out as files; a standalone `.pyz`

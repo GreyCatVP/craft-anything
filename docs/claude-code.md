@@ -30,6 +30,23 @@ integration does, why it is shaped this way, and what remains to confirm.
 - Before a build starts, `claude auth status` is checked. If Claude Code isn't signed in, the run
   stops with: "Sign in to Claude Code: open a terminal and run `claude auth login`".
 
+## Under Flatpak
+
+The Flatpak build can read the home folder but not write to it, so Claude Code can't save its
+conversations in `~/.claude`: the first turn ran, and `--resume` then said "No conversation found
+with session ID" (#506). When the app runs in a Flatpak and `CLAUDE_CONFIG_DIR` isn't set, it starts
+Claude Code with `CLAUDE_CONFIG_DIR` pointing at `craft-anything/claude` in the app's own data
+folder (`~/.var/app/ai.storyteller.craft-anything/data/`), which is writable. Two consequences:
+
+- Claude Code there is signed in separately from the one on the host. The sign-in message gives the
+  command that does it through the sandbox:
+  `flatpak run --command=sh ai.storyteller.craft-anything -c 'CLAUDE_CONFIG_DIR="$XDG_DATA_HOME/craft-anything/claude" "$HOME/.local/bin/claude" auth login'`
+  (Craft Anything never reads Claude Code's credentials, so they aren't copied over.)
+- Setting `CLAUDE_CONFIG_DIR` yourself, for example with `flatpak override --user --env=…`, wins.
+  Builds on another computer over SSH are not changed.
+
+Not yet checked in a real Flatpak (the tests cover the choice of folder and the message).
+
 ## Why this is within Anthropic's terms (as published, October 2026)
 
 From Claude Code's *Legal and compliance* page:

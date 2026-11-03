@@ -163,6 +163,15 @@ mod tests {
     use crate::workspace::TargetRef;
 
     #[test]
+    fn file_formats_doc_lists_current_manifest_and_feed_versions() {
+        let doc = include_str!("../../../docs/file-formats.md");
+        let manifest = format!("`MANIFEST_VERSION` = {} ", crate::workspace::MANIFEST_VERSION);
+        let feed = format!("`FEED_VERSION` = {} ", FEED_VERSION);
+        assert!(doc.contains(&manifest), "docs/file-formats.md must list {manifest}");
+        assert!(doc.contains(&feed), "docs/file-formats.md must list {feed}");
+    }
+
+    #[test]
     fn history_rebuilds_from_the_manifest() {
         let d = tempfile::tempdir().unwrap();
         let mut ws = Workspace::create(d.path(), "x", "Clone it", TargetRef::None).unwrap();

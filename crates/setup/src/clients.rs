@@ -139,6 +139,11 @@ pub enum Shape {
     Enabled,
     /// `{command, args, startup_timeout_sec: 30}`
     WithStartupTimeout,
+    /// `{command, args, startup_timeout_sec: 30, tools: {<tool>: {approval_mode: "approve"}}}`:
+    /// `codex exec` can't ask, so it refuses a tool not marked read-only unless the entry approves
+    /// it (#540). Only the tools that ask the person themselves are approved
+    /// ([`craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS`]); other settings in the entry are kept.
+    Codex,
 }
 
 /// One supported client, resolved for a host.
@@ -199,7 +204,26 @@ impl Client {
             Shape::TransportStdio => json!({"transport": "stdio", "enabled": true, "command": program, "args": args}),
             Shape::Enabled => json!({"command": program, "args": args, "enabled": true}),
             Shape::WithStartupTimeout => json!({"command": program, "args": args, "startup_timeout_sec": 30}),
+            Shape::Codex => {
+                let tools: serde_json::Map<String, serde_json::Value> =
+                    craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS.iter().map(|t| ((*t).to_string(), json!({"approval_mode": "approve"}))).collect();
+                json!({"command": program, "args": args, "startup_timeout_sec": 30, "tools": tools})
+            }
         }
+    }
+}
+
+impl Client {
+    /// Whether `existing` already is what `desired` asks for. Codex's entry may carry the person's
+    /// own settings beside ours, so it only has to contain ours; every other client's must match.
+    pub fn entry_is_current(&self, existing: &serde_json::Value, desired: &serde_json::Value) -> bool {
+        fn contains(have: &serde_json::Value, want: &serde_json::Value) -> bool {
+            match (have, want) {
+                (serde_json::Value::Object(h), serde_json::Value::Object(w)) => w.iter().all(|(k, v)| h.get(k).is_some_and(|x| contains(x, v))),
+                _ => have == want,
+            }
+        }
+        if self.shape == Shape::Codex { contains(existing, desired) } else { existing == desired }
     }
 }
 
@@ -259,7 +283,7 @@ pub fn clients(host: &Host) -> Vec<Client> {
 
     // Codex
     let codex = host.var("CODEX_HOME").unwrap_or_else(|| h.join(".codex"));
-    add("codex", "Codex", codex.join("config.toml"), vec![codex.clone()], Format::Toml, vec!["mcp_servers"], Shape::WithStartupTimeout, None);
+    add("codex", "Codex", codex.join("config.toml"), vec![codex.clone()], Format::Toml, vec!["mcp_servers"], Shape::Codex, None);
 
     // Cursor
     add("cursor", "Cursor", h.join(".cursor").join("mcp.json"), vec![h.join(".cursor")], Format::Jsonc, vec!["mcpServers"], Shape::Plain, None);
@@ -507,6 +531,8 @@ mod tests {
         assert_eq!(oc, json!({"type": "local", "command": ["/b/craft-anything-cli", "mcp"], "enabled": true}));
         let codex = cs.iter().find(|c| c.id == "codex").unwrap().desired_entry(&cmd);
         assert_eq!(codex["startup_timeout_sec"], 30);
+        assert_eq!(codex["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert!(codex.get("default_tools_approval_mode").is_none(), "only the tools that ask for themselves");
         for c in &cs {
             assert!(is_owned_entry(&c.desired_entry(&cmd)), "{}", c.id);
         }

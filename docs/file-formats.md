@@ -17,7 +17,7 @@ version up to the current one, then turn the document into Rust types. The step 
 | `<project>/questions.json` | `engine::questions` (`AskedQuestion`, written by `rebuild_question_ask`) | `QUESTIONS_VERSION` = 1 (`{version, items}`) | read as before | read as far as its fields are known |
 | `<project>/pinned/<n>/pin.json` | `engine::pins` (`Pin`) | `PIN_VERSION` = 2 (`version`; missing = 1; 2 records the selected program for a copied direct launch) | brought forward | read as far as its fields are known |
 | `<folder>/standin.json` | `engine::tools::standin_tools` (`analysis::standin::StandIn`; written only by `web_standin_build`) | `STANDIN_VERSION` = 1 (`version`, required) | brought forward | refused, with "update Craft Anything", and never written over |
-| `<project>/feed.json` | `ai::rebuild::feed` (written by the run) | `FEED_VERSION` = 1 (`{version, items}`; a bare list = 0) | read as before, saved as current | never written over; the conversation is rebuilt from the project for display |
+| `<project>/feed.json` | `ai::rebuild::feed` (written by the run) | `FEED_VERSION` = 2 (`{version, items}`; a bare list = 0) | read as before, saved as current | never written over; the conversation is rebuilt from the project for display |
 
 Other JSON in a project (`assets.json`, `inbox/`, `checks/`, evidence records) has no version yet;
 add one the first time its shape changes. `assets.lock` is an empty file that only carries the
@@ -28,6 +28,15 @@ behavior: all providers are allowed when `generate_assets` is true. An explicit 
 those provider ids, and an empty list allows none. The master switch still needs to be on.
 Budget and provider choices are person-owned fields: builder saves preserve the values on disk,
 and duplicating a project retains its choices.
+
+## Stand-in cached responses
+
+Version 1 stand-in files retain a recorded 304 when no usable cached body was saved. Those samples
+remain in the file for diagnostics, but replay skips them within the best matching path, query and
+operation group. If that group has no usable answer, it reports `cached_body_unavailable` instead
+of sending a bare 304 to a fresh client. A usable cached body is still stored and replayed as a 200
+with `was_not_modified: true`. This interpretation also applies to existing v1 files; the persisted
+shape and version are unchanged.
 
 ## Newer files
 

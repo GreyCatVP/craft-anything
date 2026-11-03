@@ -46,7 +46,8 @@ Plus `SHA256SUMS.txt`.
 - **Windows portable mode:** the portable zip ships `portable.txt`. While it sits next to the exe,
   settings live in `CraftAnythingData\` (`crates/engine/src/settings.rs`).
 - **Flatpak** grants `--share=network` (AI backends, engine downloads) and `--filesystem=home:ro`
-  (files to inspect, passed by path).
+  (files to inspect, passed by path), plus `--filesystem=xdg-documents/Craft Anything:create` so the
+  default projects folder can be made and written (#505).
 - **Fonts** are committed in `assets/fonts` (OFL-1.1). Release and CI builds also embed craft-fonts
   at the commit pinned in `release.yml` and `ci.yml` (`CRAFT_FONTS_DIR`, `CRAFT_FONTS_REQUIRED=1`),
   the fallbacks for Korean, Chinese, Japanese, Thai, Arabic, Hebrew, Devanagari and symbols; a

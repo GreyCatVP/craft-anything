@@ -253,7 +253,7 @@ impl RebuildRun {
                 let mut ctx = ctx;
                 let mut ws = ws;
                 // A clone can run for hours: keep the computer from sleeping until it ends.
-                let _awake = craft_anything_platform::keep_awake();
+                let awake = craft_anything_platform::keep_awake();
                 let _here = self_check::BuildingHere::new(&ws.root);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ctx.run(&mut ws, entry, api, extractor, &opts)));
                 let (ok, message, paused) = match result {
@@ -270,6 +270,9 @@ impl RebuildRun {
                     Err(_) => (false, "The workflow hit a bug and stopped safely. Your files are untouched.".to_string(), false),
                 };
                 ctx.record_usage(None);
+                // The CLI can exit as soon as it sees completion: release the helper while its
+                // supervisor threads are still available to stop it.
+                drop(awake);
                 ctx.emit(RunEvent::Finished { ok, message, paused });
                 r2.store(false, Ordering::SeqCst);
             })

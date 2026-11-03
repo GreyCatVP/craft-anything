@@ -587,7 +587,14 @@ impl AiHub {
             Some(t) => Box::new(Tunneled { inner: model, _tunnel: t }) as Box<dyn ChatModel>,
             None => model,
         };
-        Ok(ModelSlot { name: c.name.clone(), model, local, effort: e.options.effort, max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS) })
+        Ok(ModelSlot {
+            name: c.name.clone(),
+            model,
+            local,
+            effort: e.options.effort,
+            max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS),
+            context_tokens: e.options.context_tokens.unwrap_or(0),
+        })
     }
 
     fn project_root(&self) -> Option<PathBuf> {

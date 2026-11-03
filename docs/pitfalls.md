@@ -37,6 +37,9 @@ added an app the new rule rejected; both were green on their own branch.
 - It happened again with translations: #117 added UI strings and #115, merged right after it,
   added a check that every string has a Chinese translation, so `cargo xtask ci` failed on
   `main`. A PR that adds a check, or adds what a check covers, is tested on top of the other.
+  And again with a new catalog: #555 added "Pausing…" to every catalog there was, and #486 (Russian)
+  merged after it without it. A new language and a new UI string merged together need the string
+  in the new catalog too.
 
 **A dependency change merged without its lockfile.** Changes were staged with
 `git add -A crates apps docs`, which leaves out the root `Cargo.lock`, so a new dependency reached
@@ -171,6 +174,14 @@ It happened again with Vulkan on Windows (#394): starting Vulkan loaded an Intel
 (`igvk64.dll`) that crashed with `0xc0000005` on startup. Windows now starts DX12 only by default
 (which includes WARP); `WGPU_BACKEND` still allows choosing other backends.
 
+**A shader compiler picked by a default that looks around the computer.** wgpu's DX12 `Auto`
+compiler takes a `dxcompiler.dll` it finds on the PATH; one without `dxil.dll` makes unsigned
+shaders, and on an RTX 5060 Ti the device was lost as the window opened ("Parent device is
+lost", #522). Where a library chooses a program or DLL by searching, name the one that ships
+with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) as the way to
+another. A window that can't start now says how to draw without the graphics card
+(`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
@@ -196,6 +207,15 @@ deadline. Create a lock's folder first, and treat any error but "already exists"
 Compile the `.java` against Ghidra's jars (`javac -proc:none -cp <Ghidra/**/lib/*.jar>`) before a
 live run. Ghidra also rejects project paths with a folder starting with a dot, as
 `tempfile::tempdir()`'s do: give live-test temp folders a plain prefix.
+
+**A check that read another worktree.** A PR was tested in a worktree that shared the main
+`target/`; `xtask` finds the repository through `CARGO_MANIFEST_DIR`, fixed when it's built, so
+afterwards `cargo xtask` in the main tree reused that binary and read the worktree's files. Once the
+worktree was removed it said "can't read docs/ROADMAP.md"; while it existed, every check that
+reads files itself (`pending`, `secrets`, `layers`, `locks`, `tools --check`…) would have looked
+at the wrong tree (the cargo commands `ci` runs use the folder they're started in). Give every
+worktree its own `CARGO_TARGET_DIR`, and rebuild `xtask` (or delete it from `target/`) after
+sharing one.
 
 **Stopping a long run leaves children behind** unless every program goes through
 `craft_anything_platform::process`. After stopping one, check that its child processes are gone.
@@ -389,6 +409,11 @@ flag was read as a first build, and Try again starts exactly that run. A browser
 the final check failed a finished build; Try again then studied the original again and gave the
 builder the first brief. A run decides what's left from what the project records, not from which
 button started it, and a check that couldn't look says nothing about the build.
+
+**A stopped tool call broke the next request.** Retaining a stopped assistant reply kept its
+tool calls without matching results. The next model request then carried unpaired calls.
+Every retained call needs a matching result, including an explicit non-execution result.
+Test the next serialized request as well as whether a tool ran.
 
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts

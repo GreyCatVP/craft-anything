@@ -997,7 +997,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         ]),
         seen: Arc::default(),
     };
-    let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10 };
+    let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10, context_tokens: 0 };
     let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
     let mut api = ApiConversation::start_with(Arc::new(EngineHost(engine)), vec![slot], LoopConfig::default(), enabled).unwrap();
     let reply = w.turn(&mut ws, &mut api, kind("app").as_ref(), &BuilderPrompt::Message(("Build it.").into()), None).unwrap();

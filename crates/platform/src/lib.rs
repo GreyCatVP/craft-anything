@@ -20,12 +20,25 @@ pub use fs::{backup_once, write_atomic, write_atomic_private};
 pub use process::{Cancel, Ended, Launch, Launched, LineSink, Output, Process, RunningProcess, StdinMode, open_path};
 pub use which::{cli_file_name, self_cli_path, which, which_all};
 
-/// Keep the computer from sleeping while the returned guard lives (dropping it stops the helper):
+/// Owns the helper that keeps a build awake until the guard is released. Dropping it waits up to
+/// five seconds for supervised cleanup and logs a warning if that deadline passes.
+#[derive(Debug)]
+pub struct KeepAwake(RunningProcess);
+
+impl Drop for KeepAwake {
+    fn drop(&mut self) {
+        if !self.0.kill_and_wait(std::time::Duration::from_secs(5)) {
+            log::warn!("keep-awake helper {} did not confirm stopping within five seconds", self.0.pid());
+        }
+    }
+}
+
+/// Keep the computer from sleeping while the returned guard lives:
 /// a clone that runs for hours must not be cut off by sleep, which would also trip every time
 /// limit at once on waking. The screen may still turn off. `None` where there's no helper.
 // shortcut: Windows (a PowerShell helper, since this workspace forbids unsafe FFI) and macOS
 // (caffeinate) only; add `systemd-inhibit` for Linux when it's needed.
-pub fn keep_awake() -> Option<RunningProcess> {
+pub fn keep_awake() -> Option<KeepAwake> {
     // ES_CONTINUOUS | ES_SYSTEM_REQUIRED (0x80000001, in decimal: Windows PowerShell reads the hex
     // literal as a negative Int32), held by the helper's thread until it's stopped. Any failure
     // ends the helper, so it never runs without doing its job.
@@ -37,25 +50,133 @@ pub fn keep_awake() -> Option<RunningProcess> {
     } else {
         return None;
     };
-    p.timeout(std::time::Duration::from_secs(7 * 24 * 3600)).label("keep awake").spawn().ok()
+    p.timeout(std::time::Duration::from_secs(7 * 24 * 3600)).label("keep awake").spawn().ok().map(KeepAwake)
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
 
+    #[cfg(windows)]
     #[test]
     fn keep_awake_holds_until_dropped() {
         let mut guard = crate::keep_awake().expect("the helper starts");
         // A script error (the Windows call failing to load) would end it within moments.
-        assert!(guard.wait_timeout(Duration::from_secs(4)).is_none(), "still holding the computer awake");
-        let pid = guard.pid();
+        assert!(guard.0.wait_timeout(Duration::from_secs(4)).is_none(), "still holding the computer awake");
+        let pid = guard.0.pid();
         drop(guard);
-        std::thread::sleep(Duration::from_millis(800));
-        let listed = std::process::Command::new("tasklist")
+        let absent = Process::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()));
-        assert_eq!(listed.ok(), Some(false), "dropping the guard stops the helper");
+            .timeout(Duration::from_secs(5))
+            .run()
+            .map(|o| o.success && !o.stdout_text().contains(&pid.to_string()));
+        assert_eq!(absent.ok(), Some(true), "dropping the guard stops the helper");
     }
+
+    fn stand_in(name: &str) -> Process {
+        // argv[0] is the test binary even in a sandbox without /proc/self/exe.
+        let exe = std::env::args_os().next().expect("test binary path");
+        Process::new(exe).args(["--ignored", "--exact", name, "--nocapture"]).env("CRAFT_KEEP_AWAKE_STAND_IN", "1").timeout(Duration::from_secs(15))
+    }
+
+    fn helper() -> (KeepAwake, u16) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let process = stand_in("tests::keep_awake_helper_stand_in")
+            .on_stdout_line(move |line| {
+                if let Some((_, port)) = line.split_once("AWAKE_PORT=")
+                    && let Ok(port) = port.trim().parse::<u16>()
+                {
+                    let _ = tx.send(port);
+                }
+            })
+            .spawn()
+            .unwrap();
+        let mut guard = KeepAwake(process);
+        let port = rx.recv_timeout(Duration::from_secs(5)).expect("the helper is listening");
+        assert!(guard.0.wait_timeout(Duration::from_millis(50)).is_none(), "the helper stays alive until released");
+        (guard, port)
+    }
+
+    /// If a failed check left the helper alive, tell that exact helper to exit before asserting.
+    fn stop_if_alive(port: u16) -> bool {
+        let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else { return false };
+        stream.write_all(b"stop").unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut tail = Vec::new();
+        let _ = stream.read_to_end(&mut tail);
+        true
+    }
+
+    #[test]
+    fn dropping_keep_awake_finishes_stopping_its_helper() {
+        let (guard, port) = helper();
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_ok(), "the helper really started");
+        drop(guard);
+        assert!(!stop_if_alive(port), "the helper must be gone when dropping its guard returns");
+    }
+
+    #[test]
+    fn a_cli_can_exit_immediately_after_releasing_keep_awake() {
+        let output = stand_in("tests::keep_awake_cli_stand_in").run().unwrap();
+        let stdout = output.stdout_text();
+        let port: u16 = stdout.lines().find_map(|line| line.split_once("AWAKE_PORT=")).unwrap().1.trim().parse().unwrap();
+        let alive = stop_if_alive(port);
+        assert!(output.success, "{stdout}\n{}", output.stderr_text());
+        assert!(!alive, "the CLI must finish cleanup before its supervisor threads disappear");
+    }
+
+    #[test]
+    fn releasing_a_finished_keep_awake_helper_does_not_wait_for_the_deadline() {
+        let mut process = stand_in("tests::keep_awake_finished_stand_in").spawn().unwrap();
+        assert!(process.wait_timeout(Duration::from_secs(5)).unwrap().as_ref().unwrap().success);
+        let start = Instant::now();
+        drop(KeepAwake(process));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    #[ignore = "stand-in helper invoked by keep-awake lifecycle tests"]
+    fn keep_awake_helper_stand_in() {
+        if std::env::var_os("CRAFT_KEEP_AWAKE_STAND_IN").is_none() {
+            return;
+        }
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        println!("AWAKE_PORT={}", listener.local_addr().unwrap().port());
+        std::io::stdout().flush().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+                    let mut byte = [0];
+                    if stream.read(&mut byte).ok() == Some(1) {
+                        return;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(5)),
+                Err(e) => panic!("helper listener failed: {e}"),
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "stand-in CLI invoked by a_cli_can_exit_immediately_after_releasing_keep_awake"]
+    fn keep_awake_cli_stand_in() {
+        if std::env::var_os("CRAFT_KEEP_AWAKE_STAND_IN").is_none() {
+            return;
+        }
+        let (guard, port) = helper();
+        println!("AWAKE_PORT={port}");
+        std::io::stdout().flush().unwrap();
+        drop(guard);
+        std::process::exit(0);
+    }
+
+    #[test]
+    #[ignore = "stand-in completed helper invoked by keep-awake lifecycle tests"]
+    fn keep_awake_finished_stand_in() {}
 }

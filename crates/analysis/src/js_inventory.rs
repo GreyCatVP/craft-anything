@@ -62,6 +62,7 @@ pub struct Inventory {
     pub containers: Vec<Value>,
     pub contradictions: Vec<Value>,
     pub truncated: bool,
+    pub unopened_nested: usize,
     pub hashed_bytes: u64,
 }
 
@@ -280,8 +281,10 @@ impl<'c> Inventorier<'c> {
         if archive {
             if depth >= self.limits.max_depth {
                 self.note_last("nested archive not opened: depth limit");
+                self.inv.unopened_nested = self.inv.unopened_nested.saturating_add(1);
             } else if bytes.len() as u64 > self.limits.max_nested_bytes {
                 self.note_last("nested archive not opened: too large");
+                self.inv.unopened_nested = self.inv.unopened_nested.saturating_add(1);
             } else {
                 self.add_archive(&format!("{path}!/"), bytes, kind, depth + 1)?;
             }
@@ -465,7 +468,24 @@ mod tests {
         // Depth limit stops expansion.
         let mut shallow = Inventorier::new("b", "zip", InvLimits { max_depth: 0, ..Default::default() }, &|| false);
         shallow.add_file("outer.zip", &z, 0).unwrap();
-        assert_eq!(shallow.finish().entries.len(), 1);
+        let shallow = shallow.finish();
+        assert_eq!(shallow.entries.len(), 1);
+        assert_eq!(serde_json::to_value(&shallow).unwrap()["unopened_nested"], 1);
+        assert!(!shallow.truncated);
+        assert_eq!(shallow.entries[0].note.as_deref(), Some("nested archive not opened: depth limit"));
+    }
+
+    #[test]
+    fn oversized_nested_archive_is_counted_without_truncating_the_listing() {
+        let z = fx::zip_stored(&[("leaf.txt", b"leaf")]);
+        let mut inv = Inventorier::new("bundle", "directory", InvLimits { max_nested_bytes: 0, ..Default::default() }, &|| false);
+        inv.add_file("inner.zip", &z, 0).unwrap();
+        inv.add_file("other.txt", b"other", 0).unwrap();
+        let inv = inv.finish();
+        assert_eq!(serde_json::to_value(&inv).unwrap()["unopened_nested"], 1);
+        assert!(!inv.truncated);
+        assert_eq!(inv.entries.len(), 2);
+        assert_eq!(inv.entries[0].note.as_deref(), Some("nested archive not opened: too large"));
     }
 
     #[test]

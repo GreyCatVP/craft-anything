@@ -198,6 +198,8 @@ impl AcpCore {
         let method = msg.get("method").and_then(Value::as_str);
         match (method, msg.get("id")) {
             (Some(m), Some(id)) => self.agent_request(m, id.clone(), msg.get("params").unwrap_or(&Value::Null)),
+            // session/load replays history before its response, not activity in the new turn.
+            (Some("session/update"), None) if self.pending.values().any(|p| *p == Pending::LoadSession) => Vec::new(),
             (Some("session/update"), None) => self.update(msg.get("params").and_then(|p| p.get("update")).unwrap_or(&Value::Null)),
             (Some(_), None) => Vec::new(),
             (None, Some(id)) => self.response(id.as_u64().unwrap_or(0), &msg),
@@ -709,6 +711,74 @@ mod tests {
         let mut c = core(Some("old"));
         c.start();
         assert_eq!(sent(&c.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#))[0]["method"], "session/new");
+    }
+
+    fn update(c: &mut AcpCore, value: Value) -> Vec<Out> {
+        c.line(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "old", "update": value}}).to_string())
+    }
+
+    #[test]
+    fn loading_a_session_keeps_replayed_messages_and_tools_out_of_the_new_turn() {
+        let mut c = core(Some("old"));
+        c.start();
+        c.prompt("Continue here.");
+        c.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}"#);
+        let history = [
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Earlier answer"}}),
+            json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Earlier thought"}}),
+            json!({"sessionUpdate": "plan", "entries": [{"content": "Earlier plan"}]}),
+            json!({"sessionUpdate": "tool_call", "toolCallId": "old-tool", "title": "Earlier tool", "status": "completed"}),
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "old-tool", "status": "completed"}),
+        ];
+        for notification in &history {
+            assert!(update(&mut c, notification.clone()).is_empty(), "history must not appear as current activity: {notification}");
+        }
+        assert!(c.tools.is_empty(), "replay must not populate the live tool-title map");
+        assert!(c.line(r#"{"jsonrpc":"2.0","id":99,"result":{}}"#).is_empty());
+        assert!(update(&mut c, history[0].clone()).is_empty(), "an unrelated response does not finish loading");
+
+        let prompt = sent(&c.line(r#"{"jsonrpc":"2.0","id":2,"result":{}}"#));
+        assert_eq!(prompt[0]["method"], "session/prompt");
+        assert_eq!(prompt[0]["params"]["sessionId"], "old");
+        assert_eq!(prompt[0]["params"]["prompt"][0]["text"], "Continue here.");
+        assert_eq!(
+            events(update(&mut c, history[0].clone())),
+            [AgentEvent::TextDelta { text: "Earlier answer".into() }],
+            "the same text after loading is live"
+        );
+        let live = events(update(&mut c, json!({"sessionUpdate": "tool_call", "toolCallId": "live-tool", "title": "Current tool", "status": "pending"})));
+        assert!(matches!(&live[..], [AgentEvent::ToolStarted { tool, .. }] if tool == "Current tool"));
+        let done = events(update(&mut c, json!({"sessionUpdate": "tool_call_update", "toolCallId": "live-tool", "status": "completed"})));
+        assert!(matches!(&done[..], [AgentEvent::ToolFinished { tool, ok: true, .. }] if tool == "Current tool"));
+        assert_eq!(c.tools.len(), 1);
+    }
+
+    #[test]
+    fn a_failed_load_does_not_suppress_the_replacement_sessions_updates() {
+        let mut c = core(Some("old"));
+        c.start();
+        c.prompt("Try again.");
+        c.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}"#);
+        let message = json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Answer"}});
+        assert!(update(&mut c, message.clone()).is_empty());
+        let new = sent(&c.line(r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"load failed"}}"#));
+        assert_eq!(new[0]["method"], "session/new");
+        let prompt = sent(&c.line(r#"{"jsonrpc":"2.0","id":3,"result":{"sessionId":"replacement"}}"#));
+        assert_eq!(prompt[0]["params"]["sessionId"], "replacement");
+        let live = c.line(&json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "replacement", "update": message}}).to_string());
+        assert_eq!(events(live), [AgentEvent::TextDelta { text: "Answer".into() }]);
+    }
+
+    #[test]
+    fn cancelling_a_loading_session_does_not_publish_replay_or_send_the_cancelled_prompt() {
+        let mut c = core(Some("old"));
+        c.start();
+        c.prompt("Stop this.");
+        c.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}"#);
+        assert!(c.cancel().contains(&Out::TurnEnded));
+        assert!(update(&mut c, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "History"}})).is_empty());
+        assert!(c.line(r#"{"jsonrpc":"2.0","id":2,"result":{}}"#).is_empty(), "the cancelled prompt stays cancelled when loading finishes");
+        assert_eq!(sent(&c.prompt("A new request."))[0]["params"]["prompt"][0]["text"], "A new request.");
     }
 
     #[test]

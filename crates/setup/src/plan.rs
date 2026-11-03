@@ -159,7 +159,7 @@ pub fn inspect_client(c: &Client, command: &[String]) -> Action {
             return a;
         }
     };
-    if existing.as_ref() == Some(&desired) && !config::is_disabled(c, &base) {
+    if existing.as_ref().is_some_and(|e| c.entry_is_current(e, &desired)) && !config::is_disabled(c, &base) {
         a.old_text = text;
         return a;
     }

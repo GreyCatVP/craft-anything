@@ -275,6 +275,21 @@ fn a_server_is_added_by_its_address() {
     assert_eq!(h.backends().len(), 2, "only the ones that answered");
 }
 
+#[test]
+fn a_backend_context_budget_reaches_the_model() {
+    let (hub, dir) = hub();
+    let table: toml::Table = toml::from_str(
+        "[[backends]]\nname = \"Local\"\nkind = \"openai_compatible\"\nmodel = \"qwen3:8b\"\nbase_url = \"http://127.0.0.1:9/v1\"\ncontext_tokens = 8000\n",
+    )
+    .unwrap();
+    let entry = AiConfig::from_table(&table).unwrap().backends.remove(0);
+    hub.add_backend_with(entry, None).unwrap();
+    let slot = hub.build_model(&hub.entry("Local").unwrap()).unwrap();
+    assert_eq!(slot.context_tokens, 8000);
+    let saved = AiConfig::from_settings(&Settings::load_from(&dir.path().join("config.toml")));
+    assert_eq!(saved.get("Local").unwrap().options.context_tokens, Some(8000));
+}
+
 /// #374: a remote OpenAI-compatible service was treated as a local model: a 24K-token context
 /// and a cost of nothing. Only a server on this computer or its network is local.
 #[test]
@@ -458,6 +473,105 @@ fn openai_streaming_tool_loop() {
     assert_eq!(msgs[2]["tool_calls"][0]["id"], "call_a");
     assert_eq!(msgs[3]["role"], "tool");
     assert_eq!(msgs[3]["tool_call_id"], "call_a");
+}
+
+#[test]
+fn native_tool_stop_reasons_are_respected_before_execution() {
+    for (finish, run_tool) in [("length", false), ("content_filter", false), ("stop", true), ("tool_calls", true)] {
+        let first = chat_sse(&[
+            json!({"choices":[{"delta":{"tool_calls":[{
+                "index":0,"id":"call_a","type":"function","function":{"name":"core_session_show","arguments":"{}"}
+            }]}}]}),
+            json!({"choices":[{"delta":{},"finish_reason":finish}]}),
+        ]);
+        let mut responses = vec![(200, "text/event-stream", first)];
+        if finish != "content_filter" {
+            let last = chat_sse(&[json!({"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]})]);
+            responses.push((200, "text/event-stream", last));
+        }
+        let (url, seen) = mock(responses);
+        let (h, _dir) = hub();
+        add(&h, "GPT", BackendKind::Openai, &url, Some("sk-test"));
+        let mut conversation = h.start(Some("GPT"), false).unwrap();
+        let events = run(&mut conversation, "status?");
+        let started = events.iter().filter(|event| matches!(event, AgentEvent::ToolStarted { .. })).count();
+        let completed = events.iter().filter(|event| matches!(event, AgentEvent::ToolFinished { tool, ok: true, .. } if tool == "core_session_show")).count();
+        assert_eq!(started, usize::from(run_tool), "finish_reason={finish}: {events:?}");
+        assert_eq!(completed, usize::from(run_tool), "finish_reason={finish}: {events:?}");
+        let seen = seen.lock().unwrap();
+        if finish == "content_filter" {
+            assert_eq!(seen.len(), 1, "a refused turn must not request a continuation");
+            assert!(events.iter().any(|event| matches!(event, AgentEvent::Error { message, .. } if message.contains("declined"))));
+        } else {
+            assert_eq!(seen.len(), 2);
+            let messages = seen[1].body["messages"].as_array().unwrap();
+            let result = messages.last().unwrap();
+            assert_eq!(result["role"], "tool");
+            assert_eq!(result["tool_call_id"], "call_a");
+            assert_eq!(result["content"].as_str().unwrap().starts_with("Not run: the reply hit the output limit"), finish == "length");
+            assert!(events.iter().any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "Done.")));
+        }
+    }
+}
+
+fn assert_unexecuted_native_tool_calls_are_paired(finish: &str) {
+    let first = chat_sse(&[
+        json!({"choices":[{"delta":{"content":"Stopped before executing.","tool_calls":[
+            {"index":0,"id":"call_a","type":"function","function":{"name":"core_session_show","arguments":"{}"}},
+            {"index":1,"id":"call_b","type":"function","function":{"name":"core_session_show","arguments":"{}"}}
+        ]}}]}),
+        json!({"choices":[{"delta":{},"finish_reason":finish}]}),
+    ]);
+    let last = chat_sse(&[json!({"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]})]);
+    let (url, seen) = mock(vec![(200, "text/event-stream", first), (200, "text/event-stream", last)]);
+    let (h, _dir) = hub();
+    add(&h, "GPT", BackendKind::Openai, &url, Some("sk-test"));
+    let mut conversation = h.start(Some("GPT"), false).unwrap();
+    let mut events = run(&mut conversation, "status?");
+    if finish != "pause_turn" {
+        assert_eq!(seen.lock().unwrap().len(), 1, "{finish} must wait for the next user turn");
+        events.extend(run(&mut conversation, "Continue when ready."));
+    }
+    assert!(
+        !events.iter().any(|event| matches!(event, AgentEvent::ToolStarted { .. } | AgentEvent::ToolFinished { .. } | AgentEvent::ConsentNeeded { .. })),
+        "stopped calls must not run or ask for consent: {events:?}"
+    );
+    assert!(!events.iter().any(|event| matches!(event, AgentEvent::Error { .. })), "{events:?}");
+    assert!(events.iter().any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "Done.")), "{events:?}");
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2, "{finish}: one stopped response and one continuation");
+    let messages = seen[1].body["messages"].as_array().unwrap();
+    let call_at = messages.iter().position(|message| message["tool_calls"].is_array()).unwrap();
+    assert_eq!(messages[call_at]["tool_calls"].as_array().unwrap().len(), 2);
+    assert_eq!(messages[call_at]["content"], "Stopped before executing.");
+    for (offset, id) in ["call_a", "call_b"].into_iter().enumerate() {
+        let result = messages.get(call_at + offset + 1);
+        assert_eq!(result.and_then(|message| message["role"].as_str()), Some("tool"), "{finish}: each retained call needs a result: {messages:?}");
+        let result = result.unwrap();
+        assert_eq!(result["tool_call_id"], id);
+        assert!(result["content"].as_str().unwrap().starts_with("Not run:"), "{result:?}");
+    }
+    if finish == "pause_turn" {
+        assert_eq!(messages.last().unwrap()["tool_call_id"], "call_b", "a pause continues without another user request");
+    } else {
+        assert_eq!(messages.last().unwrap()["role"], "user");
+        assert_eq!(messages.last().unwrap()["content"], "Continue when ready.");
+    }
+}
+
+#[test]
+fn paused_native_tool_calls_keep_history_paired() {
+    assert_unexecuted_native_tool_calls_are_paired("pause_turn");
+}
+
+#[test]
+fn sequence_stopped_native_tool_calls_keep_history_paired() {
+    assert_unexecuted_native_tool_calls_are_paired("stop_sequence");
+}
+
+#[test]
+fn provider_stopped_native_tool_calls_keep_history_paired() {
+    assert_unexecuted_native_tool_calls_are_paired("provider_stop");
 }
 
 #[test]

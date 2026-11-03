@@ -185,12 +185,27 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool 
 /// The fix for a sign-in failure, in plain words. Sign-in always happens in Claude Code itself;
 /// we never see or handle the account.
 pub fn sign_in_hint(message: &str) -> Option<String> {
-    let m = message.to_ascii_lowercase();
-    ["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"]
-        .iter()
-        .any(|w| m.contains(w))
-        .then(|| "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string())
+    sign_in_hint_in(message, adapters::in_flatpak())
 }
+
+/// [`sign_in_hint`] for a Flatpak or not. In a Flatpak, Claude Code keeps its sign-in and
+/// conversations in a folder of the app's own (#506), so signing in from a normal terminal signs
+/// in the other copy: it's done through the sandbox, with that folder.
+fn sign_in_hint_in(message: &str, flatpak: bool) -> Option<String> {
+    let m = message.to_ascii_lowercase();
+    let wants_sign_in = ["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"].iter().any(|w| m.contains(w));
+    if !wants_sign_in {
+        return None;
+    }
+    Some(if flatpak {
+        format!("Sign in to Claude Code inside this app's sandbox: open a terminal and run `{FLATPAK_SIGN_IN}`, then try again.")
+    } else {
+        "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string()
+    })
+}
+
+/// Signing in for the Claude Code that a Flatpak build starts: the same folder it will use.
+const FLATPAK_SIGN_IN: &str = "flatpak run --command=sh ai.storyteller.craft-anything -c 'CLAUDE_CONFIG_DIR=\"$XDG_DATA_HOME/craft-anything/claude\" \"$HOME/.local/bin/claude\" auth login'";
 
 /// Words in an API's answer when the installed Claude Code is older than the model it was asked
 /// to use (#165).
@@ -561,7 +576,15 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     // raised to match, so nothing cuts a long clone short (its defaults stop a quiet tool call at
     // 30 minutes and a background build at 10).
     let (turn, quiet) = if builder { (24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60) };
-    let env = agent_env(builder, spec.options.effort);
+    let mut env = agent_env(builder, spec.options.effort);
+    // Under a Flatpak, Claude Code gets a folder it can write its conversations to (#506); on
+    // another computer over SSH it keeps its own.
+    if remote.is_none()
+        && let Some(dir) = adapters::flatpak_claude_dir()
+    {
+        let _ = std::fs::create_dir_all(&dir);
+        env.push(("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned()));
+    }
     let (prog, argv) = match &remote {
         Some(host) => ("ssh".to_string(), crate::ssh::ssh_args(host, &remote_command(&program, args, &env))),
         None => (program.clone(), args),
@@ -602,7 +625,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
         proc = proc.cwd(p);
     }
     if adapter.prompt_on_stdin() {
-        proc = proc.stdin_bytes(text);
+        proc = proc.stdin_bytes(adapter.stdin_text(&preamble, text));
     }
     let result = proc.run();
     let p = parser.lock().unwrap_or_else(PoisonError::into_inner);
@@ -823,6 +846,23 @@ impl Drop for CliConversation {
 mod tests {
     use super::*;
 
+    /// #506: under a Flatpak `~/.claude` is read-only, so Claude Code gets a folder of ours to save
+    /// its conversations in (so `--resume` finds them); the person's own `CLAUDE_CONFIG_DIR` and a
+    /// normal install are left as they are, and the sign-in hint says how to sign in there.
+    #[test]
+    fn under_a_flatpak_claude_code_keeps_its_conversations_in_a_folder_it_can_write() {
+        let data = || Some(std::path::PathBuf::from("/home/u/.var/app/ai.storyteller.craft-anything/data"));
+        let dir = adapters::flatpak_claude_dir_in(true, false, data()).unwrap();
+        assert!(dir.ends_with("craft-anything/claude") && dir.starts_with("/home/u/.var/app/ai.storyteller.craft-anything/data"), "{dir:?}");
+        assert_eq!(adapters::flatpak_claude_dir_in(true, true, data()), None, "their own choice stays");
+        assert_eq!(adapters::flatpak_claude_dir_in(false, false, data()), None, "a normal install keeps ~/.claude");
+        assert_eq!(adapters::flatpak_claude_dir_in(true, false, None), None);
+        let hint = sign_in_hint_in("Not logged in", true).unwrap();
+        assert!(hint.contains("flatpak run") && hint.contains("CLAUDE_CONFIG_DIR") && hint.contains("auth login"), "{hint}");
+        assert!(sign_in_hint_in("Not logged in", false).unwrap().contains("`claude auth login`"));
+        assert_eq!(sign_in_hint_in("all fine", true), None);
+    }
+
     /// Over SSH our environment doesn't reach the other computer, so the chosen effort (and Claude
     /// Code's raised limits) go in the remote command itself.
     #[test]
@@ -865,6 +905,43 @@ mod tests {
         assert!(pos("--mcp-config") > pos("--resume"));
     }
 
+    /// #540: only tools that ask the person themselves are approved on Codex's side.
+    #[test]
+    fn every_tool_approved_for_codex_is_registered_and_asks_for_consent() {
+        let e = craft_anything_engine::Engine::shared(craft_anything_engine::testing::session(), crate::rebuild::tools::specs());
+        for id in craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS {
+            let spec = e.registry().get(id).unwrap_or_else(|| panic!("{id} isn't registered"));
+            assert!(spec.effects.needs_consent(), "{id} must ask for consent itself");
+        }
+    }
+
+    /// #540: a refused Codex tool call came back as "null"; it says why and how to fix it.
+    #[test]
+    fn a_codex_tool_refused_for_approval_explains_the_way_out() {
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let line = r#"{"type":"item.completed","item":{"id":"i1","type":"mcp_tool_call","server":"craft-anything","tool":"rebuild_start","status":"failed","result":null,"error":{"message":"tool rebuild_start requires approval, but approval policy is never"}}}"#;
+        let v: Value = serde_json::from_str(line).unwrap();
+        let events = adapter_for("codex").parse(&mut p, &v);
+        let text = format!("{events:?}");
+        assert!(text.contains("setup --client codex --yes"), "{text}");
+        // Another server's refusal keeps Codex's words: our setup can't fix it.
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let theirs = line.replace("craft-anything", "other-server");
+        let text = format!("{:?}", adapter_for("codex").parse(&mut p, &serde_json::from_str::<Value>(&theirs).unwrap()));
+        assert!(text.contains("approval policy is never") && !text.contains("setup --client codex"), "{text}");
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let v: Value = serde_json::from_str(line).unwrap();
+        let events = adapter_for("codex").parse(&mut p, &v);
+        let text = format!("{events:?}");
+        assert!(!text.contains("\"null\""), "{text}");
+        // Any other failure shows its own message, not the JSON around it.
+        let mut p = StreamParser::new(adapter_for("codex"));
+        let other =
+            r#"{"type":"item.completed","item":{"id":"i2","type":"mcp_tool_call","tool":"x","status":"failed","result":null,"error":{"message":"boom"}}}"#;
+        let text = format!("{:?}", adapter_for("codex").parse(&mut p, &serde_json::from_str::<Value>(other).unwrap()));
+        assert!(text.contains("boom") && !text.contains("null"), "{text}");
+    }
+
     #[test]
     fn codex_and_gemini_args() {
         let a = build_args(adapter_for("codex").as_ref(), &BackendOptions::default(), "q", "P:", &mcp(), None, Access::Analyse);
@@ -877,11 +954,50 @@ mod tests {
         assert_eq!(skip(&build_args(adapter_for("codex").as_ref(), &o, "q", "P:", &mcp(), None, Access::Build)), 1);
         assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
         assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
-        assert_eq!(a.last().unwrap(), "P:q");
+        // #528: the message goes in on stdin; `-` tells `codex exec` to read it there.
+        assert_eq!(a.last().unwrap(), "-");
+        // #540: `codex exec` can't ask, so the tools that ask for themselves are approved in the
+        // same -c list, and nothing wider.
+        assert!(a.contains(&"mcp_servers.craft-anything.tools.rebuild_start.approval_mode=\"approve\"".to_string()));
+        assert!(!a.iter().any(|x| x.contains("default_tools_approval_mode")));
         let g = build_args(adapter_for("gemini-cli").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
         assert!(g.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
         let o = BackendOptions { args: vec!["run".into()], ..Default::default() };
         assert_eq!(build_args(adapter_for("aider").as_ref(), &o, "q", "", &mcp(), None, Access::Analyse), vec!["run".to_string(), "q".to_string()]);
+    }
+
+    #[test]
+    fn codex_long_prompt_goes_in_on_stdin() {
+        // #528: a long message in argv passes Windows' command-line limit (os error 206).
+        let codex = adapter_for("codex");
+        let prompt = "x".repeat(40_831);
+        let a = build_args(codex.as_ref(), &BackendOptions::default(), &prompt, "P:", &mcp(), None, Access::Build);
+        assert!(codex.prompt_on_stdin(), "codex must read its message from stdin");
+        assert!(!a.iter().any(|x| x.contains(&prompt) || x.contains("P:")), "{a:?}");
+        assert!(a.iter().map(|x| x.len() + 1).sum::<usize>() < 4096, "argv stays short");
+        assert_eq!(a.last().unwrap(), "-", "codex exec reads stdin when told to");
+        assert_eq!(&a[..2], &["exec".to_string(), "--json".to_string()]);
+        assert!(a.contains(&"--skip-git-repo-check".to_string()));
+        assert!(a.windows(2).any(|w| w[0] == "--sandbox" && w[1] == "workspace-write"));
+        assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
+        assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
+    }
+
+    #[test]
+    fn gemini_long_prompt_goes_in_on_stdin() {
+        // npm starts Gemini CLI through `gemini.cmd`, where cmd.exe allows 8,191 characters.
+        let gemini = adapter_for("gemini-cli");
+        let prompt = "x".repeat(40_831);
+        let o = BackendOptions { cli_model: Some("gemini-2.5-pro".into()), ..Default::default() };
+        let a = build_args(gemini.as_ref(), &o, &prompt, "P:", &mcp(), None, Access::Analyse);
+        assert!(gemini.prompt_on_stdin(), "gemini must read its message from stdin");
+        assert_eq!(gemini.stdin_text("P:", &prompt), format!("P:{prompt}"), "the whole message, preamble first");
+        assert!(!a.iter().any(|x| x.contains(&prompt) || x.contains("P:")), "{a:?}");
+        assert!(a.iter().map(|x| x.len() + 1).sum::<usize>() < 4096, "argv stays short");
+        // Gemini CLI appends `-p` to stdin; empty, it adds nothing but keeps the run headless.
+        assert_eq!(&a[a.len() - 2..], &["-p".to_string(), String::new()]);
+        assert!(a.windows(2).any(|w| w[0] == "-m" && w[1] == "gemini-2.5-pro"));
+        assert!(a.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
     }
 
     #[test]
@@ -1256,6 +1372,124 @@ mod tests {
         }
         let text: String = all.iter().filter_map(|e| if let AgentEvent::TextDelta { text } = e { Some(text.clone()) } else { None }).collect();
         assert_eq!(text, "read 40000 bytes", "{all:?}");
+    }
+
+    /// #528: a stand-in `codex` gets the whole message (preamble first) on stdin and only short
+    /// options in argv, for a normal message and for one longer than Windows' command line.
+    #[cfg(unix)]
+    #[test]
+    fn codex_reads_its_message_on_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("codex");
+        let script = r#"#!/bin/sh
+d=$(dirname "$0")
+if [ "$2" = "--help" ]; then echo "--json"; exit 0; fi
+printf '%s\n' "$@" > "$d/argv"
+cat > "$d/stdin"
+echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+"#;
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for prompt in ["q".to_string(), "x".repeat(40_831)] {
+            let config =
+                BackendConfig { name: "Codex".into(), kind: BackendKind::AgentCli, model: "codex".into(), base_url: None, ssh_host: None, enabled: true };
+            let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, None);
+            spec.preamble = Some("P:".into());
+            let mut c = CliConversation::new(spec);
+            c.send(&prompt);
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut all = Vec::new();
+            while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                all.extend(c.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap_or_default();
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap_or_default();
+            assert_eq!(stdin.len(), prompt.len() + 2, "{all:?}");
+            assert!(stdin == format!("P:{prompt}"), "the whole message, preamble first");
+            assert!(!argv.contains("P:"), "{argv}");
+            assert_eq!(argv.lines().last(), Some("-"), "{argv}");
+            assert_eq!(argv.lines().take(2).collect::<Vec<_>>(), ["exec", "--json"]);
+        }
+    }
+
+    /// #528, on every platform: the Codex command line stays short, and a child process started
+    /// with a message longer than Windows' 32,767-character limit gets all of it on stdin. The
+    /// child is this test binary, running `stdin_echo_child`.
+    #[test]
+    fn codex_long_message_reaches_a_child_process_whole() {
+        let prompt = "x".repeat(40_831);
+        let codex = adapter_for("codex");
+        let a = build_args(codex.as_ref(), &BackendOptions::default(), &prompt, "P:", &mcp(), None, Access::Build);
+        assert!(a.iter().map(|x| x.len() + 1).sum::<usize>() < 32_767, "argv must fit Windows' command line");
+        assert!(codex.prompt_on_stdin());
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("received");
+        let exe = std::env::current_exe().unwrap();
+        let message = format!("P:{prompt}");
+        let run = Process::new(exe.as_os_str())
+            // The Codex argv rides along after `--` (extra name filters that match no test).
+            .args(["--exact", "--test-threads=1", "--", "cli_agents::tests::stdin_echo_child"])
+            .args(&a)
+            .env(STDIN_ECHO_ENV, out.as_os_str())
+            .stdin_bytes(message.clone())
+            .timeout(Duration::from_secs(60))
+            .run();
+        assert!(run.is_ok(), "{run:?}");
+        assert_eq!(std::fs::read_to_string(&out).unwrap_or_default(), message);
+    }
+
+    /// A stand-in `gemini.cmd`, started the way npm installs Gemini CLI on Windows, gets the whole
+    /// message (preamble first) on stdin and only short options in argv, for a normal message and
+    /// for one longer than cmd.exe's 8,191 characters. Its stdin goes to `stdin_echo_child`.
+    #[cfg(windows)]
+    #[test]
+    fn gemini_cmd_reads_its_message_on_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("gemini.cmd");
+        let exe = std::env::current_exe().unwrap();
+        let script = format!(
+            "@echo off\r\nif \"%~1\"==\"--help\" (echo --output-format stream-json& exit /b 0)\r\necho %*> \"%~dp0argv\"\r\nset {STDIN_ECHO_ENV}=%~dp0stdin\r\n\"{}\" --exact --test-threads=1 cli_agents::tests::stdin_echo_child >nul\r\necho {{\"type\":\"result\",\"stats\":{{\"input_tokens\":1,\"output_tokens\":1}}}}\r\n",
+            exe.display()
+        );
+        std::fs::write(&program, script).unwrap();
+        for prompt in ["q".to_string(), "x".repeat(40_831)] {
+            let _ = std::fs::remove_file(dir.path().join("stdin"));
+            let config =
+                BackendConfig { name: "Gemini".into(), kind: BackendKind::AgentCli, model: "gemini-cli".into(), base_url: None, ssh_host: None, enabled: true };
+            let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, None);
+            spec.preamble = Some("P:".into());
+            let mut c = CliConversation::new(spec);
+            c.send(&prompt);
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            let mut all = Vec::new();
+            while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                all.extend(c.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap_or_default();
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap_or_default();
+            assert_eq!(stdin.len(), prompt.len() + 2, "{all:?}");
+            assert!(stdin == format!("P:{prompt}"), "the whole message, preamble first");
+            assert!(!argv.contains("P:"), "{argv}");
+            assert!(argv.trim_end().ends_with("-p \"\""), "{argv}");
+        }
+    }
+
+    const STDIN_ECHO_ENV: &str = "CRAFT_ANYTHING_TEST_STDIN_ECHO";
+
+    /// Not a test on its own: when run as the child of the test above, writes its stdin to the
+    /// file it's told to.
+    #[test]
+    fn stdin_echo_child() {
+        if let Some(path) = std::env::var_os(STDIN_ECHO_ENV) {
+            let mut got = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut got).unwrap();
+            std::fs::write(path, got).unwrap();
+        }
     }
 
     /// Whoever reads `TurnDone` may send the next message at once (a session that wasn't there is
