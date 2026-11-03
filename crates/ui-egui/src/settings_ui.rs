@@ -1060,6 +1060,12 @@ mod tests {
         assert_eq!(app.state.backend, None, "the late add must not override No AI for now");
         app.handle_done(Finished { job: 0, result: added(app.backend_choices) });
         assert_eq!(app.state.backend.as_deref(), Some("Home server"), "with no choice meanwhile, the added AI is chosen");
+        // Two adds at once: the first one's selection isn't a choice, so the second is selected too.
+        let started = app.backend_choices;
+        let other = |choices| Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices });
+        app.handle_done(Finished { job: 0, result: added(started) });
+        app.handle_done(Finished { job: 0, result: other(started) });
+        assert_eq!(app.state.backend.as_deref(), Some("Laptop"), "the add that finished last is selected");
     }
 }
 

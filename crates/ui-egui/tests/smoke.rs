@@ -74,6 +74,16 @@ fn first_run_ai_step_can_add_a_server_by_its_address() {
     assert!(h.query_by_label("We didn't find an AI on this computer yet").is_none());
 }
 
+/// A message (such as a server that couldn't be reached) shows on the first run too.
+#[test]
+fn first_run_shows_messages() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.state_mut().toast("Couldn't reach the server", true);
+    h.run_steps(3);
+    let _ = h.get_by_label("Couldn't reach the server");
+}
+
 /// #231: at the smallest window the app allows, Purpose's Continue was below the window with
 /// nothing to scroll; it scrolls into view above the footer and works.
 #[test]

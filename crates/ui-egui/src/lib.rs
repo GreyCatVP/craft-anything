@@ -1173,6 +1173,11 @@ impl CraftApp {
 
     pub fn choose_backend(&mut self, name: Option<String>) {
         self.backend_choices = self.backend_choices.wrapping_add(1);
+        self.select_backend(name);
+    }
+
+    /// Select a backend without counting it as the person's choice (an add that finished).
+    fn select_backend(&mut self, name: Option<String>) {
         if self.state.backend != name {
             self.state.backend = name;
             if let Some(mut c) = self.conversation.take() {
@@ -1500,7 +1505,7 @@ impl CraftApp {
                     self.toast(i18n::trf("{name} is ready", &[("name", &name)]), false);
                     // Picking another AI (or none) while this one connected wins.
                     if choices == self.backend_choices {
-                        self.choose_backend(Some(name));
+                        self.select_backend(Some(name));
                     }
                     self.refresh_backends();
                 }
@@ -1705,6 +1710,8 @@ impl CraftApp {
         self.stuck_banner(ui, &ctx);
         if !self.settings.first_run_done {
             egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas)).show(ui, |ui| guard_ui(ui, "first run", |ui| first_run::show(self, ui)));
+            // An AI added from the first run reports a failure here (a wrong address or key).
+            self.toasts(&ctx);
             titlebar::window_edge(&ctx);
             titlebar::resize_edges(&ctx);
             return;
