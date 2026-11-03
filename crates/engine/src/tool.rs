@@ -207,6 +207,14 @@ pub enum Caller {
     Agent,
 }
 
+/// Set (to any value) in the environment of every AI agent the app starts to build or answer, so
+/// that the shell commands it runs inherit it. The command line reads it and calls as
+/// [`Caller::Agent`] instead of [`Caller::Cli`]: an agent that runs `craft-anything-cli` is not the
+/// person at a terminal, and is asked before it loosens spending and cannot answer an approval.
+/// A guard against an AI acting as the person by accident, not a sandbox: a process that unsets it,
+/// or edits the project's files directly, is not stopped by it.
+pub const AGENT_ENV: &str = "CRAFT_ANYTHING_AGENT";
+
 /// Cooperative cancellation, shared with long-running work (it lives in `platform`, so the
 /// transports below the engine can take it too).
 pub use craft_anything_platform::cancel::CancelToken;

@@ -544,6 +544,8 @@ impl AcpConversation {
         let mut proc = Process::new(&self.program)
             .args(&self.args)
             .cwd(&self.cwd)
+            // The shell commands it runs inherit this: the CLI called from them is the AI, not the person.
+            .env(craft_anything_engine::AGENT_ENV, "1")
             .stdin(StdinMode::Piped)
             // One process serves the whole chat; a builder turn may take hours.
             .timeout(Duration::from_secs(24 * 3600))
@@ -850,6 +852,31 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
     #[test]
     fn acp_retry_continues_a_successfully_loaded_session() {
         assert_eq!(prompt_after_interrupted_acp_turn("loaded"), format!("P:{}", crate::failure::CONTINUE_TURN));
+    }
+
+    /// The agent program started over ACP has the mark that it is an AI in its environment, which
+    /// the shell commands it runs inherit.
+    #[cfg(unix)]
+    #[test]
+    fn the_acp_agent_has_the_mark_that_it_is_an_ai_in_its_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("acp-agent");
+        std::fs::write(&program, "#!/bin/sh\nprintf '%s' \"$CRAFT_ANYTHING_AGENT\" > \"$(dirname \"$0\")/mark\"\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mcp = McpCommand { command: "craft-anything-cli".into(), args: vec!["mcp".into()], notes: None };
+        let mut c = AcpConversation::new("Scripted ACP", "gemini-cli", program.display().to_string(), Vec::new(), dir.path().into(), mcp, None);
+        c.send("go");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !dir.path().join("mark").exists() {
+            assert!(std::time::Instant::now() < deadline, "the agent never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mark = || std::fs::read_to_string(dir.path().join("mark")).unwrap_or_default();
+        while mark().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(mark(), "1");
     }
 
     fn update(c: &mut AcpCore, value: Value) -> Vec<Out> {

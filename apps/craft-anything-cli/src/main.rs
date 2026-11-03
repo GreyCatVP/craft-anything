@@ -12,7 +12,7 @@ mod tool_args;
 
 use clap::{Parser, Subcommand};
 use craft_anything_engine::project::{Project, Purpose};
-use craft_anything_engine::{CallOptions, Caller, CancelToken, Consent, Engine, Requires, Session, Settings, ToolOutput};
+use craft_anything_engine::{AGENT_ENV, CallOptions, Caller, CancelToken, Consent, Engine, Requires, Session, Settings, ToolOutput};
 use craft_anything_evidence::ToolError;
 use output::Format;
 use serde_json::{Value, json};
@@ -216,7 +216,15 @@ fn open_or_create_project(dir: &Path) -> Result<Project, ToolError> {
 
 pub fn call_options(cli: &Cli, cancel: &CancelToken) -> CallOptions<'static> {
     let consent = if cli.allow_run { Consent::Granted } else { Consent::NotAsked };
-    CallOptions::new(Caller::Cli).with_consent(consent).with_cancel(cancel.clone())
+    CallOptions::new(caller_for(std::env::var_os(AGENT_ENV).as_deref())).with_consent(consent).with_cancel(cancel.clone())
+}
+
+/// Who is at the command line: the person, unless the app marked this process as an AI's (the
+/// agent it starts has [`AGENT_ENV`] set, and the shell commands it runs inherit it). The AI is
+/// asked before it loosens a project's spending and cannot answer an approval. The mark being set at
+/// all counts, whatever its value, so setting it empty or to 0 is not a way out.
+pub fn caller_for(agent_mark: Option<&std::ffi::OsStr>) -> Caller {
+    if agent_mark.is_some() { Caller::Agent } else { Caller::Cli }
 }
 
 /// A cancel token that trips on Ctrl-C.
@@ -523,5 +531,20 @@ fn tool(cli: &Cli, args: &[String], f: Format) -> u8 {
             0
         }
         Err(e) => fail(&e, f),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn the_command_line_is_the_person_unless_an_ai_marked_the_process() {
+        assert_eq!(caller_for(None), Caller::Cli);
+        for mark in ["1", "", "0", "false"] {
+            assert_eq!(caller_for(Some(OsStr::new(mark))), Caller::Agent, "a mark of {mark:?} still says an AI started it");
+        }
+        assert_eq!(AGENT_ENV, "CRAFT_ANYTHING_AGENT");
     }
 }

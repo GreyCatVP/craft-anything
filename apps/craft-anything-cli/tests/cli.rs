@@ -240,3 +240,35 @@ fn help_does_not_advise_a_report_format_option() {
     assert!(!help.stdout_text().contains("(core-target-open, report"));
     assert_eq!(cli(&["report", "--format", "html"], cfg.path()).code, Some(2));
 }
+
+/// An AI that runs the command line from its shell is not the person: the app marks the agents it
+/// starts with `CRAFT_ANYTHING_AGENT`, the shell commands inherit it, and the CLI then calls as the
+/// agent, which cannot answer an approval card. Without the mark the same command is the person.
+#[test]
+fn the_command_line_run_by_an_ai_cannot_answer_an_approval() {
+    use craft_anything_engine::inbox::{Inbox, RequestKind};
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let cfg = tempfile::tempdir().unwrap();
+    let projects = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(projects.path(), "Game", "A game", TargetRef::None).unwrap();
+    let inbox = Inbox::new(ws.inbox_dir());
+    let card = inbox.post(RequestKind::Approval, "Let the assistant loosen this project's asset spending?", "", Vec::new(), false, None).unwrap();
+    let answer = |marked: bool| {
+        let mut p = Process::new(env!("CARGO_BIN_EXE_craft-anything-cli"))
+            .args(["project-inbox-answer", "--project", ws.root.to_str().unwrap(), "--id", card.as_str(), "--allow"])
+            .env("CRAFT_ANYTHING_CONFIG_DIR", cfg.path())
+            .timeout(Duration::from_secs(60));
+        if marked {
+            p = p.env("CRAFT_ANYTHING_AGENT", "1");
+        }
+        p.run().unwrap()
+    };
+    let refused = answer(true);
+    assert_eq!(refused.code, Some(1), "{}", String::from_utf8_lossy(&refused.stdout));
+    let e: Value = serde_json::from_slice(&refused.stdout).unwrap();
+    assert_eq!(e["error"]["code"], "no_permission", "{e}");
+    assert_eq!(inbox.pending().len(), 1, "the card is still waiting");
+    let allowed = answer(false);
+    assert!(allowed.success, "{}", String::from_utf8_lossy(&allowed.stdout));
+    assert!(inbox.pending().is_empty(), "the person's own command line answered it");
+}

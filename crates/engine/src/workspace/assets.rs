@@ -6,7 +6,7 @@
 use crate::asset_choice::AssetChoice;
 use crate::settings::AssetSettings;
 use craft_anything_engines::assets::AssetKind;
-use craft_anything_engines::assets::model::{MAX_ASSET_CREDITS, Unit};
+use craft_anything_engines::assets::model::Unit;
 use craft_anything_evidence::ToolError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -114,12 +114,12 @@ impl ProjectAssets {
         }
         let mut t = self.effective(kind, s);
         if let Some(l) = limit {
-            let (max, unit) = match t.choice.unit {
-                Unit::Usd => (super::MAX_ASSET_BUDGET_USD, "dollars"),
-                Unit::Credits => (MAX_ASSET_CREDITS, "credits"),
+            let words = match t.choice.unit {
+                Unit::Usd => "dollars",
+                Unit::Credits => "credits",
             };
-            if !l.is_finite() || !(0.0..=max).contains(&l) {
-                return Err(ToolError::invalid(format!("A limit must be a number from 0 to {max:.0} {unit}."))
+            if !t.choice.unit.accepts(l) {
+                return Err(ToolError::invalid(format!("A limit must be a number from 0 to {:.0} {words}.", t.choice.unit.max_amount()))
                     .with_remediation("Pick a limit in that range, or turn the limit off."));
             }
             t.limit = l;
