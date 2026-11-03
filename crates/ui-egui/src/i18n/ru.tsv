@@ -807,6 +807,7 @@ Pick the folder for this project	Выберите папку для этого �
 Pick the game's folder	Выберите папку игры
 Picture a program's window	Представить окно программы
 Picture model	Модель изображений
+Unavailable model: {id}	Недоступная модель: {id}
 Pictures	Изображения
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	Изображения пока нельзя сохранить из контейнеров IoStore; вы можете посмотреть, что внутри.
 Pictures of the original	Изображения оригинала
@@ -1366,3 +1367,32 @@ your files there are the app, edited in place	ваши файлы там — э�
 … {} older	… {} старых
 ← Back	← Назад
 ↑↓ to move · Enter to run · Esc to close	↑↓ для перемещения · Enter для запуска · Esc для закрытия
+Generate speech	Сгенерировать речь
+Generate a sound effect	Сгенерировать звуковой эффект
+Generate music	Сгенерировать музыку
+Generate pictures, models and audio	Генерировать изображения, модели и звук
+Needs an asset provider key. Until then the game is built without generated assets.	Нужен ключ провайдера ресурсов. До этого игра собирается без сгенерированных ресурсов.
+Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	Оплачивается с ваших аккаунтов провайдеров: оценочно {model} за 3D-модель и {picture} за изображение. Стоимость звука зависит от длительности. Выключено — игра собирается без сгенерированных ресурсов.
+Add a provider key	Добавить ключ провайдера
+Your asset provider keys	Ваши ключи провайдеров ресурсов
+Use fal.ai, Scenario or ElevenLabs for generated assets.	Используйте fal.ai, Scenario или ElevenLabs для генерируемых ресурсов.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Создавайте оригинальные изображения и модели, речь, звуковые эффекты и музыку через собственные аккаунты провайдеров. Оценочная стоимость визуальных ресурсов: {model} за модель и {picture} за изображение. У каждого проекта бюджет {budget}. Ключи хранятся в системной связке ключей, если она доступна, иначе в закрытом локальном файле ключей. Провайдеров изображений и 3D выберите в Настройки → Сборки.
+Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Изображения и 3D-модели от fal.ai или Scenario; речь, звуковые эффекты и музыка от ElevenLabs. Оценочно {model} за модель, с бюджетом {budget} на проект. Визуальные модели выберите в Настройки → Сборки.
+3D model generator	Генератор 3D-моделей
+What pictures are turned into 3D models with.	Чем изображения превращаются в 3D-модели.
+What a new game may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Сколько новая игра может потратить на сгенерированные изображения, 3D-модели и звук, прежде чем вас спросят. У каждого проекта свой бюджет.
+API secret	Секрет API
+{name} API secret	Секрет API {name}
+Paste your {name} API secret	Вставьте секрет API {name}
+Save asset settings	Сохранить настройки ресурсов
+Key needed	Нужен ключ
+Off. Turning this on uses the providers chosen below.	Выключено. После включения используются провайдеры, выбранные ниже.
+Manage provider keys	Управлять ключами провайдеров
+Assets: {n} · estimated spent ${spent}	Ресурсов: {n} · оценочно потрачено ${spent}
+Budget ${budget} · remaining ${remaining}	Бюджет ${budget} · осталось ${remaining}
+Shared asset budget (USD)	Общий бюджет ресурсов (USD)
+Asset budget in USD	Бюджет ресурсов в USD
+Save budget	Сохранить бюджет
+Saving asset settings…	Сохраняем настройки ресурсов…
+Enter an amount from 0 to 10000 USD.	Введите сумму от 0 до 10000 USD.
+Asset spending is unavailable. Repair assets.json before generating.	Расходы на ресурсы недоступны. Исправьте assets.json перед генерацией.
