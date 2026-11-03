@@ -97,6 +97,8 @@ fn supply<'a>(req: &AssetRequest<'a>, role: Role) -> Option<Supply<'a>> {
         (R::Music { instrumental, .. }, Role::Instrumental) => Some(Supply::Flag(instrumental)),
         // No voice asked for is no voice sent.
         (R::Speech { voice_id, .. }, Role::Voice) => filled(Some(voice_id)).map(Supply::Text),
+        // One result a run, whatever the request: a price per run is the price of one result.
+        (_, Role::Count) => Some(Supply::Count(1)),
         _ => None,
     }
 }
@@ -136,7 +138,7 @@ fn options_of(kind: AssetKind) -> &'static [AssetOption] {
 /// The option a role carries; the prompt and the picture to start from are not options.
 fn option_of(role: Role) -> Option<AssetOption> {
     match role {
-        Role::Prompt | Role::Image => None,
+        Role::Prompt | Role::Image | Role::Count => None,
         Role::Shape | Role::Width | Role::Height => Some(AssetOption::Shape),
         Role::Faces => Some(AssetOption::Faces),
         Role::Textured => Some(AssetOption::Textured),
@@ -152,7 +154,9 @@ fn holds(role: Role, kind: &FieldKind) -> bool {
         Role::Prompt => matches!(kind, FieldKind::Text),
         Role::Image => matches!(kind, FieldKind::Text | FieldKind::Image | FieldKind::Images),
         Role::Shape => matches!(kind, FieldKind::Choice(_)),
-        Role::Width | Role::Height | Role::Faces | Role::Duration | Role::DurationMs => matches!(kind, FieldKind::Integer { .. } | FieldKind::Number { .. }),
+        Role::Width | Role::Height | Role::Faces | Role::Duration | Role::DurationMs | Role::Count => {
+            matches!(kind, FieldKind::Integer { .. } | FieldKind::Number { .. })
+        }
         Role::Textured | Role::Instrumental => matches!(kind, FieldKind::Bool),
         Role::Voice => matches!(kind, FieldKind::Text | FieldKind::Choice(_)),
     }
@@ -887,6 +891,26 @@ mod tests {
             assert_eq!(carried, listed, "{kind:?}");
             assert_eq!(listed.len(), options_of(kind).len(), "{kind:?} lists an option twice");
         }
+    }
+
+    /// A price per run is the price of one result: a model that can make several in a run is
+    /// asked for one, as a whole number, whatever kind of request it is.
+    #[test]
+    fn a_count_of_results_is_pinned_to_one() {
+        let roles = InputRoles::built_in();
+        let fal = [required(field("prompt", FieldKind::Text)), with_default(field("num_images", int(Some(1), Some(4))))];
+        let mapped = map(&fal, picture(Shape::Square));
+        assert_eq!(body(&mapped), json!({"prompt": "crate", "num_images": 1}));
+        assert!(mapped.body.get("num_images").is_some_and(Value::is_i64));
+        assert_eq!(mapped.ignored, [AssetOption::Shape], "the count is not an option the person chose");
+        let scenario = [field("prompt", FieldKind::Text), field("numOutputs", num(Some(1.0), Some(4.0)))];
+        assert_eq!(body(&map(&scenario, picture(Shape::Square))), json!({"prompt": "crate", "numOutputs": 1}));
+        let solid = [field("image_url", FieldKind::Image), field("num_outputs", int(None, None))];
+        assert_eq!(map(&solid, self::solid()).body.get("num_outputs"), Some(&json!(1)));
+        // A model that insists on a count can be run: one is what it gets.
+        assert!(runnable(&[field("prompt", FieldKind::Text), required(field("numSamples", int(None, None)))], AssetKind::Music, roles).is_ok());
+        // A count that isn't a number is no count: left to the model when it may be.
+        assert_eq!(body(&map(&[field("prompt", FieldKind::Text), field("num_images", FieldKind::Text)], picture(Shape::Square))), json!({"prompt": "crate"}));
     }
 
     #[test]

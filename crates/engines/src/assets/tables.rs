@@ -136,12 +136,14 @@ pub enum Role {
     Instrumental,
     /// The voice speech is read in.
     Voice,
+    /// How many results one run makes. Always one: a price per run is the price of one result.
+    Count,
 }
 
 impl Role {
     /// Every role. A new variant must be added here as well as to the matches on `Role`, which
     /// the compiler checks; a test requires `input_roles.toml` to give each one a field name.
-    pub const ALL: [Role; 11] = [
+    pub const ALL: [Role; 12] = [
         Role::Prompt,
         Role::Image,
         Role::Shape,
@@ -153,6 +155,7 @@ impl Role {
         Role::DurationMs,
         Role::Instrumental,
         Role::Voice,
+        Role::Count,
     ];
 }
 
@@ -171,10 +174,11 @@ struct RoleNames {
     duration_ms: Vec<String>,
     instrumental: Vec<String>,
     voice: Vec<String>,
+    count: Vec<String>,
 }
 
 impl RoleNames {
-    fn by_role(&self) -> [(Role, &[String]); 11] {
+    fn by_role(&self) -> [(Role, &[String]); 12] {
         [
             (Role::Prompt, &self.prompt),
             (Role::Image, &self.image),
@@ -187,6 +191,7 @@ impl RoleNames {
             (Role::DurationMs, &self.duration_ms),
             (Role::Instrumental, &self.instrumental),
             (Role::Voice, &self.voice),
+            (Role::Count, &self.count),
         ]
     }
 }
@@ -421,13 +426,14 @@ mod tests {
                 Role::DurationMs => "music_length_ms",
                 Role::Instrumental => "force_instrumental",
                 Role::Voice => "voice_id",
+                Role::Count => "num_images",
             }
         }
         let table = InputRoles::built_in();
         for role in Role::ALL {
             assert_eq!(table.role_of(example_field(role)), Some(role), "{role:?} has no field name in input_roles.toml");
         }
-        // `ALL` lists each role once, and the table parser's own list covers the same eleven.
+        // `ALL` lists each role once, and the table parser's own list covers the same twelve.
         let distinct: HashSet<Role> = Role::ALL.into_iter().collect();
         assert_eq!(distinct.len(), Role::ALL.len());
         let parsed: HashSet<Role> = RoleNames::default().by_role().into_iter().map(|(role, _)| role).collect();
@@ -464,6 +470,9 @@ mod tests {
             ("duration_ms", Role::DurationMs),
             ("force_instrumental", Role::Instrumental),
             ("voice_id", Role::Voice),
+            // fal's count of pictures, and Scenario's.
+            ("num_images", Role::Count),
+            ("numOutputs", Role::Count),
         ] {
             assert_eq!(roles.role_of(field), Some(role), "{field}");
         }

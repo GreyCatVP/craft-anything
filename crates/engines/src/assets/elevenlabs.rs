@@ -1,13 +1,14 @@
-//! ElevenLabs audio, using the caller's key. [`ElevenLabs::list`] and [`ElevenLabs::describe`] say
-//! which models make each type of audio and what they cost in credits: speech models come from the
-//! account's own list, sound effects and music are the two fixed endpoints whose rates the app keeps
-//! (`known_models.toml`).
-use super::inputs::{FieldKind, InputField, REMEDIATION, runnable};
+//! ElevenLabs audio, using the caller's key and billed in credits. [`ElevenLabs::list`] and
+//! [`ElevenLabs::describe`] say which models make each type of audio and what they cost in credits:
+//! speech models come from the account's own list, sound effects and music are the two fixed
+//! endpoints whose rates the app keeps (`known_models.toml`). A run sends the request laid out in
+//! the endpoint's inputs ([`map_request`]) with the chosen model named.
+use super::inputs::{FieldKind, InputField, Mapped, REMEDIATION, map_request, runnable};
 use super::model::{AssetOption, ListedModel, MAX_ASSET_CREDITS, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::tables::{InputRoles, KnownModel, KnownModels};
-use super::{AssetKind, AssetProvider, Generated, LegacyRequest, http};
+use super::{AssetKind, AssetProvider, AssetRequest, Generated, charged_or_unknown, estimate_from, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -27,41 +28,73 @@ impl Default for ElevenLabs {
 /// The lengths, in seconds, of a sound effect and of a track that ElevenLabs makes.
 const SOUND_SECONDS: (f64, f64) = (0.5, 30.0);
 const MUSIC_SECONDS: (f64, f64) = (3.0, 600.0);
+/// The longest text spoken, and the longest description of a sound or a track.
+const MAX_SPEECH: usize = 10_000;
+const MAX_PROMPT: usize = 2000;
+/// How long one generation may take.
+const GENERATE_TIMEOUT: Duration = Duration::from_secs(600);
+/// The header in which ElevenLabs says how many credits a clip of speech cost.
+const CHARACTER_COST: &str = "character-cost";
+/// The input of a speech request that ElevenLabs takes in the address rather than the body.
+const VOICE_FIELD: &str = "voice_id";
+/// The input every request names its model in.
+const MODEL_FIELD: &str = "model_id";
 
-/// Check modality-specific limits, identifiers, provider ownership, and a positive finite estimate.
-fn validate(req: &LegacyRequest) -> Result<(), ToolError> {
-    let model = match *req {
-        LegacyRequest::Speech { model, text, voice_id } => {
-            http::text(text, 10_000)?;
-            http::id(voice_id)?;
-            model
-        }
-        LegacyRequest::SoundEffect { model, prompt, duration_seconds } => {
-            http::text(prompt, 2000)?;
-            http::duration(duration_seconds, SOUND_SECONDS.0, SOUND_SECONDS.1)?;
-            model
-        }
-        LegacyRequest::Music { model, prompt, duration_seconds, .. } => {
-            http::text(prompt, 2000)?;
-            http::duration(duration_seconds, MUSIC_SECONDS.0, MUSIC_SECONDS.1)?;
-            model
-        }
-        _ => return Err(http::bad("ElevenLabs does not support this asset request.")),
-    };
-    http::id(&model.endpoint)?;
-    if model.provider != ID || model.kind != req.kind() || !req.listed_cost().is_finite() || req.listed_cost() <= 0.0 {
-        return Err(http::bad("The audio model or its rate does not match this request."));
+/// Where a request for `req` goes, and its body: the request laid out in the endpoint's inputs, with
+/// the chosen model named. Also the options the inputs leave unused. Lengths, texts and the voice
+/// are checked against what ElevenLabs takes, and a model of another type is refused.
+fn request(model: &ModelDetail, req: &AssetRequest) -> Result<Sent, ToolError> {
+    if http::id(&model.id).is_err() {
+        return Err(http::bad("That is not an id ElevenLabs gives its models.").with_remediation(REMEDIATION));
     }
-    Ok(())
+    if !model.kinds.contains(&req.kind()) {
+        return Err(http::bad("The chosen ElevenLabs model does not make this type of audio.").with_remediation(REMEDIATION));
+    }
+    let path = match *req {
+        AssetRequest::Speech { text, voice_id } => {
+            http::text(text, MAX_SPEECH)?;
+            http::id(voice_id)?;
+            format!("text-to-speech/{voice_id}?output_format=mp3_44100_128")
+        }
+        AssetRequest::SoundEffect { prompt, duration_seconds } => {
+            http::text(prompt, MAX_PROMPT)?;
+            http::duration(duration_seconds, SOUND_SECONDS.0, SOUND_SECONDS.1)?;
+            "sound-generation?output_format=mp3_44100_128".to_string()
+        }
+        AssetRequest::Music { prompt, duration_seconds, .. } => {
+            http::text(prompt, MAX_PROMPT)?;
+            http::duration(duration_seconds, MUSIC_SECONDS.0, MUSIC_SECONDS.1)?;
+            "music?output_format=mp3_44100_128".to_string()
+        }
+        AssetRequest::Image { .. } | AssetRequest::Model3d { .. } => return Err(http::bad("ElevenLabs makes speech, sound effects and music only.")),
+    };
+    let Mapped { mut body, ignored } = map_request(&model.fields, req, InputRoles::built_in())?;
+    body.remove(VOICE_FIELD);
+    body.insert(MODEL_FIELD.to_string(), json!(model.id));
+    Ok(Sent { path, body, ignored })
 }
+
+/// A request as it is sent: where to, its body, and the options of the request it leaves unused.
+struct Sent {
+    path: String,
+    body: Map<String, Value>,
+    ignored: Vec<AssetOption>,
+}
+
+/// The credits ElevenLabs says a clip of speech cost: a number that can be believed.
+fn character_cost(headers: &ureq::http::HeaderMap) -> Option<f64> {
+    let credits: f64 = headers.get(CHARACTER_COST)?.to_str().ok()?.trim().parse().ok()?;
+    (credits.is_finite() && (0.0..=MAX_ASSET_CREDITS).contains(&credits)).then_some(credits)
+}
+
 impl AssetProvider for ElevenLabs {
-    /// Return the catalogue identifier used to route requests to ElevenLabs.
+    /// Return the identifier a project's choice names.
     fn id(&self) -> &'static str {
         ID
     }
     /// Return the provider's display name.
     fn name(&self) -> &'static str {
-        "ElevenLabs"
+        NAME
     }
     /// Name the environment variable used when no credential is stored.
     fn key_env(&self) -> Option<&'static str> {
@@ -71,47 +104,39 @@ impl AssetProvider for ElevenLabs {
     fn keys_page(&self) -> Option<&'static str> {
         Some("https://elevenlabs.io/app/settings/api-keys")
     }
-    /// Validate the audio request and return its catalogue estimate without network access.
-    fn estimate(&self, req: &LegacyRequest) -> Result<f64, ToolError> {
-        validate(req)?;
-        Ok(req.listed_cost())
+    fn unit(&self) -> Unit {
+        Unit::Credits
     }
-    /// Validate and submit the modality's payload, returning bounded MP3 bytes and an estimated cost.
-    fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
-        validate(req)?;
+    fn list_models(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
+        self.list(key, kind)
+    }
+    fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
+        ElevenLabs::describe(self, key, model)
+    }
+    /// The model's credits for this request: characters times its rate for speech, seconds times
+    /// the rate the app keeps for sound effects and music. A request ElevenLabs can't take is refused.
+    fn estimate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
         self.validate_key(key)?;
+        request(model, req)?;
+        Ok(estimate_from(&model.pricing, req))
+    }
+    /// Send the request and return the MP3 it answers with. What it cost is ElevenLabs' own count of
+    /// credits for speech, where it gives one, else the model's rate for the request.
+    fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
         let key = http::key(key)?;
-        let (path, content_type, body): (String, String, Vec<u8>) = match *req {
-            LegacyRequest::Speech { model, text, voice_id } => (
-                format!("text-to-speech/{voice_id}?output_format=mp3_44100_128"),
-                "application/json".into(),
-                json!({"text":text,"model_id":model.endpoint}).to_string().into_bytes(),
-            ),
-            LegacyRequest::SoundEffect { model, prompt, duration_seconds } => (
-                "sound-generation?output_format=mp3_44100_128".into(),
-                "application/json".into(),
-                json!({"text":prompt,"duration_seconds":duration_seconds,"model_id":model.endpoint,"prompt_influence":0.3}).to_string().into_bytes(),
-            ),
-            LegacyRequest::Music { model, prompt, duration_seconds, instrumental } => (
-                "music?output_format=mp3_44100_128".into(),
-                "application/json".into(),
-                json!({"prompt":prompt,"music_length_ms":(duration_seconds*1000.0).ceil() as u64,"force_instrumental":instrumental,"model_id":model.endpoint})
-                    .to_string()
-                    .into_bytes(),
-            ),
-            _ => return Err(http::bad("ElevenLabs does not support this request.")),
-        };
-        let response = http::agent(Duration::from_secs(600))
+        let Sent { path, body, ignored } = request(model, req)?;
+        let response = http::agent(GENERATE_TIMEOUT)
             .post(format!("{}/{path}", self.base))
             .header("xi-api-key", key)
-            .header("Content-Type", content_type)
-            .send(body)
+            .header("Content-Type", "application/json")
+            .send(Value::Object(body).to_string())
             .map_err(|_| http::network())?;
         http::status(response.status().as_u16())?;
+        let counted = if req.kind() == AssetKind::Speech { character_cost(response.headers()) } else { None };
+        let cost = counted.or_else(|| estimate_from(&model.pricing, req));
         // The request was accepted, so a failed body read still reports the charge.
-        let cost = req.listed_cost();
-        let bytes = http::bytes(response.into_body(), http::MAX_BYTES).map_err(|e| super::charged(e, cost))?;
-        Ok(Generated { url: String::new(), bytes, cost_usd: cost })
+        let bytes = http::bytes(response.into_body(), http::MAX_BYTES).map_err(|e| charged_or_unknown(e, cost))?;
+        Ok(Generated { url: String::new(), bytes, cost, ignored })
     }
 }
 
@@ -168,7 +193,8 @@ impl ElevenLabs {
     /// One model with the inputs a request for it carries and its price. A sound effect or music
     /// model is one of the fixed two and needs no request; a speech model is looked up in the
     /// account's list, and one it no longer holds (or that makes no speech, or needs alpha access) is a
-    /// [`ErrorCode::BadSettings`] error that names it.
+    /// [`ErrorCode::BadSettings`] error that names it. What the list said of a speech model is used
+    /// again for ten minutes ([`super::described`]).
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let key = http::key(key)?;
         if http::id(model).is_err() {
@@ -181,8 +207,14 @@ impl ElevenLabs {
                 kinds: fixed.kinds.clone(),
                 fields: fixed.kinds.first().map_or_else(Vec::new, |&kind| fixed_fields(kind)),
                 pricing: per_second(fixed),
+                unit_price: None,
             });
         }
+        super::described(&format!("{ID} {}", self.base), key, model, || self.speech_detail(key, model))
+    }
+
+    /// A speech model as the account's list has it, asked of ElevenLabs.
+    fn speech_detail(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let models = self.account(key)?;
         let entry = models.iter().find(|entry| speech_id(entry) == Some(model)).ok_or_else(|| http::gone(NAME, model))?;
         Ok(ModelDetail {
@@ -191,13 +223,15 @@ impl ElevenLabs {
             kinds: vec![AssetKind::Speech],
             fields: fixed_fields(AssetKind::Speech),
             pricing: speech_pricing(entry),
+            unit_price: None,
         })
     }
 
     /// The models of the account's list as ElevenLabs answered, as many as the size limit of an answer
     /// lets through. The key goes only to ElevenLabs' API.
     fn account(&self, key: &str) -> Result<Vec<Value>, ToolError> {
-        let response = http::agent(LIST_TIMEOUT).get(format!("{}/models", self.base)).header("xi-api-key", key).call().map_err(|_| http::cannot_reach(NAME))?;
+        let url = format!("{}/models", self.base);
+        let response = http::get(|| http::agent(LIST_TIMEOUT).get(&url).header("xi-api-key", key).call()).map_err(|_| http::cannot_reach(NAME))?;
         let status = response.status().as_u16();
         // A key without `models_read` is answered 404 (`workspace_not_found`), a key that is wrong 401.
         if matches!(status, 401 | 403 | 404) {
@@ -322,65 +356,130 @@ fn fixed_fields(kind: AssetKind) -> Vec<InputField> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::{AssetKind, Catalogue};
+    use crate::assets::{AssetKind, charged_amount, was_charged};
     use craft_anything_evidence::ErrorCode;
 
-    /// Check each audio endpoint's payload, authentication, binary result, and catalogue estimate.
+    /// A speech model of the account's list, at `multiplier` credits a character.
+    fn speech_model(pricing: Pricing) -> ModelDetail {
+        ModelDetail {
+            id: "eleven_multilingual_v2".into(),
+            name: "Eleven Multilingual v2".into(),
+            kinds: vec![AssetKind::Speech],
+            fields: fixed_fields(AssetKind::Speech),
+            pricing,
+            unit_price: None,
+        }
+    }
+
+    fn per_character(credits: f64) -> Pricing {
+        Pricing::Before { unit: Unit::Credits, rate: Rate::PerCharacter(credits) }
+    }
+
+    /// A fixed model, as described without a request.
+    fn fixed(id: &str) -> ModelDetail {
+        ElevenLabs { base: "http://127.0.0.1:9".into() }.describe("sk-test", id).unwrap()
+    }
+
+    fn sound(seconds: f64) -> AssetRequest<'static> {
+        AssetRequest::SoundEffect { prompt: "wind", duration_seconds: seconds }
+    }
+
+    /// Check each audio endpoint's payload, authentication, binary result, and what it cost in credits.
     #[test]
     fn speech_sound_and_music_use_distinct_wire_schemas_and_binary_results() {
-        let (base, seen) = http::tests::serve(|_| vec![(200, "ID3 speech".into()), (200, "ID3 sound".into()), (200, "ID3 music".into())]);
+        let (base, seen) = http::tests::serve_with_headers(|_| {
+            vec![
+                (200, "ID3 speech".into(), vec![(CHARACTER_COST.to_string(), "7".to_string())]),
+                (200, "ID3 sound".into(), vec![]),
+                (200, "ID3 music".into(), vec![(CHARACTER_COST.to_string(), "1".to_string())]),
+            ]
+        });
         let provider = ElevenLabs { base };
-        let c = Catalogue::built_in();
-        let speech = LegacyRequest::Speech { model: c.audio_model(AssetKind::Speech, None).unwrap(), text: "héllo", voice_id: "voice_test" };
-        let sound = LegacyRequest::SoundEffect { model: c.audio_model(AssetKind::SoundEffect, None).unwrap(), prompt: "wind", duration_seconds: 2.5 };
-        let music =
-            LegacyRequest::Music { model: c.audio_model(AssetKind::Music, None).unwrap(), prompt: "gentle music", duration_seconds: 10.0, instrumental: true };
-        assert_eq!(provider.generate("sk-test", &speech).unwrap().bytes, b"ID3 speech");
-        assert_eq!(provider.generate("sk-test", &sound).unwrap().bytes, b"ID3 sound");
-        assert_eq!(provider.generate("sk-test", &music).unwrap().bytes, b"ID3 music");
-        assert_eq!(provider.estimate(&speech).unwrap(), 5.0 * 0.00008);
-        assert_eq!(provider.estimate(&sound).unwrap(), 0.005);
-        assert_eq!(provider.estimate(&music).unwrap(), 0.025);
+        let speech = AssetRequest::Speech { text: "héllo", voice_id: "voice_test" };
+        let music = AssetRequest::Music { prompt: "gentle music", duration_seconds: 10.0, instrumental: true };
+        let (talk, wind, tune) = (speech_model(per_character(1.0)), fixed("eleven_text_to_sound_v2"), fixed("music_v1"));
+        assert_eq!(provider.estimate("sk-test", &talk, &speech).unwrap(), Some(5.0), "five characters at a credit each");
+        assert_eq!(provider.estimate("sk-test", &wind, &sound(2.5)).unwrap(), Some(100.0), "40 credits a second");
+        assert_eq!(provider.estimate("sk-test", &tune, &music).unwrap(), Some(150.0), "15 credits a second");
+        let made = provider.generate("sk-test", &talk, &speech).unwrap();
+        assert_eq!((made.bytes.as_slice(), made.cost), (&b"ID3 speech"[..], Some(7.0)), "ElevenLabs' own count of credits");
+        let made = provider.generate("sk-test", &wind, &sound(2.5)).unwrap();
+        assert_eq!((made.bytes.as_slice(), made.cost), (&b"ID3 sound"[..], Some(100.0)));
+        let made = provider.generate("sk-test", &tune, &music).unwrap();
+        assert_eq!((made.bytes.as_slice(), made.cost), (&b"ID3 music"[..], Some(150.0)), "a count of characters says nothing of a track");
+        assert!(made.ignored.is_empty());
         let seen = seen.lock().unwrap();
+        let body = |i: usize| -> Value { serde_json::from_str(seen[i].split("\r\n\r\n").nth(1).unwrap()).unwrap() };
         assert!(seen[0].starts_with("POST /text-to-speech/voice_test?output_format=mp3_44100_128 "));
-        assert!(seen[0].contains("eleven_multilingual_v2"));
+        assert_eq!(body(0), json!({"text": "héllo", "model_id": "eleven_multilingual_v2"}), "the voice is in the address");
         assert!(seen[1].starts_with("POST /sound-generation?output_format=mp3_44100_128 "));
-        assert!(seen[1].contains("\"duration_seconds\":2.5"));
+        assert_eq!(body(1), json!({"text": "wind", "duration_seconds": 2.5, "model_id": "eleven_text_to_sound_v2"}));
         assert!(seen[2].starts_with("POST /music?output_format=mp3_44100_128 "));
-        assert!(seen[2].contains("\"music_length_ms\":10000") && seen[2].contains("\"force_instrumental\":true"));
+        assert_eq!(body(2), json!({"prompt": "gentle music", "music_length_ms": 10000, "force_instrumental": true, "model_id": "music_v1"}));
         assert!(seen.iter().all(|s| s.to_ascii_lowercase().contains("xi-api-key: sk-test")));
     }
+
+    /// Without ElevenLabs' count, speech costs its characters at the model's rate; with no rate
+    /// either, nobody knows.
+    #[test]
+    fn speech_without_a_count_costs_its_characters() {
+        let (base, _) = http::tests::serve_with_headers(|_| {
+            vec![(200, "ID3".into(), vec![]), (200, "ID3".into(), vec![(CHARACTER_COST.to_string(), "lots".to_string())]), (200, "ID3".into(), vec![])]
+        });
+        let provider = ElevenLabs { base };
+        let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_test" };
+        assert_eq!(provider.generate("sk-test", &speech_model(per_character(0.5)), &speech).unwrap().cost, Some(2.5));
+        assert_eq!(provider.generate("sk-test", &speech_model(per_character(0.5)), &speech).unwrap().cost, Some(2.5), "a count that is no number");
+        assert_eq!(provider.generate("sk-test", &speech_model(Pricing::Unknown), &speech).unwrap().cost, None);
+    }
+
     /// Reject invalid audio inputs locally and classify HTTP errors without echoing remote secrets.
     #[test]
     fn invalid_inputs_and_remote_errors_never_expose_credentials() {
-        let c = Catalogue::built_in();
-        let model = c.audio_model(AssetKind::SoundEffect, None).unwrap();
+        let wind = fixed("eleven_text_to_sound_v2");
         for duration in [f64::NAN, f64::INFINITY, -1.0, 0.0, 31.0] {
-            assert!(ElevenLabs::default().estimate(&LegacyRequest::SoundEffect { model, prompt: "wind", duration_seconds: duration }).is_err());
+            assert!(ElevenLabs::default().estimate("sk-test", &wind, &sound(duration)).is_err());
         }
-        let speech = LegacyRequest::Speech { model: c.audio_model(AssetKind::Speech, None).unwrap(), text: "hi", voice_id: "../bad" };
-        assert!(ElevenLabs::default().generate("sk-test", &speech).is_err());
+        let speech = AssetRequest::Speech { text: "hi", voice_id: "../bad" };
+        assert!(ElevenLabs::default().generate("sk-test", &speech_model(per_character(1.0)), &speech).is_err());
         let (base, _) = http::tests::serve(|_| {
             vec![(401, "sk-test echoed by remote".into()), (429, "sk-test echoed by remote".into()), (500, "sk-test echoed by remote".into())]
         });
         let provider = ElevenLabs { base };
-        let req = LegacyRequest::SoundEffect { model, prompt: "wind", duration_seconds: 1.0 };
         for code in [ErrorCode::BadSettings, ErrorCode::OverLimit, ErrorCode::ProgramFailed] {
-            let error = provider.generate("sk-test", &req).unwrap_err();
+            let error = provider.generate("sk-test", &wind, &sound(1.0)).unwrap_err();
             assert_eq!(error.code, code);
             assert!(!format!("{error:?}").contains("sk-test"));
-            assert_eq!(crate::assets::charged_usd(&error), None, "a refused request is not charged");
+            assert!(!was_charged(&error), "a refused request is not charged");
         }
     }
+
+    /// A model of another type, or a request for a picture, is refused before anything is sent.
+    #[test]
+    fn a_model_of_another_type_is_refused_before_anything_is_sent() {
+        let provider = ElevenLabs { base: "http://127.0.0.1:9".into() };
+        let music = AssetRequest::Music { prompt: "calm", duration_seconds: 10.0, instrumental: false };
+        let picture = AssetRequest::Image { prompt: "a crate", shape: crate::assets::Shape::Square };
+        for (model, req) in [(fixed("eleven_text_to_sound_v2"), music), (fixed("music_v1"), sound(2.0)), (fixed("music_v1"), picture)] {
+            let error = provider.generate("sk-test", &model, &req).unwrap_err();
+            assert_eq!(error.code, ErrorCode::BadSettings, "{} for {:?}", model.id, req.kind());
+            assert!(!was_charged(&error));
+            assert!(provider.estimate("sk-test", &model, &req).is_err());
+        }
+    }
+
     /// A body that fails after an accepted request still reports the request's charge.
     #[test]
     fn a_failed_body_after_an_accepted_request_reports_its_charge() {
-        let model = Catalogue::built_in().audio_model(AssetKind::SoundEffect, None).unwrap();
-        let req = LegacyRequest::SoundEffect { model, prompt: "wind", duration_seconds: 2.0 };
-        let (base, _) = http::tests::serve(|_| vec![(200, String::new())]);
-        let error = ElevenLabs { base }.generate("sk-test", &req).unwrap_err();
+        let (base, _) = http::tests::serve(|_| vec![(200, String::new()), (200, String::new())]);
+        let provider = ElevenLabs { base };
+        let error = provider.generate("sk-test", &fixed("eleven_text_to_sound_v2"), &sound(2.0)).unwrap_err();
         assert_eq!(error.code, ErrorCode::GarbledOutput);
-        assert_eq!(crate::assets::charged_usd(&error), Some(req.listed_cost()));
+        assert_eq!(charged_amount(&error), Some(80.0));
+        // A clip whose cost nobody can say is still a charge, of unknown amount.
+        let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_test" };
+        let error = provider.generate("sk-test", &speech_model(Pricing::Unknown), &speech).unwrap_err();
+        assert!(was_charged(&error) && charged_amount(&error).is_none());
     }
 }
 

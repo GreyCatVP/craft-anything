@@ -1,43 +1,39 @@
-//! Game assets from fal.ai over plain HTTPS: pictures (textures, skies, concept art)
-//! and game-ready 3D models with Tripo P1 (a picture in, a low-poly GLB model out, its face count
-//! capped). One key (`Authorization: Key …`), paid per generation; every call reports what it cost.
-//! Running a model is done by the asset table's endpoints (`assets.toml`) until the live lists
-//! replace them; [`Fal::list`] and [`Fal::describe`] read fal's own list of models, each model's
-//! inputs and its prices from the platform API.
+//! Game assets from fal.ai over plain HTTPS: pictures, 3D models, speech, sound effects and music
+//! from any model fal lists that this app can fill the inputs of. One key (`Authorization: Key …`),
+//! paid in dollars per generation. [`Fal::list`] and [`Fal::describe`] read fal's own list of
+//! models, each model's inputs and its price from the platform API; a run is sent to the model's
+//! endpoint with the request laid out in its inputs ([`map_request`]), and what it cost is read from
+//! the billing units fal counts in its answer.
 
-use super::inputs::{REMEDIATION, runnable};
+use super::inputs::{FieldKind, Mapped, REMEDIATION, map_request, runnable};
 use super::model::{ListedModel, MAX_ASSET_BUDGET_USD, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::openapi::input_fields;
 use super::tables::{InputRoles, KnownModels};
-use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, SizeBy, charged, http};
+use super::{AssetKind, AssetProvider, AssetRequest, Generated, charged_or_unknown, estimate_from, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use http::{CURSOR_LENGTH, encode, time_is_up, words};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::time::{Duration, Instant};
 
-/// The provider id the asset table names.
+/// The provider id a project's choice names.
 pub const ID: &str = "fal";
 /// What people call it.
 const NAME: &str = "fal.ai";
 const BASE: &str = "https://fal.run";
 /// fal's platform API, which lists models and prices (generations are run at [`BASE`]).
 const API_BASE: &str = "https://api.fal.ai";
-/// Largest download we keep (a textured GLB is a few MB).
-const MAX_BYTES: u64 = 200 << 20;
-
-/// How fal is told a picture's shape: the field and its value for the model.
-fn fal_size(by: SizeBy, shape: Shape) -> (&'static str, &'static str) {
-    match (by, shape) {
-        (SizeBy::ImageSize, Shape::Square) => ("image_size", "square_hd"),
-        (SizeBy::ImageSize, Shape::Wide) => ("image_size", "landscape_16_9"),
-        (SizeBy::ImageSize, Shape::Tall) => ("image_size", "portrait_16_9"),
-        (SizeBy::AspectRatio, Shape::Square) => ("aspect_ratio", "1:1"),
-        (SizeBy::AspectRatio, Shape::Wide) => ("aspect_ratio", "16:9"),
-        (SizeBy::AspectRatio, Shape::Tall) => ("aspect_ratio", "9:16"),
-    }
-}
+/// How long a generation may take: fal answers once it is done, and a 3D model takes a minute or two.
+const GENERATE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// How long downloading a finished file may take.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// The largest answer to a generation that is read: it may carry the file itself as a `data:` URI.
+const MAX_ANSWER: u64 = http::MAX_BYTES;
+/// The header in which fal says how many billing units a finished run used.
+const BILLABLE_UNITS: &str = "x-fal-billable-units";
+/// The input a picture model takes its file format in, and the format asked for: the file is saved
+/// as a PNG.
+const PICTURE_FORMAT: (&str, &str) = ("output_format", "png");
 
 /// fal.ai, as an [`AssetProvider`].
 pub struct Fal {
@@ -72,66 +68,121 @@ impl AssetProvider for Fal {
         Some("FAL_KEY")
     }
 
-    /// Validate credentials, generate a supported image or mesh, and download it with its catalogue cost.
-    fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
-        self.validate_key(key)?;
-        let key = key.trim();
-        let cost = req.listed_cost();
+    fn unit(&self) -> Unit {
+        Unit::Usd
+    }
+
+    fn list_models(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
+        self.list(key, kind)
+    }
+
+    fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
+        Fal::describe(self, key, model)
+    }
+
+    /// The model's price for one run when fal publishes it per run or per megapixel; `None` for a
+    /// price per a quantity only the finished run knows. A request the model can't take is refused.
+    fn estimate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
+        http::key(key)?;
+        request(model, req)?;
+        Ok(estimate_from(&model.pricing, req))
+    }
+
+    /// Run the model with the request laid out in its inputs, then fetch the file. What it cost is
+    /// the billing units fal reports times the model's price for one; without that count, the price
+    /// known before the run, else unknown.
+    fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
+        let key = http::key(key)?;
+        let Mapped { body, ignored } = request(model, req)?;
+        let answer = self.post(key, &model.id, &Value::Object(body))?;
+        let cost = cost_of(answer.units, model, estimate_from(&model.pricing, req));
         // fal answers once the paid generation is done: any failure after that still reports its charge.
-        match *req {
-            LegacyRequest::Image { model, prompt, shape } => {
-                let (field, size) = fal_size(model.size_by, shape);
-                let body = json!({"prompt": prompt, field: size, "num_images": 1, "output_format": "png"});
-                let v = self.post(key, &model.endpoint, &body, cost)?;
-                let made = || {
-                    if v.pointer("/has_nsfw_concepts/0").and_then(Value::as_bool) == Some(true) {
-                        return Err(ToolError::new(ErrorCode::ProgramFailed, "fal.ai's safety check blocked that picture.")
-                            .with_remediation("Describe it differently."));
-                    }
-                    let url = image_url(&v).ok_or_else(|| unexpected("picture", &v))?;
-                    Ok(Generated { bytes: download(&url)?, url, cost_usd: cost })
-                };
-                made().map_err(|e| charged(e, cost))
+        let made = || {
+            let v = http::json_up_to(answer.body, MAX_ANSWER)?;
+            if v.pointer("/has_nsfw_concepts/0").and_then(Value::as_bool) == Some(true) {
+                return Err(
+                    ToolError::new(ErrorCode::ProgramFailed, "fal.ai's safety check blocked that picture.").with_remediation("Describe it differently.")
+                );
             }
-            LegacyRequest::Model3d { model, image_url, textured, faces } => {
-                let range = model.faces();
-                let faces = faces.clamp(*range.start(), *range.end());
-                let v = self.post(key, &model.endpoint, &json!({"image_url": image_url, "texture": textured, "face_limit": faces}), cost)?;
-                let made = || {
-                    let url = model_url(&v).ok_or_else(|| unexpected("3D model", &v))?;
-                    Ok(Generated { bytes: download(&url)?, url, cost_usd: cost })
-                };
-                made().map_err(|e| charged(e, cost))
-            }
-            _ => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai does not support this asset request.")),
-        }
+            let url = output_url(req.kind(), &v).ok_or_else(|| unexpected(req.kind(), &v))?;
+            Ok(Generated { bytes: download(&url)?, url, cost, ignored })
+        };
+        made().map_err(|e| charged_or_unknown(e, cost))
     }
 }
 
+/// What fal is sent for `req` with `model`: the request laid out in the model's inputs, a picture
+/// asked for as a PNG where the model lets it choose, and the options no input took.
+fn request(model: &ModelDetail, req: &AssetRequest) -> Result<Mapped, ToolError> {
+    if !endpoint_ok(&model.id) {
+        return Err(http::bad("That is not an id fal.ai gives its models.").with_remediation(REMEDIATION));
+    }
+    let mut mapped = map_request(&model.fields, req, InputRoles::built_in())?;
+    let (format_field, png) = PICTURE_FORMAT;
+    let takes_png = model.fields.iter().any(|f| {
+        f.name == format_field
+            && match &f.kind {
+                FieldKind::Choice(values) => values.iter().any(|v| v == png),
+                FieldKind::Text => true,
+                _ => false,
+            }
+    });
+    if req.kind() == AssetKind::Image && takes_png {
+        mapped.body.insert(format_field.to_string(), json!(png));
+    }
+    Ok(mapped)
+}
+
+/// What a finished run cost: the billing units fal counted (`X-Fal-Billable-Units`) times the
+/// model's price for one. Without a believable count, a price known before the run is what it
+/// cost (the estimate); a cost fal only counts after the run is then unknown.
+fn cost_of(units: Option<f64>, model: &ModelDetail, estimate: Option<f64>) -> Option<f64> {
+    let counted =
+        units.zip(model.unit_price).map(|(units, price)| units * price).filter(|cost| cost.is_finite() && (0.0..=MAX_ASSET_BUDGET_USD).contains(cost));
+    counted.or(match model.pricing {
+        Pricing::Before { .. } => estimate,
+        Pricing::After { .. } | Pricing::Unknown => None,
+    })
+}
+
+/// The billing units a finished run used, as fal's answer says: a number that is not negative.
+fn billable_units(headers: &ureq::http::HeaderMap) -> Option<f64> {
+    let units: f64 = headers.get(BILLABLE_UNITS)?.to_str().ok()?.trim().parse().ok()?;
+    (units.is_finite() && units >= 0.0).then_some(units)
+}
+
+/// The answer to a generation fal accepted: the billing units it counted, and its body.
+struct Answer {
+    units: Option<f64>,
+    body: ureq::Body,
+}
+
 impl Fal {
-    /// Run one paid request; an unreadable success answer still reports the request's `cost`.
-    fn post(&self, key: &str, model: &str, body: &Value, cost: f64) -> Result<Value, ToolError> {
+    /// Run one paid request. A refusal (any answer but success) is not charged; a success is the
+    /// finished, paid generation.
+    fn post(&self, key: &str, model: &str, body: &Value) -> Result<Answer, ToolError> {
         let url = format!("{}/{model}", self.base);
-        // A 3D model takes a minute or two; fal answers once it's done.
-        let resp = agent(Duration::from_secs(10 * 60))
+        let response = http::agent(GENERATE_TIMEOUT)
             .post(&url)
             .header("Authorization", &format!("Key {key}"))
             .header("Content-Type", "application/json")
             .send(body.to_string())
-            .map_err(|e| {
-                ToolError::new(ErrorCode::EngineMissing, format!("Couldn't reach fal.ai: {e}"))
-                    .with_remediation("Check your internet connection and try again.")
-            })?;
-        let status = resp.status().as_u16();
-        let text = resp.into_body().read_to_string().unwrap_or_default();
-        match status {
-            200..=299 => serde_json::from_str(&text)
-                .map_err(|e| charged(ToolError::new(ErrorCode::GarbledOutput, format!("fal.ai sent an unreadable answer: {e}")), cost)),
-            401 | 403 => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai didn't accept the key.")
-                .with_remediation("Check the fal.ai key in Settings → AI → Game assets.")),
-            402 => Err(ToolError::new(ErrorCode::OverLimit, "The fal.ai account is out of credit.").with_remediation("Add credit at fal.ai, then try again.")),
-            _ => Err(ToolError::new(ErrorCode::EngineMissing, format!("fal.ai answered {status}: {}", text.chars().take(300).collect::<String>()))),
+            .map_err(|_| http::network())?;
+        refusal(response.status().as_u16())?;
+        Ok(Answer { units: billable_units(response.headers()), body: response.into_body() })
+    }
+}
+
+/// What a status fal answered a generation with means, its own words for the refusals the person
+/// can act on. A remote body is never repeated.
+fn refusal(status: u16) -> Result<(), ToolError> {
+    match status {
+        401 | 403 => {
+            Err(ToolError::new(ErrorCode::BadSettings, "fal.ai didn't accept the key.")
+                .with_remediation("Check the fal.ai key in Settings → AI → Game assets."))
         }
+        402 => Err(ToolError::new(ErrorCode::OverLimit, "The fal.ai account is out of credit.").with_remediation("Add credit at fal.ai, then try again.")),
+        status => http::status(status),
     }
 }
 
@@ -230,12 +281,18 @@ impl Fal {
 
     /// One model with all its inputs and its price, as `key` gets them. A model fal no longer
     /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it; a price that
-    /// cannot be read is an error too, because a run must not go ahead as if it were free.
+    /// cannot be read is an error too, because a run must not go ahead as if it were free. What fal
+    /// answered is used again for ten minutes ([`super::described`]).
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let key = http::key(key)?;
         if !endpoint_ok(model) {
             return Err(http::bad("That is not an id fal.ai gives its models.").with_remediation(REMEDIATION));
         }
+        super::described(&format!("{ID} {}", self.api_base), key, model, || self.fetch_detail(key, model))
+    }
+
+    /// [`Fal::describe`], asked of fal.
+    fn fetch_detail(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let url = format!("{}/v1/models?endpoint_id={}&expand=openapi-3.0", self.api_base, encode(model));
         let response = self.send(Some(key), &url)?;
         if response.status().as_u16() == 404 {
@@ -252,13 +309,13 @@ impl Fal {
         }
         let fields = input_fields(found.get("openapi").unwrap_or(&Value::Null))?;
         let mut priced = self.fetch_prices(key, &[model])?;
-        let pricing = match priced.table.remove(model) {
-            Some(pricing) => pricing,
+        let Priced { pricing, unit_price } = match priced.table.remove(model) {
+            Some(priced) => priced,
             // The row may be on a page fal did not send: that is not the same as having no price.
             None if priced.more => return Err(http::garbled("fal.ai's prices could not be read.").with_remediation("Try again in a moment.")),
-            None => Pricing::Unknown,
+            None => Priced { pricing: Pricing::Unknown, unit_price: None },
         };
-        Ok(ModelDetail { id: model.to_string(), name: name_of(found, model), kinds: kinds_of(category_of(found), model), fields, pricing })
+        Ok(ModelDetail { id: model.to_string(), name: name_of(found, model), kinds: kinds_of(category_of(found), model), fields, pricing, unit_price })
     }
 
     /// One page of a category: the models on it, and how to ask for the next page if there is one.
@@ -290,8 +347,8 @@ impl Fal {
             match self.fetch_prices(key, &ids) {
                 Ok(mut priced) => {
                     for model in batch.iter_mut() {
-                        if let Some(pricing) = priced.table.remove(&model.id) {
-                            model.pricing = pricing;
+                        if let Some(row) = priced.table.remove(&model.id) {
+                            model.pricing = row.pricing;
                         }
                     }
                     left_out |= priced.more;
@@ -315,11 +372,13 @@ impl Fal {
 
     /// A GET to fal's platform API. The key, when there is one, goes only to this address.
     fn send(&self, key: Option<&str>, url: &str) -> Result<ureq::http::Response<ureq::Body>, ToolError> {
-        let request = http::agent(LIST_TIMEOUT).get(url);
-        match key {
-            Some(key) => request.header("Authorization", &format!("Key {key}")).call(),
-            None => request.call(),
-        }
+        http::get(|| {
+            let request = http::agent(LIST_TIMEOUT).get(url);
+            match key {
+                Some(key) => request.header("Authorization", &format!("Key {key}")).call(),
+                None => request.call(),
+            }
+        })
         .map_err(|_| http::cannot_reach(NAME))
     }
 }
@@ -351,8 +410,17 @@ fn next_of(answer: &Value) -> Next {
 
 /// The prices of a batch of models, and whether fal said it had more than it sent.
 struct Prices {
-    table: HashMap<String, Pricing>,
+    table: HashMap<String, Priced>,
     more: bool,
+}
+
+/// What one model costs, as a row of fal's price list says.
+#[derive(Debug, PartialEq)]
+struct Priced {
+    pricing: Pricing,
+    /// The row's price for one billing unit, when it is one to count with: what a finished run's
+    /// count of units is multiplied by.
+    unit_price: Option<f64>,
 }
 
 /// The answer's JSON, or why there is none. fal's rate limit is told apart because it is the one
@@ -453,12 +521,15 @@ fn endpoint_ok(id: &str) -> bool {
 
 /// A model's id and price out of one row of fal's price list. A row with a price that is not a
 /// number is kept, as no price: fal named the model, but gave nothing to count with.
-fn price_row(row: &Value) -> Option<(String, Pricing)> {
+fn price_row(row: &Value) -> Option<(String, Priced)> {
     let id = row.get("endpoint_id")?.as_str()?;
     let price = row.get("unit_price").and_then(Value::as_f64).unwrap_or(f64::NAN);
     let unit = row.get("unit").and_then(Value::as_str).unwrap_or_default();
     let currency = row.get("currency").and_then(Value::as_str).unwrap_or_default();
-    Some((id.to_string(), pricing_of(price, unit, currency)))
+    let pricing = pricing_of(price, unit, currency);
+    // A price `pricing_of` believes is one to count with; the others are none.
+    let unit_price = pricing.tracked().then_some(price);
+    Some((id.to_string(), Priced { pricing, unit_price }))
 }
 
 /// A price turned into how it is charged.
@@ -497,43 +568,25 @@ fn pricing_of(unit_price: f64, unit: &str, currency: &str) -> Pricing {
     }
 }
 
-fn agent(timeout: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .user_agent("CraftAnything")
-        .timeout_connect(Some(Duration::from_secs(20)))
-        .timeout_recv_response(Some(timeout))
-        .timeout_recv_body(Some(Duration::from_secs(10 * 60)))
-        .build()
-        .new_agent()
-}
-
-/// Fetch a generated file (fal answers with its address, or a `data:` URI in sync mode).
+/// Fetch a generated file: fal answers with its address, or with the file itself as a `data:` URI
+/// (in sync mode). An address is fetched without the key.
 fn download(url: &str) -> Result<Vec<u8>, ToolError> {
     if let Some(data) = url.strip_prefix("data:") {
         let b64 =
             data.split_once(";base64,").map(|(_, b)| b).ok_or_else(|| ToolError::new(ErrorCode::GarbledOutput, "fal.ai sent a file in an unknown form."))?;
         return base64_decode(b64);
     }
-    let resp =
-        agent(Duration::from_secs(120)).get(url).call().map_err(|e| ToolError::new(ErrorCode::EngineMissing, format!("Couldn't download the file: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(ToolError::new(ErrorCode::EngineMissing, format!("Downloading the file failed ({}).", resp.status().as_u16())));
-    }
-    let mut bytes = Vec::new();
-    resp.into_body()
-        .into_reader()
-        .take(MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| ToolError::new(ErrorCode::EngineMissing, format!("The download broke off: {e}")))?;
-    if bytes.len() as u64 > MAX_BYTES {
-        return Err(ToolError::new(ErrorCode::OverLimit, "The generated file is too large."));
-    }
-    Ok(bytes)
+    http::download(url, DOWNLOAD_TIMEOUT)
 }
 
-fn image_url(v: &Value) -> Option<String> {
-    v.pointer("/images/0/url").and_then(Value::as_str).map(str::to_string)
+/// Where the finished file is, by what was asked for: a picture, a GLB model, or a sound.
+fn output_url(kind: AssetKind, v: &Value) -> Option<String> {
+    let first = |pointers: &[&str]| pointers.iter().find_map(|p| v.pointer(p).and_then(Value::as_str).filter(|u| !u.is_empty()).map(str::to_string));
+    match kind {
+        AssetKind::Image => first(&["/images/0/url", "/image/url"]),
+        AssetKind::Model3d => model_url(v),
+        AssetKind::Speech | AssetKind::SoundEffect | AssetKind::Music => first(&["/audio/url", "/audio_file/url", "/audio_url/url", "/audio_url"]),
+    }
 }
 
 /// The GLB: Tripo lists it under `model_urls`; its main `model_mesh` can be an FBX instead.
@@ -546,7 +599,12 @@ fn model_url(v: &Value) -> Option<String> {
     glb.or_else(|| mesh.and_then(|m| m.get("url")?.as_str())).filter(|u| !u.is_empty()).map(str::to_string)
 }
 
-fn unexpected(what: &str, v: &Value) -> ToolError {
+fn unexpected(kind: AssetKind, v: &Value) -> ToolError {
+    let what = match kind {
+        AssetKind::Image => "picture",
+        AssetKind::Model3d => "3D model",
+        AssetKind::Speech | AssetKind::SoundEffect | AssetKind::Music => "sound",
+    };
     ToolError::new(ErrorCode::GarbledOutput, format!("fal.ai didn't return a {what}."))
         .with_details(json!({"answer": v.to_string().chars().take(500).collect::<String>()}))
 }
@@ -569,95 +627,174 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, ToolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::Catalogue;
-    use craft_anything_platform::sync::Mutex;
-    use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
-    use std::sync::Arc;
+    use crate::assets::inputs::InputField;
+    use crate::assets::model::AssetOption;
+    use crate::assets::{Shape, charged_amount, was_charged};
 
-    /// A tiny local server that answers each request in turn and records what it was sent.
-    fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let base = format!("http://{}", l.local_addr().unwrap());
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let s2 = seen.clone();
-        std::thread::spawn(move || {
-            for (status, body) in answers {
-                let (mut stream, _) = l.accept().unwrap();
-                let mut r = BufReader::new(stream.try_clone().unwrap());
-                let mut head = String::new();
-                let mut len = 0usize;
-                loop {
-                    let mut line = String::new();
-                    r.read_line(&mut line).unwrap();
-                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                        len = v.trim().parse().unwrap();
-                    }
-                    head.push_str(&line);
-                    if line == "\r\n" {
-                        break;
-                    }
-                }
-                let mut req_body = vec![0; len];
-                r.read_exact(&mut req_body).unwrap();
-                s2.lock().unwrap().push(format!("{head}{}", String::from_utf8_lossy(&req_body)));
-                write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
-                    .unwrap();
-            }
-        });
-        (base, seen)
+    fn field(name: &str, kind: FieldKind, required: bool) -> InputField {
+        InputField { name: name.into(), kind, required, has_default: false }
     }
 
-    /// A picture with FLUX.1 [dev].
-    fn image(fal: &Fal, key: &str, prompt: &str, shape: Shape) -> Result<Generated, ToolError> {
-        let c = Catalogue::built_in();
-        fal.generate(key, &LegacyRequest::Image { model: c.image_model(Some("flux-dev"))?, prompt, shape })
+    /// FLUX.1 [dev] as fal describes it: a prompt, a named size and a count, priced per megapixel.
+    fn flux() -> ModelDetail {
+        let sizes = FieldKind::Choice(vec!["square_hd".into(), "landscape_16_9".into(), "portrait_16_9".into()]);
+        ModelDetail {
+            id: "fal-ai/flux/dev".into(),
+            name: "FLUX.1 [dev]".into(),
+            kinds: vec![AssetKind::Image],
+            fields: vec![
+                field("prompt", FieldKind::Text, true),
+                field("image_size", sizes, false),
+                field("num_images", FieldKind::Integer { min: Some(1), max: Some(4) }, false),
+                field("output_format", FieldKind::Choice(vec!["jpeg".into(), "png".into()]), false),
+            ],
+            pricing: Pricing::Before { unit: Unit::Usd, rate: Rate::PerMegapixel(0.025) },
+            unit_price: Some(0.025),
+        }
     }
 
-    fn model_3d(fal: &Fal, key: &str, image_url: &str, textured: bool, faces: u32) -> Result<Generated, ToolError> {
-        let c = Catalogue::fallback();
-        fal.generate(key, &LegacyRequest::Model3d { model: c.model_3d(None)?, image_url, textured, faces })
+    /// Tripo P1: a picture in, a GLB out, its face count capped; priced per GPU second, so known after the run.
+    fn tripo() -> ModelDetail {
+        ModelDetail {
+            id: "tripo3d/p1/image-to-3d".into(),
+            name: "Tripo P1".into(),
+            kinds: vec![AssetKind::Model3d],
+            fields: vec![
+                field("image_url", FieldKind::Text, true),
+                field("texture", FieldKind::Bool, false),
+                field("face_limit", FieldKind::Integer { min: Some(48), max: Some(20_000) }, false),
+            ],
+            pricing: Pricing::After { unit: Unit::Usd },
+            unit_price: Some(0.002),
+        }
+    }
+
+    fn picture(shape: Shape) -> AssetRequest<'static> {
+        AssetRequest::Image { prompt: "a wooden crate, game asset", shape }
+    }
+
+    fn solid(faces: u32) -> AssetRequest<'static> {
+        AssetRequest::Model3d { image_url: Some("https://v3.fal.media/files/crate.png"), prompt: None, textured: true, faces }
+    }
+
+    fn fal(base: String) -> Fal {
+        Fal { base, ..Fal::default() }
+    }
+
+    /// The stand-in's answer, with fal's count of billing units when `units` is given.
+    fn answer(status: u16, body: Value, units: Option<&str>) -> (u16, String, Vec<(String, String)>) {
+        (status, body.to_string(), units.map(|u| vec![(BILLABLE_UNITS.to_string(), u.to_string())]).unwrap_or_default())
     }
 
     #[test]
     fn a_picture_then_a_model_from_its_address() {
         let png = base64_encode(b"\x89PNG fake");
         let glb = base64_encode(b"glTF fake");
-        let (base, seen) = serve(vec![
-            (200, json!({"images": [{"url": format!("data:image/png;base64,{png}"), "content_type": "image/png"}], "has_nsfw_concepts": [false]}).to_string()),
-            (200, json!({"model_mesh": {"url": "https://x/m.fbx", "file_name": "m.fbx"}, "model_urls": {"glb": {"url": format!("data:model/gltf-binary;base64,{glb}")}}}).to_string()),
-        ]);
-        let fal = Fal { base, ..Fal::default() };
-        let pic = image(&fal, " k-123 ", "a wooden crate, game asset", Shape::Square).unwrap();
+        let (base, seen) = http::tests::serve_with_headers(|_| {
+            vec![
+                answer(
+                    200,
+                    json!({"images": [{"url": format!("data:image/png;base64,{png}"), "content_type": "image/png"}], "has_nsfw_concepts": [false]}),
+                    Some("2"),
+                ),
+                answer(
+                    200,
+                    json!({"model_mesh": {"url": "https://x/m.fbx", "file_name": "m.fbx"}, "model_urls": {"glb": {"url": format!("data:model/gltf-binary;base64,{glb}")}}}),
+                    Some("250"),
+                ),
+            ]
+        });
+        let fal = fal(base);
+        assert_eq!(AssetProvider::estimate(&fal, "k-123", &flux(), &picture(Shape::Square)).unwrap(), Some(0.05), "two whole megapixels, before the run");
+        let pic = fal.generate(" k-123 ", &flux(), &picture(Shape::Square)).unwrap();
         assert_eq!(pic.bytes, b"\x89PNG fake");
-        assert!((pic.cost_usd - 0.05).abs() < 1e-9, "a conservative two decimal megapixels, not a verified invoice charge");
-        let model = model_3d(&fal, "k-123", "https://v3.fal.media/files/crate.png", true, 2000).unwrap();
+        assert_eq!(pic.cost, Some(0.05), "the units fal counted times the price of one");
+        assert!(pic.ignored.is_empty());
+        assert_eq!(AssetProvider::estimate(&fal, "k-123", &tripo(), &solid(2000)).unwrap(), None, "a price per GPU second is known after the run");
+        let model = fal.generate("k-123", &tripo(), &solid(2000)).unwrap();
         assert_eq!(model.bytes, b"glTF fake", "the GLB, not the FBX");
-        assert!((model.cost_usd - 0.50).abs() < 1e-9, "a textured Tripo P1 model");
+        assert_eq!(model.cost, Some(0.5));
         let seen = seen.lock().unwrap();
         assert!(seen[0].starts_with("POST /fal-ai/flux/dev "), "{}", seen[0]);
         // Header names aren't case-sensitive; the key goes in fal's "Key …" form.
         assert!(seen[0].to_ascii_lowercase().contains("authorization: key k-123"), "{}", seen[0]);
-        assert!(seen[0].contains("\"image_size\":\"square_hd\"") && seen[0].contains("\"output_format\":\"png\""));
+        for sent in ["\"image_size\":\"square_hd\"", "\"output_format\":\"png\"", "\"num_images\":1", "\"prompt\":\"a wooden crate, game asset\""] {
+            assert!(seen[0].contains(sent), "{sent}: {}", seen[0]);
+        }
         assert!(
             seen[1].starts_with("POST /tripo3d/p1/image-to-3d ") && seen[1].contains("\"texture\":true") && seen[1].contains("\"face_limit\":2000"),
             "{}",
             seen[1]
         );
         assert!(seen[1].contains("\"image_url\":\"https://v3.fal.media/files/crate.png\""));
+        assert!(!seen[1].contains("output_format"), "only a picture is asked for in a format");
+    }
+
+    /// Without fal's count of units, a price known before the run is the cost; one known only after
+    /// it is unknown, and so is a count nobody could believe.
+    #[test]
+    fn a_cost_is_the_units_counted_else_the_price_known_before() {
+        for (units, model, cost) in [
+            (None, flux(), Some(0.025)),
+            (Some("1"), flux(), Some(0.025)),
+            (Some("not a number"), flux(), Some(0.025)),
+            (None, tripo(), None),
+            (Some("-3"), tripo(), None),
+            (Some("1e300"), tripo(), None),
+            (Some(" 100 "), tripo(), Some(0.2)),
+        ] {
+            let body = if model.kinds == [AssetKind::Image] {
+                json!({"images": [{"url": "data:image/png;base64,AA=="}]})
+            } else {
+                json!({"model_urls": {"glb": {"url": "data:model/gltf-binary;base64,AA=="}}})
+            };
+            let (base, _) = http::tests::serve_with_headers(move |_| vec![answer(200, body, units)]);
+            let req = if model.kinds == [AssetKind::Image] { picture(Shape::Tall) } else { solid(500) };
+            assert_eq!(fal(base).generate("k", &model, &req).unwrap().cost, cost, "{units:?} {}", model.id);
+        }
+        // A model with no price at all: whatever fal counts, the cost is unknown.
+        let unpriced = ModelDetail { pricing: Pricing::Unknown, unit_price: None, ..flux() };
+        assert_eq!(cost_of(Some(1.0), &unpriced, None), None);
     }
 
     #[test]
-    fn nano_banana_pro_is_asked_for_an_aspect_ratio() {
-        let png = base64_encode(b"PNG fake");
-        let (base, seen) = serve(vec![(200, json!({"images": [{"url": format!("data:image/png;base64,{png}")}], "description": ""}).to_string())]);
-        let c = Catalogue::built_in();
-        let req = LegacyRequest::Image { model: c.image_model(None).unwrap(), prompt: "a night sky", shape: Shape::Wide };
-        let pic = Fal { base, ..Fal::default() }.generate("k", &req).unwrap();
-        assert_eq!((pic.bytes.as_slice(), pic.cost_usd), (&b"PNG fake"[..], 0.15));
-        let seen = seen.lock().unwrap();
-        assert!(seen[0].starts_with("POST /fal-ai/nano-banana-pro "), "{}", seen[0]);
-        assert!(seen[0].contains("\"aspect_ratio\":\"16:9\"") && !seen[0].contains("image_size"), "{}", seen[0]);
+    fn options_the_model_has_no_input_for_are_reported() {
+        let (base, seen) = http::tests::serve(|_| vec![(200, json!({"images": [{"url": "data:image/png;base64,AA=="}]}).to_string())]);
+        let shapeless = ModelDetail { fields: vec![field("prompt", FieldKind::Text, true)], ..flux() };
+        let made = fal(base).generate("k", &shapeless, &picture(Shape::Wide)).unwrap();
+        assert_eq!(made.ignored, [AssetOption::Shape]);
+        assert!(!seen.lock().unwrap()[0].contains("output_format"), "no format input, no format sent");
+    }
+
+    #[test]
+    fn a_request_the_model_cannot_take_is_refused_before_anything_is_sent() {
+        let fal = fal("http://127.0.0.1:9".into());
+        let needs_mask = ModelDetail { fields: vec![field("prompt", FieldKind::Text, true), field("mask_url", FieldKind::Text, true)], ..flux() };
+        for model in [needs_mask, ModelDetail { id: "../escape".into(), ..flux() }] {
+            let estimated = AssetProvider::estimate(&fal, "k", &model, &picture(Shape::Square)).unwrap_err();
+            let made = fal.generate("k", &model, &picture(Shape::Square)).unwrap_err();
+            for error in [estimated, made] {
+                assert_eq!(error.code, ErrorCode::BadSettings, "{}", error.message);
+                assert!(!was_charged(&error), "nothing was sent, so nothing was charged");
+            }
+        }
+        assert_eq!(fal.generate(" ", &flux(), &picture(Shape::Square)).unwrap_err().code, ErrorCode::BadSettings, "no key");
+    }
+
+    #[test]
+    fn audio_comes_back_as_an_address() {
+        let (base, _) = http::tests::serve(|base| vec![(200, json!({"audio": {"url": format!("{base}/sound.mp3")}}).to_string()), (200, "ID3 fake".into())]);
+        let model = ModelDetail {
+            id: "fal-ai/stable-audio".into(),
+            name: "Stable Audio".into(),
+            kinds: vec![AssetKind::SoundEffect],
+            fields: vec![field("prompt", FieldKind::Text, true), field("seconds_total", FieldKind::Integer { min: Some(1), max: Some(47) }, false)],
+            pricing: Pricing::Unknown,
+            unit_price: None,
+        };
+        let made = fal(base).generate("k", &model, &AssetRequest::SoundEffect { prompt: "wind", duration_seconds: 3.0 }).unwrap();
+        assert_eq!((made.bytes.as_slice(), made.cost), (&b"ID3 fake"[..], None));
+        assert!(made.ignored.is_empty());
     }
 
     #[test]
@@ -670,33 +807,49 @@ mod tests {
 
     #[test]
     fn refusals_say_what_to_do() {
-        let (base, _) = serve(vec![
-            (401, "{}".into()),
-            (402, "{}".into()),
-            (200, json!({"images": [{"url": "data:image/png;base64,AA=="}], "has_nsfw_concepts": [true]}).to_string()),
-        ]);
-        let fal = Fal { base, ..Fal::default() };
+        let (base, _) = http::tests::serve_with_headers(|_| {
+            vec![
+                answer(401, json!({}), Some("1")),
+                answer(402, json!({}), None),
+                answer(200, json!({"images": [{"url": "data:image/png;base64,AA=="}], "has_nsfw_concepts": [true]}), Some("1")),
+            ]
+        });
+        let fal = fal(base);
         for code in [ErrorCode::BadSettings, ErrorCode::OverLimit] {
-            let refused = image(&fal, "bad", "x", Shape::Wide).unwrap_err();
+            let refused = fal.generate("bad", &flux(), &picture(Shape::Wide)).unwrap_err();
             assert_eq!(refused.code, code);
-            assert_eq!(super::super::charged_usd(&refused), None, "a refused request is not charged");
+            assert!(!was_charged(&refused), "a refused request is not charged");
         }
-        let blocked = image(&fal, "bad", "x", Shape::Wide).unwrap_err();
+        let blocked = fal.generate("bad", &flux(), &picture(Shape::Wide)).unwrap_err();
         assert!(blocked.message.contains("safety check"));
-        assert_eq!(super::super::charged_usd(&blocked), Some(0.025), "a finished generation is charged even when blocked");
+        assert_eq!(charged_amount(&blocked), Some(0.025), "a finished generation is charged even when blocked");
     }
 
-    /// A finished generation that returns no usable output still reports what it cost.
+    /// A finished generation that returns no usable output still reports what it cost, or that it
+    /// cost something nobody said.
     #[test]
     fn a_finished_generation_without_output_reports_its_charge() {
-        let (base, _) = serve(vec![(200, "not json".into()), (200, json!({"model_urls": {}}).to_string())]);
-        let fal = Fal { base, ..Fal::default() };
-        let unreadable = image(&fal, "k", "x", Shape::Square).unwrap_err();
+        let (base, _) = http::tests::serve_with_headers(|base| {
+            vec![
+                (200, "not json".into(), vec![]),
+                answer(200, json!({"model_urls": {}}), Some("250")),
+                answer(200, json!({"model_urls": {}}), None),
+                answer(200, json!({"images": [{"url": format!("{base}/gone.png")}]}), None),
+                (500, "SECRET-BODY".into(), vec![]),
+            ]
+        });
+        let fal = fal(base);
+        let unreadable = fal.generate("k", &flux(), &picture(Shape::Square)).unwrap_err();
         assert_eq!(unreadable.code, ErrorCode::GarbledOutput);
-        assert_eq!(super::super::charged_usd(&unreadable), Some(0.05));
-        let missing = model_3d(&fal, "k", "https://v3.fal.media/files/crate.png", true, 2000).unwrap_err();
-        assert_eq!(super::super::charged_usd(&missing), Some(0.50));
+        assert_eq!(charged_amount(&unreadable), Some(0.05), "the price known before the run");
+        let missing = fal.generate("k", &tripo(), &solid(2000)).unwrap_err();
+        assert_eq!(charged_amount(&missing), Some(0.5));
         assert!(missing.details.as_ref().is_some_and(|d| d.get("answer").is_some()), "the provider's answer is kept beside the charge");
+        let uncounted = fal.generate("k", &tripo(), &solid(2000)).unwrap_err();
+        assert!(was_charged(&uncounted) && charged_amount(&uncounted).is_none(), "charged, at a cost nobody said");
+        let lost = fal.generate("k", &flux(), &picture(Shape::Square)).unwrap_err();
+        assert_eq!(charged_amount(&lost), Some(0.05), "a download that failed is still a paid generation");
+        assert!(!format!("{lost:?}").contains("SECRET-BODY"));
     }
 
     #[test]
@@ -706,6 +859,7 @@ mod tests {
         let uri = data_uri(b"hi", "image/png");
         assert_eq!(uri, "data:image/png;base64,aGk=");
         assert_eq!(download(&uri).unwrap(), b"hi");
+        assert_eq!(download("data:image/png,raw").unwrap_err().code, ErrorCode::GarbledOutput);
     }
 }
 
@@ -916,10 +1070,15 @@ mod listing_tests {
 
     #[test]
     fn a_list_stops_at_the_page_limit_and_says_so() {
-        let (base, seen) = http::tests::serve(|_| (0..MAX_PAGES).map(|i| (200, page(vec![picture_model(&format!("acme/m{i}"), "M")], Some("Mg")))).collect());
+        // Pages without end, each answered by its cursor: page `n` leads to page `n + 1`.
+        let (base, seen) = http::tests::serve_by(|target| {
+            let at: usize = target.split("&cursor=p").nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
+            (200, page(vec![picture_model(&format!("acme/m{at}"), "M")], Some(&format!("p{}", at + 1))))
+        });
         let list = fal(base).list(None, AssetKind::Image).unwrap();
         assert_eq!(list.models.len(), MAX_PAGES);
-        assert_eq!(seen.lock().unwrap().len(), MAX_PAGES);
+        let asked: HashSet<String> = seen.lock().unwrap().iter().map(|r| r.split_whitespace().nth(1).unwrap_or_default().to_string()).collect();
+        assert_eq!(asked.len(), MAX_PAGES, "each page once, and none past the limit");
         assert!(list.error.as_deref().is_some_and(|e| e.contains("incomplete")), "{:?}", list.error);
     }
 
@@ -1078,13 +1237,18 @@ mod listing_tests {
         let (base, seen) = http::tests::serve(|_| {
             vec![(200, page(vec![picture_model("fal-ai/flux/schnell", "FLUX.1 [schnell]")], None)), (200, prices(&[("fal-ai/flux/schnell", 0.003, "image")]))]
         });
-        let detail = fal(base).describe(KEY, "fal-ai/flux/schnell").unwrap();
+        let fal = fal(base);
+        let detail = fal.describe(KEY, "fal-ai/flux/schnell").unwrap();
         assert_eq!((detail.id.as_str(), detail.name.as_str(), &detail.kinds), ("fal-ai/flux/schnell", "FLUX.1 [schnell]", &vec![AssetKind::Image]));
         assert_eq!(detail.pricing, Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.003) });
+        assert_eq!(detail.unit_price, Some(0.003));
+        // Described again within ten minutes, with the same key: what fal said is used again, unasked.
+        assert_eq!(fal.describe(&format!(" {KEY} "), "fal-ai/flux/schnell").unwrap(), detail);
         let size = detail.fields.iter().find(|f| f.name == "image_size").unwrap();
         assert_eq!(size.kind, FieldKind::Choice(vec!["square_hd".into(), "landscape_16_9".into(), "portrait_16_9".into()]));
         assert!(detail.fields.iter().any(|f| f.name == "prompt" && f.required));
         let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "one model page and one price, once");
         assert!(seen[0].starts_with("GET /v1/models?endpoint_id=fal-ai/flux/schnell&expand=openapi-3.0 "), "{}", seen[0]);
         assert!(seen[1].starts_with("GET /v1/models/pricing?endpoint_id=fal-ai/flux/schnell "), "{}", seen[1]);
         assert!(seen.iter().all(|r| r.to_ascii_lowercase().contains("authorization: key k-123\r\n")));
@@ -1297,7 +1461,12 @@ mod listing_tests {
         }
         assert_eq!(rate("image", MAX_ASSET_BUDGET_USD), usd(Rate::PerRequest(MAX_ASSET_BUDGET_USD)), "the most is still a price");
         let absurd = price_row(&json!({"endpoint_id": "acme/absurd", "unit_price": 1e300, "unit": "image", "currency": "USD"}));
-        assert_eq!(absurd, Some(("acme/absurd".to_string(), Pricing::Unknown)));
+        assert_eq!(absurd, Some(("acme/absurd".to_string(), Priced { pricing: Pricing::Unknown, unit_price: None })));
+        // A price to count with is kept as the price of one billing unit, before the run or after it.
+        let gpu = price_row(&json!({"endpoint_id": "acme/gpu", "unit_price": 0.0011, "unit": "gpu_second", "currency": "USD"}));
+        assert_eq!(gpu, Some(("acme/gpu".to_string(), Priced { pricing: Pricing::After { unit: Unit::Usd }, unit_price: Some(0.0011) })));
+        let euro = price_row(&json!({"endpoint_id": "acme/euro", "unit_price": 0.04, "unit": "image", "currency": "EUR"}));
+        assert_eq!(euro.map(|(_, priced)| priced.unit_price), Some(None), "a price in euros is no price to count dollars with");
         assert_eq!(rate("image", 0.0), usd(Rate::PerRequest(0.0)), "free is a price");
         for currency in ["EUR", "", "credits"] {
             assert_eq!(pricing_of(1.0, "image", currency), Pricing::Unknown, "{currency:?}");

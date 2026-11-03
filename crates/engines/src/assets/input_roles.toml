@@ -25,6 +25,8 @@ duration = ["duration", "seconds_total", "duration_seconds"]
 duration_ms = ["music_length_ms", "duration_ms"]
 instrumental = ["instrumental", "force_instrumental"]
 voice = ["voice", "voice_id"]
+# How many results one run makes: always one, since a price per run is the price of one result.
+count = ["num_images", "num_outputs", "numOutputs", "numSamples"]
 
 # The values of a `shape` field that stand for each picture shape, best first: the first one a
 # model allows is the one we send.

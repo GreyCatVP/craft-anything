@@ -223,18 +223,19 @@ impl AssetSettings {
     /// The dollar limit for a new project.
     ///
     /// Temporary: the callers that still think in one budget (a new project's starting budget in
-    /// `ai::rebuild::project`, the price words of the Engines screen) use it until Task 10 and
-    /// Task 13 of the per-type assets plan move them to [`Self::default_limit`].
+    /// `ai::rebuild::project`, which only the rebuild brief still reads, and the Engines and project
+    /// screens) use it until Tasks 12, 13 and 14 of the per-type assets plan move them to
+    /// [`Self::default_limit`].
     pub fn budget(&self) -> f64 {
         self.default_limit(Unit::Usd)
     }
 
-    /// The id the asset table (removed in Task 10 of the per-type assets plan) gave the model
-    /// chosen as the default for `kind`; `None` for Off, for a model that table never had, and for
-    /// any type but pictures and 3D models.
+    /// The id the old asset table gave the model chosen as the default for `kind`; `None` for Off,
+    /// for a model that table never had, and for any type but pictures and 3D models.
     ///
-    /// Temporary: the callers still reading that table (`asset_tools`, the rebuild brief, the
-    /// settings screens) use it until Task 10 and Task 13 replace the table with the chosen model.
+    /// Temporary: only the Settings and Engines screens still read that table, until Task 13 of the
+    /// per-type assets plan replaces them with the provider and model pickers. Generation uses each
+    /// project's chosen model.
     pub fn legacy_table_id(&self, kind: AssetKind) -> Option<String> {
         let c = self.defaults.get(&kind)?;
         let provider = c.provider.as_deref()?;

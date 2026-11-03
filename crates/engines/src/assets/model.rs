@@ -100,7 +100,8 @@ fn request_noun(kind: AssetKind) -> &'static str {
     }
 }
 
-fn amount(unit: Unit, x: f64) -> String {
+/// An amount in `unit` as the person reads it: "$0.53", "20 credits", "under $0.01".
+pub fn amount(unit: Unit, x: f64) -> String {
     match unit {
         Unit::Usd => usd(x),
         Unit::Credits => credits(x),
@@ -197,6 +198,10 @@ pub struct ModelDetail {
     /// Every input the provider describes for it.
     pub fields: Vec<InputField>,
     pub pricing: Pricing,
+    /// What one of the units the provider bills a run in costs, in the pricing's unit, where the
+    /// provider counts a finished run in such units (fal's `unit_price`, multiplied by the units its
+    /// answer reports). `None` where it doesn't, or gave no price that can be believed.
+    pub unit_price: Option<f64>,
 }
 
 /// The models fetched for one asset type, with the reason the fetch failed if it did.

@@ -1,14 +1,15 @@
-//! Scenario asynchronous image and mesh generation with a mandatory cost preflight. Running a model
-//! is done by the asset table's endpoints (`assets.toml`) until the live lists replace them;
+//! Scenario's asynchronous generation, in credits, with a mandatory price check: every run is quoted
+//! by a dry run before it is submitted, and what it cost is read from the finished job.
 //! [`Scenario::list`] and [`Scenario::describe`] read Scenario's own list of public models, each
-//! model's inputs and what it costs in credits.
-use super::inputs::{FieldKind, InputField, MAX_CHOICES, MAX_FIELDS, REMEDIATION, runnable};
+//! model's inputs and what it costs in credits; a run sends the request laid out in the model's
+//! inputs ([`map_request`]).
+use super::inputs::{FieldKind, InputField, MAX_CHOICES, MAX_FIELDS, Mapped, REMEDIATION, map_request, runnable};
 use super::model::{AssetOption, ListedModel, MAX_ASSET_CREDITS, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::tables::{InputRoles, KnownModels};
-use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, http};
+use super::{AssetKind, AssetProvider, AssetRequest, Generated, charged, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use http::{CURSOR_LENGTH, time_is_up, words};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -16,8 +17,11 @@ use std::time::{Duration, Instant};
 pub const ID: &str = "scenario";
 /// What people call it.
 const NAME: &str = "Scenario";
-/// Starter's $15 / 1500 CU. This is a budgeting conversion, not an invoice.
-const USD_PER_CU: f64 = 0.01;
+/// The largest inline picture (a `data:` URI) sent to start a model from.
+const MAX_INLINE_PICTURE: usize = 28 << 20;
+/// The longest description or text sent.
+const MAX_TEXT: usize = 10_000;
+
 pub struct Scenario {
     base: String,
     timeout: Duration,
@@ -37,43 +41,42 @@ impl Default for Scenario {
     }
 }
 
-/// Validate an image or mesh request and build its model identifier and Scenario payload.
-fn request<'a>(req: &'a LegacyRequest<'_>) -> Result<(&'a str, Value), ToolError> {
-    let (model, body) = match *req {
-        LegacyRequest::Image { model, prompt, shape } => {
-            http::text(prompt, 10_000)?;
-            let ratio = match shape {
-                Shape::Square => "1:1",
-                Shape::Wide => "16:9",
-                Shape::Tall => "9:16",
-            };
-            (model.endpoint.as_str(), json!({"prompt":prompt,"aspectRatio":ratio,"resolution":"1K","numOutputs":1}))
-        }
-        LegacyRequest::Model3d { model, image_url, textured, faces } => {
-            if !model.faces().contains(&faces) {
-                return Err(http::bad("The requested polygon count is outside this model's range."));
-            }
-            if image_url.starts_with("asset_") {
-                http::id(image_url)?;
-            } else if image_url.starts_with("data:image/") {
-                if image_url.len() > (28 << 20) || !image_url.contains(";base64,") {
-                    return Err(http::bad("The Scenario input image is too large or malformed."));
-                }
-            } else {
-                http::media_url(image_url)?;
-            }
-            (
-                model.endpoint.as_str(),
-                json!({"image":[image_url],"shouldTexture":textured,"shouldRemesh":true,"targetPolycount":faces,"topology":"triangle","enablePbr":textured,"textureResolution":"2k"}),
-            )
-        }
-        _ => return Err(http::bad("Scenario does not support this asset request.")),
-    };
-    http::id(model)?;
-    if req.provider() != ID || !req.listed_cost().is_finite() || req.listed_cost() <= 0.0 {
-        return Err(http::bad("The Scenario model needs a positive spending ceiling."));
+/// Where a run of `model` is sent, and the request laid out in its inputs. A picture to start from
+/// must be a Scenario asset id, an inline picture or an HTTPS address; nothing else is sent.
+fn request(model: &ModelDetail, req: &AssetRequest) -> Result<(String, Mapped), ToolError> {
+    if http::id(&model.id).is_err() {
+        return Err(http::bad("That is not an id Scenario gives its models.").with_remediation(REMEDIATION));
     }
-    Ok((model, body))
+    match *req {
+        AssetRequest::Image { prompt: text, .. }
+        | AssetRequest::Speech { text, .. }
+        | AssetRequest::SoundEffect { prompt: text, .. }
+        | AssetRequest::Music { prompt: text, .. } => http::text(text, MAX_TEXT)?,
+        AssetRequest::Model3d { image_url, prompt, .. } => {
+            if let Some(url) = image_url.filter(|u| !u.trim().is_empty()) {
+                picture_ok(url)?;
+            }
+            if let Some(text) = prompt.filter(|p| !p.trim().is_empty()) {
+                http::text(text, MAX_TEXT)?;
+            }
+        }
+    }
+    Ok((format!("generate/custom/{}", model.id), map_request(&model.fields, req, InputRoles::built_in())?))
+}
+
+/// Whether a picture can be sent to Scenario: an asset id of its own, an inline picture of bounded
+/// size, or an HTTPS address without credentials.
+fn picture_ok(url: &str) -> Result<(), ToolError> {
+    if url.starts_with("asset_") {
+        http::id(url)
+    } else if url.starts_with("data:image/") {
+        if url.len() > MAX_INLINE_PICTURE || !url.contains(";base64,") {
+            return Err(http::bad("The Scenario input image is too large or malformed."));
+        }
+        Ok(())
+    } else {
+        http::media_url(url).map_err(|_| http::bad("The picture to start from must be an HTTPS address, a Scenario asset or an inline picture."))
+    }
 }
 
 /// Return the remaining workflow time, or a timeout warning that the remote job may still charge.
@@ -83,6 +86,13 @@ fn remaining(start: Instant, timeout: Duration) -> Result<Duration, ToolError> {
             .with_remediation("Check the job in Scenario before generating again.")
     })
 }
+
+/// A number of credits Scenario reported that can be believed: finite, not negative, and no more
+/// than a limit can be.
+fn believable(credits: f64) -> bool {
+    credits.is_finite() && (0.0..=MAX_ASSET_CREDITS).contains(&credits)
+}
+
 impl Scenario {
     /// Send an authenticated JSON request, requiring status 269 to confirm an API-tier price check.
     /// `charge` is the quoted cost of a paid submission: once Scenario accepts it, an unreadable
@@ -90,10 +100,10 @@ impl Scenario {
     fn call(&self, auth: &str, path: &str, body: Option<&Value>, timeout: Duration, charge: Option<f64>) -> Result<Value, ToolError> {
         let agent = http::agent(timeout);
         let url = format!("{}/{path}", self.base);
-        let response = if let Some(body) = body {
-            agent.post(url).header("Authorization", auth).header("Content-Type", "application/json").send(body.to_string())
-        } else {
-            agent.get(url).header("Authorization", auth).call()
+        let response = match body {
+            Some(body) => agent.post(&url).header("Authorization", auth).header("Content-Type", "application/json").send(body.to_string()),
+            // A GET (a job's state, an asset's address) starts nothing paid, so it may be asked again.
+            None => http::get(|| agent.get(&url).header("Authorization", auth).call()),
         }
         .map_err(|_| http::network())?;
         http::status(response.status().as_u16())?;
@@ -101,13 +111,29 @@ impl Scenario {
             return Err(http::garbled("Scenario did not confirm an API-tier price check; check your account before trying again."));
         }
         http::json(response.into_body()).map_err(|e| match charge {
-            Some(cost) => super::charged(e, cost),
+            Some(cost) => charged(e, cost),
             None => e,
         })
     }
+
+    /// Scenario's quote for one run, in credits, from a dry run of the very request that would be
+    /// submitted. A quote that is missing, not a number, nothing, negative or more than a limit can
+    /// be is refused, and so is an answer that started a job: nothing is submitted after either.
+    fn quote(&self, auth: &str, path: &str, body: &Value, start: Instant) -> Result<f64, ToolError> {
+        let quote = self.call(auth, &format!("{path}?dryRun=api"), Some(body), remaining(start, self.timeout)?, None)?;
+        // Fail closed if a server ignores dryRun: never follow it with another paid request.
+        if quote.get("job").is_some() || quote.get("jobId").is_some() {
+            return Err(http::garbled("Scenario returned a job during the price check; check your account before trying again."));
+        }
+        quote
+            .get("creativeUnitsCost")
+            .and_then(Value::as_f64)
+            .filter(|&credits| believable(credits) && credits > 0.0)
+            .ok_or_else(|| http::garbled("Scenario did not provide a valid cost quote; generation was not started."))
+    }
 }
 impl AssetProvider for Scenario {
-    /// Return the catalogue identifier used to route requests to Scenario.
+    /// Return the identifier a project's choice names.
     fn id(&self) -> &'static str {
         ID
     }
@@ -135,48 +161,48 @@ impl AssetProvider for Scenario {
         }
         Ok(())
     }
-    /// Validate the request and return its catalogue spending ceiling without submitting a job.
-    fn estimate(&self, req: &LegacyRequest) -> Result<f64, ToolError> {
-        request(req)?;
-        Ok(req.listed_cost())
+    fn unit(&self) -> Unit {
+        Unit::Credits
     }
-    /// Confirm a live quote within the ceiling, submit once, and poll and download within one deadline.
-    /// The returned cost converts the quoted creative units to an estimated USD amount.
-    fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
-        let (model, body) = request(req)?;
+    fn list_models(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
+        self.list(key, kind)
+    }
+    fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
+        Scenario::describe(self, key, model)
+    }
+    /// Scenario's own quote for this very run (a dry run that starts nothing), whatever the
+    /// model's listed price says.
+    fn estimate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
         let auth = self.auth(key)?;
+        let (path, Mapped { body, .. }) = request(model, req)?;
+        Ok(Some(self.quote(&auth, &path, &Value::Object(body), Instant::now())?))
+    }
+    /// Quote the run, submit it once, and poll and download within one deadline. What it cost is
+    /// the finished job's own count of credits, else the quote.
+    fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
+        let auth = self.auth(key)?;
+        let (path, Mapped { body, ignored }) = request(model, req)?;
+        let body = Value::Object(body);
         let start = Instant::now();
-        let path = format!("generate/custom/{model}");
-        let quote = self.call(&auth, &format!("{path}?dryRun=api"), Some(&body), remaining(start, self.timeout)?, None)?;
-        // Fail closed if a server ignores dryRun: never follow it with another paid request.
-        if quote.get("job").is_some() || quote.get("jobId").is_some() {
-            return Err(http::garbled("Scenario returned a job during the price check; check your account before trying again."));
-        }
-        let cost = quote
-            .get("creativeUnitsCost")
-            .and_then(Value::as_f64)
-            .filter(|c| c.is_finite() && *c > 0.0)
-            .ok_or_else(|| http::garbled("Scenario did not provide a valid cost quote; generation was not started."))?
-            * USD_PER_CU;
-        if !cost.is_finite() || cost > req.listed_cost() {
-            return Err(ToolError::new(ErrorCode::OverLimit, "Scenario's current quote exceeds this model's spending ceiling; generation was not started."));
-        }
+        let quote = self.quote(&auth, &path, &body, start)?;
         // Accepted from its successful status on: an unreadable answer and every later failure report the quoted charge.
-        let submitted = self.call(&auth, &path, Some(&body), remaining(start, self.timeout)?, Some(cost))?;
-        let (url, bytes) = self.finish(&auth, &submitted, start).map_err(|e| super::charged(e, cost))?;
-        Ok(Generated { url, bytes, cost_usd: cost })
+        let submitted = self.call(&auth, &path, Some(&body), remaining(start, self.timeout)?, Some(quote))?;
+        let (url, bytes, billed) = self.finish(&auth, &submitted, start).map_err(|e| charged(e, quote))?;
+        Ok(Generated { url, bytes, cost: Some(billed.unwrap_or(quote)), ignored })
     }
 }
 
 impl Scenario {
-    /// Poll a submitted job, resolve its asset and download it within the workflow deadline.
-    fn finish(&self, auth: &str, submitted: &Value, start: Instant) -> Result<(String, Vec<u8>), ToolError> {
+    /// Poll a submitted job, resolve its asset and download it within the workflow deadline. Also
+    /// the credits the finished job says it cost (`job.billing.cuCost`), when it says so believably.
+    fn finish(&self, auth: &str, submitted: &Value, start: Instant) -> Result<(String, Vec<u8>, Option<f64>), ToolError> {
         let job_id = submitted.pointer("/job/jobId").and_then(Value::as_str).ok_or_else(|| http::garbled("Scenario returned no job identifier."))?;
         http::id(job_id)?;
         loop {
             let job = self.call(auth, &format!("jobs/{job_id}"), None, remaining(start, self.timeout)?, None)?;
             match job.pointer("/job/status").and_then(Value::as_str) {
                 Some("success") => {
+                    let billed = job.pointer("/job/billing/cuCost").and_then(Value::as_f64).filter(|&credits| believable(credits));
                     let asset_id =
                         job.pointer("/job/metadata/assetIds/0").and_then(Value::as_str).ok_or_else(|| http::garbled("Scenario completed without an asset."))?;
                     http::id(asset_id)?;
@@ -188,7 +214,7 @@ impl Scenario {
                         .ok_or_else(|| http::garbled("Scenario returned no asset download address."))?
                         .to_string();
                     let bytes = http::download(&url, remaining(start, self.timeout)?)?;
-                    return Ok((url, bytes));
+                    return Ok((url, bytes, billed));
                 }
                 Some("failed" | "failure" | "cancelled" | "canceled") => {
                     return Err(ToolError::new(ErrorCode::ProgramFailed, "Scenario could not complete this generation.")
@@ -303,13 +329,19 @@ impl Scenario {
 
     /// One model with all its inputs and its price, as `key` gets them. A model Scenario no longer
     /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it. Its kinds are those
-    /// its capabilities and tags settle, else the known-models table's.
+    /// its capabilities and tags settle, else the known-models table's. What Scenario answered is
+    /// used again for ten minutes ([`super::described`]).
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let auth = self.auth(key)?;
         if http::id(model).is_err() {
             return Err(http::bad("That is not an id Scenario gives its models.").with_remediation(REMEDIATION));
         }
-        let found = self.fetch(&auth, model).map_err(Trouble::into_error)?.ok_or_else(|| http::gone(NAME, model))?;
+        super::described(&format!("{ID} {}", self.base), &auth, model, || self.fetch_detail(&auth, model))
+    }
+
+    /// [`Scenario::describe`], asked of Scenario.
+    fn fetch_detail(&self, auth: &str, model: &str) -> Result<ModelDetail, ToolError> {
+        let found = self.fetch(auth, model).map_err(Trouble::into_error)?.ok_or_else(|| http::gone(NAME, model))?;
         let mut kinds = kinds_of(&found, model);
         if kinds.is_empty() {
             kinds = KnownModels::built_in().kinds(ID, model).unwrap_or_default().to_vec();
@@ -490,11 +522,13 @@ impl Scenario {
 
     /// A GET to Scenario's API. `auth` is only for the requests that need it.
     fn send(&self, auth: Option<&str>, url: &str, timeout: Duration) -> Result<ureq::http::Response<ureq::Body>, ToolError> {
-        let request = http::agent(timeout).get(url);
-        match auth {
-            Some(auth) => request.header("Authorization", auth).call(),
-            None => request.call(),
-        }
+        http::get(|| {
+            let request = http::agent(timeout).get(url);
+            match auth {
+                Some(auth) => request.header("Authorization", auth).call(),
+                None => request.call(),
+            }
+        })
         .map_err(|_| http::cannot_reach(NAME))
     }
 }
@@ -599,7 +633,7 @@ fn read_inputs(model: &Value, id: &str) -> Result<Vec<InputField>, ToolError> {
 fn detail_of(model: &Value, id: &str, kinds: Vec<AssetKind>) -> Result<ModelDetail, ToolError> {
     let fields = read_inputs(model, id)?;
     let pricing = pricing_of(model, &kinds);
-    Ok(ModelDetail { id: id.to_string(), name: name_of(model, id), kinds, fields, pricing })
+    Ok(ModelDetail { id: id.to_string(), name: name_of(model, id), kinds, fields, pricing, unit_price: None })
 }
 
 fn listed(candidate: &Candidate, pricing: Pricing, ignores: Vec<AssetOption>) -> ListedModel {
@@ -819,19 +853,60 @@ fn too_big() -> ToolError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assets::Catalogue;
+    use crate::assets::{Shape, charged_amount, was_charged};
+    use serde_json::json;
+
+    const KEY: &str = "test-key:test-secret";
+
+    fn input(name: &str, kind: FieldKind, required: bool) -> InputField {
+        InputField { name: name.into(), kind, required, has_default: !required }
+    }
+
+    /// Gemini 3.1 on Scenario as its inputs describe it: a prompt, an aspect ratio and a count.
+    fn gemini() -> ModelDetail {
+        ModelDetail {
+            id: "model_google-gemini-3-1-flash".into(),
+            name: "Gemini 3.1".into(),
+            kinds: vec![AssetKind::Image],
+            fields: vec![
+                input("prompt", FieldKind::Text, true),
+                input("aspectRatio", FieldKind::Choice(vec!["1:1".into(), "16:9".into(), "9:16".into()]), false),
+                input("numOutputs", FieldKind::Number { min: Some(1.0), max: Some(4.0) }, false),
+            ],
+            pricing: Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(100.0) } },
+            unit_price: None,
+        }
+    }
+
+    /// Meshy on Scenario: a list of pictures in, a face count and texturing.
+    fn meshy() -> ModelDetail {
+        ModelDetail {
+            id: "model_meshy-7-1-img23d".into(),
+            name: "Meshy".into(),
+            kinds: vec![AssetKind::Model3d],
+            fields: vec![
+                input("image", FieldKind::Images, true),
+                input("shouldTexture", FieldKind::Bool, false),
+                input("targetPolycount", FieldKind::Number { min: Some(100.0), max: Some(300_000.0) }, false),
+            ],
+            pricing: Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: None } },
+            unit_price: None,
+        }
+    }
+
+    fn wide() -> AssetRequest<'static> {
+        AssetRequest::Image { prompt: "a wooden crate", shape: Shape::Wide }
+    }
 
     /// Run the shared image fixture against a test-configured Scenario provider.
     fn image(provider: &Scenario) -> Result<Generated, ToolError> {
-        provider.generate(
-            "test-key:test-secret",
-            &LegacyRequest::Image {
-                model: Catalogue::built_in().image_model(Some("scenario-gemini-3-1")).unwrap(),
-                prompt: "a wooden crate",
-                shape: Shape::Wide,
-            },
-        )
+        provider.generate(KEY, &gemini(), &wide())
     }
+
+    fn quick(base: String) -> Scenario {
+        Scenario { base, poll_interval: Duration::ZERO, ..Scenario::default() }
+    }
+
     /// Check the full quoted image workflow and ensure only API requests carry authentication.
     #[test]
     fn price_submit_poll_resolve_and_download_keep_auth_off_media_requests() {
@@ -840,24 +915,54 @@ mod tests {
                 (269, json!({"creativeUnitsCost":19}).to_string()),
                 (200, json!({"job":{"jobId":"job_test"}}).to_string()),
                 (200, json!({"job":{"status":"in-progress"}}).to_string()),
-                (200, json!({"job":{"status":"success","metadata":{"assetIds":["asset_test"]}}}).to_string()),
+                (200, json!({"job":{"status":"success","billing":{"cuCost":17},"metadata":{"assetIds":["asset_test"]}}}).to_string()),
                 (200, json!({"asset":{"url":format!("{base}/media.png")}}).to_string()),
                 (200, "PNG fake".into()),
             ]
         });
-        let provider = Scenario { base, poll_interval: Duration::ZERO, ..Scenario::default() };
-        let result = image(&provider).unwrap();
+        let result = image(&quick(base)).unwrap();
         assert_eq!(result.bytes, b"PNG fake");
-        assert_eq!(result.cost_usd, 0.19);
+        assert_eq!(result.cost, Some(17.0), "the credits the finished job says it cost, never dollars");
+        assert!(result.ignored.is_empty());
         let seen = seen.lock().unwrap();
         assert!(seen[0].starts_with("POST /generate/custom/model_google-gemini-3-1-flash?dryRun=api "));
         assert!(seen[1].starts_with("POST /generate/custom/model_google-gemini-3-1-flash "));
-        assert!(seen[1].contains("\"aspectRatio\":\"16:9\"") && seen[1].contains("\"numOutputs\":1"));
+        assert_eq!(seen[0].split("\r\n\r\n").nth(1), seen[1].split("\r\n\r\n").nth(1), "the request quoted is the request submitted");
+        assert!(seen[1].contains("\"aspectRatio\":\"16:9\"") && seen[1].contains("\"numOutputs\":1") && seen[1].contains("\"prompt\":\"a wooden crate\""));
         assert!(seen[2].starts_with("GET /jobs/job_test "));
         assert!(seen[4].starts_with("GET /assets/asset_test "));
         assert!(seen[0].to_ascii_lowercase().contains("authorization: basic "));
         assert!(!seen[5].to_ascii_lowercase().contains("authorization"));
     }
+
+    /// The estimate is Scenario's quote for the very request, by a dry run that submits nothing.
+    #[test]
+    fn the_estimate_is_a_dry_run_quote() {
+        let (base, seen) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":19.5}).to_string())]);
+        assert_eq!(quick(base).estimate(KEY, &gemini(), &wide()).unwrap(), Some(19.5), "whatever the listed typical price says");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].starts_with("POST /generate/custom/model_google-gemini-3-1-flash?dryRun=api ") && seen[0].contains("\"aspectRatio\":\"16:9\""));
+    }
+
+    /// A job that says nothing of what it cost cost what it was quoted; one that says something no
+    /// one could believe likewise.
+    #[test]
+    fn a_job_without_its_cost_cost_its_quote() {
+        for billing in [json!({}), json!({"cuCost": -4}), json!({"cuCost": 1e300}), json!({"cuCost": "17"})] {
+            let (base, _) = http::tests::serve(|base| {
+                vec![
+                    (269, json!({"creativeUnitsCost":19}).to_string()),
+                    (200, json!({"job":{"jobId":"job_test"}}).to_string()),
+                    (200, json!({"job":{"status":"success","billing":billing,"metadata":{"assetIds":["asset_test"]}}}).to_string()),
+                    (200, json!({"asset":{"url":format!("{base}/media.png")}}).to_string()),
+                    (200, "PNG fake".into()),
+                ]
+            });
+            assert_eq!(image(&quick(base)).unwrap().cost, Some(19.0));
+        }
+    }
+
     /// Preserve the requested image, polygon count, and texturing options in mesh submission.
     #[test]
     fn mesh_request_honours_target_polygons_and_texture() {
@@ -870,36 +975,58 @@ mod tests {
                 (200, "glTF fake".into()),
             ]
         });
-        let req = LegacyRequest::Model3d {
-            model: Catalogue::built_in().model_3d(Some("scenario-meshy")).unwrap(),
-            image_url: "https://example.com/input.png",
-            textured: true,
-            faces: 3000,
-        };
-        let provider = Scenario { base, ..Scenario::default() };
-        assert_eq!(provider.generate("test-key:test-secret", &req).unwrap().bytes, b"glTF fake");
+        let req = AssetRequest::Model3d { image_url: Some("https://example.com/input.png"), prompt: None, textured: true, faces: 3000 };
+        let made = Scenario { base, ..Scenario::default() }.generate(KEY, &meshy(), &req).unwrap();
+        assert_eq!((made.bytes.as_slice(), made.cost), (&b"glTF fake"[..], Some(120.0)));
         let seen = seen.lock().unwrap();
         assert!(seen[1].contains("\"image\":[\"https://example.com/input.png\"]"));
         assert!(seen[1].contains("\"targetPolycount\":3000") && seen[1].contains("\"shouldTexture\":true"));
     }
-    /// Stop after preflight when a quote is invalid, over budget, already a job, or unconfirmed.
+
+    /// Stop after preflight when a quote is invalid, already a job, or unconfirmed.
     #[test]
     fn unsafe_or_missing_quotes_never_submit_a_generation() {
         for quote in [
-            json!({"creativeUnitsCost":101}),
             json!({"creativeUnitsCost":0}),
             json!({"creativeUnitsCost":-1}),
+            json!({"creativeUnitsCost":1e300}),
+            json!({"creativeUnitsCost":MAX_ASSET_CREDITS + 1.0}),
+            json!({"creativeUnitsCost":"19"}),
             json!({}),
             json!({"creativeUnitsCost":1,"job":{"jobId":"unexpected"}}),
         ] {
-            let (base, seen) = http::tests::serve(|_| vec![(269, quote.to_string())]);
-            assert!(image(&Scenario { base, ..Scenario::default() }).is_err());
-            assert_eq!(seen.lock().unwrap().len(), 1);
+            let (base, seen) = http::tests::serve(|_| vec![(269, quote.to_string()), (269, quote.to_string())]);
+            let provider = Scenario { base, ..Scenario::default() };
+            assert!(provider.estimate(KEY, &gemini(), &wide()).is_err(), "{quote}");
+            let error = image(&provider).unwrap_err();
+            assert!(!was_charged(&error), "{quote}");
+            assert_eq!(seen.lock().unwrap().len(), 2, "{quote}: a quote each, and nothing submitted");
         }
         let (base, seen) = http::tests::serve(|_| vec![(200, json!({"creativeUnitsCost":19}).to_string())]);
         assert!(image(&Scenario { base, ..Scenario::default() }).is_err());
         assert_eq!(seen.lock().unwrap().len(), 1, "an ordinary success is not a confirmed dry run");
     }
+
+    /// A request the model can't take, and a picture that can't be sent, are refused before anything is asked.
+    #[test]
+    fn a_request_that_cannot_be_sent_is_refused_before_anything_is_asked() {
+        let provider = Scenario { base: "http://127.0.0.1:9".into(), ..Scenario::default() };
+        let solid = |url| AssetRequest::Model3d { image_url: Some(url), prompt: None, textured: false, faces: 500 };
+        for url in ["asset_../../x", "file:///etc/passwd", "http://example.com/x.png", "data:image/png,raw", "https://user:pw@example.com/x.png"] {
+            let error = provider.generate(KEY, &meshy(), &solid(url)).unwrap_err();
+            assert_eq!(error.code, ErrorCode::BadSettings, "{url}");
+            assert!(!was_charged(&error));
+        }
+        let from_words = AssetRequest::Model3d { image_url: None, prompt: Some("a barrel"), textured: false, faces: 500 };
+        assert_eq!(provider.estimate(KEY, &meshy(), &from_words).unwrap_err().code, ErrorCode::BadSettings, "the model needs a picture");
+        assert_eq!(provider.estimate(KEY, &ModelDetail { id: "../x".into(), ..gemini() }, &wide()).unwrap_err().code, ErrorCode::BadSettings);
+        let blank = AssetRequest::Image { prompt: " ", shape: Shape::Square };
+        assert_eq!(provider.generate(KEY, &gemini(), &blank).unwrap_err().code, ErrorCode::BadSettings);
+        for key in ["", "no-secret"] {
+            assert_eq!(provider.generate(key, &gemini(), &wide()).unwrap_err().code, ErrorCode::BadSettings, "{key:?}");
+        }
+    }
+
     /// Reject failed jobs, unsafe asset identifiers, and expired deadlines without exposing remote text.
     #[test]
     fn failed_jobs_invalid_ids_and_deadlines_fail_without_leaking_body() {
@@ -913,11 +1040,12 @@ mod tests {
             });
             let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
             assert!(!format!("{error:?}").contains("test-secret"));
-            assert_eq!(crate::assets::charged_usd(&error), Some(0.01), "a submitted job reports its quoted charge");
+            assert_eq!(charged_amount(&error), Some(1.0), "a submitted job reports its quoted charge, in credits");
         }
         let error = image(&Scenario { timeout: Duration::ZERO, ..Scenario::default() }).unwrap_err();
-        assert_eq!(crate::assets::charged_usd(&error), None, "nothing was submitted");
+        assert!(!was_charged(&error), "nothing was submitted");
     }
+
     /// Failures after submission (unknown status, missing asset address, failed download) report the
     /// quoted charge; failures before submission do not.
     #[test]
@@ -941,23 +1069,23 @@ mod tests {
                 all.extend(answers(base));
                 all
             });
-            let error = image(&Scenario { base, poll_interval: Duration::ZERO, ..Scenario::default() }).unwrap_err();
-            assert_eq!(crate::assets::charged_usd(&error), Some(0.19));
+            let error = image(&quick(base)).unwrap_err();
+            assert_eq!(charged_amount(&error), Some(19.0));
             assert!(seen.lock().unwrap().len() >= 3);
         }
         let (base, _) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":19}).to_string()), (402, "no credit".into())]);
         let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
-        assert_eq!(crate::assets::charged_usd(&error), None, "a refused submission is not charged");
+        assert!(!was_charged(&error), "a refused submission is not charged");
         // An accepted submission whose answer is empty or not JSON is still charged.
         for answer in ["", "not json"] {
             let (base, _) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":19}).to_string()), (200, answer.into())]);
             let error = image(&Scenario { base, ..Scenario::default() }).unwrap_err();
             assert_eq!(error.code, ErrorCode::GarbledOutput);
-            assert_eq!(crate::assets::charged_usd(&error), Some(0.19), "answer {answer:?}");
+            assert_eq!(charged_amount(&error), Some(19.0), "answer {answer:?}");
         }
         // An unreadable price check is not: nothing was submitted.
         let (base, seen) = http::tests::serve(|_| vec![(269, "not json".into())]);
-        assert_eq!(crate::assets::charged_usd(&image(&Scenario { base, ..Scenario::default() }).unwrap_err()), None);
+        assert!(!was_charged(&image(&Scenario { base, ..Scenario::default() }).unwrap_err()));
         assert_eq!(seen.lock().unwrap().len(), 1);
     }
     /// Require both credential components and reject control characters during local validation.
@@ -968,6 +1096,7 @@ mod tests {
             assert!(provider.validate_key(key).is_err());
         }
         assert!(provider.validate_key("test-key:test-secret").is_ok());
+        assert_eq!(provider.unit(), Unit::Credits);
     }
 }
 
@@ -979,6 +1108,7 @@ mod listing_tests {
     use crate::assets::tables::InputRoles;
     use crate::assets::{AssetRequest, Shape};
     use craft_anything_platform::sync::Mutex;
+    use serde_json::json;
     use std::collections::HashMap;
     use std::io::{BufRead, BufReader, Write};
     use std::net::{TcpListener, TcpStream};
@@ -1459,6 +1589,8 @@ mod listing_tests {
         assert_eq!(ratio.kind, FieldKind::Choice(vec!["1:1".into(), "16:9".into(), "9:16".into()]));
         assert!(ratio.has_default && !ratio.required);
         assert!(detail.fields.iter().any(|f| f.name == "prompt" && f.required && f.kind == FieldKind::Text));
+        // Described again within ten minutes, with the same key: what Scenario said is used again, unasked.
+        assert_eq!(stand.scenario().describe(KEY, "model_pic").unwrap(), detail);
         let requests = stand.requests();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].starts_with("GET /v1/models/model_pic "), "{}", requests[0]);
@@ -1629,7 +1761,8 @@ mod listing_tests {
         let fields = scenario_fields(&picture_inputs()).unwrap();
         let wide = AssetRequest::Image { prompt: "a crate", shape: Shape::Wide };
         let mapped = map_request(&fields, &wide, roles).unwrap();
-        assert_eq!(Value::Object(mapped.body), json!({"prompt": "a crate", "aspectRatio": "16:9"}));
+        // One picture a run: the price of a run is the price of one.
+        assert_eq!(Value::Object(mapped.body), json!({"prompt": "a crate", "aspectRatio": "16:9", "numOutputs": 1}));
         assert_eq!(mapped.ignored, []);
         assert_eq!(runnable(&fields, AssetKind::Image, roles), Ok(vec![]));
 

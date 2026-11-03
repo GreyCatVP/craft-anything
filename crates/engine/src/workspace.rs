@@ -500,9 +500,9 @@ impl Manifest {
     /// The one dollar budget the project had before limits were kept per type: the old budget it
     /// carries, else the built-in one.
     ///
-    /// Temporary: the callers still thinking in one budget (the asset tools, the rebuild brief,
-    /// the project's asset tools and panel) use it until Tasks 10, 11, 12 and 14 of the per-type
-    /// assets plan move them to [`ProjectAssets::effective`].
+    /// Temporary: the callers still thinking in one budget (the rebuild brief, the project's asset
+    /// tools and panel) use it until Tasks 11, 12 and 14 of the per-type assets plan move them to
+    /// [`ProjectAssets::effective`]. The generation tools no longer read it.
     pub fn legacy_budget_usd(&self) -> f64 {
         self.assets.legacy_budget_usd.unwrap_or(ASSET_BUDGET_USD)
     }
@@ -510,8 +510,8 @@ impl Manifest {
     /// Whether the person allows this provider to generate paid assets in this project: the master
     /// switch is on and the provider is among the old provider list's (see [`Self::asset_provider_chosen`]).
     ///
-    /// Temporary, until Tasks 10 and 12 of the per-type assets plan decide by the type's chosen
-    /// provider instead.
+    /// Temporary, until Tasks 11 and 12 of the per-type assets plan (the project's asset tools, the
+    /// rebuild brief) decide by the type's chosen provider instead, as the generation tools do.
     pub fn asset_provider_allowed(&self, provider: &str) -> bool {
         self.generate_assets && self.asset_provider_chosen(provider)
     }
@@ -519,7 +519,7 @@ impl Manifest {
     /// Whether this provider is among the project's old provider list, whatever the master switch
     /// says: what turning generated assets back on would allow. No list: every provider.
     ///
-    /// Temporary, until Tasks 10, 11 and 14 of the per-type assets plan decide by the type's chosen
+    /// Temporary, until Tasks 11 and 14 of the per-type assets plan decide by the type's chosen
     /// provider instead.
     pub fn asset_provider_chosen(&self, provider: &str) -> bool {
         self.assets.legacy_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
@@ -1087,8 +1087,9 @@ impl Workspace {
     /// Checked sum of every amount in the ledger, whatever its unit (dollars and credits are
     /// added as plain numbers); unreadable, malformed or invalid ledgers fail closed.
     ///
-    /// Temporary: only for the callers not yet rewritten for per-type limits. Tasks 10, 12 and 14 of
-    /// the per-type assets plan replace them with [`Workspace::try_type_usage`] and delete this.
+    /// Temporary: only for the callers not yet rewritten for per-type limits (the project's asset
+    /// tools, the rebuild brief). Tasks 11, 12 and 14 of the per-type assets plan replace them with
+    /// [`Workspace::try_type_usage`], as the generation tools already use, and delete this.
     pub fn try_assets_spent(&self) -> Result<f64, ToolError> {
         asset_total(&self.try_assets()?)
     }

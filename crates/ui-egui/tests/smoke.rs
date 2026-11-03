@@ -479,8 +479,10 @@ fn pausing_generated_assets_keeps_the_provider_choices() {
 /// off there, beside the built-in ones.
 #[test]
 fn a_registered_asset_provider_is_listed_and_switchable() {
+    use craft_anything_engine::evidence::ToolError;
     use craft_anything_engine::workspace::{TargetRef, Workspace};
-    use craft_anything_engines::assets::{AssetProvider, AssetProviders, Generated, LegacyRequest};
+    use craft_anything_engines::assets::model::{ModelDetail, ModelList, Unit};
+    use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Generated};
     struct Custom;
     impl AssetProvider for Custom {
         fn id(&self) -> &'static str {
@@ -489,8 +491,17 @@ fn a_registered_asset_provider_is_listed_and_switchable() {
         fn name(&self) -> &'static str {
             "Custom Art"
         }
-        fn generate(&self, _key: &str, _req: &LegacyRequest) -> Result<Generated, craft_anything_engine::evidence::ToolError> {
-            Err(craft_anything_engine::evidence::ToolError::invalid("not used in this test"))
+        fn unit(&self) -> Unit {
+            Unit::Usd
+        }
+        fn list_models(&self, _key: Option<&str>, _kind: AssetKind) -> Result<ModelList, ToolError> {
+            Ok(ModelList { models: Vec::new(), error: None })
+        }
+        fn describe(&self, _key: &str, _model: &str) -> Result<ModelDetail, ToolError> {
+            Err(ToolError::invalid("not used in this test"))
+        }
+        fn generate(&self, _key: &str, _model: &ModelDetail, _req: &AssetRequest) -> Result<Generated, ToolError> {
+            Err(ToolError::invalid("not used in this test"))
         }
     }
     let d = tempfile::tempdir().unwrap();

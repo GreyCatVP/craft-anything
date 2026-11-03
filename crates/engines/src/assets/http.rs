@@ -173,11 +173,21 @@ pub(super) fn media_url(url: &str) -> Result<(), ToolError> {
     }
     Ok(())
 }
+/// Send a GET, and once more if the system interrupted the first try (`EINTR`, which a busy
+/// machine's signals can cause). A GET starts no paid work, so asking again is safe: never use
+/// this for a POST, which may start a generation that is charged twice.
+pub(super) fn get<T>(send: impl Fn() -> Result<T, ureq::Error>) -> Result<T, ureq::Error> {
+    match send() {
+        Err(ureq::Error::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted => send(),
+        other => other,
+    }
+}
+
 /// Download bounded media from a validated address without forwarding provider credentials.
 pub(super) fn download(url: &str, timeout: Duration) -> Result<Vec<u8>, ToolError> {
     media_url(url)?;
     // A separate agent and no auth headers: credentials never reach the media host.
-    let response = agent(timeout).get(url).call().map_err(|_| network())?;
+    let response = get(|| agent(timeout).get(url).call()).map_err(|_| network())?;
     status(response.status().as_u16())?;
     bytes(response.into_body(), MAX_BYTES)
 }
@@ -188,7 +198,7 @@ pub(super) mod tests {
     use craft_anything_platform::sync::Mutex;
     use std::{
         io::{BufRead, BufReader, Write},
-        net::TcpListener,
+        net::{TcpListener, TcpStream},
         sync::Arc,
         time::Instant,
     };
@@ -200,6 +210,15 @@ pub(super) mod tests {
 
     /// [`serve`], with each answer held back for `delay` after its request has been read.
     pub fn serve_after(delay: Duration, answers: impl FnOnce(&str) -> Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
+        stand(delay, |base| answers(base).into_iter().map(|(status, body)| (status, body, Vec::new())).collect())
+    }
+
+    /// [`serve`], with headers of its own on each answer (name, value).
+    pub fn serve_with_headers(answers: impl FnOnce(&str) -> Vec<(u16, String, Vec<(String, String)>)>) -> (String, Arc<Mutex<Vec<String>>>) {
+        stand(Duration::ZERO, answers)
+    }
+
+    fn stand(delay: Duration, answers: impl FnOnce(&str) -> Vec<(u16, String, Vec<(String, String)>)>) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -208,7 +227,7 @@ pub(super) mod tests {
         let recorded = seen.clone();
         std::thread::spawn(move || {
             let start = Instant::now();
-            for (status, body) in answers {
+            for (status, body, headers) in answers {
                 let mut stream = loop {
                     match listener.accept() {
                         Ok((s, _)) => break s,
@@ -219,31 +238,66 @@ pub(super) mod tests {
                         Err(e) => panic!("local accept failed: {e}"),
                     }
                 };
-                // Accepted sockets inherit the listener's mode differently across platforms.
-                stream.set_nonblocking(false).unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-                let mut reader = BufReader::new(stream.try_clone().unwrap());
-                let mut head = String::new();
-                let mut len = 0;
-                loop {
-                    let mut line = String::new();
-                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
-                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                        len = v.trim().parse().unwrap();
-                    }
-                    head.push_str(&line);
-                    if line == "\r\n" {
-                        break;
-                    }
-                }
-                let mut payload = vec![0; len];
-                reader.read_exact(&mut payload).unwrap();
-                recorded.lock().unwrap().push(format!("{head}{}", String::from_utf8_lossy(&payload)));
+                recorded.lock().unwrap().push(request_of(&stream));
                 std::thread::sleep(delay);
                 // The client may be gone before the body is written (it does not read the body of an
                 // error answer). That ends nothing here: a panic would kill the thread and with it every
                 // answer still to come, which made tests that ask twice fail now and then.
-                let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let extra: String = headers.iter().map(|(name, value)| format!("{name}: {value}\r\n")).collect();
+                let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        (base, seen)
+    }
+
+    /// The request on a newly accepted stream: its head and its body.
+    fn request_of(stream: &TcpStream) -> String {
+        // Accepted sockets inherit the listener's mode differently across platforms.
+        stream.set_nonblocking(false).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut head = String::new();
+        let mut len = 0;
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                len = v.trim().parse().unwrap();
+            }
+            head.push_str(&line);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut payload = vec![0; len];
+        reader.read_exact(&mut payload).unwrap();
+        format!("{head}{}", String::from_utf8_lossy(&payload))
+    }
+
+    /// A stand-in that answers each request by what it asks for (`answer(target)`, the request's
+    /// path and query), as many as come in ten seconds. A request sent again gets the same answer,
+    /// so a test of many requests doesn't depend on none of them being sent twice: one the system
+    /// interrupted after the stand-in had read it is sent again ([`get`]).
+    pub fn serve_by(answer: impl Fn(&str) -> (u16, String) + Send + 'static) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(10) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = request_of(&stream);
+                        let target = request.split_whitespace().nth(1).unwrap_or_default().to_string();
+                        recorded.lock().unwrap().push(request);
+                        let (status, body) = answer(&target);
+                        let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(1)),
+                    Err(_) => break,
+                }
             }
         });
         (base, seen)
@@ -301,6 +355,34 @@ pub(super) mod tests {
         }
         assert!(media_url("https://cdn.example.com/file?signature=fake").is_ok());
     }
+    /// A GET interrupted by the system is sent once more; any other failure, or a second
+    /// interruption, is the answer.
+    #[test]
+    fn an_interrupted_get_is_sent_once_more() {
+        let counted = std::sync::atomic::AtomicUsize::new(0);
+        let tries = &counted;
+        let interrupted_then = |then: Result<u8, ureq::Error>| {
+            let then = std::cell::RefCell::new(Some(then));
+            move || -> Result<u8, ureq::Error> {
+                if tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    return Err(ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::Interrupted)));
+                }
+                then.borrow_mut().take().unwrap_or(Err(ureq::Error::Timeout(ureq::Timeout::Global)))
+            }
+        };
+        assert_eq!(get(interrupted_then(Ok(7))).unwrap(), 7);
+        assert_eq!(tries.swap(0, std::sync::atomic::Ordering::SeqCst), 2);
+        let twice = get(interrupted_then(Err(ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::Interrupted)))));
+        assert!(matches!(twice, Err(ureq::Error::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted));
+        assert_eq!(tries.swap(0, std::sync::atomic::Ordering::SeqCst), 2, "only once more");
+        let refused = get(|| -> Result<u8, ureq::Error> {
+            tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused)))
+        });
+        assert!(refused.is_err());
+        assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 1, "another failure is not tried again");
+    }
+
     /// Enforce both the body-size ceiling and a deadline when a server stalls.
     #[test]
     fn response_size_and_wall_clock_are_bounded() {

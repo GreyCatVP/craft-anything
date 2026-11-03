@@ -21,7 +21,7 @@ const ALL_KEYED: &[(&str, bool)] = &[("fal", true), ("scenario", true), ("eleven
 const NO_KEYS: &[(&str, bool)] = &[("fal", false), ("scenario", false), ("elevenlabs", false)];
 
 /// Quote model guidance with one checked ledger snapshot, as a builder prompt does.
-fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>) -> String {
+fn assets_note(ws: &Workspace) -> String {
     super::assets_note(&BriefCx {
         ws,
         deep: false,
@@ -30,8 +30,6 @@ fn assets_note(ws: &Workspace, image_model: Option<&str>, model_3d: Option<&str>
         assets: true,
         asset_providers: ALL_KEYED,
         asset_spent: ws.try_assets_spent().ok(),
-        image_model,
-        model_3d,
     })
 }
 
@@ -47,17 +45,7 @@ fn an_enabled_provider_without_a_key_is_not_offered() {
         m.assets.legacy_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
     })
     .unwrap();
-    let cx = |keys| BriefCx {
-        ws: &ws,
-        deep: false,
-        ghidra: false,
-        editor: None,
-        assets: true,
-        asset_providers: keys,
-        asset_spent: Some(0.0),
-        image_model: Some("scenario-gemini-3-1"),
-        model_3d: Some("scenario-meshy"),
-    };
+    let cx = |keys| BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: true, asset_providers: keys, asset_spent: Some(0.0) };
     // fal has a key but is disabled; Scenario is enabled without one.
     let only_audio: &[(&str, bool)] = &[("fal", true), ("scenario", false), ("elevenlabs", true)];
     let cx_audio = cx(only_audio);
@@ -81,17 +69,7 @@ fn an_enabled_provider_without_a_key_is_not_offered() {
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
     super::brief(
         kind(k).as_ref(),
-        &BriefCx {
-            asset_spent: ws.try_assets_spent().ok(),
-            ws,
-            deep,
-            ghidra,
-            editor,
-            assets,
-            asset_providers: if assets { ALL_KEYED } else { NO_KEYS },
-            image_model: None,
-            model_3d: None,
-        },
+        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep, ghidra, editor, assets, asset_providers: if assets { ALL_KEYED } else { NO_KEYS } },
         extra,
     )
 }
@@ -354,19 +332,15 @@ fn a_new_project_keeps_the_persons_asset_choice() {
     }
 }
 
-/// Art estimates follow configured image and 3D prices, with catalogue defaults for unknown models.
+/// Art estimates quote the asset table's default models, whatever Settings chose: the builder no
+/// longer picks models, and the project's choice per type is what the tools use.
 #[test]
 fn the_assets_note_reads_prices_from_the_asset_table() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     ws.manifest.generate_assets = true;
-    let before = assets_note(&ws, None, None);
-    assert!(before.contains("a picture (about $0.15)") && before.contains("(about $0.65 each)"), "{before}");
-    assert_eq!(assets_note(&ws, Some("no-such-model"), None), before, "an unknown model quotes the default's prices");
-    let schnell = assets_note(&ws, Some("flux-schnell"), None);
-    assert!(schnell.contains("(about $0.51 each)") && schnell.contains("a picture (about $0.01)"), "{schnell}");
-    let scenario = assets_note(&ws, Some("scenario-gemini-3-1"), Some("scenario-meshy"));
-    assert!(scenario.contains("(about $11.00 each)"), "configured 3D and image prices: {scenario}");
+    let note = assets_note(&ws);
+    assert!(note.contains("a picture (about $0.15)") && note.contains("(about $0.65 each)"), "{note}");
 }
 
 #[test]
@@ -1342,17 +1316,7 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     assert_eq!(checks.iter().map(|c| c.id()).collect::<Vec<_>>(), ["outline"]);
     let b = super::brief(
         &SlidesKind,
-        &BriefCx {
-            asset_spent: ws.try_assets_spent().ok(),
-            ws: &ws,
-            deep: false,
-            ghidra: false,
-            editor: None,
-            assets: false,
-            asset_providers: NO_KEYS,
-            image_model: None,
-            model_3d: None,
-        },
+        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws: &ws, deep: false, ghidra: false, editor: None, assets: false, asset_providers: NO_KEYS },
         None,
     );
     assert!(b.contains("What to build: a slide deck."), "{b}");
@@ -1524,17 +1488,7 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx {
-        asset_spent: Some(0.0),
-        ws,
-        deep: false,
-        ghidra: false,
-        editor: None,
-        assets: false,
-        asset_providers: NO_KEYS,
-        image_model: None,
-        model_3d: None,
-    };
+    let cx = |ws| BriefCx { asset_spent: Some(0.0), ws, deep: false, ghidra: false, editor: None, assets: false, asset_providers: NO_KEYS };
     assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
@@ -2568,8 +2522,6 @@ fn every_builder_hears_the_asset_choice_as_it_is_now() {
             editor: None,
             assets,
             asset_providers: if assets { ALL_KEYED } else { NO_KEYS },
-            image_model: None,
-            model_3d: None,
         }
     }
     assert!(project_assets_note(&cx(&ws, true)).contains("now off"));

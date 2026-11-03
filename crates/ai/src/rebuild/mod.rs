@@ -966,13 +966,11 @@ impl Worker {
         if spent.is_none() {
             snapshot.manifest.generate_assets = false;
         }
-        let (deep, ghidra, image_model, model_3d, providers) = {
+        let (deep, ghidra, providers) = {
             let session = self.engine.session();
             (
                 !session.clean_room(),
                 session.settings.ghidra_launcher().is_some(),
-                session.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Image),
-                session.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Model3d),
                 // The session's registry, so providers a fork registers are offered and checked too.
                 session.ext.get::<craft_anything_engines::assets::AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default(),
             )
@@ -988,8 +986,6 @@ impl Worker {
             assets: spent.is_some() && keyed.iter().any(|&(id, has_key)| has_key && snapshot.manifest.asset_provider_allowed(id)),
             asset_providers: &keyed,
             asset_spent: spent,
-            image_model: image_model.as_deref(),
-            model_3d: model_3d.as_deref(),
         };
         match prompt {
             BuilderPrompt::Initial { extra, api, originals } => {

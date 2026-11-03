@@ -778,7 +778,8 @@ mod tests {
     /// Restricting legacy all-provider permission must retain every other provider, including extensions.
     #[test]
     fn disabling_a_legacy_provider_keeps_other_registered_providers_enabled() {
-        use craft_anything_engines::assets::{AssetProvider, Generated, LegacyRequest};
+        use craft_anything_engines::assets::model::{ModelDetail, ModelList, Unit};
+        use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetRequest, Generated};
         struct Custom;
         impl AssetProvider for Custom {
             /// Register a provider outside the built-in catalogue to exercise permission preservation.
@@ -789,8 +790,17 @@ mod tests {
             fn name(&self) -> &'static str {
                 "Custom"
             }
+            fn unit(&self) -> Unit {
+                Unit::Usd
+            }
+            fn list_models(&self, _: Option<&str>, _: AssetKind) -> Result<ModelList, ToolError> {
+                Ok(ModelList { models: Vec::new(), error: None })
+            }
+            fn describe(&self, _: &str, _: &str) -> Result<ModelDetail, ToolError> {
+                Err(ToolError::invalid("test provider has no models"))
+            }
             /// Fail any generation attempt because this fixture only tests permission changes.
-            fn generate(&self, _: &str, _: &LegacyRequest) -> Result<Generated, ToolError> {
+            fn generate(&self, _: &str, _: &ModelDetail, _: &AssetRequest) -> Result<Generated, ToolError> {
                 Err(ToolError::invalid("test provider must not generate"))
             }
         }

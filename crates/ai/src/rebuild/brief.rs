@@ -207,19 +207,11 @@ pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
     if images || models {
         let table = Catalogue::built_in();
         let allowed = |provider: &str| provider_usable(cx, provider);
-        // Quote only usable models: a disabled or unkeyed configured default is not a usable estimate.
-        let picture = table
-            .image_model(cx.image_model)
-            .ok()
-            .filter(|m| allowed(&m.provider))
-            .or_else(|| table.image_model(None).ok().filter(|m| allowed(&m.provider)))
-            .or_else(|| table.images().iter().find(|m| allowed(&m.provider)));
-        let model = table
-            .model_3d(cx.model_3d)
-            .ok()
-            .filter(|m| allowed(&m.provider))
-            .or_else(|| table.model_3d(None).ok().filter(|m| allowed(&m.provider)))
-            .or_else(|| table.models_3d().iter().find(|m| allowed(&m.provider)));
+        // Quote only usable models: a disabled or unkeyed default is not a usable estimate. The
+        // generation tools use each type's model chosen in the project; until this note states
+        // those (Task 12 of the per-type assets plan), it quotes the old table's defaults.
+        let picture = table.image_model(None).ok().filter(|m| allowed(&m.provider)).or_else(|| table.images().iter().find(|m| allowed(&m.provider)));
+        let model = table.model_3d(None).ok().filter(|m| allowed(&m.provider)).or_else(|| table.models_3d().iter().find(|m| allowed(&m.provider)));
         if images {
             let price = picture.map(|m| format!(" ({})", about_usd(m.cost(Shape::Square)))).unwrap_or_default();
             note.push_str(&format!(" assets_image_generate makes a picture{price} for textures, skies, backgrounds and menu art."));
