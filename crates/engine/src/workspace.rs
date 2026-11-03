@@ -491,6 +491,8 @@ impl Manifest {
 
 /// The starting budget for generated assets.
 pub const ASSET_BUDGET_USD: f64 = 5.0;
+/// The largest budget a project or Settings accepts for generated assets.
+pub const MAX_ASSET_BUDGET_USD: f64 = 10_000.0;
 
 fn default_asset_budget() -> f64 {
     ASSET_BUDGET_USD

@@ -1414,5 +1414,5 @@ Shared asset budget (USD)	Общий бюджет ресурсов (USD)
 Asset budget in USD	Бюджет ресурсов в USD
 Save budget	Сохранить бюджет
 Saving asset settings…	Сохраняем настройки ресурсов…
-Enter an amount from 0 to 10000 USD.	Введите сумму от 0 до 10000 USD.
+Enter an amount from 0 to {max} USD.	Введите сумму от 0 до {max} USD.
 Asset spending is unavailable. Repair assets.json before generating.	Расходы на ресурсы недоступны. Исправьте assets.json перед генерацией.

@@ -629,7 +629,7 @@ impl CraftApp {
                     // A CLI or another app can change this budget while the sidebar is open.
                     // Raising starts from disk; an explicit Save still sets the typed amount.
                     let ws = Workspace::open(root)?;
-                    params["budget_usd"] = serde_json::json!((ws.manifest.asset_budget_usd + step).min(10_000.0));
+                    params["budget_usd"] = serde_json::json!((ws.manifest.asset_budget_usd + step).min(craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD));
                 }
                 engine.call(
                     tool,
@@ -732,15 +732,19 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
                 ui.add(egui::TextEdit::singleline(&mut draft.1).desired_width(100.0).frame(widgets::text_field_frame_compact(&t))),
                 "Asset budget in USD",
             );
-            let value = draft.1.trim().parse::<f64>().ok().filter(|v| v.is_finite() && (0.0..=10_000.0).contains(v));
+            let value =
+                draft.1.trim().parse::<f64>().ok().filter(|v| v.is_finite() && (0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD).contains(v));
             if ui.add_enabled(value.is_some_and(|v| v != budget), egui::Button::new(tr("Save budget"))).clicked()
                 && let Some(value) = value
             {
                 app.act("project_assets_budget", serde_json::json!({"project": ws.root, "budget_usd": value}), tr("Save asset settings"));
             }
         });
-        if !draft.1.trim().parse::<f64>().is_ok_and(|v| v.is_finite() && (0.0..=10_000.0).contains(&v)) {
-            widgets::caption(ui, "Enter an amount from 0 to 10000 USD.");
+        if !draft.1.trim().parse::<f64>().is_ok_and(|v| v.is_finite() && (0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD).contains(&v)) {
+            widgets::caption(
+                ui,
+                &trf("Enter an amount from 0 to {max} USD.", &[("max", format!("{:.0}", craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD).as_str())]),
+            );
         }
         ui.data_mut(|data| data.insert_temp(id, draft));
         let step = craft_anything_engines::assets::usd(app.asset_budget_step());

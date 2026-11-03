@@ -222,10 +222,10 @@ impl Default for Settings {
 }
 
 /// The current `config.toml` format version. Bumping it means appending a step to [`SETTINGS_STEPS`].
-pub const SETTINGS_VERSION: u32 = 3;
+pub const SETTINGS_VERSION: u32 = 4;
 
 /// The steps that bring an older `config.toml` forward; step `i` goes from version `i` to `i + 1`.
-const SETTINGS_STEPS: &[Step<toml::Table>] = &[settings_v0_to_v1, settings_v1_to_v2, settings_v2_to_v3];
+const SETTINGS_STEPS: &[Step<toml::Table>] = &[settings_v0_to_v1, settings_v1_to_v2, settings_v2_to_v3, settings_v3_to_v4];
 const _: () = assert!(SETTINGS_STEPS.len() == SETTINGS_VERSION as usize, "one step per config.toml version");
 
 /// Version 0 (no `version` key) has the same shape as version 1; only the number is new.
@@ -252,6 +252,12 @@ fn settings_v1_to_v2(table: &mut toml::Table) -> Result<(), String> {
 /// Version 3 adds more project folders and the answer about a picked folder's files; both start
 /// empty. The number is new so an older build doesn't save over the list (and lose it).
 fn settings_v2_to_v3(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
+/// Version 4 adds `[assets] model_3d`, the 3D generator's id in the asset table; missing keeps the
+/// table's default. The number is new so an older build doesn't save over the choice (and lose it).
+fn settings_v3_to_v4(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
@@ -658,7 +664,8 @@ default = "Claude Code"
         assert!(!pending_path.exists());
     }
 
-    /// Older settings receive safe asset defaults, while budget and model choices round-trip through disk.
+    /// Older settings receive safe asset defaults, while budget and model choices round-trip through disk
+    /// and survive the version 3 to 4 step.
     #[test]
     fn the_asset_budget_is_a_setting_and_old_configs_load() {
         let old: Settings = toml::from_str("mode = \"experienced\"\nauto_mode = false\n").unwrap();
@@ -673,6 +680,12 @@ default = "Claude Code"
         s.assets.model_3d = Some("scenario-meshy".into());
         s.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), s);
+        // Version 4 added `model_3d`: a version 3 config is brought forward with or without it,
+        // and a version 4 config is newer than a version 3 build, which won't save over it.
+        let v3 = read_settings("version = 3\n[assets]\nbudget_usd = 9.0\nimage_model = \"flux-dev\"\n").unwrap();
+        assert_eq!((v3.version, v3.assets.budget(), v3.assets.model_3d.as_deref()), (SETTINGS_VERSION, 9.0, None));
+        let kept = read_settings("version = 3\n[assets]\nmodel_3d = \"tripo-p1\"\n").unwrap();
+        assert_eq!((kept.version, kept.assets.model_3d.as_deref()), (4, Some("tripo-p1")));
         let odd: Settings = toml::from_str("[assets]\nbudget_usd = -3.0\n").unwrap();
         assert_eq!(odd.assets.budget(), 5.0, "a negative budget isn't used");
     }

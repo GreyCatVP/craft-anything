@@ -1415,5 +1415,5 @@ Shared asset budget (USD)	共享素材预算（美元）
 Asset budget in USD	素材预算（美元）
 Save budget	保存预算
 Saving asset settings…	正在保存素材设置…
-Enter an amount from 0 to 10000 USD.	请输入 0 到 10000 美元之间的金额。
+Enter an amount from 0 to {max} USD.	请输入 0 到 {max} 美元之间的金额。
 Asset spending is unavailable. Repair assets.json before generating.	无法读取素材支出。请先修复 assets.json，再生成素材。

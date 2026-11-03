@@ -674,7 +674,7 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
         "Budget for a new project",
         "What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.",
         |ui| {
-            changed |= number(ui, &mut a.budget_usd, 0.0..=10_000.0, "$", "");
+            changed |= number(ui, &mut a.budget_usd, 0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD, "$", "");
         },
     );
     let table = craft_anything_engines::assets::Catalogue::built_in();

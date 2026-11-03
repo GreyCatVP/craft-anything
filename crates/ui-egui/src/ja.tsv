@@ -870,5 +870,5 @@ Shared asset budget (USD)	素材の共有予算（USD）
 Asset budget in USD	素材の予算（USD）
 Save budget	予算を保存
 Saving asset settings…	素材設定を保存中…
-Enter an amount from 0 to 10000 USD.	0〜10000 USD の金額を入力してください。
+Enter an amount from 0 to {max} USD.	0〜{max} USD の金額を入力してください。
 Asset spending is unavailable. Repair assets.json before generating.	素材の支出を読み取れません。生成する前に assets.json を修復してください。

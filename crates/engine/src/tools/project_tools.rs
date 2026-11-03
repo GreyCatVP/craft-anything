@@ -239,8 +239,8 @@ fn project_assets_budget(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
     let mut ws = open(&p.project)?;
     let spent = ws.try_assets_spent()?;
     if let Some(b) = p.budget_usd {
-        if !b.is_finite() || !(0.0..=10_000.0).contains(&b) {
-            return Err(ToolError::invalid("budget_usd must be between 0 and 10000."));
+        if !b.is_finite() || !(0.0..=crate::workspace::MAX_ASSET_BUDGET_USD).contains(&b) {
+            return Err(ToolError::invalid(format!("budget_usd must be between 0 and {:.0}.", crate::workspace::MAX_ASSET_BUDGET_USD)));
         }
         ws.set_person(|m| m.asset_budget_usd = b)?;
     }
@@ -660,7 +660,7 @@ mod tests {
         assert_eq!(call(json!({"project": ws.root, "budget_usd": 12.5})).unwrap()["budget_usd"], 12.5);
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 12.5);
         assert!(call(json!({"project": ws.root, "budget_usd": -1})).is_err());
-        assert!(call(json!({"project": ws.root, "budget_usd": 10001})).is_err());
+        assert!(call(json!({"project": ws.root, "budget_usd": 10001})).unwrap_err().message.contains("between 0 and 10000"));
         ws.record_asset(crate::workspace::AssetRecord { file: "sound.mp3".into(), kind: "sound".into(), prompt: "chime".into(), cost_usd: 2.25, at_ms: 1 })
             .unwrap();
         let out = call(json!({"project": ws.root, "budget_usd": 1.75})).unwrap();
