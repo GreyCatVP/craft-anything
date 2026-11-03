@@ -473,6 +473,14 @@ pub trait AssetProvider: Send + Sync {
     /// paid work is returned through [`charged`] (or [`charged_unknown`]), so the caller records
     /// the charge even though no output arrived.
     fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError>;
+    /// [`AssetProvider::generate`] for a run whose limit was checked against `approved`, the estimate
+    /// [`AssetProvider::estimate`] gave. A provider that prices each run afresh just before it starts
+    /// it (a quote) must not start one that now costs more: it refuses, with nothing spent. One whose
+    /// estimate is the model's published price has nothing newer to compare with, which is the default.
+    fn generate_within(&self, key: &str, model: &ModelDetail, req: &AssetRequest, approved: Option<f64>) -> Result<Generated, ToolError> {
+        let _ = approved;
+        self.generate(key, model, req)
+    }
 }
 
 /// The [`ToolError::details`] field that carries a charge a failed generation already incurred:
@@ -518,8 +526,8 @@ pub fn was_charged(error: &ToolError) -> bool {
 
 /// The amount a failed generation reported through [`charged`]: `None` when it reported no charge
 /// or a charge of unknown cost (tell them apart with [`was_charged`]). A charge that is present
-/// but neither a number nor `null` reads as NaN, so the caller's cost check refuses it instead of
-/// ignoring it.
+/// but neither a number nor `null` reads as NaN, which no cost check passes: the caller records it
+/// as a charge whose amount can't be read, never as no charge.
 pub fn charged_amount(error: &ToolError) -> Option<f64> {
     match error.details.as_ref()?.get(CHARGED_AMOUNT)? {
         serde_json::Value::Null => None,
@@ -529,41 +537,45 @@ pub fn charged_amount(error: &ToolError) -> Option<f64> {
 
 /// How long a model's description is used before it is asked for again.
 const DESCRIBED_FOR: Duration = Duration::from_secs(10 * 60);
-/// The most descriptions kept at one time.
+/// The most descriptions one provider keeps at a time.
 const MAX_DESCRIBED: usize = 256;
 
-/// Which description: the provider and the address it was asked at, a fingerprint of the key it
-/// was asked with (prices and models can be an account's own), and the model.
-type DescribedKey = (String, u64, String);
+/// Which description: a fingerprint of the key it was asked with (prices and models can be an
+/// account's own), and the model.
+type DescribedKey = (u64, String);
 
-fn described_models() -> &'static Mutex<HashMap<DescribedKey, (Instant, ModelDetail)>> {
-    static DESCRIBED: OnceLock<Mutex<HashMap<DescribedKey, (Instant, ModelDetail)>>> = OnceLock::new();
-    DESCRIBED.get_or_init(Mutex::default)
+/// The models one provider described in the last ten minutes. Each provider keeps its own; the
+/// built-in ones live as long as the process ([`AssetProviders::built_in`]).
+#[derive(Default)]
+pub(crate) struct Described {
+    kept: Mutex<HashMap<DescribedKey, (Instant, ModelDetail)>>,
 }
 
-/// What `describe` gives for `model`, or what it gave in the last ten minutes for the same
-/// provider address (`place`), key and model. Errors are not kept: a model that could not be
-/// described is asked about again next time. The lock is never held while `describe` runs.
-pub(crate) fn described(place: &str, key: &str, model: &str, describe: impl FnOnce() -> Result<ModelDetail, ToolError>) -> Result<ModelDetail, ToolError> {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    key.hash(&mut hasher);
-    let id: DescribedKey = (place.to_string(), hasher.finish(), model.to_string());
-    if let Ok(kept) = described_models().lock()
-        && let Some((at, detail)) = kept.get(&id)
-        && at.elapsed() < DESCRIBED_FOR
-    {
-        return Ok(detail.clone());
-    }
-    let detail = describe()?;
-    if let Ok(mut kept) = described_models().lock() {
-        kept.retain(|_, (at, _)| at.elapsed() < DESCRIBED_FOR);
-        if kept.len() >= MAX_DESCRIBED {
-            kept.clear();
+impl Described {
+    /// What `describe` gives for `model`, or what it gave in the last ten minutes for the same key
+    /// and model. Errors are not kept: a model that could not be described is asked about again
+    /// next time. The lock is never held while `describe` runs.
+    pub(crate) fn get_or(&self, key: &str, model: &str, describe: impl FnOnce() -> Result<ModelDetail, ToolError>) -> Result<ModelDetail, ToolError> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        let id: DescribedKey = (hasher.finish(), model.to_string());
+        if let Ok(kept) = self.kept.lock()
+            && let Some((at, detail)) = kept.get(&id)
+            && at.elapsed() < DESCRIBED_FOR
+        {
+            return Ok(detail.clone());
         }
-        kept.insert(id, (Instant::now(), detail.clone()));
+        let detail = describe()?;
+        if let Ok(mut kept) = self.kept.lock() {
+            kept.retain(|_, (at, _)| at.elapsed() < DESCRIBED_FOR);
+            if kept.len() >= MAX_DESCRIBED {
+                kept.clear();
+            }
+            kept.insert(id, (Instant::now(), detail.clone()));
+        }
+        Ok(detail)
     }
-    Ok(detail)
 }
 
 /// The asset providers a project can use.
@@ -585,9 +597,15 @@ impl Default for AssetProviders {
 }
 
 impl AssetProviders {
-    /// fal.ai, Scenario and ElevenLabs.
+    /// fal.ai, Scenario and ElevenLabs: the same ones for the whole process, so what they keep (the
+    /// models they described lately) outlasts one tool call.
     pub fn built_in() -> AssetProviders {
-        AssetProviders { providers: vec![Arc::new(fal::Fal::default()), Arc::new(scenario::Scenario::default()), Arc::new(elevenlabs::ElevenLabs::default())] }
+        static BUILT_IN: OnceLock<AssetProviders> = OnceLock::new();
+        BUILT_IN
+            .get_or_init(|| AssetProviders {
+                providers: vec![Arc::new(fal::Fal::default()), Arc::new(scenario::Scenario::default()), Arc::new(elevenlabs::ElevenLabs::default())],
+            })
+            .clone()
     }
 
     /// Add a provider, or replace the one with the same id.
@@ -893,23 +911,43 @@ mod tests {
     /// A model is described once for ten minutes per provider address, key and model; a failure is
     /// asked about again.
     #[test]
-    fn a_description_is_kept_per_place_key_and_model() {
+    fn a_description_is_kept_per_provider_key_and_model() {
         let asked = std::sync::atomic::AtomicUsize::new(0);
-        let place = format!("test {:?}", Instant::now());
         let describe = || {
             asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Stub.describe("k", "m")
         };
         let count = || asked.load(std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(described(&place, "k", "m", describe).unwrap().id, "m");
-        assert_eq!(described(&place, "k", "m", describe).unwrap().id, "m");
+        let (kept, elsewhere) = (Described::default(), Described::default());
+        assert_eq!(kept.get_or("k", "m", describe).unwrap().id, "m");
+        assert_eq!(kept.get_or("k", "m", describe).unwrap().id, "m");
         assert_eq!(count(), 1, "the second time is kept");
-        described(&place, "other key", "m", describe).unwrap();
-        described(&format!("{place} elsewhere"), "k", "m", describe).unwrap();
-        described(&place, "k", "another model", describe).unwrap();
-        assert_eq!(count(), 4, "another key, address or model is asked about");
+        kept.get_or("other key", "m", describe).unwrap();
+        elsewhere.get_or("k", "m", describe).unwrap();
+        kept.get_or("k", "another model", describe).unwrap();
+        assert_eq!(count(), 4, "another key, provider or model is asked about");
         let gone = || Err(ToolError::new(ErrorCode::BadSettings, "gone"));
-        assert!(described(&place, "k", "gone", gone).is_err());
-        assert!(described(&place, "k", "gone", describe).is_ok(), "a failure is not kept");
+        assert!(kept.get_or("k", "gone", gone).is_err());
+        assert!(kept.get_or("k", "gone", describe).is_ok(), "a failure is not kept");
+    }
+
+    /// The built-in providers are the same ones on every call, so what they keep lasts; a registry
+    /// a caller changes is its own copy.
+    #[test]
+    fn the_built_in_providers_are_shared() {
+        let (a, mut b) = (AssetProviders::built_in(), AssetProviders::built_in());
+        for id in ["fal", "scenario", "elevenlabs"] {
+            assert!(Arc::ptr_eq(&a.get(id).unwrap(), &b.get(id).unwrap()), "{id}");
+        }
+        b.register(Arc::new(Stub));
+        assert!(a.get("stub").is_none() && AssetProviders::built_in().get("stub").is_none());
+    }
+
+    /// By default a run doesn't compare its price with the one approved: there is nothing newer.
+    #[test]
+    fn generating_within_an_approved_price_is_generating_by_default() {
+        let model = Stub.describe("k", "m").unwrap();
+        let req = AssetRequest::Image { prompt: "a crate", shape: Shape::Square };
+        assert_eq!(Stub.generate_within("k", &model, &req, Some(0.0)).unwrap().cost, Some(3.0));
     }
 }

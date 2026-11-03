@@ -10,7 +10,7 @@
 use crate::inbox::Inbox;
 use crate::settings::AssetSettings;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
-use crate::tools::interaction_tools::{Verdict, ask_approval, inbox, inside, resolve, workspace_of};
+use crate::tools::interaction_tools::{Approval, ask_approval_or_always, inbox, inside, resolve, workspace_of};
 use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, TypeAssets, TypeUsage, Workspace};
 use craft_anything_engines::assets::inputs::map_request;
 use craft_anything_engines::assets::model::{ModelDetail, Unit, amount};
@@ -22,7 +22,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// The person's key for each asset provider (by provider id), put in the session by the tool
 /// server (read from the keychain; a key never travels on a command line or into a log).
@@ -36,9 +36,10 @@ impl AssetKeys {
     }
 }
 
-/// Remembered, per asset type, when the person says "always" to going over its limit.
-fn over_limit_approval(kind: AssetKind) -> String {
-    format!("assets:over-budget:{}", kind.id())
+/// The action an over-limit card for `kind` names. Its "Always" is not remembered as an allowed
+/// action: it switches the type's limit off, where the person sees it.
+fn over_limit_card(kind: AssetKind) -> String {
+    format!("assets:limit:{}", kind.id())
 }
 
 /// How long a generation waits for another process's generation in the same project to finish.
@@ -475,7 +476,8 @@ impl Ready {
 
     /// What this type's receipts say besides where each went and what it cost.
     fn receipt<'a>(&'a self, from: &'a str) -> Receipt<'a> {
-        Receipt { kind: self.kind, from, provider: self.provider.id(), model: &self.t.choice.model, unit: self.t.choice.unit }
+        let tracked = self.limited().choice.pricing.tracked();
+        Receipt { kind: self.kind, from, provider: self.provider.id(), model: &self.t.choice.model, unit: self.t.choice.unit, tracked }
     }
 }
 
@@ -488,20 +490,31 @@ struct Receipt<'a> {
     provider: &'a str,
     model: &'a str,
     unit: Unit,
+    /// The type's price was one to count with when it ran, so a cost was expected.
+    tracked: bool,
+}
+
+/// Whether a reported amount is one to count with: a number, not below nothing.
+fn believable(amount: f64) -> bool {
+    amount.is_finite() && amount >= 0.0
 }
 
 impl Receipt<'_> {
-    /// The ledger row for `rel`; no amount when the provider gave no cost that can be believed.
+    /// The ledger row for `rel`, with the amount the provider reported when it can be believed. No
+    /// amount is a missing cost when one was expected (the type was tracked); a reported amount
+    /// that can't be believed (not a number, below nothing) is kept as a missing cost, never as
+    /// no row: the next generation of the type then asks.
     fn record(&self, rel: &str, amount: Option<f64>) -> AssetRecord {
+        let counted = amount.filter(|&a| believable(a));
         AssetRecord {
             file: rel.to_string(),
             kind: self.kind.ledger_name().into(),
             prompt: self.from.chars().take(1000).collect(),
             provider: self.provider.into(),
             model: self.model.into(),
-            amount,
+            amount: counted,
             unit: Some(self.unit),
-            cost_missing: amount.is_none(),
+            cost_missing: if amount.is_some() { counted.is_none() } else { self.tracked },
             at_ms: crate::inbox::now_ms(),
         }
     }
@@ -509,19 +522,26 @@ impl Receipt<'_> {
     /// What the provider may have charged, in words.
     fn charge(&self, amount: Option<f64>) -> String {
         match amount {
-            Some(a) => exact(self.unit, a),
+            Some(a) if believable(a) => exact(self.unit, a),
+            Some(_) => "an amount that can't be read".into(),
             None => "an amount it did not say".into(),
         }
     }
 }
 
-/// Go ahead if the type's limit allows this generation, else ask the person (unless they said
-/// "always" for this type). Usage is the type's own, under its provider and in its unit, from a
-/// checked ledger read. A limit applies when it is switched on, the project doesn't ignore the
-/// budget and the type's price is one to count with. With an estimate, usage plus the estimate
-/// must stay within the limit; without one (a cost known only after the run) a generation may
-/// start while usage is under the limit, and so may pass it once. A generation whose cost could not
-/// be read leaves usage unknown, so every later one asks until the person allows it.
+/// Whether `t`'s limit is enforced in this project: it is switched on, the project doesn't ignore
+/// the budget, and the type's price is one to count with.
+fn limit_applies(ws: &Workspace, t: &TypeAssets) -> bool {
+    t.limit_on && !ws.manifest.assets.ignore_budget && t.choice.pricing.tracked()
+}
+
+/// Go ahead if the type's limit allows this generation, else ask the person. Usage is the type's
+/// own, under its provider and in its unit, from a checked ledger read. A limit applies when
+/// [`limit_applies`]. With an estimate, usage plus the estimate must stay within the limit; without
+/// one (a cost known only after the run) a generation may start while usage is under the limit, and
+/// so may pass it once. A generation whose cost could not be read leaves usage unknown, so every
+/// later one asks until the person allows it. "Always" switches the type's limit off, through the
+/// person's own settings, where they see it and can switch it back on.
 fn within_limit(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, kind: AssetKind, t: &TypeAssets, estimate: Option<f64>) -> Result<(), ToolError> {
     let usage = ws.try_type_usage(kind, t)?;
     valid_cost(usage.amount)?;
@@ -529,15 +549,10 @@ fn within_limit(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, kind: Asse
         valid_cost(e)?;
         valid_cost(usage.amount + e)?;
     }
-    let limited = t.limit_on && !ws.manifest.assets.ignore_budget && t.choice.pricing.tracked();
-    if !limited {
+    if !limit_applies(ws, t) {
         return Ok(());
     }
     valid_cost(t.limit)?;
-    let approval = over_limit_approval(kind);
-    if ws.manifest.allowed_actions.contains(&approval) {
-        return Ok(());
-    }
     let within = match estimate {
         Some(e) => usage.amount + e <= t.limit + EPSILON,
         None => usage.amount + EPSILON < t.limit,
@@ -575,10 +590,21 @@ fn within_limit(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, kind: Asse
     if estimate.is_none() {
         detail.push_str(" This model's cost is known only after it runs.");
     }
-    detail.push_str(&format!(" Allow once for this {one}, or always to let the builder keep generating {many} for this project."));
-    match ask_approval(ctx, inbox, Some(ws), &title, &detail, &approval)? {
-        Verdict::Yes => Ok(()),
-        Verdict::No(_) | Verdict::NoAnswer => Err(stop(format!("The limit for {many} is reached and the person didn't allow more."))),
+    detail
+        .push_str(&format!(" Allow once for this {one}, or always to switch this project's limit for {many} off (it can be switched back on {CHOOSE_AGAIN})."));
+    match ask_approval_or_always(ctx, inbox, &title, &detail, &over_limit_card(kind))? {
+        Approval::Once => Ok(()),
+        Approval::Always => {
+            let settings = ctx.session.settings.assets.clone();
+            let mut switched = Ok(());
+            let saved = ws.set_person(|m| switched = m.assets.set_limit(kind, None, Some(false), &settings));
+            // The person allowed this one either way; a switch that couldn't be saved asks next time.
+            if let Err(e) = saved.and(switched) {
+                ctx.report(None, format!("The limit for {many} could not be switched off: {}", e.message));
+            }
+            Ok(())
+        }
+        Approval::Refused => Err(stop(format!("The limit for {many} is reached and the person didn't allow more."))),
     }
 }
 
@@ -588,34 +614,31 @@ fn within_limit(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, kind: Asse
 /// output are kept.
 fn make(ws: &Workspace, ready: &Ready, req: &AssetRequest<'_>, path: &Path, rel: &str, from: &str, estimate: Option<f64>) -> Result<Generated, ToolError> {
     let receipt = ready.receipt(from);
-    let g = ready.provider.generate(&ready.key, &ready.model, req).map_err(|e| record_charge(ws, &receipt, ready.kind, rel, e))?;
+    // The run may not start at a price above the one its limit was checked against.
+    let g = ready.provider.generate_within(&ready.key, &ready.model, req, estimate).map_err(|e| record_charge(ws, &receipt, ready.kind, rel, e))?;
     keep(ws, path, rel, &receipt, &g)?;
     within_estimate(rel, g.cost, estimate, ready.t.choice.unit)?;
     Ok(g)
 }
 
-/// Record the charge a failed generation reported, and say so in its error. An invalid or
-/// unrecordable charge is reported instead of being dropped; a charge of unknown cost is recorded
-/// as a generation without an amount.
+/// Record the charge a failed generation reported, and say so in its error. A charge of unknown
+/// cost, or one that can't be read, is recorded as a generation without an amount; a charge the
+/// ledger can't take is reported, never dropped.
 fn record_charge(ws: &Workspace, receipt: &Receipt<'_>, kind: AssetKind, rel: &str, error: ToolError) -> ToolError {
     if !was_charged(&error) {
         return error;
     }
     let amount = charged_amount(&error);
     let (many, _) = type_words(kind);
-    let recorded = || {
-        if let Some(a) = amount {
-            valid_cost(a)?;
-        }
-        ws.record_asset(receipt.record(rel, amount))
-    };
-    match recorded() {
+    let row = receipt.record(rel, amount);
+    let counted = row.amount;
+    match ws.record_asset(row) {
         Ok(()) => {
             let note = format!(
                 "The charge already counts against the project's limit for {many}. Do not blindly regenerate or retry: check the provider's job and account first."
             );
             let remediation = Some(error.remediation.as_deref().map_or_else(|| note.clone(), |r| format!("{r} {note}")));
-            let said = match amount {
+            let said = match counted {
                 Some(_) => format!("this was recorded as spending for {rel}, which was not saved."),
                 None => format!("this was recorded as spending of unknown amount for {rel}, which was not saved."),
             };
@@ -635,15 +658,25 @@ fn record_charge(ws: &Workspace, receipt: &Receipt<'_>, kind: AssetKind, rel: &s
 
 /// Record a paid generation before preparing or saving its output. A failed save keeps the receipt;
 /// a failed receipt leaves the destination untouched. These two files are not a crash-atomic transaction.
+///
+/// A cost the provider reported that can't be believed is recorded as a missing one, and the output
+/// is not published: something about the run is wrong.
 fn keep(ws: &Workspace, path: &Path, rel: &str, receipt: &Receipt<'_>, g: &Generated) -> Result<(), ToolError> {
-    if let Some(cost) = g.cost {
-        valid_cost(cost)?;
-    }
     let charged = receipt.charge(g.cost);
     ws.record_asset(receipt.record(rel, g.cost)).map_err(|e| {
         ToolError::new(e.code, format!("Asset spending could not be recorded; the provider may have charged {charged}. Output was not saved: {}", e.message))
             .with_remediation("Do not blindly regenerate or retry: check the provider charge and repair the asset ledger first.")
     })?;
+    if g.cost.is_some_and(|c| !believable(c)) {
+        let (many, one) = type_words(receipt.kind);
+        return Err(ToolError::new(
+            ErrorCode::GarbledOutput,
+            format!("The provider reported a cost for {rel} that is not an amount; it was recorded as a {one} of unknown cost, and {rel} was not saved."),
+        )
+        .with_remediation(format!(
+            "Do not blindly regenerate or retry: check the provider charge first. The next generation of {many} asks before it spends."
+        )));
+    }
     let save = || {
         confined(&ws.root, &ws.app_dir())?;
         confined(&ws.app_dir(), path)?;
@@ -689,7 +722,7 @@ fn summary(ws: &Workspace, ready: &Ready, saved: &str, made: &Generated, extra: 
         .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and check the asset ledger before continuing.")
     })?;
     let t = ready.limited();
-    let limited = t.limit_on && !ws.manifest.assets.ignore_budget && t.choice.pricing.tracked();
+    let limited = limit_applies(ws, &t);
     let mut v = json!({
         "saved": saved,
         "kind": ready.kind.id(),
@@ -735,9 +768,12 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
 }
 
 /// A stand-in for the picture a 3D model will be made from, which doesn't exist yet when the
-/// model's cost is asked for: one transparent pixel, inline, so a provider that quotes the very
-/// request has a real picture to look at.
-const PREFLIGHT_PICTURE: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+/// model's cost is asked for: a plain light-grey PNG of the size a picture is made at (1024×1024),
+/// sent inline, so a provider that quotes the very request has a real picture of the real size.
+fn preflight_picture() -> &'static str {
+    static PICTURE: OnceLock<String> = OnceLock::new();
+    PICTURE.get_or_init(|| fal::data_uri(include_bytes!("preflight-picture.png"), "image/png"))
+}
 
 /// What a 3D model is made from.
 enum Start {
@@ -771,7 +807,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         (None, None) => return Err(ToolError::invalid("give a prompt or an image")),
         (None, Some(prompt)) => {
             let roles = InputRoles::built_in();
-            let takes_picture = map_request(&solid.model.fields, &request(Some(PREFLIGHT_PICTURE), None), roles).is_ok();
+            let takes_picture = map_request(&solid.model.fields, &request(Some(preflight_picture()), None), roles).is_ok();
             let words = AssetRequest::Model3d { image_url: None, prompt: Some(prompt), textured, faces };
             let takes_words = map_request(&solid.model.fields, &words, roles);
             let pictures_on = j.ws.manifest.asset_type_on(AssetKind::Image, &j.settings).is_some();
@@ -804,7 +840,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let model_estimate = match &start {
         Start::Given(url) => solid.estimate(&AssetRequest::Model3d { image_url: Some(url), prompt: None, textured, faces })?,
         // The picture isn't made yet; what a model costs doesn't depend on it.
-        Start::Made(_) => solid.estimate(&request(Some(PREFLIGHT_PICTURE), None))?,
+        Start::Made(_) => solid.estimate(&request(Some(preflight_picture()), None))?,
         Start::Words => solid.estimate(&AssetRequest::Model3d { image_url: None, prompt: Some(words), textured, faces })?,
     };
     let picture_estimate = match &start {
@@ -911,7 +947,7 @@ mod tests {
 
     /// A spoken line made at ElevenLabs, as a receipt records it.
     fn speech() -> Receipt<'static> {
-        Receipt { kind: AssetKind::Speech, from: "hi", provider: "elevenlabs", model: "eleven_v3", unit: Unit::Credits }
+        Receipt { kind: AssetKind::Speech, from: "hi", provider: "elevenlabs", model: "eleven_v3", unit: Unit::Credits, tracked: true }
     }
 
     /// A dollar receipt written by hand, to stand for spending already in the ledger.
@@ -972,13 +1008,24 @@ mod tests {
         detail(id, kind, fields, pricing)
     }
 
-    /// One request a stand-in was asked to run.
+    /// One request a stand-in was asked to run or to price.
     #[derive(Debug, Clone, PartialEq)]
     struct Call {
         kind: AssetKind,
         model: String,
         picture: Option<String>,
         words: Option<String>,
+    }
+
+    impl Call {
+        fn of(model: &ModelDetail, req: &AssetRequest) -> Call {
+            let (picture, words) = match *req {
+                AssetRequest::Model3d { image_url, prompt, .. } => (image_url.map(str::to_string), prompt.map(str::to_string)),
+                AssetRequest::Image { prompt, .. } => (None, Some(prompt.to_string())),
+                _ => (None, None),
+            };
+            Call { kind: req.kind(), model: model.id.clone(), picture, words }
+        }
     }
 
     /// Stands in for a provider: describes the models it holds, records each estimate and run,
@@ -997,7 +1044,9 @@ mod tests {
         /// A project whose spending lock is looked at during each run: whether it was held.
         probe: Option<(PathBuf, Mutex<Option<bool>>)>,
         calls: Mutex<Vec<Call>>,
-        estimates: Mutex<Vec<AssetKind>>,
+        estimates: Mutex<Vec<Call>>,
+        /// The estimate each run was approved within, as the generation passed it on.
+        approved: Mutex<Vec<Option<f64>>>,
         described: Mutex<Vec<String>>,
     }
 
@@ -1025,6 +1074,7 @@ mod tests {
                 probe: None,
                 calls: Mutex::default(),
                 estimates: Mutex::default(),
+                approved: Mutex::default(),
                 described: Mutex::default(),
             }
         }
@@ -1075,7 +1125,7 @@ mod tests {
         /// Record quote requests, refuse a request the model can't take, and return the injected amount or the model's price.
         fn estimate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
             assert_eq!(key, "sk-test");
-            self.estimates.lock().unwrap().push(req.kind());
+            self.estimates.lock().unwrap().push(Call::of(model, req));
             map_request(&model.fields, req, InputRoles::built_in())?;
             Ok(self.estimate.unwrap_or_else(|| estimate_from(&model.pricing, req)))
         }
@@ -1083,12 +1133,7 @@ mod tests {
         fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
             assert_eq!(key, "sk-test");
             let mapped = map_request(&model.fields, req, InputRoles::built_in())?;
-            let (picture, words) = match *req {
-                AssetRequest::Model3d { image_url, prompt, .. } => (image_url.map(str::to_string), prompt.map(str::to_string)),
-                AssetRequest::Image { prompt, .. } => (None, Some(prompt.to_string())),
-                _ => (None, None),
-            };
-            self.calls.lock().unwrap().push(Call { kind: req.kind(), model: model.id.clone(), picture, words });
+            self.calls.lock().unwrap().push(Call::of(model, req));
             if let Some((root, held)) = &self.probe {
                 // A second handle stands for another process sharing the project.
                 *held.lock().unwrap() = Some(Workspace::open(root).unwrap().lock_spending(Duration::ZERO).is_err());
@@ -1099,6 +1144,11 @@ mod tests {
                 return Err(charged_or_unknown(failed, charge));
             }
             Ok(Generated { url: "https://stand-in/picture.png".into(), bytes: b"generated".to_vec(), cost, ignored: mapped.ignored })
+        }
+        /// Record the estimate the run was approved within, then run it.
+        fn generate_within(&self, key: &str, model: &ModelDetail, req: &AssetRequest, approved: Option<f64>) -> Result<Generated, ToolError> {
+            self.approved.lock().unwrap().push(approved);
+            self.generate(key, model, req)
         }
     }
 
@@ -1314,7 +1364,7 @@ mod tests {
     }
 
     #[test]
-    fn a_limit_asks_before_going_over_and_remembers_always_for_its_type() {
+    fn a_limit_asks_before_going_over_and_always_switches_it_off() {
         let (_d, mut w) = ws();
         choose(&mut w, AssetKind::Model3d, "fal", "solid", Unit::Usd, price(Unit::Usd, 0.48), 5.0);
         choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, price(Unit::Usd, 0.48), 5.0);
@@ -1333,16 +1383,28 @@ mod tests {
         // Under the limit: no question.
         within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.03)).unwrap();
         assert!(inbox.pending().is_empty());
-        // Over it: asked; "no" stops, "always" lifts the limit of this type for the project.
+        // Over it: asked; "no" stops, "once" lets this one through and asks next time.
         let t = answer_when_asked(&w, false, false, "$0.48");
         assert_eq!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap_err().code, ErrorCode::OverLimit);
         t.join().unwrap();
+        let t = answer_when_asked(&w, true, false, "3D models");
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap();
+        t.join().unwrap();
+        assert!(Workspace::open(&w.root).unwrap().manifest.assets.types[&AssetKind::Model3d].limit_on, "once leaves the limit on");
+        // "Always" switches this type's limit off, in the person's own settings, where the panel shows it.
         let t = answer_when_asked(&w, true, true, "3D models");
         within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap();
         t.join().unwrap();
-        assert!(Workspace::open(&w.root).unwrap().manifest.allowed_actions.iter().any(|k| k == "assets:over-budget:model_3d"));
+        let saved = Workspace::open(&w.root).unwrap().manifest;
+        assert!(!saved.assets.types[&AssetKind::Model3d].limit_on, "the 3D limit is off");
+        assert!(saved.assets.types[&AssetKind::Image].limit_on, "the pictures limit is not");
+        assert!(!saved.allowed_actions.iter().any(|k| k.starts_with("assets:")), "no hidden permission: {:?}", saved.allowed_actions);
+        assert_eq!(w.manifest.assets.types[&AssetKind::Model3d].limit, 5.0, "the limit itself is kept for when it is switched back on");
+        let models = w.manifest.assets.types[&AssetKind::Model3d].clone();
         within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(10.0)).unwrap();
-        assert!(inbox.pending().is_empty(), "after \"always\" it doesn't ask again for 3D models");
+        assert!(inbox.pending().is_empty(), "with the limit off it doesn't ask again for 3D models");
+        // An answer of "always" from before limits were per type lifts nothing.
+        w.set_person(|m| m.allowed_actions.push("assets:over-budget".into())).unwrap();
         // Pictures have a limit of their own, which "always" for 3D models doesn't lift.
         let t = answer_when_asked(&w, false, false, "pictures");
         assert_eq!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &pictures, Some(0.48)).unwrap_err().code, ErrorCode::OverLimit);
@@ -1431,32 +1493,108 @@ mod tests {
             within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(0.1)).unwrap();
             asked.join().unwrap();
         }
-        // Always: it stops asking for pictures.
+        // Always: the limit for pictures is switched off, so it stops asking.
         let asked = answer_when_asked(&w, true, true, "pictures");
         within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(0.1)).unwrap();
         asked.join().unwrap();
+        let t = w.manifest.assets.types[&AssetKind::Image].clone();
+        assert!(!t.limit_on);
         within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(0.1)).unwrap();
         assert!(inbox.pending().is_empty());
     }
 
     /// A model the provider has no price for runs without a limit, and each generation is counted
-    /// without an amount.
+    /// without an amount, and without a missing cost: none was expected.
     #[test]
     fn an_untracked_model_runs_and_is_counted_without_an_amount() {
         let (_d, mut w) = ws();
-        let stub = Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown));
+        let stub = Recording { cost: Some(Some(1.0)), ..Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown)) };
         let (engine, stub) = recording_engine(&mut w, stub);
-        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, Pricing::Unknown, 0.0);
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, Pricing::Unknown, 0.5);
         for i in 0..3 {
             let v = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": format!("crate-{i}.png")})).unwrap();
-            assert_eq!((v["cost"].clone(), v["limit"].clone(), v["generations"].as_u64()), (Value::Null, Value::Null, Some(i + 1)));
+            assert_eq!((v["limit"].clone(), v["left"].clone(), v["generations"].as_u64()), (Value::Null, Value::Null, Some(i + 1)));
         }
-        assert_eq!(stub.calls().len(), 3, "a zero limit doesn't stop a type whose usage isn't tracked");
-        assert!(w.try_assets().unwrap().iter().all(|r| r.amount.is_none() && r.model == "pic"));
-        // A model whose price became known is limited again, whatever the project was shown.
+        assert_eq!(stub.calls().len(), 3, "three dollar runs against a fifty-cent limit: the limit doesn't apply to a type whose price is unknown");
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+        // Without a cost from the provider: counted, no amount, and nothing missing.
+        let unpriced = Recording { cost: Some(None), ..Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown)) };
+        let v = call(&engine_with(&w, vec![Arc::new(unpriced)]), "assets_image_generate", json!({"prompt": "a crate", "save_as": "plain.png"})).unwrap();
+        assert_eq!((v["cost"].clone(), v["cost_missing"].as_bool(), v["generations"].as_u64()), (Value::Null, Some(false), Some(4)));
+        let last = w.try_assets().unwrap().pop().unwrap();
+        assert_eq!((last.amount, last.cost_missing, last.model.as_str()), (None, false, "pic"));
+    }
+
+    /// Generations made while a type's price was unknown never block it once the model has a price:
+    /// the priced model runs under its limit without asking, and its limit then holds.
+    #[test]
+    fn generations_without_a_price_never_block_a_price_that_becomes_known() {
+        let (_d, mut w) = ws();
+        let unpriced = Recording { cost: Some(None), ..Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown)) };
+        let (engine, _) = recording_engine(&mut w, unpriced);
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, Pricing::Unknown, 0.15);
+        for i in 0..3 {
+            call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": format!("crate-{i}.png")})).unwrap();
+        }
+        assert!(w.try_assets().unwrap().iter().all(|r| r.amount.is_none() && !r.cost_missing));
+        // The same provider now prices the model (or the person picks a priced one there): the count
+        // goes on, and the earlier generations are not an unknown cost.
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, price(Unit::Usd, 0.1), 0.15);
         let priced = Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", price(Unit::Usd, 0.1)));
         let engine = engine_with(&w, vec![Arc::new(priced)]);
-        assert_eq!(call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "late.png"})).unwrap_err().code, ErrorCode::OverLimit);
+        let v = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "priced.png"})).unwrap();
+        assert_eq!(
+            (v["used"].as_f64(), v["generations"].as_u64(), v["cost_missing"].as_bool(), v["left"].as_f64()),
+            (Some(0.1), Some(4), Some(false), Some(0.05))
+        );
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty(), "under its limit: not asked (Auto mode would have stopped)");
+        // And its limit holds: another ten cents would pass fifteen.
+        assert_eq!(call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "over.png"})).unwrap_err().code, ErrorCode::OverLimit);
+    }
+
+    /// The picture a 3D model's price is asked with, before its picture is made, is a real picture
+    /// of the size pictures are made at.
+    #[test]
+    fn the_stand_in_picture_is_a_full_size_picture() {
+        let uri = preflight_picture();
+        let b64 = uri.strip_prefix("data:image/png;base64,").unwrap();
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
+        assert_eq!((reader.info().width, reader.info().height), (1024, 1024));
+    }
+
+    /// Each run is started within the estimate its limit was checked against, so a provider that
+    /// prices it again just before starting can refuse a higher price.
+    #[test]
+    fn a_run_starts_within_the_estimate_its_limit_approved() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("scenario", Unit::Credits, 20.0));
+        call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap();
+        call(&engine, "assets_model_generate", json!({"prompt": "a crate", "save_as": "crate.glb"})).unwrap();
+        assert_eq!(*stub.approved.lock().unwrap(), [Some(20.0), Some(20.0), Some(20.0)], "a picture, then a picture and the model made from it");
+        // The model made from a picture still to be made was priced with the full-size stand-in picture.
+        let priced: Vec<Call> = stub.estimates.lock().unwrap().iter().filter(|c| c.kind == AssetKind::Model3d).cloned().collect();
+        assert_eq!(priced.len(), 1);
+        assert_eq!(priced[0].picture.as_deref(), Some(preflight_picture()));
+    }
+
+    /// A 3D model's limit that refuses the run stops it before the picture made first is paid for.
+    #[test]
+    fn a_3d_limit_refusal_stops_before_the_picture_is_paid_for() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+        w.set_person(|m| {
+            if let Some(t) = m.assets.types.get_mut(&AssetKind::Model3d) {
+                t.limit = 0.05;
+            }
+        })
+        .unwrap();
+        let error = call(&engine, "assets_model_generate", json!({"prompt": "a crate", "save_as": "crate.glb"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OverLimit);
+        assert!(error.message.contains("3D models"), "{}", error.message);
+        assert!(stub.calls().is_empty(), "no picture was made");
+        assert!(w.try_assets().unwrap().is_empty() && !w.app_dir().join("crate.png").exists());
     }
 
     /// From a description: the pictures choice makes a picture first, counted as a picture, when the
@@ -1652,10 +1790,18 @@ mod tests {
         let unknown = engine_with(&w, vec![Arc::new(Recording { fails_charging: Some(None), ..Recording::new("elevenlabs", Unit::Credits, 10.0) })]);
         assert!(sound(&unknown).message.contains("spending of unknown amount"));
         assert_eq!(w.try_assets().unwrap().last().map(|r| (r.amount, r.cost_missing)), Some((None, true)));
-        // An invalid charge is reported as unrecorded, and the ledger is left as it was.
+        // A charge that is no amount is still a charge: recorded as one of unknown cost, never dropped.
         let invalid = engine_with(&w, vec![Arc::new(Recording { fails_charging: Some(Some(-1.0)), ..Recording::new("elevenlabs", Unit::Credits, 10.0) })]);
-        assert!(sound(&invalid).message.contains("could not be recorded"));
-        assert_eq!(w.try_assets().unwrap().len(), 2);
+        let error = sound(&invalid);
+        assert!(error.message.contains("can't be read") && error.message.contains("spending of unknown amount"), "{}", error.message);
+        assert_eq!(w.try_assets().unwrap().last().map(|r| (r.amount, r.cost_missing)), Some((None, true)));
+        assert_eq!(w.try_assets().unwrap().len(), 3);
+        // A charge the ledger can't take is reported, never dropped silently.
+        std::fs::write(w.root.join("assets.json"), "broken").unwrap();
+        let failed = ToolError::new(ErrorCode::ProgramFailed, "The job failed.");
+        let reported = record_charge(&w, &speech(), AssetKind::Speech, "audio/x.mp3", craft_anything_engines::assets::charged(failed, 3.0));
+        assert!(reported.message.contains("3.0000 credits") && reported.message.contains("could not be recorded"), "{}", reported.message);
+        assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
     }
 
     /// A model stage that fails after its picture was made records both charges.
@@ -1834,15 +1980,31 @@ mod tests {
 
     /// Invalid actual costs must prevent both writing generated bytes and adding a spending record.
     #[test]
-    fn invalid_returned_cost_is_never_saved_or_recorded() {
+    fn an_invalid_returned_cost_is_recorded_as_missing_and_the_output_is_not_saved() {
         let (_d, w) = ws();
         let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
-        for cost in [f64::NAN, f64::INFINITY, -1.0] {
+        for (i, cost) in [f64::NAN, f64::INFINITY, -1.0].into_iter().enumerate() {
             let made = Generated { url: String::new(), bytes: vec![1], cost: Some(cost), ignored: Vec::new() };
-            assert!(keep(&w, &path, &rel, &speech(), &made).is_err());
-            assert!(!path.exists());
-            assert!(w.assets().is_empty());
+            let error = keep(&w, &path, &rel, &speech(), &made).unwrap_err();
+            assert_eq!(error.code, ErrorCode::GarbledOutput, "{cost}");
+            assert!(error.message.contains("not an amount") && error.message.contains("not saved"), "{}", error.message);
+            assert!(!path.exists(), "nothing published");
+            let records = w.try_assets().unwrap();
+            assert_eq!(records.len(), i + 1, "the receipt is never dropped");
+            assert_eq!((records[i].amount, records[i].cost_missing), (None, true), "{cost}");
         }
+        // The type's usage is then unknown: its next generation asks first.
+        let t = TypeAssets {
+            choice: AssetChoice {
+                provider: Some("elevenlabs".into()),
+                model: "eleven_v3".into(),
+                model_name: "v3".into(),
+                unit: Unit::Credits,
+                pricing: price(Unit::Credits, 1.0),
+            },
+            ..TypeAssets::default()
+        };
+        assert!(w.try_type_usage(AssetKind::Speech, &t).unwrap().cost_missing);
     }
 
     /// Unreadable ledgers stop every paid tool before quotes, approval questions or provider calls.

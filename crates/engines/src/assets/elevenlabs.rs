@@ -6,7 +6,7 @@
 use super::inputs::{FieldKind, InputField, Mapped, REMEDIATION, map_request, runnable};
 use super::model::{AssetOption, ListedModel, MAX_ASSET_CREDITS, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::tables::{InputRoles, KnownModel, KnownModels};
-use super::{AssetKind, AssetProvider, AssetRequest, Generated, charged_or_unknown, estimate_from, http};
+use super::{AssetKind, AssetProvider, AssetRequest, Described, Generated, charged_or_unknown, estimate_from, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
@@ -17,11 +17,19 @@ pub const ID: &str = "elevenlabs";
 const NAME: &str = "ElevenLabs";
 pub struct ElevenLabs {
     base: String,
+    /// The speech models described lately.
+    described: Described,
 }
 impl Default for ElevenLabs {
     /// Use the production ElevenLabs API endpoint.
     fn default() -> Self {
-        Self { base: "https://api.elevenlabs.io/v1".into() }
+        Self::at("https://api.elevenlabs.io/v1")
+    }
+}
+impl ElevenLabs {
+    /// ElevenLabs' API at `base`.
+    fn at(base: impl Into<String>) -> ElevenLabs {
+        ElevenLabs { base: base.into(), described: Described::default() }
     }
 }
 
@@ -194,7 +202,7 @@ impl ElevenLabs {
     /// model is one of the fixed two and needs no request; a speech model is looked up in the
     /// account's list, and one it no longer holds (or that makes no speech, or needs alpha access) is a
     /// [`ErrorCode::BadSettings`] error that names it. What the list said of a speech model is used
-    /// again for ten minutes ([`super::described`]).
+    /// again for ten minutes.
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let key = http::key(key)?;
         if http::id(model).is_err() {
@@ -210,7 +218,7 @@ impl ElevenLabs {
                 unit_price: None,
             });
         }
-        super::described(&format!("{ID} {}", self.base), key, model, || self.speech_detail(key, model))
+        self.described.get_or(key, model, || self.speech_detail(key, model))
     }
 
     /// A speech model as the account's list has it, asked of ElevenLabs.
@@ -377,7 +385,7 @@ mod tests {
 
     /// A fixed model, as described without a request.
     fn fixed(id: &str) -> ModelDetail {
-        ElevenLabs { base: "http://127.0.0.1:9".into() }.describe("sk-test", id).unwrap()
+        ElevenLabs::at("http://127.0.0.1:9").describe("sk-test", id).unwrap()
     }
 
     fn sound(seconds: f64) -> AssetRequest<'static> {
@@ -394,7 +402,7 @@ mod tests {
                 (200, "ID3 music".into(), vec![(CHARACTER_COST.to_string(), "1".to_string())]),
             ]
         });
-        let provider = ElevenLabs { base };
+        let provider = ElevenLabs::at(base);
         let speech = AssetRequest::Speech { text: "héllo", voice_id: "voice_test" };
         let music = AssetRequest::Music { prompt: "gentle music", duration_seconds: 10.0, instrumental: true };
         let (talk, wind, tune) = (speech_model(per_character(1.0)), fixed("eleven_text_to_sound_v2"), fixed("music_v1"));
@@ -426,7 +434,7 @@ mod tests {
         let (base, _) = http::tests::serve_with_headers(|_| {
             vec![(200, "ID3".into(), vec![]), (200, "ID3".into(), vec![(CHARACTER_COST.to_string(), "lots".to_string())]), (200, "ID3".into(), vec![])]
         });
-        let provider = ElevenLabs { base };
+        let provider = ElevenLabs::at(base);
         let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_test" };
         assert_eq!(provider.generate("sk-test", &speech_model(per_character(0.5)), &speech).unwrap().cost, Some(2.5));
         assert_eq!(provider.generate("sk-test", &speech_model(per_character(0.5)), &speech).unwrap().cost, Some(2.5), "a count that is no number");
@@ -445,7 +453,7 @@ mod tests {
         let (base, _) = http::tests::serve(|_| {
             vec![(401, "sk-test echoed by remote".into()), (429, "sk-test echoed by remote".into()), (500, "sk-test echoed by remote".into())]
         });
-        let provider = ElevenLabs { base };
+        let provider = ElevenLabs::at(base);
         for code in [ErrorCode::BadSettings, ErrorCode::OverLimit, ErrorCode::ProgramFailed] {
             let error = provider.generate("sk-test", &wind, &sound(1.0)).unwrap_err();
             assert_eq!(error.code, code);
@@ -457,7 +465,7 @@ mod tests {
     /// A model of another type, or a request for a picture, is refused before anything is sent.
     #[test]
     fn a_model_of_another_type_is_refused_before_anything_is_sent() {
-        let provider = ElevenLabs { base: "http://127.0.0.1:9".into() };
+        let provider = ElevenLabs::at("http://127.0.0.1:9");
         let music = AssetRequest::Music { prompt: "calm", duration_seconds: 10.0, instrumental: false };
         let picture = AssetRequest::Image { prompt: "a crate", shape: crate::assets::Shape::Square };
         for (model, req) in [(fixed("eleven_text_to_sound_v2"), music), (fixed("music_v1"), sound(2.0)), (fixed("music_v1"), picture)] {
@@ -472,7 +480,7 @@ mod tests {
     #[test]
     fn a_failed_body_after_an_accepted_request_reports_its_charge() {
         let (base, _) = http::tests::serve(|_| vec![(200, String::new()), (200, String::new())]);
-        let provider = ElevenLabs { base };
+        let provider = ElevenLabs::at(base);
         let error = provider.generate("sk-test", &fixed("eleven_text_to_sound_v2"), &sound(2.0)).unwrap_err();
         assert_eq!(error.code, ErrorCode::GarbledOutput);
         assert_eq!(charged_amount(&error), Some(80.0));
@@ -524,7 +532,7 @@ mod listing_tests {
 
     fn answering(answers: Vec<(u16, String)>) -> (ElevenLabs, Arc<Mutex<Vec<String>>>) {
         let (base, seen) = http::tests::serve(move |_| answers);
-        (ElevenLabs { base }, seen)
+        (ElevenLabs::at(base), seen)
     }
 
     /// An ElevenLabs whose server counts the connections made to it and closes each at once: a request
@@ -554,7 +562,7 @@ mod listing_tests {
                     }
                 }
             });
-            Silent { provider: ElevenLabs { base }, connections, done }
+            Silent { provider: ElevenLabs::at(base), connections, done }
         }
 
         fn connections(&self) -> usize {
@@ -772,7 +780,7 @@ mod listing_tests {
         assert_eq!(error.code, ErrorCode::ProgramFailed);
         assert!(!format!("{error:?}").contains("SECRET-BODY"));
         // Nothing listens: the connection fails.
-        let nobody = ElevenLabs { base: nothing_listens() };
+        let nobody = ElevenLabs::at(nothing_listens());
         let error = nobody.list(Some(KEY), AssetKind::Speech).unwrap_err();
         assert_eq!(error.code, ErrorCode::EngineMissing);
         assert!(error.message.contains("ElevenLabs") && error.remediation.is_some());

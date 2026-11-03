@@ -9,7 +9,7 @@ use super::inputs::{FieldKind, Mapped, REMEDIATION, map_request, runnable};
 use super::model::{ListedModel, MAX_ASSET_BUDGET_USD, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::openapi::input_fields;
 use super::tables::{InputRoles, KnownModels};
-use super::{AssetKind, AssetProvider, AssetRequest, Generated, charged_or_unknown, estimate_from, http};
+use super::{AssetKind, AssetProvider, AssetRequest, Described, Generated, charged_or_unknown, estimate_from, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use http::{CURSOR_LENGTH, encode, time_is_up, words};
 use serde_json::{Value, json};
@@ -43,11 +43,21 @@ pub struct Fal {
     api_base: String,
     /// How long [`Fal::list`] may go on starting requests.
     list_deadline: Duration,
+    /// How long a generation may take before its answer is given up on.
+    generate_timeout: Duration,
+    /// The models described lately.
+    described: Described,
 }
 
 impl Default for Fal {
     fn default() -> Fal {
-        Fal { base: BASE.to_string(), api_base: API_BASE.to_string(), list_deadline: LIST_DEADLINE }
+        Fal {
+            base: BASE.to_string(),
+            api_base: API_BASE.to_string(),
+            list_deadline: LIST_DEADLINE,
+            generate_timeout: GENERATE_TIMEOUT,
+            described: Described::default(),
+        }
     }
 }
 
@@ -94,8 +104,11 @@ impl AssetProvider for Fal {
     fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
         let key = http::key(key)?;
         let Mapped { body, ignored } = request(model, req)?;
-        let answer = self.post(key, &model.id, &Value::Object(body))?;
-        let cost = cost_of(answer.units, model, estimate_from(&model.pricing, req));
+        let estimate = estimate_from(&model.pricing, req);
+        // A run whose answer never came may still have been made and billed: what it would cost
+        // without fal's count of units.
+        let answer = self.post(key, &model.id, &Value::Object(body), cost_of(None, model, estimate))?;
+        let cost = cost_of(answer.units, model, estimate);
         // fal answers once the paid generation is done: any failure after that still reports its charge.
         let made = || {
             let v = http::json_up_to(answer.body, MAX_ANSWER)?;
@@ -159,18 +172,27 @@ struct Answer {
 
 impl Fal {
     /// Run one paid request. A refusal (any answer but success) is not charged; a success is the
-    /// finished, paid generation.
-    fn post(&self, key: &str, model: &str, body: &Value) -> Result<Answer, ToolError> {
+    /// finished, paid generation. A request that was sent but whose answer never came in time may
+    /// have been made all the same: it is charged `if_sent` (unknown when `None`). One that could
+    /// not be sent at all (no connection) is not.
+    fn post(&self, key: &str, model: &str, body: &Value, if_sent: Option<f64>) -> Result<Answer, ToolError> {
         let url = format!("{}/{model}", self.base);
-        let response = http::agent(GENERATE_TIMEOUT)
+        let response = http::agent(self.generate_timeout)
             .post(&url)
             .header("Authorization", &format!("Key {key}"))
             .header("Content-Type", "application/json")
             .send(body.to_string())
-            .map_err(|_| http::network())?;
+            .map_err(|e| if sent_but_unanswered(&e) { charged_or_unknown(http::network(), if_sent) } else { http::network() })?;
         refusal(response.status().as_u16())?;
         Ok(Answer { units: billable_units(response.headers()), body: response.into_body() })
     }
+}
+
+/// Whether a failed request had reached fal and was waiting for its answer when it failed: its
+/// answer (or the whole call) ran out of time after it was sent.
+fn sent_but_unanswered(e: &ureq::Error) -> bool {
+    use ureq::Timeout;
+    matches!(e, ureq::Error::Timeout(Timeout::RecvResponse | Timeout::RecvBody | Timeout::Global | Timeout::PerCall))
 }
 
 /// What a status fal answered a generation with means, its own words for the refusals the person
@@ -282,13 +304,13 @@ impl Fal {
     /// One model with all its inputs and its price, as `key` gets them. A model fal no longer
     /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it; a price that
     /// cannot be read is an error too, because a run must not go ahead as if it were free. What fal
-    /// answered is used again for ten minutes ([`super::described`]).
+    /// answered is used again for ten minutes.
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let key = http::key(key)?;
         if !endpoint_ok(model) {
             return Err(http::bad("That is not an id fal.ai gives its models.").with_remediation(REMEDIATION));
         }
-        super::described(&format!("{ID} {}", self.api_base), key, model, || self.fetch_detail(key, model))
+        self.described.get_or(key, model, || self.fetch_detail(key, model))
     }
 
     /// [`Fal::describe`], asked of fal.
@@ -850,6 +872,29 @@ mod tests {
         let lost = fal.generate("k", &flux(), &picture(Shape::Square)).unwrap_err();
         assert_eq!(charged_amount(&lost), Some(0.05), "a download that failed is still a paid generation");
         assert!(!format!("{lost:?}").contains("SECRET-BODY"));
+    }
+
+    /// A request fal received but never answered in time may have been made: it is charged what it
+    /// would cost; one that never reached fal is not.
+    #[test]
+    fn a_run_whose_answer_never_came_is_a_possible_charge() {
+        let (base, seen) = http::tests::serve_after(Duration::from_millis(800), |_| vec![(200, json!({"images": []}).to_string())]);
+        let slow = Fal { generate_timeout: Duration::from_millis(200), ..fal(base) };
+        let error = slow.generate("k", &flux(), &picture(Shape::Tall)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert_eq!(charged_amount(&error), Some(0.025), "the price known before the run");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        let (base, _) = http::tests::serve_after(Duration::from_millis(800), |_| vec![(200, json!({"model_urls": {}}).to_string())]);
+        let error = Fal { generate_timeout: Duration::from_millis(200), ..fal(base) }.generate("k", &tripo(), &solid(500)).unwrap_err();
+        assert!(was_charged(&error) && charged_amount(&error).is_none(), "a cost known only after the run: unknown");
+        // Nothing listens: nothing was sent, nothing charged.
+        let nobody = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", listener.local_addr().unwrap())
+        };
+        let error = fal(nobody).generate("k", &flux(), &picture(Shape::Tall)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert!(!was_charged(&error));
     }
 
     #[test]

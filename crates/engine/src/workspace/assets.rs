@@ -275,10 +275,14 @@ mod tests {
         partly.cost_missing = true;
         ws.record_asset(partly).unwrap();
         ws.record_asset(made("image", "fal", Some(Unit::Usd), None, 3)).unwrap();
-        // No amount is no cost, whether or not the record says so.
-        let unflagged = AssetRecord { cost_missing: false, ..made("speech", "elevenlabs", Some(Unit::Credits), None, 4) };
-        ws.record_asset(unflagged).unwrap();
-        assert!(ws.try_type_usage(AssetKind::Speech, &typed("elevenlabs", Unit::Credits, 0)).unwrap().cost_missing);
+        // No amount and not flagged: a model with no price, whose usage is counted without amounts.
+        // It is a generation, not a missing cost: once the model has a price, nothing earlier is unknown.
+        let unpriced = AssetRecord { cost_missing: false, ..made("speech", "elevenlabs", Some(Unit::Credits), None, 4) };
+        ws.record_asset(unpriced).unwrap();
+        assert_eq!(
+            ws.try_type_usage(AssetKind::Speech, &typed("elevenlabs", Unit::Credits, 0)).unwrap(),
+            TypeUsage { amount: 0.0, generations: 1, cost_missing: false }
+        );
         let scenario = typed("scenario", Unit::Credits, 0);
         assert_eq!(ws.try_type_usage(AssetKind::Image, &scenario).unwrap(), TypeUsage { amount: 10.0, generations: 2, cost_missing: true });
         assert_eq!(

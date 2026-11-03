@@ -6,7 +6,7 @@
 use super::inputs::{FieldKind, InputField, MAX_CHOICES, MAX_FIELDS, Mapped, REMEDIATION, map_request, runnable};
 use super::model::{AssetOption, ListedModel, MAX_ASSET_CREDITS, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::tables::{InputRoles, KnownModels};
-use super::{AssetKind, AssetProvider, AssetRequest, Generated, charged, http};
+use super::{AssetKind, AssetProvider, AssetRequest, Described, Generated, charged, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use http::{CURSOR_LENGTH, time_is_up, words};
 use serde_json::Value;
@@ -28,6 +28,8 @@ pub struct Scenario {
     poll_interval: Duration,
     /// How long [`Scenario::list`] may go on starting requests.
     list_deadline: Duration,
+    /// The models described lately.
+    described: Described,
 }
 impl Default for Scenario {
     /// Use the production API with a ten-minute workflow deadline and two-second polling interval.
@@ -37,6 +39,7 @@ impl Default for Scenario {
             timeout: Duration::from_secs(600),
             poll_interval: Duration::from_secs(2),
             list_deadline: LIST_DEADLINE,
+            described: Described::default(),
         }
     }
 }
@@ -117,8 +120,9 @@ impl Scenario {
     }
 
     /// Scenario's quote for one run, in credits, from a dry run of the very request that would be
-    /// submitted. A quote that is missing, not a number, nothing, negative or more than a limit can
-    /// be is refused, and so is an answer that started a job: nothing is submitted after either.
+    /// submitted. A quote that is missing, not a number, negative or more than a limit can be is
+    /// refused, and so is an answer that started a job: nothing is submitted after either. A quote
+    /// of nothing is a free run.
     fn quote(&self, auth: &str, path: &str, body: &Value, start: Instant) -> Result<f64, ToolError> {
         let quote = self.call(auth, &format!("{path}?dryRun=api"), Some(body), remaining(start, self.timeout)?, None)?;
         // Fail closed if a server ignores dryRun: never follow it with another paid request.
@@ -128,7 +132,7 @@ impl Scenario {
         quote
             .get("creativeUnitsCost")
             .and_then(Value::as_f64)
-            .filter(|&credits| believable(credits) && credits > 0.0)
+            .filter(|&credits| believable(credits))
             .ok_or_else(|| http::garbled("Scenario did not provide a valid cost quote; generation was not started."))
     }
 }
@@ -180,11 +184,25 @@ impl AssetProvider for Scenario {
     /// Quote the run, submit it once, and poll and download within one deadline. What it cost is
     /// the finished job's own count of credits, else the quote.
     fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
+        self.generate_within(key, model, req, None)
+    }
+    /// [`AssetProvider::generate`], refusing with nothing spent when the fresh quote is above
+    /// `approved`, the quote the limit was checked against: the price rose since it was checked.
+    fn generate_within(&self, key: &str, model: &ModelDetail, req: &AssetRequest, approved: Option<f64>) -> Result<Generated, ToolError> {
         let auth = self.auth(key)?;
         let (path, Mapped { body, ignored }) = request(model, req)?;
         let body = Value::Object(body);
         let start = Instant::now();
         let quote = self.quote(&auth, &path, &body, start)?;
+        if let Some(approved) = approved
+            && quote > approved + 1e-9
+        {
+            return Err(ToolError::new(
+                ErrorCode::OverLimit,
+                format!("Scenario's price rose since it was checked ({quote} credits now, {approved} credits approved); nothing was started."),
+            )
+            .with_remediation("Try again: the limit is checked against the new price."));
+        }
         // Accepted from its successful status on: an unreadable answer and every later failure report the quoted charge.
         let submitted = self.call(&auth, &path, Some(&body), remaining(start, self.timeout)?, Some(quote))?;
         let (url, bytes, billed) = self.finish(&auth, &submitted, start).map_err(|e| charged(e, quote))?;
@@ -330,13 +348,13 @@ impl Scenario {
     /// One model with all its inputs and its price, as `key` gets them. A model Scenario no longer
     /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it. Its kinds are those
     /// its capabilities and tags settle, else the known-models table's. What Scenario answered is
-    /// used again for ten minutes ([`super::described`]).
+    /// used again for ten minutes.
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let auth = self.auth(key)?;
         if http::id(model).is_err() {
             return Err(http::bad("That is not an id Scenario gives its models.").with_remediation(REMEDIATION));
         }
-        super::described(&format!("{ID} {}", self.base), &auth, model, || self.fetch_detail(&auth, model))
+        self.described.get_or(&auth, model, || self.fetch_detail(&auth, model))
     }
 
     /// [`Scenario::describe`], asked of Scenario.
@@ -987,7 +1005,6 @@ mod tests {
     #[test]
     fn unsafe_or_missing_quotes_never_submit_a_generation() {
         for quote in [
-            json!({"creativeUnitsCost":0}),
             json!({"creativeUnitsCost":-1}),
             json!({"creativeUnitsCost":1e300}),
             json!({"creativeUnitsCost":MAX_ASSET_CREDITS + 1.0}),
@@ -1005,6 +1022,50 @@ mod tests {
         let (base, seen) = http::tests::serve(|_| vec![(200, json!({"creativeUnitsCost":19}).to_string())]);
         assert!(image(&Scenario { base, ..Scenario::default() }).is_err());
         assert_eq!(seen.lock().unwrap().len(), 1, "an ordinary success is not a confirmed dry run");
+    }
+
+    /// A quote of nothing is a free run: it goes ahead and costs nothing.
+    #[test]
+    fn a_free_quote_is_a_free_run() {
+        let (base, seen) = http::tests::serve(|base| {
+            vec![
+                (269, json!({"creativeUnitsCost":0}).to_string()),
+                (269, json!({"creativeUnitsCost":0}).to_string()),
+                (200, json!({"job":{"jobId":"job_test"}}).to_string()),
+                (200, json!({"job":{"status":"success","metadata":{"assetIds":["asset_test"]}}}).to_string()),
+                (200, json!({"asset":{"url":format!("{base}/media.png")}}).to_string()),
+                (200, "PNG fake".into()),
+            ]
+        });
+        let provider = quick(base);
+        assert_eq!(provider.estimate(KEY, &gemini(), &wide()).unwrap(), Some(0.0));
+        assert_eq!(provider.generate_within(KEY, &gemini(), &wide(), Some(0.0)).unwrap().cost, Some(0.0));
+        assert_eq!(seen.lock().unwrap().len(), 6);
+    }
+
+    /// A run is quoted again just before it is submitted; a quote above the one its limit was
+    /// checked against stops it with nothing submitted, and one at or below it goes ahead.
+    #[test]
+    fn a_price_that_rose_since_it_was_checked_is_not_paid() {
+        let (base, seen) = http::tests::serve(|_| vec![(269, json!({"creativeUnitsCost":21}).to_string())]);
+        let error = quick(base).generate_within(KEY, &gemini(), &wide(), Some(19.0)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OverLimit);
+        assert!(error.message.contains("price rose since it was checked") && error.message.contains("21 credits"), "{}", error.message);
+        assert!(!was_charged(&error), "nothing was submitted");
+        assert_eq!(seen.lock().unwrap().len(), 1, "the quote only");
+        for approved in [Some(19.0), Some(25.0), None] {
+            let (base, seen) = http::tests::serve(|base| {
+                vec![
+                    (269, json!({"creativeUnitsCost":19}).to_string()),
+                    (200, json!({"job":{"jobId":"job_test"}}).to_string()),
+                    (200, json!({"job":{"status":"success","metadata":{"assetIds":["asset_test"]}}}).to_string()),
+                    (200, json!({"asset":{"url":format!("{base}/media.png")}}).to_string()),
+                    (200, "PNG fake".into()),
+                ]
+            });
+            assert_eq!(quick(base).generate_within(KEY, &gemini(), &wide(), approved).unwrap().cost, Some(19.0), "{approved:?}");
+            assert_eq!(seen.lock().unwrap().len(), 5);
+        }
     }
 
     /// A request the model can't take, and a picture that can't be sent, are refused before anything is asked.
@@ -1582,7 +1643,8 @@ mod listing_tests {
         let entry = entry("model_pic", "Pic", &["txt2img"], &["Image"]);
         let body = described(&entry, picture_inputs(), Some(stats(json!([variant("txt2img", "txt2img:1K", json!(19))]), Some("txt2img:1K"))));
         let stand = serving(Library::new(vec![vec![entry]]).with("model_pic", 200, body));
-        let detail = stand.scenario().describe(&format!("  {KEY} "), "model_pic").unwrap();
+        let scenario = stand.scenario();
+        let detail = scenario.describe(&format!("  {KEY} "), "model_pic").unwrap();
         assert_eq!((detail.name.as_str(), &detail.kinds), ("Pic", &vec![AssetKind::Image]));
         assert_eq!(detail.pricing, quoted(Some(19.0)));
         let ratio = detail.fields.iter().find(|f| f.name == "aspectRatio").unwrap();
@@ -1590,7 +1652,7 @@ mod listing_tests {
         assert!(ratio.has_default && !ratio.required);
         assert!(detail.fields.iter().any(|f| f.name == "prompt" && f.required && f.kind == FieldKind::Text));
         // Described again within ten minutes, with the same key: what Scenario said is used again, unasked.
-        assert_eq!(stand.scenario().describe(KEY, "model_pic").unwrap(), detail);
+        assert_eq!(scenario.describe(KEY, "model_pic").unwrap(), detail);
         let requests = stand.requests();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].starts_with("GET /v1/models/model_pic "), "{}", requests[0]);

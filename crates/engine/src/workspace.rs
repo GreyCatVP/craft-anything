@@ -559,11 +559,13 @@ pub struct AssetRecord {
     /// The model's id at the provider. Empty for a generation recorded before version 1.
     pub model: String,
     /// What the provider reported the generation cost, in `unit`, which may differ from the final
-    /// bill. `None`: it reported nothing usable.
+    /// bill. `None`: it reported nothing usable, or the model has no price to count with.
     pub amount: Option<f64>,
     /// What `amount` is counted in; `None` when the provider's unit isn't known either.
     pub unit: Option<Unit>,
-    /// The provider gave no cost for this generation, so the totals understate what it took.
+    /// A cost that should have been read was not: the model had a price, or the provider reported
+    /// one that can't be believed, so the totals understate what it took. A generation of a model
+    /// with no price at all has no amount without this: its usage was never counted in amounts.
     pub cost_missing: bool,
     pub at_ms: u64,
 }
@@ -574,9 +576,10 @@ pub struct AssetRecord {
 pub struct TypeUsage {
     /// The sum of the amounts reported, in the type's unit.
     pub amount: f64,
-    /// How many generations were counted, including those that reported no cost.
+    /// How many generations were counted, including those without an amount.
     pub generations: u32,
-    /// At least one counted generation reported no cost, so `amount` is a lower bound.
+    /// At least one counted generation's cost should have been read and was not (see
+    /// [`AssetRecord::cost_missing`]), so `amount` is a lower bound.
     pub cost_missing: bool,
 }
 
@@ -662,10 +665,8 @@ fn type_usage(records: &[AssetRecord], kind: AssetKind, t: &TypeAssets) -> TypeU
             continue;
         }
         usage.generations = usage.generations.saturating_add(1);
-        match record.amount {
-            Some(amount) => usage.amount += amount,
-            None => usage.cost_missing = true,
-        }
+        // No amount, unflagged, is a generation of a model with no price: counted, not missing.
+        usage.amount += record.amount.unwrap_or(0.0);
         usage.cost_missing |= record.cost_missing;
     }
     usage
