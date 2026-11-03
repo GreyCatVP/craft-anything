@@ -487,13 +487,13 @@ impl Server {
     /// Ask the person (through the session's inbox) to allow one consent-gated call. `None` when
     /// there is no inbox.
     fn ask_consent(&self, name: &str, why: &str, token: &CancelToken) -> Option<bool> {
-        let dir = self.engine.session().ext.get::<craft_anything_engine::inbox::InboxDir>()?;
-        let inbox = craft_anything_engine::inbox::Inbox::new(dir.0.clone());
-        let title = self.engine.registry().get(name).map(|s| s.title).unwrap_or(name);
-        let id =
-            inbox.post(craft_anything_engine::inbox::RequestKind::Approval, &format!("Allow: {title}"), why, Vec::new(), false, Some(name.to_string())).ok()?;
-        let answer = inbox.wait(&id, Duration::from_secs(30 * 60), &|| token.is_cancelled());
-        Some(answer.and_then(|a| a.allow).unwrap_or(false))
+        let dir = self.engine.session().ext.get::<craft_anything_engine::inbox::InboxDir>()?.0.clone();
+        let inbox = craft_anything_engine::inbox::Inbox::new(dir);
+        let (id, title) = match self.engine.registry().get(name) {
+            Some(s) => (s.id, s.title),
+            None => (name, name),
+        };
+        craft_anything_engine::tools::interaction_tools::approve_consent(&inbox, id, title, why, &|| token.is_cancelled()).ok()
     }
 
     fn success_body(&self, name: &str, out: &ToolOutput) -> Value {

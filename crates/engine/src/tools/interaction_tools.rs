@@ -580,6 +580,17 @@ pub(crate) fn ask_approval(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: Option<&mut Wor
     wait_for_approval(inbox, ws, title, detail, kind, &|| cancel.is_cancelled())
 }
 
+/// Ask the person, through the project's inbox, to allow one call of a consent-gated tool (a
+/// client calling it over MCP). `tool` is its canonical id: "Always for this project" remembers it,
+/// and a tool remembered so is allowed without asking again (#563). `true` when allowed.
+pub fn approve_consent(inbox: &Inbox, tool: &str, title: &str, why: &str, cancelled: &dyn Fn() -> bool) -> Result<bool, ToolError> {
+    let mut ws = workspace_of(inbox);
+    if ws.as_ref().is_some_and(|w| w.manifest.allowed_actions.iter().any(|k| k == tool)) {
+        return Ok(true);
+    }
+    Ok(matches!(wait_for_approval(inbox, ws.as_mut(), title, why, tool, cancelled)?, Verdict::Yes))
+}
+
 fn wait_for_approval(
     inbox: &Inbox,
     ws: Option<&mut Workspace>,
@@ -782,6 +793,34 @@ mod tests {
         e2.session().settings.auto_mode = false;
         let err = e2.call("core_person_ask", json!({"question": "Blue or red?"}), crate::CallOptions::new(crate::Caller::Mcp)).err().unwrap();
         assert!(err.remediation.unwrap_or_default().contains("sensible choice"));
+    }
+
+    #[test]
+    fn consent_always_for_this_project_is_not_asked_again() {
+        // #563: "Always for this project" on a consent card was read as "once".
+        let (_d, w) = ws();
+        let inbox = Inbox::new(w.inbox_dir());
+        let answerer = {
+            let inbox = inbox.clone();
+            std::thread::spawn(move || {
+                for _ in 0..100 {
+                    if let Some(r) = inbox.pending().first() {
+                        assert_eq!(r.title, "Run a scripted web session");
+                        inbox.answer(&r.id, &crate::inbox::Answer { allow: Some(true), always: true, ..Default::default() }).unwrap();
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                panic!("no request arrived");
+            })
+        };
+        let ask = || approve_consent(&inbox, "web_walkthrough_record", "Run a scripted web session", "why", &|| false).unwrap();
+        assert!(ask());
+        answerer.join().unwrap();
+        assert!(Workspace::open(&w.root).unwrap().manifest.allowed_actions.contains(&"web_walkthrough_record".to_string()));
+        // A second call is allowed at once: nobody answers this time, and nothing is posted.
+        assert!(ask());
+        assert!(inbox.pending().is_empty());
     }
 
     #[test]

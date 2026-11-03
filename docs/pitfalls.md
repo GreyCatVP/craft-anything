@@ -401,6 +401,11 @@ tool calls without matching results. The next model request then carried unpaire
 Every retained call needs a matching result, including an explicit non-execution result.
 Test the next serialized request as well as whether a tool ran.
 
+**A second way to ask that forgot "always".** The MCP server asked for consent-gated tools with its
+own inbox post and read only `allow`, so "Always for this project" worked as "Allow once" and a
+scripted web session asked again on every call (#563). Every approval card goes through the
+engine's approval functions (`approve_consent`, `ask_approval`), which remember and check the answer.
+
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts
 broke, and "Basic Membership" lost a word. It also tested whole tokens, so a secret inside a URL or
