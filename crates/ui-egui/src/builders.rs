@@ -157,7 +157,11 @@ pub fn built_by(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(default) = app.default_builder() else {
         icons::show(ui, "triangle-alert", 16.0, t.warning);
-        ui.label(RichText::new(tr("Building needs a coding agent such as Claude Code, or an AI with an API key.")).size(theme::BODY).color(t.text_dim));
+        ui.label(
+            RichText::new(tr("Building needs a coding agent such as Antigravity (agy) or Claude Code, or an AI with an API key."))
+                .size(theme::BODY)
+                .color(t.text_dim),
+        );
         if widgets::link(ui, "Set one up").clicked() {
             app.need_builder(false);
         }
@@ -203,7 +207,7 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
             ui.add(
                 egui::Label::new(
                     RichText::new(tr(
-                        "Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.",
+                        "Building needs a coding agent on this computer (Antigravity (agy), Claude Code or Codex: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.",
                     ))
                     .color(t.text_dim),
                 )

@@ -1,4 +1,4 @@
-//! Agent CLIs (Claude Code, Codex, Gemini CLI, OpenCode, Hermes…) run as owned subprocesses with
+//! Agent CLIs (Claude Code, Codex, Antigravity, OpenCode, Hermes…) run as owned subprocesses with
 //! our MCP server, optionally on another machine over ssh. Their JSON event streams become
 //! [`AgentEvent`]s.
 //!
@@ -37,7 +37,6 @@ pub const MCP_NAME: &str = "craft-anything";
 pub const KNOWN: &[(&str, &str, &str)] = &[
     ("claude-code", "claude", "Claude Code"),
     ("codex", "codex", "Codex"),
-    ("gemini-cli", "gemini", "Gemini CLI"),
     ("antigravity", "agy", "Antigravity"),
     ("opencode", "opencode", "OpenCode"),
     ("hermes", "hermes", "Hermes Agent"),
@@ -48,11 +47,17 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
 ];
 
 pub fn program_for(agent: &str) -> String {
-    KNOWN.iter().find(|(id, _, _)| *id == agent).map(|(_, p, _)| p.to_string()).unwrap_or_else(|| agent.to_string())
+    match agent {
+        "gemini-cli" | "gemini" => "agy".to_string(),
+        _ => KNOWN.iter().find(|(id, _, _)| *id == agent).map(|(_, p, _)| p.to_string()).unwrap_or_else(|| agent.to_string()),
+    }
 }
 
 pub fn display_for(agent: &str) -> String {
-    KNOWN.iter().find(|(id, _, _)| *id == agent).map(|(_, _, d)| d.to_string()).unwrap_or_else(|| agent.to_string())
+    match agent {
+        "gemini-cli" | "gemini" => "Antigravity".to_string(),
+        _ => KNOWN.iter().find(|(id, prog, _)| *id == agent || *prog == agent).map(|(_, _, d)| d.to_string()).unwrap_or_else(|| agent.to_string()),
+    }
 }
 
 /// The built-in adapter for an agent id (the plain one for agents without their own).
@@ -182,10 +187,25 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool 
     }
 }
 
-/// The fix for a sign-in failure, in plain words. Sign-in always happens in Claude Code itself;
+/// The fix for a sign-in failure, in plain words. Sign-in always happens in the agent itself;
 /// we never see or handle the account.
 pub fn sign_in_hint(message: &str) -> Option<String> {
     sign_in_hint_in(message, adapters::in_flatpak())
+}
+
+/// The fix for a sign-in failure for a specific agent CLI, in plain words.
+pub fn sign_in_hint_for(agent: &str, message: &str) -> Option<String> {
+    let m = message.to_ascii_lowercase();
+    if !["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"].iter().any(|w| m.contains(w)) {
+        return None;
+    }
+    match agent {
+        "antigravity" | "agy" | "gemini-cli" | "gemini" => {
+            Some("Sign in to Antigravity: open a terminal and run `agy` (or sign in via Antigravity IDE), then try again.".into())
+        }
+        "codex" => Some("Run `codex login` in a terminal.".into()),
+        _ => sign_in_hint_in(message, adapters::in_flatpak()),
+    }
 }
 
 /// [`sign_in_hint`] for a Flatpak or not. In a Flatpak, Claude Code keeps its sign-in and
@@ -575,7 +595,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     if spec.question && !adapter.answers_questions() {
         let _ = tx.send(AgentEvent::Error {
             message: format!("{name} can't be kept to only reading here, so it isn't asked questions about a build."),
-            remediation: Some("Ask with Claude Code, or with an AI that has an API key.".into()),
+            remediation: Some("Ask with Antigravity, Claude Code, or an AI that has an API key.".into()),
             log: None,
         });
         return nothing_done(&name);
@@ -1042,7 +1062,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_and_gemini_args() {
+    fn codex_and_antigravity_args() {
         let a = build_args(adapter_for("codex").as_ref(), &BackendOptions::default(), "q", "P:", &mcp(), None, Access::Analyse);
         assert_eq!(&a[..2], &["exec".to_string(), "--json".to_string()]);
         // #69: project folders aren't git repositories; the flag comes once, also when the
@@ -1061,6 +1081,9 @@ mod tests {
         assert!(!a.iter().any(|x| x.contains("default_tools_approval_mode")));
         let g = build_args(adapter_for("gemini-cli").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
         assert!(g.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
+        let ag = build_args(adapter_for("antigravity").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
+        assert!(ag.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
+        assert!(!adapter_for("codex").answers_questions() && !adapter_for("aider").answers_questions() && adapter_for("antigravity").answers_questions());
         let o = BackendOptions { args: vec!["run".into()], ..Default::default() };
         assert_eq!(build_args(adapter_for("aider").as_ref(), &o, "q", "", &mcp(), None, Access::Analyse), vec!["run".to_string(), "q".to_string()]);
     }
@@ -1248,7 +1271,10 @@ mod tests {
         assert!(!has(&clean, "--allowedTools") && !has(&clean, "--fork-session") && has(&clean, "--no-session-persistence"));
         // Only agents that can be held to reading are asked.
         assert!(adapter_for("claude-code").answers_questions());
-        assert!(!adapter_for("codex").answers_questions() && !adapter_for("gemini-cli").answers_questions() && !adapter_for("aider").answers_questions());
+        assert!(adapter_for("antigravity").answers_questions());
+        assert!(adapter_for("agy").answers_questions());
+        assert!(adapter_for("gemini-cli").answers_questions());
+        assert!(!adapter_for("codex").answers_questions() && !adapter_for("aider").answers_questions());
     }
 
     #[test]
@@ -1395,7 +1421,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_codex_and_gemini_streams() {
+    fn parses_codex_and_antigravity_streams() {
         let mut p = StreamParser::new(adapter_for("codex"));
         let mut ev = Vec::new();
         for l in [
@@ -1772,6 +1798,6 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         assert!(reg.for_agent("claude").resumes() && !reg.for_agent("codex").resumes() && reg.for_agent("antigravity").resumes());
         // Registering an adapter for an existing id replaces that one.
         reg.register(Arc::new(EchoAgent));
-        assert_eq!(format!("{reg:?}"), r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "echo-agent"]"#);
+        assert_eq!(format!("{reg:?}"), r#"["claude-code", "codex", "opencode", "antigravity", "hermes", "maki", "echo-agent"]"#);
     }
 }

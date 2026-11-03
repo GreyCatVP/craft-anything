@@ -47,7 +47,7 @@ pub enum BackendKind {
     Openrouter,
     /// Ollama, LM Studio, llama.cpp, vLLM… (OpenAI-compatible HTTP).
     OpenaiCompatible,
-    /// Claude Code, Codex, Gemini CLI, Hermes Agent, OpenCode… run as a subprocess with our MCP server.
+    /// Claude Code, Codex, Antigravity, Hermes Agent, OpenCode… run as a subprocess with our MCP server.
     AgentCli,
 }
 
@@ -69,7 +69,7 @@ impl BackendKind {
             BackendKind::Openai => &[openai::OPENAI_DEFAULT_MODEL],
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki"],
+            BackendKind::AgentCli => &["claude-code", "codex", "antigravity", "opencode", "hermes", "maki"],
         }
     }
 
@@ -84,7 +84,7 @@ pub struct BackendConfig {
     /// User-chosen name, unique: "Claude", "Local Llama", "Codex on studio-mac".
     pub name: String,
     pub kind: BackendKind,
-    /// Model id (API backends) or agent id (`claude-code`, `codex`, `gemini-cli`, `antigravity`, `hermes`, `opencode`…).
+    /// Model id (API backends) or agent id (`claude-code`, `codex`, `antigravity`, `hermes`, `opencode`…).
     pub model: String,
     /// Base URL for API backends (defaults per kind).
     #[serde(default)]
@@ -112,11 +112,14 @@ pub fn effort_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -
 }
 
 /// The model an AI uses, when it can be chosen (Settings → AI, #123): an API's own, or the one
-/// Claude Code is asked for. `None` for an agent app that picks its own.
+/// Claude Code or Antigravity is asked for. `None` for an agent app that picks its own.
 pub fn model_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -> Option<String> {
     match config.kind {
         BackendKind::AgentCli if config.model == "claude-code" => {
             Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| anthropic::DEFAULT_MODEL.to_string()))
+        }
+        BackendKind::AgentCli if config.model == "antigravity" || config.model == "agy" => {
+            Some(options.and_then(|o| o.cli_model.clone()).unwrap_or_else(|| cli_agents::adapters::antigravity::DEFAULT_MODEL.to_string()))
         }
         BackendKind::AgentCli => None,
         _ => Some(config.model.clone()),
@@ -494,12 +497,15 @@ impl AiHub {
         Ok(true)
     }
 
-    /// The models a backend can be set to (#123): the API's own list, or Claude's models for Claude
-    /// Code. Empty for an agent app that picks its own. Blocking (bounded); run it off the UI thread.
+    /// The models a backend can be set to (#123): the API's own list, or agent models for Claude
+    /// Code or Antigravity. Empty for an agent app that picks its own. Blocking (bounded); run it off the UI thread.
     pub fn model_choices(&self, name: &str) -> Result<Vec<String>, ToolError> {
         let e = self.entry(name)?;
         match (e.config.kind, model_in_use(&e.config, Some(&e.options))) {
             (_, None) => Ok(Vec::new()),
+            (BackendKind::AgentCli, Some(_)) if e.config.model == "antigravity" || e.config.model == "agy" => {
+                Ok(cli_agents::adapters::antigravity::MODELS.iter().map(|m| m.to_string()).collect())
+            }
             (BackendKind::AgentCli, Some(_)) => Ok(anthropic::MODELS.iter().map(|m| m.to_string()).collect()),
             _ => self.list_models(name),
         }

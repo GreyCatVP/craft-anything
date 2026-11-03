@@ -169,7 +169,7 @@ pub struct Client {
 }
 
 /// Other names people use for a client (its program's name).
-const ALIASES: &[(&str, &str)] = &[("agy", "antigravity")];
+const ALIASES: &[(&str, &str)] = &[("agy", "antigravity"), ("gemini", "antigravity"), ("gemini_cli", "antigravity"), ("gemini-cli", "antigravity")];
 
 impl Client {
     /// Whether `name` (an id, `-` or `_`, or an alias) means this client.
@@ -288,19 +288,6 @@ pub fn clients(host: &Host) -> Vec<Client> {
     // Cursor
     add("cursor", "Cursor", h.join(".cursor").join("mcp.json"), vec![h.join(".cursor")], Format::Jsonc, vec!["mcpServers"], Shape::Plain, None);
 
-    // Gemini CLI
-    let gem_home = host.var("GEMINI_CLI_HOME").unwrap_or_else(|| h.clone());
-    add(
-        "gemini_cli",
-        "Gemini CLI",
-        gem_home.join(".gemini").join("settings.json"),
-        vec![gem_home.join(".gemini")],
-        Format::Jsonc,
-        vec!["mcpServers"],
-        Shape::Plain,
-        Some(gem_home.join(".agents").join("skills")),
-    );
-
     // Windsurf
     let ws = h.join(".codeium").join("windsurf");
     add("windsurf", "Windsurf", ws.join("mcp_config.json"), vec![ws.clone()], Format::Jsonc, vec!["mcpServers"], Shape::Plain, None);
@@ -342,14 +329,14 @@ pub fn clients(host: &Host) -> Vec<Client> {
     add("hermes", "Hermes", hermes.join("config.yaml"), vec![hermes.clone()], Format::Yaml, vec!["mcp_servers"], Shape::Enabled, Some(hermes.join("skills")));
 
     // Antigravity (agy)
-    let ag_home = host.var("ANTIGRAVITY_HOME").unwrap_or_else(|| h.clone());
+    let ag_home = host.var("ANTIGRAVITY_HOME").or_else(|| host.var("GEMINI_CLI_HOME")).unwrap_or_else(|| h.clone());
     let ag = ag_home.join(".gemini").join("config");
     let ag_cli = ag_home.join(".gemini").join("antigravity-cli");
     add(
         "antigravity",
         "Antigravity",
         ag.join("mcp_config.json"),
-        vec![ag.clone(), ag_cli],
+        vec![ag.clone(), ag_cli, ag_home.join(".gemini")],
         Format::Jsonc,
         vec!["mcpServers"],
         Shape::Plain,
@@ -465,7 +452,7 @@ mod tests {
     fn table_is_complete_and_ids_unique() {
         let host = Host::with_home("/home/u");
         let cs = clients(&host);
-        assert!(cs.len() >= 21);
+        assert!(cs.len() >= 20);
         let mut ids: Vec<_> = cs.iter().map(|c| c.id).collect();
         ids.sort();
         ids.dedup();
@@ -479,6 +466,8 @@ mod tests {
         let named = |n: &str| cs.iter().filter(|c| c.is(n)).map(|c| c.id).collect::<Vec<_>>();
         assert_eq!(named("antigravity"), ["antigravity"]);
         assert_eq!(named("agy"), ["antigravity"]);
+        assert_eq!(named("gemini"), ["antigravity"]);
+        assert_eq!(named("gemini-cli"), ["antigravity"]);
         assert_eq!(named("kimi-code"), ["kimi_code"]);
         assert!(named("nope").is_empty());
     }

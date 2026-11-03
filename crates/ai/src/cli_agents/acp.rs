@@ -22,14 +22,9 @@ use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 /// Agents known to speak ACP, and the arguments that start them in that mode.
-pub const ACP_AGENTS: &[(&str, &[&str])] = &[
-    ("gemini-cli", &["--experimental-acp"]),
-    ("qwen-code", &["--experimental-acp"]),
-    ("opencode", &["acp"]),
-    ("goose", &["acp"]),
-    ("hermes", &["acp"]),
-    ("maki", &["acp"]),
-];
+/// Agents known to speak ACP, and the arguments that start them in that mode.
+pub const ACP_AGENTS: &[(&str, &[&str])] =
+    &[("qwen-code", &["--experimental-acp"]), ("opencode", &["acp"]), ("goose", &["acp"]), ("hermes", &["acp"]), ("maki", &["acp"])];
 
 /// Agents whose ACP mode takes the backend's model (`cli_model`), and the flag after the ACP
 /// arguments that picks it. Others keep the model they're set to.
@@ -670,7 +665,7 @@ mod tests {
 
     fn core(resume: Option<&str>) -> AcpCore {
         let mcp = McpCommand { command: "/opt/ca/craft-anything-cli".into(), args: vec!["mcp".into()], notes: None };
-        AcpCore::new("Gemini", "Gemini CLI", PathBuf::from("/w/project"), mcp, resume.map(str::to_string))
+        AcpCore::new("Qwen", "Qwen Code", PathBuf::from("/w/project"), mcp, resume.map(str::to_string))
     }
 
     fn sent(outs: &[Out]) -> Vec<Value> {
