@@ -1,4 +1,4 @@
-# Chinese UI localisation
+# UI localisation
 
 The desktop app offers **한국어** (`ko`), **Русский** (`ru`), **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
 alongside English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
@@ -13,7 +13,7 @@ matching accepts underscores, case differences and Unix encoding suffixes.
 
 ## Scope and format
 
-`crates/ui-egui/src/i18n/zh-hans.tsv` and `zh-hant.tsv` contain original
+`crates/ui-egui/src/i18n/ko.tsv`, `ru.tsv`, `zh-hans.tsv` and `zh-hant.tsv` contain original
 translations under the repository's MIT OR Apache-2.0 licence. Each UTF-8 line
 has two columns: `English source<TAB>translation`. Comments begin with `#`;
 `\n` represents a newline. The language registry in `i18n.rs` embeds the catalogs.
@@ -29,8 +29,8 @@ descriptions, logs and exported reports retain their original text. The CLI,
 MCP, tool IDs, stored project data and the separate browser viewer are unchanged.
 
 Keep placeholders such as `{name}` and `{n}` intact, along with command IDs,
-shortcuts, escapes and trailing `…`. Update both Chinese catalogs when English
-source keys change. Common terms include 净室 / 淨室 (Clean room), 深度 (Deep),
+shortcuts, escapes and trailing `…`. Update every catalog (`ko`, `ru`, `zh-hans`, `zh-hant`)
+when English source keys change; the tests require matching key sets. Common terms include 净室 / 淨室 (Clean room), 深度 (Deep),
 构建 / 建置 (Build), 证据 / 證據 (Evidence), and 项目 / 專案 (Project).
 The Korean catalog `ko.tsv` uses 클린룸 (Clean room), 심층 (Deep), 분석 / 만들기 / 검사 / 완성
 (Study / Build / Check / Ready), 근거 (Evidence) and 프로젝트 (Project); short labels are nouns and
@@ -53,15 +53,15 @@ widget labels and registered engine tool titles and groups; it also runs in
 `cargo xtask ci`. It does not prove coverage of arbitrary runtime text or labels
 held in tables, so review those when adding or changing UI code.
 
-The existing snapshot example accepts `--lang zh-hans` or
-`--lang zh-hant`, for example:
+The existing snapshot example accepts any catalog code with `--lang`, such as
+`--lang zh-hant` or `--lang ko`, for example:
 
 ```sh
 cargo run -p craft-anything-ui-egui --example snapshot -- --lang zh-hant --only settings --out-dir target/snapshots/zh-hant
 ```
 
-Chinese glyphs use the existing craft-fonts fallback, which release and CI builds
+Chinese and Korean glyphs use the existing craft-fonts fallback, which release and CI builds
 already include. Local builds must set `CRAFT_FONTS_DIR` to a craft-fonts checkout
 before compiling to get the same glyph coverage. The catalogs add no font assets.
-Check both scripts, clipping, narrow windows and native file dialogs visually
+Check each script, clipping, narrow windows and native file dialogs visually
 on each platform; catalog coverage alone does not verify layout or fonts.
