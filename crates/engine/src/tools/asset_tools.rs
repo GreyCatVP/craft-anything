@@ -418,6 +418,13 @@ fn save_path(ws: &Workspace, save_as: &str, ext: &str) -> Result<(PathBuf, Strin
     let app = ws.app_dir();
     // Paths given from the workspace ("app/Assets/x.glb") mean the same place.
     let rel = save_as.trim().trim_start_matches("./").trim_start_matches("app/").trim_start_matches("app\\");
+    // Windows drops trailing dots and spaces, reads ':' as a data stream and "NAME~1" as a short
+    // name, so "reference./x.png" or "REFERE~1/x.png" could reach a record by another spelling.
+    // Refuse those spellings everywhere.
+    let short_name = |part: &str| part.split('~').skip(1).any(|after| after.starts_with(|c: char| c.is_ascii_digit()));
+    if rel.split(['/', '\\']).filter(|part| !part.is_empty() && *part != ".").any(|part| part.ends_with(['.', ' ']) || part.contains(':') || short_name(part)) {
+        return Err(ToolError::invalid("save_as parts must not end in a dot or space, or contain ':' or a short-name '~1'"));
+    }
     let path = resolve(&app, rel).filter(|p| inside(&app, p) && *p != app).ok_or_else(|| ToolError::invalid("save_as must be a file path inside app/"))?;
     confined(&ws.root, &app)?;
     confined(&app, &path)?;
@@ -1060,7 +1067,12 @@ mod tests {
         {
             assert_eq!(save_path(&w, record, "png").unwrap_err().code, ErrorCode::BadInput, "{record}");
         }
+        // Spellings Windows maps onto a record: trailing dots or spaces, data streams, short names.
+        for spelling in ["reference./x.png", "reference /x.png", "inbox:hidden/x.png", "ATTACH~1/x.png", "Assets/x.png.", "Assets\\pinned. \\x.png"] {
+            assert_eq!(save_path(&w, spelling, "png").unwrap_err().code, ErrorCode::BadInput, "{spelling}");
+        }
         assert_eq!(save_path(&w, "Assets/crate.png", "png").unwrap().1, "Assets/crate.png");
+        assert_eq!(save_path(&w, "Assets/sky~night.png", "png").unwrap().1, "Assets/sky~night.png", "a tilde alone is fine");
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(w.root.join("reference"), w.root.join("art")).unwrap();
