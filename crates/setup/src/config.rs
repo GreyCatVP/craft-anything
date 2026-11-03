@@ -119,16 +119,27 @@ fn json_to_toml(v: &Value) -> Option<toml_edit::Value> {
     })
 }
 
-/// `over` laid onto `base`: objects are merged key by key, anything else is replaced.
-fn deep_merge(base: &mut Value, over: &Value) {
-    match (base, over) {
-        (Value::Object(b), Value::Object(o)) => {
-            for (k, v) in o {
-                deep_merge(b.entry(k.clone()).or_insert(Value::Null), v);
-            }
+/// `want` set into `target` where it stands: a setting that already has the value is left alone, a
+/// different one is replaced keeping its comment, and a table of ours is merged into the person's
+/// (regular or inline) instead of replacing it, so their other settings and comments stay.
+fn merge_in_place(target: &mut dyn toml_edit::TableLike, want: &serde_json::Map<String, Value>) -> Result<(), String> {
+    for (k, v) in want {
+        if let Value::Object(inner) = v
+            && let Some(child) = target.get_mut(k).and_then(|i| i.as_table_like_mut())
+        {
+            merge_in_place(child, inner)?;
+            continue;
         }
-        (b, o) => *b = o.clone(),
+        let mut new = json_to_toml(v).ok_or_else(|| format!("cannot write {k} as TOML"))?;
+        if let Some(have) = target.get(k).and_then(|i| i.as_value()) {
+            if have.to_string().trim() == new.to_string().trim() {
+                continue;
+            }
+            *new.decor_mut() = have.decor().clone();
+        }
+        target.insert(k, toml_edit::Item::Value(new));
     }
+    Ok(())
 }
 
 fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String> {
@@ -147,46 +158,24 @@ fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String
         doc.insert(table_name, toml_edit::Item::Table(t));
     }
     let servers = doc.get_mut(table_name).and_then(|t| t.as_table_mut()).ok_or_else(|| format!("`{table_name}` exists but is not a table"))?;
-    // Our own entry written inline (`craft-anything = { command = … }`) becomes a table, so the
-    // merge below keeps what the person put in it (`enabled = false`, `disabled_tools`…).
-    if client.shape == Shape::Codex
-        && old.as_ref().is_some_and(is_owned_entry)
-        && let Some(item) = servers.get_mut(SERVER_NAME)
-        && item.is_inline_table()
-    {
-        match std::mem::replace(item, toml_edit::Item::None).into_table() {
-            Ok(table) => *item = toml_edit::Item::Table(table),
-            Err(other) => *item = other,
-        }
-    }
-    match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
-        // Only our own entry is merged into; a foreign one (an HTTP `url` Codex would refuse beside
-        // a `command`) is replaced, as the plan says it will be.
-        Some(existing) if client.shape == Shape::Codex && old.as_ref().is_some_and(is_owned_entry) => {
-            // The person's own settings (env, enabled_tools, other tools' approvals…) stay; our
-            // keys are set, and a table of ours is merged into theirs rather than replacing it.
-            let mut merged = old.clone().unwrap_or(Value::Null);
-            for (k, v) in fields {
-                if let (Some(Value::Object(have)), Value::Object(want)) = (merged.get_mut(k), v) {
-                    for (name, setting) in want {
-                        deep_merge(have.entry(name.clone()).or_insert(Value::Null), setting);
-                    }
-                    let tv = json_to_toml(&Value::Object(have.clone())).ok_or_else(|| format!("cannot write {k} as TOML"))?;
-                    existing.insert(k, toml_edit::Item::Value(tv));
-                } else if let Some(item) = ours.get(k) {
-                    existing.insert(k, item.clone());
+    // Only our own entry is merged into (a foreign one, such as an HTTP `url` Codex would refuse
+    // beside a `command`, is replaced, as the plan says it will be). The person's other settings
+    // and comments stay, whether the entry is a table or written inline.
+    let merge = client.shape == Shape::Codex && old.as_ref().is_some_and(is_owned_entry);
+    if merge && let Some(existing) = servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_like_mut()) {
+        merge_in_place(existing, fields)?;
+    } else {
+        match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
+            Some(existing) => {
+                // Keep the existing table's position and decor; replace its keys.
+                existing.clear();
+                for (k, v) in ours.iter() {
+                    existing.insert(k, v.clone());
                 }
             }
-        }
-        Some(existing) => {
-            // Keep the existing table's position and decor; replace its keys.
-            existing.clear();
-            for (k, v) in ours.iter() {
-                existing.insert(k, v.clone());
+            None => {
+                servers.insert(SERVER_NAME, toml_edit::Item::Table(ours));
             }
-        }
-        None => {
-            servers.insert(SERVER_NAME, toml_edit::Item::Table(ours));
         }
     }
     if client.id == "grok_build"
@@ -270,6 +259,30 @@ mod tests {
         assert_eq!(got["command"], "/b/craft-anything-cli");
         assert_eq!(got["enabled"], false);
         assert_eq!(got["disabled_tools"][0], "x");
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
+    }
+
+    /// #540: comments on an inline entry, in its fields and in a `tools` table stay.
+    #[test]
+    fn comments_on_our_codex_entry_and_its_tools_table_stay() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let inline = "[mcp_servers]\ncraft-anything = { command = \"/old/craft-anything-cli\", args = [\"mcp\"], enabled = false } # mine\n";
+        let new = set_entry(&c, inline, &e).unwrap();
+        assert!(new.contains("# mine"), "{new}");
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!((got["enabled"].clone(), got["command"].clone()), (Value::Bool(false), Value::from("/b/craft-anything-cli")));
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new);
+
+        let table = "[mcp_servers.craft-anything]\ncommand = \"/old/craft-anything-cli\" # the program\nargs = [\"mcp\"]\n\n# about tools\n[mcp_servers.craft-anything.tools]\n# keep me\nother = { approval_mode = \"prompt\" } # theirs\n";
+        let new = set_entry(&c, table, &e).unwrap();
+        for note in ["# the program", "# about tools", "# keep me", "# theirs"] {
+            assert!(new.contains(note), "{note} lost:\n{new}");
+        }
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!(got["tools"]["other"]["approval_mode"], "prompt");
         assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
         assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
     }
