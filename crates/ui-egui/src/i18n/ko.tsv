@@ -1,0 +1,1368 @@
+# ko: Korean UI translations. Licensed MIT OR Apache-2.0.
+# UTF-8: English source<TAB>Korean text. Keep placeholders and escapes intact.
+ GB	 GB
+ and {n} more	 외 {n}개
+ {ascii}	 {ascii}
+ · ${c:.2}	 · ${c:.2}
+ · ssh {h}	 · ssh {h}
+(1 picture attached)	(그림 1장 첨부)
+({n} pictures attached)	(그림 {n}장 첨부)
+, ${c:.4}	, ${c:.4}
+.NET application graph	.NET 앱 그래프
+.NET apps	.NET 앱
+.NET assembly overview	.NET 어셈블리 개요
+.NET native calls	.NET 네이티브 호출
+.NET types and methods	.NET 타입과 메서드
+/btw {}	/btw {}
+0x… or number	0x… 또는 숫자
+A .NET program (C#, F# or VB)	.NET 프로그램 (C#, F#, VB)
+A DOS program	DOS 프로그램
+A Java program	Java 프로그램
+A Linux (or Unix) program	Linux(또는 Unix) 프로그램
+A Mac or iPhone program	Mac 또는 iPhone 프로그램
+A SQLite database (how an app stores its data)	SQLite 데이터베이스 (앱이 데이터를 저장하는 곳)
+A WebAssembly module (code that runs in a browser)	WebAssembly 모듈 (브라우저에서 실행되는 코드)
+A Windows program	Windows 프로그램
+A ZIP archive	ZIP 압축 파일
+A bundle of ready-made code that many programs share.	여러 프로그램이 함께 쓰는, 미리 만들어 둔 코드 묶음입니다.
+A coding agent such as Claude Code builds it, and an AI answers your questions in plain words. Change this any time in Settings → AI.	Claude Code 같은 코딩 에이전트가 만들고, AI가 질문에 쉬운 말로 답합니다. 설정 → AI에서 언제든 바꿀 수 있습니다.
+A command's output shows here when it finishes.	명령이 끝나면 출력이 여기에 나옵니다.
+A copy to try something else from here.	여기서부터 다른 방법을 시도해 볼 복사본입니다.
+A file of machine code that a computer can run directly, like an .exe or an app.	.exe나 앱처럼 컴퓨터가 바로 실행할 수 있는 기계어 파일입니다.
+A file that a computer can run as a program.	컴퓨터가 프로그램으로 실행할 수 있는 파일입니다.
+A file that links packed web code back to the original, readable source files.	압축된 웹 코드를 읽을 수 있는 원래 소스 파일과 이어 주는 파일입니다.
+A file we don't recognise yet	아직 알아보지 못한 파일
+A first look at a file you're unsure about, without running it.	확실하지 않은 파일을 실행하지 않고 먼저 살펴보기
+A folder	폴더
+A folder has no bytes of its own	폴더에는 자체 바이트가 없습니다
+A free reverse-engineering tool from the NSA. Deep mode uses it for extra detail; Clean room mode never does.	NSA가 만든 무료 리버스 엔지니어링 도구입니다. 심층 모드는 더 자세히 보려고 이 도구를 쓰고, 클린룸 모드는 절대 쓰지 않습니다.
+A frozen copy (recommended)	고정 복사본 (권장)
+A frozen copy takes {size}. That's a lot of space: a light copy takes {light}.	고정 복사본에는 {size}가 필요합니다. 공간이 많이 듭니다. 가벼운 복사본은 {light}입니다.
+A frozen copy takes {size}; a light copy takes {light}.	고정 복사본은 {size}, 가벼운 복사본은 {light}가 필요합니다.
+A game	게임
+A game's files	게임 파일
+A light copy	가벼운 복사본
+A locked room for running a program so it can't touch the rest of your computer.	프로그램이 컴퓨터의 다른 부분을 건드리지 못하게 가둬 두고 실행하는 잠긴 방입니다.
+A map of which functions call which other functions.	어떤 함수가 어떤 함수를 부르는지 보여 주는 지도입니다.
+A name the program's author gave to a function or variable that survived in the file.	프로그램 작성자가 함수나 변수에 붙인 이름 중 파일에 남아 있는 것입니다.
+A named piece of a program that does one job, like "add two numbers" or "save the file".	"두 수 더하기"나 "파일 저장"처럼 한 가지 일을 하는, 이름 붙은 프로그램 조각입니다.
+A number that says where something is in a program's memory, like a house number.	집 번지처럼, 프로그램 메모리에서 무언가가 있는 위치를 나타내는 숫자입니다.
+A piece of text stored inside a program, like a message, a web address or a file name.	메시지, 웹 주소, 파일 이름처럼 프로그램 안에 저장된 글자입니다.
+A program, an app bundle, an APK, a JavaScript bundle, a folder… or drop it on the window.	프로그램, 앱 번들, APK, JavaScript 번들, 폴더…를 고르거나 창에 끌어다 놓으면 됩니다.
+A recording of network traffic	네트워크 통신 기록
+A region of a program as it sits in memory while running.	실행 중인 프로그램이 메모리에 올라가 있는 한 구역입니다.
+A region of a program file with one purpose: code, text, pictures, settings.	코드, 글자, 그림, 설정처럼 한 가지 용도를 가진 프로그램 파일의 한 구역입니다.
+A rule of thumb. Usually right, sometimes wrong, so we label the result as a best guess.	경험에서 나온 어림 규칙입니다. 대개 맞지만 틀릴 때도 있어 결과를 추정으로 표시합니다.
+A saved, checkable record of something we found, with how sure we are and where we found it.	찾아낸 내용을 확인할 수 있게 저장한 기록입니다. 얼마나 확실한지, 어디서 찾았는지도 담깁니다.
+A script or web page	스크립트 또는 웹 페이지
+A set of commands a program offers to other programs.	프로그램이 다른 프로그램에 제공하는 명령 모음입니다.
+A simple snake game	간단한 뱀 게임
+A small download (under 200 MB). Free, no account needed.	작은 다운로드(200 MB 미만)입니다. 무료이며 계정이 필요 없습니다.
+A small file that lists what an app is called, what it needs and what it's allowed to do.	앱 이름, 필요한 것, 허용된 권한을 적어 둔 작은 파일입니다.
+A smart contract (EVM bytecode)	스마트 계약 (EVM 바이트코드)
+A way of writing bytes as two-character codes (00 to FF). The rawest view of a file.	바이트를 두 글자 코드(00~FF)로 적는 방식입니다. 파일을 가장 날것 그대로 보는 방법입니다.
+A way to build desktop apps out of web pages. The app is basically a website with its own browser.	웹 페이지로 데스크톱 앱을 만드는 방식입니다. 앱은 사실상 자체 브라우저를 가진 웹사이트입니다.
+A website	웹사이트
+A website for my bakery	우리 빵집 웹사이트
+AI	AI
+AI cost	AI 비용
+AI cost (estimate)	AI 비용 (추정)
+AI cost (part estimate)	AI 비용 (일부 추정)
+AI model file	AI 모델 파일
+AI name	AI 이름
+AI use this session	이번 세션 AI 사용량
+API boundary	API 경계
+API key	API 키
+API key (stored in your system keychain)	API 키 (시스템 키체인에 저장)
+API key, if it needs one	API 키 (필요한 경우)
+About 10 GB. Free for personal use with a Unity account.	약 10 GB. Unity 계정이 있으면 개인 용도로 무료입니다.
+About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	약 60 GB, Epic Games 계정, Visual Studio C++ 도구가 필요합니다.
+Add	추가
+Add Visual Studio's C++ tools	Visual Studio C++ 도구 추가
+Add a brain	AI 추가
+Add a fal.ai key	fal.ai 키 추가
+Add a folder…	폴더 추가…
+Add a plugin	플러그인 추가
+Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	AI를 추가하면 이 근거를 대신 읽고, 이어지는 질문에 답하고, 증거가 있는 곳을 짚어 줍니다.
+Add an AI by its address	주소로 AI 추가
+Add more info. The builder reads it at its next step.	내용을 더 적으면 빌더가 다음 단계에서 읽습니다.
+Add pictures	그림 추가
+Add pictures of the original	원본 그림 추가
+Add pictures of the original (optional: screenshots help it look right)	원본 그림 추가 (선택: 스크린숏이 있으면 더 비슷하게 만듭니다)
+Add to a running build	진행 중인 빌드에 추가
+Added	추가됨
+Added {n} picture(s). The builder uses them from your next change.	그림 {n}장을 추가했습니다. 빌더가 다음 변경부터 사용합니다.
+Address to file offset	주소를 파일 오프셋으로 변환
+Adds its decompiler to Deep mode. Craft Anything can download and set it up for you.	심층 모드에 디컴파일러를 더합니다. Craft Anything이 내려받아 설치해 줄 수 있습니다.
+Advanced	고급
+After installing one, look for it again.	하나를 설치한 뒤 다시 찾으면 됩니다.
+Agent	에이전트
+Allow generated assets	생성 에셋 허용
+Allow once	한 번 허용
+Allowed for this project	이 프로젝트에 허용됨
+Allowed for this project.	이 프로젝트에 허용했습니다.
+Allowed in	허용 범위
+Allowed once	한 번 허용됨
+Allowed once.	한 번 허용했습니다.
+Also list projects from	다음 위치의 프로젝트도 표시
+Always for this project	이 프로젝트에서 항상 허용
+An Android app	Android 앱
+An Android app package: the file you install on a phone.	Android 앱 패키지: 휴대폰에 설치하는 파일입니다.
+An Apple settings file (plist)	Apple 설정 파일 (plist)
+An app	앱
+An app or a file	앱 또는 파일
+Analyse a JavaScript app	JavaScript 앱 분석
+Analyse a page's JavaScript	페이지의 JavaScript 분석
+Android app code (DEX)	Android 앱 코드 (DEX)
+Android app components	Android 앱 구성 요소
+Android app package	Android 앱 패키지
+Android apps	Android 앱
+Android class	Android 클래스
+Android method bytecode	Android 메서드 바이트코드
+Android resources	Android 리소스
+Annotate function	함수 주석 달기
+Another build is working, so this one waits its turn.	다른 빌드가 진행 중이라 이 빌드는 차례를 기다립니다.
+Answer a project's question	프로젝트 질문에 답하기
+Answer any of them in a message below.	아래 메시지로 어느 것이든 답할 수 있습니다.
+Answered by {name}	답변: {name}
+Answers come from {brain}. To build, set up a coding agent in Settings → AI.	답은 {brain}에서 옵니다. 만들려면 설정 → AI에서 코딩 에이전트를 설정해야 합니다.
+App	앱
+App details on device	기기의 앱 정보
+Apple apps	Apple 앱
+Approve an agent action	에이전트 작업 승인
+Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	앱과 게임: 그림과 이만큼 닮을 때까지 계속 다듬습니다. 끄면 닮은 정도만 알려 줍니다.
+Architectures	아키텍처
+Archive	압축 파일
+Archives	압축 파일
+Ask a question	질문하기
+Ask about a build	빌드에 대해 묻기
+Ask about the build	빌드에 대해 묻기
+Ask about the build, e.g. "where are the latest files?" Nothing changes and no build starts.	빌드에 대해 물어볼 수 있습니다. 예: "최신 파일은 어디 있나요?" 아무것도 바뀌지 않고 빌드도 시작되지 않습니다.
+Ask about this game	이 게임에 대해 묻기
+Ask anything, e.g. "What does this program do?"	무엇이든 물어볼 수 있습니다. 예: "이 프로그램은 무슨 일을 하나요?"
+Ask before running anything	실행 전에 항상 묻기
+Ask each time	매번 묻기
+Ask first	먼저 묻기
+Ask for a change	변경 요청
+Ask for a change, e.g. "bigger buttons" or "add a dark mode"	변경 요청. 예: "버튼을 더 크게" 또는 "다크 모드 추가"
+Ask for a change, e.g. "make it faster" or "add a high-score table"	변경 요청. 예: "더 빠르게" 또는 "최고 점수 표 추가"
+Ask for a change, e.g. "make the header blue" or "add a contact form"	변경 요청. 예: "헤더를 파란색으로" 또는 "문의 양식 추가"
+Ask in your own words. Every answer shows how sure we are, and the proof.	편하게 물어보면 됩니다. 모든 답에 얼마나 확실한지와 증거가 함께 나옵니다.
+Ask me	나에게 묻기
+Ask the agent about this	에이전트에게 묻기
+Ask the agent about this target. It cites evidence for every claim.	이 대상에 대해 에이전트에게 묻습니다. 모든 주장에 근거를 답니다.
+Ask the agent…	에이전트에게 묻기…
+Ask the person	사용자에게 묻기
+Ask: "How does the % key work?"	질문 예: "% 키는 어떻게 작동하나요?"
+Ask: "Is it safe to run?"	질문 예: "실행해도 안전한가요?"
+Ask: "What does it send over the internet?"	질문 예: "인터넷으로 무엇을 보내나요?"
+Asking for its models…	모델 목록을 묻는 중…
+Asset catalog	에셋 카탈로그
+At most this many rounds of fixes after the first build.	첫 빌드 뒤 고치기를 최대 이 회차까지 반복합니다.
+Attach pictures	그림 첨부
+Attach pictures (or drop them here)	그림 첨부 (또는 여기에 끌어다 놓기)
+Auto mode	자동 모드
+Automatic	자동
+Automatic ({name})	자동 ({name})
+Back	뒤로
+Best guess	추정
+Best guess: a reasonable reading, but not proven.	추정: 그럴듯한 해석이지만 증명되지는 않았습니다.
+Binary layout	바이너리 구조
+Blocked	차단됨
+Bookmark	책갈피
+Budget for a new project	새 프로젝트 예산
+Bug report	버그 보고
+Build	만들기
+Build a rebuild ledger	재구성 기록부 만들기
+Build a stand-in backend	대체 백엔드 만들기
+Build with	만들기 방식
+Build with this	이걸로 만들기
+Build with {name}	{name}에서 만들기
+Build with {name} instead	대신 {name}에서 만들기
+Build without it	없이 만들기
+Builder's questions:	빌더의 질문:
+Building	만드는 중
+Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	만들려면 이 컴퓨터에 코딩 에이전트(Claude Code, Codex, Gemini CLI 중 하나를 설치하고 그 창에서 한 번 로그인)나 API 키가 있는 AI가 필요합니다. Craft Anything은 계정 정보를 보지 않습니다.
+Building needs a coding agent such as Claude Code, or an AI with an API key.	만들려면 Claude Code 같은 코딩 에이전트나 API 키가 있는 AI가 필요합니다.
+Builds	빌드
+Builds and answers may use it again.	빌드와 답변에서 다시 쓸 수 있습니다.
+Builds at once	동시 빌드 수
+Builds keep going without stopping to ask you before an action. The builder still never deletes outside its project, changes system settings or publishes anything, and stays within each project's asset budget.	빌드가 작업 전에 멈춰서 묻지 않고 계속 진행합니다. 그래도 빌더는 프로젝트 밖에서 삭제하거나 시스템 설정을 바꾸거나 무언가를 공개하지 않으며, 프로젝트별 에셋 예산을 넘지 않습니다.
+Builds use this one. Click to choose automatically again.	빌드에 이 항목을 씁니다. 누르면 다시 자동으로 고릅니다.
+Built by	빌더
+Built with	만든 도구
+Built with {stack}, as you asked, so no game engine is needed.	요청한 대로 {stack} 기반으로 만들어서 게임 엔진이 필요 없습니다.
+Call graph	호출 그래프
+Call path	호출 경로
+Call the build done	빌드 완료 처리
+Called done. A new message carries on from here.	완료로 처리했습니다. 새 메시지를 보내면 여기서부터 이어집니다.
+Cancel	취소
+Cancel: don't use this folder	취소: 이 폴더 사용 안 함
+Capture a website for rebuilding	다시 만들 웹사이트 캡처
+Capture inventories	캡처 내역
+Capture menus, dialogs and tabs	메뉴, 대화상자, 탭 캡처
+Change	변경
+Change a setting	설정 변경
+Change an AI's model	AI 모델 변경
+Change how hard an AI thinks	AI 생각 강도 변경
+Change it	바꾸기
+Change…	변경…
+Check	검사
+Check .NET native calls	.NET 네이티브 호출 검사
+Check a rebuild claim	재구성 주장 검사
+Check a scripted web session	스크립트 웹 세션 검사
+Check an answer	답변 검사
+Check decompiled C#	디컴파일된 C# 검사
+Check my build	내 빌드 검사
+Check the JEB connection	JEB 연결 검사
+Check the asset keys	에셋 키 검사
+Check the setup	설정 검사
+Check {n}	검사 {n}
+Check {n}: about {s}% like the original	검사 {n}: 원본과 약 {s}% 비슷함
+Checked against Godot's official checksums before it's used.	사용 전에 Godot 공식 체크섬으로 확인합니다.
+Checking	검사 중
+Choose a file	파일 고르기
+Choose a folder…	폴더 고르기…
+Choose a function, string or section to see it here.	함수, 문자열, 섹션을 고르면 여기에 표시됩니다.
+Choose an AI's job	AI 역할 고르기
+Choose the folder Ghidra is installed in.	Ghidra가 설치된 폴더를 고릅니다.
+Choose what the builder's questions get	빌더 질문 처리 방식 고르기
+Choose what to recreate, say what you want, then press Start.	다시 만들 것을 고르고 원하는 내용을 적은 뒤 시작을 누릅니다.
+Choose…	고르기…
+Classes	클래스
+Clean room	클린룸
+Clean room / Deep	클린룸 / 심층
+Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	클린룸은 원본의 코드, 파일, 페이지 소스를 절대 읽지 않습니다. 심층 모드는 Craft Anything의 모든 도구로 읽습니다.
+Clean room never reads the original's code, files or page source: it works from what you can see. Deep reads them with every tool, and with Ghidra when it's installed. Every finding records which was used.	클린룸은 원본의 코드, 파일, 페이지 소스를 절대 읽지 않고 눈에 보이는 것만으로 작업합니다. 심층은 모든 도구로 읽고, Ghidra가 설치되어 있으면 Ghidra도 씁니다. 발견한 내용마다 어느 쪽을 썼는지 기록됩니다.
+Clean room on	클린룸 켜짐
+Clean room or Deep	클린룸 또는 심층
+Clean room: nothing inside the original is read. We work from what you can see: pictures, the page as a visitor sees it, and watching it run.	클린룸: 원본 내부는 전혀 읽지 않습니다. 그림, 방문자가 보는 페이지, 실행 모습처럼 눈에 보이는 것만으로 작업합니다.
+Clear finished	끝난 항목 지우기
+Close	닫기
+Close a Frida session	Frida 세션 닫기
+Close a GDB session	GDB 세션 닫기
+Close a Rizin debug session	Rizin 디버그 세션 닫기
+Close a pinned build	고정한 빌드 닫기
+Close it	닫기
+Close it first.	먼저 닫아야 합니다.
+Close the website	웹사이트 닫기
+Code reconstructed from a program that looks like the C language. Close to what the program does, but not its original source.	프로그램에서 되살린, C 언어처럼 보이는 코드입니다. 프로그램 동작에 가깝지만 원래 소스는 아닙니다.
+Code signature	코드 서명
+Coding agent app	코딩 에이전트 앱
+Command palette (Ctrl/⌘ K)	명령 팔레트 (Ctrl/⌘ K)
+Commands:	명령:
+Compare WebAssembly interfaces	WebAssembly 인터페이스 비교
+Compare module exports	모듈 내보내기 비교
+Compare two .NET builds	.NET 빌드 두 개 비교
+Compare two app versions	앱 버전 두 개 비교
+Compare two artifacts	결과물 두 개 비교
+Compare two evidence bundles	근거 묶음 두 개 비교
+Compare two functions	함수 두 개 비교
+Compare two page captures	페이지 캡처 두 개 비교
+Compare two runs	실행 두 번 비교
+Compare two screenshots	스크린숏 두 장 비교
+Comparing and rebuilding	비교와 다시 만들기
+Compiled Python file	컴파일된 Python 파일
+Connect	연결
+Connect agent apps	에이전트 앱 연결
+Connect to a browser	브라우저에 연결
+Connect {name}	{name} 연결
+Connected devices	연결된 기기
+Connected phone	연결된 휴대폰
+Continue	계속
+Contradicted	반박됨
+Control-flow graph: a map of every path a function can take, like a flowchart.	제어 흐름 그래프: 순서도처럼 함수가 지날 수 있는 모든 경로를 보여 주는 지도입니다.
+Copies share the files it saves beside itself.	복사본들은 이 빌드가 옆에 저장하는 파일을 함께 씁니다.
+Copy a file off the phone	휴대폰에서 파일 가져오기
+Copy a file to the phone	휴대폰으로 파일 보내기
+Copy an app off the phone	휴대폰에서 앱 가져오기
+Copy the command	명령 복사
+Copy the evidence id	근거 ID 복사
+Couldn't add the pictures:	그림을 추가하지 못했습니다:
+Couldn't answer:	답하지 못했습니다:
+Couldn't attach the pictures:	그림을 첨부하지 못했습니다:
+Couldn't look through that folder.	그 폴더를 살펴보지 못했습니다.
+Couldn't open it.	열지 못했습니다.
+Couldn't open the folder.	폴더를 열지 못했습니다.
+Couldn't open {}: {}	{} 열기 실패: {}
+Couldn't start a worker thread: {e}	작업 스레드를 시작하지 못했습니다: {e}
+Couldn't start it.	시작하지 못했습니다.
+Coverage unknown	적용 범위 알 수 없음
+Craft Anything	Craft Anything
+Craft Anything can't build with {engine}, so Unity is the closest match.	Craft Anything은 {engine}에서 만들 수 없어 가장 가까운 Unity를 씁니다.
+Craft Anything or the computer closed while it was working. Everything so far is kept; Continue picks up where it stopped.	작업 중에 Craft Anything이나 컴퓨터가 종료되었습니다. 지금까지 한 것은 모두 남아 있으며, 계속을 누르면 멈춘 곳부터 이어 갑니다.
+Craft Anything reads its code and files with every tool it has. For your private use.	Craft Anything이 가진 모든 도구로 코드와 파일을 읽습니다. 개인 용도 전용입니다.
+Craft Anything reads the original's code, files and page source with every tool it has, and with Ghidra when it's installed.	Craft Anything이 가진 모든 도구로 원본의 코드, 파일, 페이지 소스를 읽고, Ghidra가 설치되어 있으면 Ghidra도 씁니다.
+Craft Anything report.md	Craft Anything report.md
+Craft Anything's records, checks and anything it built in app/ are deleted. Your own files in the folder stay as they are.	Craft Anything의 기록과 검사, app/에 만든 모든 것이 삭제됩니다. 폴더 안에 직접 둔 파일은 그대로 남습니다.
+Crash dump	크래시 덤프
+Create the project	프로젝트 만들기
+Critical	심각
+Cross-reference: a place in the program that uses or calls the thing you're looking at.	상호 참조: 지금 보는 대상을 쓰거나 부르는 프로그램 안의 위치입니다.
+Cross-references	상호 참조
+Cross-references: the places in the program that use or call the thing you're looking at.	상호 참조: 지금 보는 대상을 쓰거나 부르는 프로그램 안의 위치들입니다.
+Current document	현재 문서
+Cursor address	커서 주소
+Cursor function	커서 위치 함수
+Custom	사용자 지정
+Cutter command	Cutter 명령
+DOS load image	DOS 로드 이미지
+Databases	데이터베이스
+Decide yourself	알아서 정하기
+Decode a radio recording	무선 녹음 해독
+Decompile	디컴파일
+Decompile Java with Vineflower	Vineflower로 Java 디컴파일
+Decompile many	여러 개 디컴파일
+Decompile with JEB	JEB으로 디컴파일
+Deep	심층
+Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	이제 심층 모드에서 Ghidra로 디컴파일합니다. 큰 프로그램은 처음 살펴볼 때 몇 분 걸릴 수 있습니다.
+Deep mode on	심층 모드 켜짐
+Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	심층: 가진 모든 도구로 코드, 파일, 페이지 소스를 읽고, Ghidra가 설치되어 있으면 Ghidra도 씁니다. 눌러서 전환합니다.
+Delete a project	프로젝트 삭제
+Delete it	삭제
+Delete the project	프로젝트 삭제
+Delete {name}?	{name}을(를) 삭제할까요?
+Deleted.	삭제했습니다.
+Deleted. Your own files are still in the folder.	삭제했습니다. 직접 둔 파일은 폴더에 그대로 있습니다.
+Delete…	삭제…
+Deliberately scrambled to make it hard to read, without changing what it does.	하는 일은 그대로 두고 읽기 어렵게 일부러 뒤섞은 것입니다.
+Demangle Swift symbols	Swift 심볼 이름 풀기
+Details	자세히
+Details about the selected item appear here.	고른 항목의 자세한 정보가 여기에 나옵니다.
+Detect	감지
+Device details	기기 정보
+Device features	기기 기능
+Device folder	기기 폴더
+Device log	기기 로그
+Disassemble sBPF code	sBPF 코드 디스어셈블
+Disassembly	디스어셈블리
+Disconnect agent apps	에이전트 앱 연결 끊기
+Dismiss	닫기
+Dispatch metadata	디스패치 메타데이터
+Display info	화면 정보
+Do you have permission?	권한이 있나요?
+Does it talk to the internet?	인터넷과 통신하나요?
+Does it track me?	나를 추적하나요?
+Don't allow	허용 안 함
+Don't ask again (you can change this in Settings)	다시 묻지 않기 (설정에서 바꿀 수 있음)
+Done	완료
+Download	내려받기
+Download Godot {v}	Godot {v} 내려받기
+Download Unity Hub	Unity Hub 내려받기
+Download and use Ghidra	Ghidra 내려받아 쓰기
+Download it from unity.com and install it.	unity.com에서 내려받아 설치하세요.
+Download it from unrealengine.com and install it.	unrealengine.com에서 내려받아 설치하세요.
+Download the Epic Games Launcher	Epic Games Launcher 내려받기
+Downloads keep going in the background.	내려받기는 백그라운드에서 계속됩니다.
+Drive an app's screen	앱 화면 조작
+Drop a calculator app (or any small program) on the window.	계산기 앱(또는 작은 프로그램 아무거나)을 창에 끌어다 놓으세요.
+Drop a file or app anywhere in this window.	파일이나 앱을 이 창 아무 곳에나 끌어다 놓으세요.
+Drop the file on the window. We only read it; nothing runs.	파일을 창에 끌어다 놓으세요. 읽기만 하고 아무것도 실행하지 않습니다.
+Drop to attach	놓아서 첨부
+Drop to open it	놓아서 열기
+Duplicate	복제
+Duplicate a project	프로젝트 복제
+Duplicate the project	이 프로젝트 복제
+Each answer says how sure we are: Seen it, Worked it out or Best guess.	답마다 확실한 정도를 표시합니다: 직접 확인, 추론, 추정.
+Edit a project file	프로젝트 파일 편집
+Edit them in place	그 자리에서 고치기
+Effort:	생각 깊이:
+Electron and JavaScript	Electron과 JavaScript
+Electron fuses	Electron 퓨즈
+Engines	엔진
+Engines and settings	엔진과 설정
+Enter a full web address, like example.com or https://example.com/page.	example.com이나 https://example.com/page처럼 전체 웹 주소를 입력하세요.
+Enter to send · Shift+Enter for a new line	Enter로 보내기 · Shift+Enter로 줄 바꿈
+Epic's own installer. It only opens if Epic's signature checks out.	Epic의 공식 설치 프로그램입니다. Epic의 서명이 확인될 때만 열립니다.
+Essentials	기본 도구
+Every build of this project.	이 프로젝트의 모든 빌드입니다.
+Every finding is saved here with how sure we are.	찾은 내용은 모두 확실한 정도와 함께 여기에 저장됩니다.
+Every tool as well: a workbench with functions, bytes, references and evidence.	모든 도구까지 보여 줍니다. 함수, 바이트, 참조, 근거를 다루는 작업대입니다.
+Everything found so far, as a Markdown file.	지금까지 찾은 내용을 모두 Markdown 파일로 내보냅니다.
+Everything so far is kept. Continue picks up where it stopped.	지금까지 한 일은 모두 남아 있습니다. 계속하면 멈춘 곳부터 이어 갑니다.
+Evidence	근거
+Evidence ledger	근거 기록
+Evidence so far	지금까지의 근거
+Explain a function	함수 설명
+Explain like I'm new	쉽게 설명
+Export a report	보고서 내보내기
+Export a report (Markdown)	보고서 내보내기 (Markdown)
+Export captured scripts	캡처한 스크립트 내보내기
+Export evidence	근거 내보내기
+Export report	보고서 내보내기
+Extract an archive	압축 파일 풀기
+Extract firmware	펌웨어 추출
+Extract with this	이걸로 추출
+Extracts	추출 담당
+File formats	파일 형식
+Files packed inside a file	파일 안에 묶인 파일
+Filter	필터
+Filter by name	이름으로 필터
+Filter the files	파일 필터
+Filter…	필터…
+Find Android classes	Android 클래스 찾기
+Find Java classes	Java 클래스 찾기
+Find a call path	호출 경로 찾기
+Find a game's files	게임 파일 찾기
+Find an app	앱 찾기
+Find in-page MCP tools	페이지 안의 MCP 도구 찾기
+Find it automatically	자동으로 찾기
+Find out how any software works, then craft your own.	어떤 소프트웨어든 작동 방식을 알아낸 뒤 나만의 것을 만듭니다.
+Find the original source line	원래 소스 줄 찾기
+Firmware regions	펌웨어 영역
+Fold the sidebar	사이드바 접기
+Folders of projects, and projects started in a folder you picked. Removing one only takes it off the list.	프로젝트 폴더와, 직접 고른 폴더에서 시작한 프로젝트입니다. 빼도 목록에서만 사라집니다.
+Follow the installer that opened. Come back here when it's done.	열린 설치 프로그램을 따라 진행하세요. 끝나면 여기로 돌아오세요.
+Follow the steps on rustup.rs, then come back here.	rustup.rs의 안내를 따른 뒤 여기로 돌아오세요.
+For everything you make, like the switch in the title bar.	만드는 모든 것에 적용됩니다. 제목 표시줄의 스위치와 같습니다.
+For example: a website for my bakery	예: 우리 빵집 웹사이트
+For example: recreate this website	예: 이 웹사이트 다시 만들기
+For example: the same app, but simpler	예: 같은 앱을 더 간단하게
+For example: the same game, with a high-score table	예: 같은 게임에 최고 점수표 추가
+Force-stop an app	앱 강제 종료
+Forget the key	키 지우기
+Found on this computer	이 컴퓨터에서 찾음
+Found {} AI option(s) on this computer	이 컴퓨터에서 AI {}개를 찾았습니다
+Frida devices	Frida 기기
+Frida instrumentation	Frida 계측
+Frida processes	Frida 프로세스
+Frida session status	Frida 세션 상태
+From	원본
+Frozen copy	고정 사본
+Function address	함수 주소
+Function assembly	함수 어셈블리
+Function dossier	함수 종합 정보
+Function info	함수 정보
+Function instructions	함수 명령어
+Function references	함수 참조
+Functions	함수
+GDB command	GDB 명령
+GDB session status	GDB 세션 상태
+Game assets	게임 에셋
+Game engines	게임 엔진
+Game files	게임 파일
+General	일반
+Generate a 3D model	3D 모델 생성
+Generate a picture	그림 생성
+Generate custom pictures and models	맞춤 그림과 모델 생성
+Generated art (games)	생성한 그림 (게임)
+Generated assets	생성한 에셋
+Generated pictures and 3D models are made with fal.ai.	생성하는 그림과 3D 모델은 fal.ai로 만듭니다.
+Get Ghidra	Ghidra 받기
+Get Ghidra for Deep mode	심층 모드용 Ghidra 받기
+Get Unity Hub	Unity Hub 받기
+Get a key at {name}	{name}에서 키 받기
+Get the Epic Games Launcher	Epic Games Launcher 받기
+Get {name}	{name} 받기
+Getting Ghidra	Ghidra 받는 중
+Getting Godot	Godot 받는 중
+Getting Unity Hub	Unity Hub 받는 중
+Getting the Epic Games Launcher	Epic Games Launcher 받는 중
+Ghidra	Ghidra
+Ghidra folder	Ghidra 폴더
+Ghidra is ready	Ghidra 준비됨
+Ghidra is ready. Deep mode uses it from now on.	Ghidra가 준비됐습니다. 이제부터 심층 모드에서 씁니다.
+Ghidra isn't installed, so the built-in decompiler stands in. Get it in Settings → Engines.	Ghidra가 설치되지 않아 내장 디컴파일러를 대신 씁니다. 설정 → 엔진에서 받을 수 있습니다.
+Ghidra isn't on this computer yet, so the built-in decompiler stands in.	이 컴퓨터에 아직 Ghidra가 없어 내장 디컴파일러를 대신 씁니다.
+Ghidra will use half of this computer's memory (up to {gb} GB).	Ghidra가 이 컴퓨터 메모리의 절반을 씁니다 (최대 {gb} GB).
+Ghidra will use up to {gb} GB of memory.	Ghidra가 메모리를 최대 {gb} GB까지 씁니다.
+Ghidra, a free reverse-engineering tool from the NSA, gives Deep mode richer decompiled code and types.	NSA가 만든 무료 리버스 엔지니어링 도구 Ghidra를 쓰면 심층 모드에서 더 자세한 디컴파일 코드와 타입을 얻습니다.
+Go home	홈으로
+Go program details	Go 프로그램 세부 정보
+Go to address	주소로 이동
+Go to offset (0x…)	오프셋으로 이동 (0x…)
+Go to the project	프로젝트로 이동
+Good enough	합격 기준
+Got it	확인
+Graph	그래프
+Half of this computer's memory, up to {gb} GB.	이 컴퓨터 메모리의 절반, 최대 {gb} GB.
+Here's a first look:	먼저 살펴본 내용입니다:
+Here's what I found on that page:	그 페이지에서 찾은 내용입니다:
+Hex	Hex
+Hide pinned builds	고정한 빌드 숨기기
+Hide the answer	답 숨기기
+Hide the console	콘솔 숨기기
+High	높음
+Home	홈
+How alike a rebuild must look to the original before refining stops.	다듬기를 멈추려면 다시 만든 결과가 원본과 얼마나 닮아야 하는지 정합니다.
+How closely may Craft Anything look at it?	Craft Anything이 얼마나 자세히 살펴봐도 될까요?
+How complete is the rebuild	다시 만든 결과의 완성도
+How do I open an app?	앱은 어떻게 여나요?
+How do the window and the page talk to each other?	창과 페이지는 서로 어떻게 주고받나요?
+How does the % key work?	% 키는 어떻게 작동하나요?
+How is this app built?	이 앱은 어떻게 만들어졌나요?
+How is this app put together?	이 앱은 어떻게 구성돼 있나요?
+How many projects may build at the same time. More wait their turn.	동시에 만들 수 있는 프로젝트 수입니다. 넘치면 차례를 기다립니다.
+How should the builder use them?	빌더가 이것들을 어떻게 쓸까요?
+I have Ghidra	Ghidra가 이미 있음
+I have permission	권한이 있음
+I want to make things work together	서로 연동되게 만들고 싶습니다
+I'm checking whether it's safe	안전한지 확인하고 있습니다
+I'm keeping old software alive	오래된 소프트웨어를 계속 쓰려고 합니다
+I'm learning how things work	작동 원리를 배우고 있습니다
+I'm new to this	처음입니다
+ILSpy decompile	ILSpy 디컴파일
+Ideas:	아이디어:
+Identify a Flutter build	Flutter 빌드 식별
+Import a source folder	소스 폴더 가져오기
+Import evidence	근거 가져오기
+Imports / Exports	임포트 / 익스포트
+In Deep mode this one takes a game's own files out after the study. Click to stop.	심층 모드에서는 분석이 끝난 뒤 여기서 게임 자체 파일을 꺼냅니다. 누르면 그만둡니다.
+In Unity Hub: sign in (or make a free account) and accept the free Personal licence. Then open Installs, press Install Editor and choose the recommended version. About 10 GB.	Unity Hub에서 로그인(또는 무료 계정 만들기)하고 무료 Personal 라이선스에 동의하세요. 그다음 Installs를 열고 Install Editor를 눌러 권장 버전을 고르세요. 약 10 GB입니다.
+In the launcher: sign in, open Unreal Engine, then Library, and press + next to Engine Versions to install one. About 60 GB.	런처에서 로그인하고 Unreal Engine → Library를 연 뒤 Engine Versions 옆의 +를 눌러 하나 설치하세요. 약 60 GB입니다.
+In use	사용 중
+Inside	내부
+Inspect a Dart AOT snapshot	Dart AOT 스냅샷 살펴보기
+Inspect a network recording	네트워크 기록 살펴보기
+Inspect a web page	웹 페이지 살펴보기
+Inspect an Electron page	Electron 페이지 살펴보기
+Inspect data	데이터 살펴보기
+Inspect instruction	명령어 살펴보기
+Inspector	인스펙터
+Install Rust	Rust 설치
+Install Unity Hub	Unity Hub 설치
+Install Visual Studio Community (free) and tick "Game development with C++".	Visual Studio Community(무료)를 설치하고 "Game development with C++"에 체크하세요.
+Install Xcode	Xcode 설치
+Install an app	앱 설치
+Install an engine	엔진 설치
+Install the launcher	런처 설치
+Installed	설치됨
+Installed apps	설치된 앱
+Inter-process communication: how two parts of an app (or two apps) send messages to each other.	프로세스 간 통신: 앱의 두 부분(또는 두 앱)이 서로 메시지를 주고받는 방식입니다.
+Interface Builder documents	Interface Builder 문서
+Interrupted	중단됨
+Inventory an archive or app bundle	압축 파일이나 앱 번들 목록 보기
+Investigating	조사 중
+Investigation so far	지금까지의 조사
+Is Apktool available?	Apktool을 쓸 수 있나요?
+Is adb available?	adb를 쓸 수 있나요?
+Is an asset key set up?	에셋 키가 설정됐나요?
+Is anything in here a program?	여기에 프로그램이 들어 있나요?
+Is anything sensitive saved in plain text?	민감한 정보가 평문으로 저장돼 있나요?
+Is it safe to look inside programs?	프로그램 안을 살펴봐도 괜찮나요?
+Is it safe to run?	실행해도 안전한가요?
+Is there any readable text inside?	안에 읽을 수 있는 글자가 있나요?
+Is this file safe to open?	이 파일을 열어도 안전한가요?
+It closed straight away.	바로 닫혔습니다.
+It closed straight away. It said:	바로 닫혔습니다. 남긴 메시지:
+It isn't on this computer yet. Craft Anything can download Ghidra {version} and the Java runtime it needs (about {mb} MB), check both against their publishers' checksums, and set them up in its own folder. Nothing else on your computer changes.	이 컴퓨터에는 아직 없습니다. Craft Anything이 Ghidra {version} 및 필요한 Java 런타임(약 {mb} MB)을 내려받아 배포처의 체크섬으로 둘 다 확인한 뒤 자체 폴더에 설치할 수 있습니다. 컴퓨터의 다른 부분은 바뀌지 않습니다.
+It isn't on this computer yet. Install Ghidra {version} from its release page, then choose its folder.	이 컴퓨터에는 아직 없습니다. 릴리스 페이지에서 Ghidra {version} 버전을 설치한 뒤 그 폴더를 고르세요.
+It's already open.	이미 열려 있습니다.
+It's already open. Right-click it to open another copy.	이미 열려 있습니다. 하나 더 열려면 오른쪽 클릭하세요.
+It's done	이대로 완성
+It's mine, or I'm allowed to look	내 것이거나 볼 권한이 있음
+Its copy is deleted, with anything it saved there. The project itself stays as it is.	이 사본과 그 안에 저장된 것이 삭제됩니다. 프로젝트 자체는 그대로입니다.
+Its folder is deleted with everything in it: what was built, the checks and the conversation.	폴더와 그 안의 모든 것이 삭제됩니다: 만든 결과, 검사, 대화.
+Its own code	자체 코드
+Java archive overview	Java 아카이브 개요
+Java class	Java 클래스
+Java method bytecode and pseudo-Java	Java 메서드 바이트코드와 의사 Java
+Java program code (one class)	Java 프로그램 코드 (클래스 하나)
+Java programs	Java 프로그램
+Java runtime	Java 런타임
+Jobs	작업
+Jobs ({n_jobs})	작업 ({n_jobs})
+Jobs ({n})	작업 ({n})
+Just a question: nothing was changed. Answered by	질문에만 답했고 바뀐 것은 없습니다. 답변:
+Just ask	질문만 하기
+Just look inside	살펴보기만
+Keep going without asking	묻지 않고 계속하기
+Keep it	남겨 두기
+Keep it in the sidebar to open any time, whatever later builds change.	나중 빌드가 무엇을 바꾸든 사이드바에 두고 언제든 열 수 있습니다.
+Keep the build as it is and stop offering to carry on.	빌드를 지금 그대로 두고 더 이어 가자고 묻지 않습니다.
+Keep this version in the sidebar to open any time.	이 버전을 사이드바에 두고 언제든 열 수 있습니다.
+Keeps this version exactly as it is now. Later builds can't change or break it, and anything it saves stays with the copy.	이 버전을 지금 그대로 보관합니다. 나중 빌드가 바꾸거나 망가뜨릴 수 없고, 이 버전이 저장하는 것은 사본에 남습니다.
+Key saved	키 저장됨
+Keyed archive	키 기반 아카이브
+Kind	종류
+Language	언어
+Last: {what}	마지막: {what}
+Launch an app	앱 실행
+Leave a few GB for the rest of your computer.	컴퓨터의 다른 작업을 위해 몇 GB는 남겨 두세요.
+Leave a path empty to use the managed install. We never need environment variables.	경로를 비워 두면 관리되는 설치본을 씁니다. 환경 변수는 필요 없습니다.
+Leave empty to use the one Craft Anything sets up.	비워 두면 Craft Anything이 설치한 것을 씁니다.
+Let a project generate assets	프로젝트가 에셋을 생성하도록 허용
+Let's go	시작하기
+Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	빌더가 게임용 사실적인 3D 모델과 텍스처를 만들 수 있습니다. 모델 하나에 {model}, 프로젝트마다 예산 {budget}입니다.
+Library resolution	라이브러리 해석
+Light copy: shares big files with the project	가벼운 사본: 큰 파일을 프로젝트와 공유
+Likeness	닮은 정도
+Line up code and behaviour	코드와 동작 대조
+Line up source with the bundle	소스와 번들 대조
+List Electron pages	Electron 페이지 목록
+List JEB units	JEB 유닛 목록
+List JS runtime targets	JS 런타임 대상 목록
+List a Unity assets file	Unity 에셋 파일 목록
+List a Unity bundle	Unity 번들 목록
+List a game's archives	게임 아카이브 목록
+List a node's event listeners	노드의 이벤트 리스너 목록
+List an AI's models	AI 모델 목록
+List an Unreal IoStore container	Unreal IoStore 컨테이너 목록
+List an Unreal pak	Unreal pak 목록
+List bookmarks	북마크 목록
+List browser pages	브라우저 페이지 목록
+List documents	문서 목록
+List engines	엔진 목록
+List functions	함수 목록
+List names	이름 목록
+List open targets	열린 대상 목록
+List pinned builds	고정한 빌드 목록
+List plugins	플러그인 목록
+List project files	프로젝트 파일 목록
+List projects	프로젝트 목록
+List questions about a build	빌드에 관한 질문 목록
+List radio decoders	무선 디코더 목록
+List segments	세그먼트 목록
+List shared Cutter sessions	공유된 Cutter 세션 목록
+List strings	문자열 목록
+Live: the project's latest build	최신 유지: 프로젝트의 최신 빌드
+Load a screenshot	스크린샷 불러오기
+Loading…	불러오는 중…
+Log	로그
+Look again	다시 살펴보기
+Look at a game	게임 살펴보기
+Look at a website	웹사이트 살펴보기
+Look at the game	게임 살펴보기
+Look for AI on this computer	이 컴퓨터에서 AI 찾기
+Look for game engines	게임 엔진 찾기
+Look for projects again	프로젝트 다시 찾기
+Looked at everything	전부 살펴봄
+Looked at part of it	일부만 살펴봄
+Looked at {a} of {b}	{b}개 중 {a}개 살펴봄
+Looking for AI on this computer…	이 컴퓨터에서 AI 찾는 중…
+Looking for game engines on this computer…	이 컴퓨터에서 게임 엔진 찾는 중…
+Looking for the game's files…	게임 파일 찾는 중…
+Looking inside needs Deep mode	안을 살펴보려면 심층 모드가 필요합니다
+Looking inside software you own or are allowed to examine is normal and often protected (learning, compatibility, security). Saying why helps you keep to it; it stays on this computer.	내가 가진 소프트웨어나 살펴봐도 되는 소프트웨어의 안을 들여다보는 일은 흔하며, 대개 법으로 보호됩니다(학습, 호환성, 보안). 이유를 적어 두면 그 범위를 지키는 데 도움이 되고, 이 내용은 이 컴퓨터에만 남습니다.
+Looking on this computer…	이 컴퓨터에서 찾는 중…
+Low	낮음
+Mach-O structure	Mach-O 구조
+Made a copy: {name}	사본을 만들었습니다: {name}
+Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	fal.ai로 만들고 내 계정에서 비용이 나갑니다: 3D 모델 하나에 {model}, 그림 하나에 {picture}. 끄면 게임을 이것 없이 만듭니다.
+Made with {engine}	{engine} 기반
+Made without looking inside the original.	원본 안을 보지 않고 만들었습니다.
+Make a game that plays like this	이렇게 플레이되는 게임 만들기
+Make a simpler version of this game	이 게임을 더 간단하게 만들기
+Make my own version	나만의 버전 만들기
+Make my own version of this app	이 앱을 나만의 버전으로 만들기
+Making my own thing talk to something else.	내가 만든 것을 다른 것과 연동합니다.
+Many source files packed into one big file so an app or web page loads faster.	앱이나 웹 페이지가 빨리 로드되도록 여러 소스 파일을 큰 파일 하나로 묶은 것입니다.
+Map a HarmonyOS app	HarmonyOS 앱 구조 파악
+Map a page's module graph	페이지 모듈 그래프 그리기
+Map an Android app	Android 앱 구조 파악
+Map an Apple app	Apple 앱 구조 파악
+Markdown	Markdown
+Match functions between two builds	두 빌드 사이 함수 짝짓기
+Match my pictures	내 그림에 맞추기
+Match static code to what ran	정적 코드와 실제 실행 대조
+Maximise	최대화
+May I run "{title}"?	"{title}" 실행해도 될까요?
+May I {action}?	{action} 해도 될까요?
+Measure which code ran	실행된 코드 측정
+Medium	보통
+Memory for Ghidra	Ghidra 메모리
+Minimise	최소화
+Mode	모드
+Model	모델
+Model: {model}	모델: {model}
+Modules	모듈
+More detail	더 자세히
+More makes a big program's first look faster.	많을수록 큰 프로그램을 처음 살펴볼 때 빨라집니다.
+More memory makes Ghidra's first look at a big program faster; leave some for the rest of the computer. Used from the next time Ghidra starts.	메모리가 많을수록 Ghidra가 큰 프로그램을 처음 살펴볼 때 빨라집니다. 컴퓨터의 다른 작업을 위해 조금은 남겨 두세요. 다음에 Ghidra를 시작할 때부터 적용됩니다.
+Name (optional)	이름 (선택)
+Name an address	주소에 이름 붙이기
+Name at address	주소의 이름
+Name many addresses	여러 주소에 이름 붙이기
+Names the program's author gave to functions or variables that survived in the file.	프로그램 작성자가 함수나 변수에 붙인 이름 중 파일에 남아 있는 것입니다.
+Needs a fal.ai key. Until then the game is built without them.	fal.ai 키가 필요합니다. 그전까지는 게임을 이것 없이 만듭니다.
+Needs you	확인 필요
+Network	네트워크
+New	신규
+New project	새 프로젝트
+New projects go in	새 프로젝트 저장 위치
+Next address	다음 주소
+No AI (built-in engines only)	AI 없음 (내장 엔진만)
+No AI brain is set up, so answers come straight from the built-in engines. Add one any time for plain-words explanations.	설정된 AI가 없어 내장 엔진이 바로 답합니다. 쉬운 말 설명이 필요하면 언제든 AI를 추가하세요.
+No AI for now	지금은 AI 없이
+No AI is set up yet. The built-in engines still work; an AI adds plain-words answers.	아직 설정한 AI가 없습니다. 내장 엔진은 그대로 동작하고, AI를 더하면 쉬운 말로 된 답을 받습니다.
+No Unreal or Unity archives were found. Pick the folder the game is installed in.	Unreal이나 Unity 압축 파일을 찾지 못했습니다. 게임이 설치된 폴더를 고르세요.
+No coding agent was found on this computer yet.	이 컴퓨터에서 아직 코딩 에이전트를 찾지 못했습니다.
+No evidence yet	아직 근거 없음
+No game files here	여기에 게임 파일 없음
+No jobs yet. Long tasks show their progress here, and you can cancel them.	아직 작업이 없습니다. 오래 걸리는 작업은 여기에 진행 상황이 나오고, 취소할 수 있습니다.
+No matches	일치 항목 없음
+No open questions	미해결 질문 없음
+No plugins yet.	아직 플러그인이 없습니다.
+No result yet	아직 결과 없음
+No targets	대상 없음
+No tool named {tool}	{tool} 도구가 없습니다
+None	없음
+None yet. Screenshots help it look right.	아직 없습니다. 스크린샷이 있으면 모양을 더 잘 맞춥니다.
+Not allowed	허용 안 함
+Not allowed.	허용하지 않았습니다.
+Not available yet	아직 사용할 수 없음
+Not compared yet: {what}	아직 비교 안 함: {what}
+Not installed	설치 안 됨
+Not now	나중에
+Nothing allowed yet.	아직 허용한 것이 없습니다.
+Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below.	아직 만들 수 있는 것이 없습니다. Claude Code를 설치하고 한 번 로그인하거나, 아래에서 API 키로 AI를 추가하세요.
+Nothing found	찾은 것 없음
+Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have.	아직 찾은 것이 없습니다. API 키, 로컬 모델 서버(Ollama, LM Studio), 이미 있는 에이전트 앱을 찾습니다.
+Nothing inside it is read.	안의 내용은 읽지 않습니다.
+Nothing inside it is read; Craft Anything works from what you can see. Your version gets its own art.	안의 내용은 읽지 않습니다. Craft Anything은 눈에 보이는 것만으로 작업합니다. 내가 만드는 버전에는 따로 그린 그림이 들어갑니다.
+Nothing inside the original is read: not its code, files or page source. Craft Anything works from what you can see: pictures, the page as a visitor sees it, and watching it run.	원본의 안쪽은 읽지 않습니다. 코드, 파일, 페이지 소스 모두 마찬가지입니다. Craft Anything은 눈에 보이는 것으로 작업합니다. 그림, 방문자가 보는 페이지, 실행하는 모습을 봅니다.
+Nothing made yet. What you make shows up here.	아직 만든 것이 없습니다. 만든 것은 여기에 나옵니다.
+Nothing matches the filter.	필터에 맞는 항목이 없습니다.
+Nothing matches.	맞는 항목이 없습니다.
+Nothing new for {time}. Long steps can be quiet; if it stays like this, press Pause.	{time} 동안 새 소식이 없습니다. 오래 걸리는 단계는 조용할 수 있습니다. 계속 이대로면 일시 정지를 누르세요.
+Nothing open	열린 것 없음
+Nothing open yet	아직 열린 것 없음
+Nothing selected	선택한 것 없음
+Nothing to show	보여 줄 것 없음
+Nothing uses it until it's on again; it keeps its key.	다시 켤 때까지 어디에서도 쓰지 않습니다. 키는 그대로 남습니다.
+Nothing — start fresh	없음 — 처음부터 시작
+Now	진행 중
+Now: {what} ({time})	진행 중: {what} ({time})
+Objective-C classes	Objective-C 클래스
+Objective-C protocols	Objective-C 프로토콜
+Observe a JS runtime	JS 런타임 관찰
+Of this, {cost} was charged to an API key.	이 중 {cost}는 API 키로 청구되었습니다.
+Off	끔
+Ollama or LM Studio on another computer, or any service that speaks the OpenAI API.	다른 컴퓨터의 Ollama나 LM Studio, 또는 OpenAI API를 쓰는 모든 서비스.
+On	켬
+One line, in plain words. It stays on this computer and is never sent anywhere.	쉬운 말로 한 줄. 이 컴퓨터에만 남고 어디에도 보내지 않습니다.
+One-shot instrumentation	1회 계측
+Only for Ghidra. Empty = managed.	Ghidra 전용. 비워 두면 자동 관리.
+Only its name changes; its folder stays where it is.	이름만 바뀌고 폴더는 그대로 있습니다.
+Only take pictures out of games you made, or whose owner allows it. A game's art is usually protected by copyright and by the game's licence.	직접 만든 게임이나 주인이 허락한 게임에서만 그림을 꺼내세요. 게임의 그림은 보통 저작권과 게임 이용 약관으로 보호됩니다.
+Only the pin goes; the project and its app stay as they are.	고정만 풀립니다. 프로젝트와 앱은 그대로 있습니다.
+Open	열기
+Open "Show me the proof" to see the exact code we found, and how sure we are.	"근거 보기"를 열면 찾아낸 코드와 얼마나 확실한지 볼 수 있습니다.
+Open Ghidra's release page	Ghidra 배포 페이지 열기
+Open Unity Hub	Unity Hub 열기
+Open a calculator app and find the code behind one button.	계산기 앱을 열고 버튼 하나 뒤에 있는 코드를 찾아보세요.
+Open a file in JEB	JEB에서 파일 열기
+Open a file or drop one here.	파일을 열거나 여기에 끌어다 놓으세요.
+Open a file…	파일 열기…
+Open a folder or app bundle	폴더나 앱 번들 열기
+Open a folder or app bundle…	폴더나 앱 번들 열기…
+Open a folder…	폴더 열기…
+Open a pinned build	고정한 빌드 열기
+Open a project's folder	프로젝트 폴더 열기
+Open a website	웹사이트 열기
+Open an app or file	앱이나 파일 열기
+Open an engine's app	엔진 앱 열기
+Open another copy	하나 더 열기
+Open another target	다른 대상 열기
+Open files, folders or apps; you can have several open at once.	파일, 폴더, 앱을 엽니다. 여러 개를 한꺼번에 열 수 있습니다.
+Open folder	폴더 열기
+Open in the workbench	작업대에서 열기
+Open it	열기
+Open log	로그 열기
+Open one of the files inside it to see its bytes.	안에 든 파일 하나를 열면 바이트를 볼 수 있습니다.
+Open questions	미해결 질문
+Open something	무언가 열기
+Open something first: drop a file or app here, or choose "Just look inside" on New project. Then I can look inside it.	먼저 무언가를 여세요. 파일이나 앱을 여기에 끌어다 놓거나, 새 프로젝트에서 "살펴보기만"를 고르세요. 그러면 안을 살펴볼 수 있습니다.
+Open something to start	무언가를 열어 시작하세요
+Open the Epic Games Launcher	Epic Games Launcher 열기
+Open the app	앱 열기
+Open the app you're curious about.	궁금한 앱을 여세요.
+Open the download page	다운로드 페이지 열기
+Open the folder	폴더 열기
+Open the installer app	설치 앱 열기
+Open the website	웹사이트 열기
+Open {name}	{name} 열기
+Opened {name}	{name} 열림
+Opened {name}. Taking a first look…	{name} 열림. 먼저 훑어보는 중…
+Opened {}	{} 열림
+Opening {name}…	{name} 여는 중…
+Open…	열기…
+Or type your answer…	또는 답을 입력하세요…
+Original	원본
+Other pages of a website studied and compared besides the one you gave.	알려 준 페이지 말고도 분석하고 비교한 웹사이트의 다른 페이지.
+Overview	개요
+Packet capture overview	패킷 캡처 개요
+Packet fields	패킷 필드
+Page through evidence	근거 넘겨 보기
+Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	앱 일부가 멈춰서 그 부분만 중지하고 나머지는 계속했습니다. 작업한 내용은 남아 있습니다.
+Part of the app is stuck. Restarting clears it, and your work is kept.	앱 일부가 멈췄습니다. 재시작하면 풀리고, 작업한 내용은 남습니다.
+Part of this screen hit a bug and was skipped. Your work is safe.	이 화면 일부에서 버그가 나서 건너뛰었습니다. 작업한 내용은 안전합니다.
+Paste your API key (kept in your system keychain)	API 키 붙여넣기 (시스템 키체인에 보관)
+Paste your {name} key	{name} 키 붙여넣기
+Path	경로
+Pause	일시 정지
+Pausing…	일시 정지 중…
+Pause the build first, then delete the project.	먼저 빌드를 일시 정지한 뒤 프로젝트를 삭제하세요.
+Pause the build first.	먼저 빌드를 일시 정지하세요.
+Paused	일시 정지됨
+Paused.	일시 정지했습니다.
+Pick a folder with projects in it	프로젝트가 든 폴더 고르기
+Pick a game's folder	게임 폴더 고르기
+Pick another folder…	다른 폴더 고르기…
+Pick another game	다른 게임 고르기
+Pick something on the left	왼쪽에서 하나를 고르세요
+Pick the app or game folder	앱이나 게임 폴더 고르기
+Pick the app, game or file to rebuild	다시 만들 앱, 게임, 파일 고르기
+Pick the folder for this project	이 프로젝트의 폴더 고르기
+Pick the game's folder	게임 폴더 고르기
+Picture a program's window	프로그램 창 캡처
+Picture model	그림 모델
+Pictures	그림
+Pictures can't be saved from IoStore containers yet; you can see what's inside.	IoStore 컨테이너에서는 아직 그림을 저장할 수 없습니다. 안에 든 것은 볼 수 있습니다.
+Pictures of the original	원본 그림
+Pieces of text stored inside a program, like messages, web addresses or file names.	프로그램 안에 저장된 글자 조각. 메시지, 웹 주소, 파일 이름 같은 것입니다.
+Pin a build	빌드 고정
+Pin a project's build	프로젝트 빌드 고정
+Pin it	고정하기
+Pin name	고정 이름
+Pin removed.	고정을 풀었습니다.
+Pin this build	이 빌드 고정
+Pinned	고정됨
+Pinned builds	고정한 빌드
+Pinned: {name}. Open it from the sidebar any time.	{name} 고정됨. 언제든 사이드바에서 열 수 있습니다.
+Plain words, big buttons, and I'll explain everything.	쉬운 말, 큰 버튼, 모든 것을 설명해 드립니다.
+Plain words, short sentences, and every technical word explained.	쉬운 말, 짧은 문장, 기술 용어는 모두 풀어서 설명합니다.
+Plan	계획
+Plan connecting agent apps	에이전트 앱 연결 계획
+Play a project's result	프로젝트 결과 실행
+Play the game	게임 실행
+Plugin added. Read its tools to start using them.	플러그인을 추가했습니다. 도구를 읽어야 쓸 수 있습니다.
+Plugin arguments	플러그인 인수
+Plugin command or address	플러그인 명령 또는 주소
+Plugin id	플러그인 ID
+Plugin removed.	플러그인을 뺐습니다.
+Plugins	플러그인
+Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	플러그인은 Craft Anything이 자기 도구처럼 내놓는 도구를 더합니다. MCP 서버(명령이나 주소. 추가한 뒤 도구를 읽으세요) 또는 WebAssembly 컴포넌트(.wasm 파일. 내 파일이나 네트워크에 손댈 수 없습니다)를 쓸 수 있습니다.
+Plugins added here always ask before each call.	여기서 추가한 플러그인은 부를 때마다 먼저 묻습니다.
+Plugins read. Their new tools are offered from the next start.	플러그인을 읽었습니다. 새 도구는 다음 실행부터 나옵니다.
+Preserving software that's no longer supported.	더 이상 지원되지 않는 소프트웨어 보존.
+Preview a project's website	프로젝트 웹사이트 미리 보기
+Preview the website	웹사이트 미리 보기
+Previous address	이전 주소
+Program: found automatically	프로그램: 자동으로 찾음
+Program: {path}	프로그램: {path}
+Programs (native code)	프로그램 (네이티브 코드)
+Progress	진행 상황
+Project details	프로젝트 정보
+Project name	프로젝트 이름
+Projects	프로젝트
+Projects and builds	프로젝트와 빌드
+Property list	속성 목록
+Pseudo-C	의사 C
+Purpose	용도
+Raise the asset budget	에셋 예산 늘리기
+Raise the budget by {amount}	예산 {amount} 늘리기
+Raw machine code	기계어 원본
+Read AI settings	AI 설정 읽기
+Read a Unity game's IL2CPP metadata	Unity 게임의 IL2CPP 메타데이터 읽기
+Read a game's files	게임 파일 읽기
+Read a project file	프로젝트 파일 읽기
+Read a setting	설정 읽기
+Read an app's screen	앱 화면 읽기
+Read bytes	바이트 읽기
+Read comment	주석 읽기
+Read inline comment	줄 안 주석 읽기
+Read its tools	도구 읽기
+Read pinned builds	고정한 빌드 읽기
+Read projects	프로젝트 읽기
+Read the journal	작업 일지 읽기
+Read the plugin's tools	플러그인 도구 읽기
+Read the project	프로젝트 읽기
+Reading what's inside…	안에 든 것을 읽는 중…
+Ready	완성
+Ready: {what} is on this computer.	준비됨: {what} 설치되어 있습니다.
+Rebuild status	다시 만들기 상태
+Record a finding	발견 기록
+Record a hypothesis	가설 기록
+Record an open question	미해결 질문 기록
+Recover readable sources	읽을 수 있는 소스 복원
+Recreate it with darker colours	더 어두운 색으로 다시 만들기
+Recreate just its main feature	핵심 기능만 다시 만들기
+Recreate this website	이 웹사이트 다시 만들기
+Recreated games are built with the original's own engine when it's here (Unity, Unreal or Godot), else Unity, and Rust as the last resort.	다시 만드는 게임은 원본 엔진(Unity, Unreal, Godot)이 이 컴퓨터에 있으면 그 엔진으로, 없으면 Unity로, 마지막 수단으로 Rust로 만듭니다.
+References to a name	이름 참조
+Refining rounds	다듬기 회차
+Refresh plugins	플러그인 새로 고침
+Regions of a program file, each with one purpose: code, text, pictures, settings.	프로그램 파일의 구역. 구역마다 코드, 글자, 그림, 설정 같은 한 가지 용도가 있습니다.
+Reload	다시 불러오기
+Remember permission	권한 기억
+Remove	목록에서 빼기
+Remove a pin	고정 풀기
+Remove a pinned build	빌드 고정 풀기
+Remove a plugin	플러그인 빼기
+Remove an AI	AI 빼기
+Remove an app	앱 제거
+Remove an asset key	에셋 키 삭제
+Remove bookmark	책갈피 빼기
+Remove it	고정 풀기
+Remove it and its key	키와 함께 빼기
+Remove {name}	{name} 빼기
+Remove {name}?	{name} 고정을 풀까요?
+Remove…	빼기…
+Rename	이름 바꾸기
+Rename a pinned build	고정한 빌드 이름 바꾸기
+Rename a project	프로젝트 이름 바꾸기
+Rename the pin	고정 이름 바꾸기
+Rename the project	프로젝트 이름 바꾸기
+Rename…	이름 바꾸기…
+Reset	초기화
+Resolve a call	호출 대상 찾기
+Resolved	해결됨
+Resources	리소스
+Restart	재시작
+Restore	복원
+Result	결과
+Resume a Frida session	Frida 세션 다시 시작
+Rizin command	Rizin 명령
+Rizin debug command	Rizin 디버그 명령
+Rizin debug session status	Rizin 디버그 세션 상태
+Rough guide:	대략:
+Run	실행
+Run a Frida script	Frida 스크립트 실행
+Run a build command	빌드 명령 실행
+Run a scripted Electron session	스크립트로 Electron 세션 실행
+Run a scripted web session	스크립트로 웹 세션 실행
+Run a tool from the command palette (Ctrl/⌘ K), or pick a finding in the Evidence panel.	명령 팔레트(Ctrl/⌘ K)에서 도구를 실행하거나, 근거 패널에서 발견 하나를 고르세요.
+Run and watch a program	프로그램을 실행하며 지켜보기
+Run to study	실행하며 분석
+Running	실행 중
+Running processes	실행 중인 프로세스
+Running programs	실행 중인 프로그램
+Running {id}	{id} 실행 중
+Runs its tools without asking	묻지 않고 도구를 실행합니다
+Runs the first-run steps next time.	다음에 처음 실행 단계를 다시 거칩니다.
+Rust program details	Rust 프로그램 정보
+SHA-256	SHA-256
+SQLite database contents	SQLite 데이터베이스 내용
+Safety	안전
+Save	저장
+Save a picture	그림 저장
+Save a report	보고서 저장
+Save an asset key	에셋 키 저장
+Save picture	그림 저장
+Save settings	설정 저장
+Save the key	키 저장
+Save the picture	그림 저장
+Save the report	보고서 저장
+Saved	저장됨
+Saved in	저장 위치
+Saves space: copies the program and code, and shares dependencies and media with the project. A shared file rewritten in place changes here too.	공간을 아낍니다. 프로그램과 코드는 복사하고, 의존 파일과 미디어는 프로젝트와 함께 씁니다. 함께 쓰는 파일을 그 자리에서 고치면 여기도 바뀝니다.
+Say what you want	원하는 것을 말하세요
+Say what you want first.	먼저 원하는 것을 말하세요.
+Say what you want to make, or drop an app or file on the window to look inside it. Everything runs in Clean room mode unless you switch on Deep.	만들고 싶은 것을 말하거나, 앱이나 파일을 창에 끌어다 놓아 안을 살펴보세요. 심층 모드를 켜지 않으면 모두 클린룸 모드로 실행됩니다.
+Screenshot	스크린샷
+Screenshot a page	페이지 스크린샷
+Screenshots of how it should look. The builder opens each one and matches it.	어떻게 보여야 하는지 담은 스크린샷. 빌더가 하나씩 열어 맞춥니다.
+Search for bytes	바이트 검색
+Search functions	함수 검색
+Search strings	문자열 검색
+Sections	섹션
+Security research on software I'm allowed to examine.	살펴봐도 되는 소프트웨어의 보안 연구.
+See how a page is built: its layout, styles, scripts and the requests it makes.	페이지가 어떻게 만들어졌는지 봅니다. 레이아웃, 스타일, 스크립트, 보내는 요청.
+See how a program works: what it does, what it talks to, what's inside.	프로그램이 어떻게 동작하는지 봅니다. 무엇을 하는지, 무엇과 통신하는지, 안에 무엇이 있는지.
+See what a game packs and save its pictures as PNG files. Only for games you made, or whose owner lets you.	게임에 무엇이 들어 있는지 보고 그림을 PNG 파일로 저장합니다. 직접 만든 게임이나 주인이 허락한 게임에서만 쓰세요.
+See what a game packs, and save its pictures as PNG files.	게임에 무엇이 들어 있는지 보고, 그림을 PNG 파일로 저장합니다.
+See what a stand-in was asked	대역 서버가 받은 요청 보기
+See which servers an app talks to, and what it says.	앱이 어떤 서버와 통신하고 무엇을 주고받는지 봅니다.
+Seen it	직접 확인
+Seen it: read directly from the file, page or capture.	직접 확인: 파일, 페이지, 캡처에서 바로 읽었습니다.
+Selected	선택됨
+Selection	선택 항목
+Send	보내기
+Send (Enter)	보내기 (Enter)
+Send now	지금 보내기
+Server address	서버 주소
+Session status	세션 상태
+Set a project's asset budget	프로젝트 에셋 예산 정하기
+Set an AI's program	AI 프로그램 정하기
+Set one up	설정하기
+Set up a brain…	AI 설정…
+Set up a builder	빌더 설정
+Settings	설정
+Show a build's activity	빌드 활동 보기
+Show a project	프로젝트 보기
+Show folder	폴더 보기
+Show me everything	모두 보여 주기
+Show me the proof	근거 보기
+Show pinned builds	고정한 빌드 보기
+Show settings	설정 보기
+Show the answer	답 보기
+Show the console	콘솔 보기
+Show the folder	폴더 보기
+Show the ones that are met	충족한 항목 보기
+Show the sidebar	사이드바 보기
+Show the welcome again	환영 화면 다시 보기
+Showing	보이는 항목
+Sign in and add the Unity Editor	로그인하고 Unity Editor 추가
+Sign in and install Unreal Engine	로그인하고 Unreal Engine 설치
+Simple	간단
+Simple: say what you want and it's handled for you. Advanced: every tool, the evidence and the logs.	간단: 원하는 것을 말하면 알아서 처리합니다. 고급: 모든 도구, 근거, 로그를 봅니다.
+Since Craft Anything opened.	Craft Anything을 연 뒤부터.
+Size	크기
+Skip setup	설정 건너뛰기
+Smart contract interface	스마트 계약 인터페이스
+Software I made, bought, or have permission to examine.	내가 만들었거나 샀거나 살펴볼 권한이 있는 소프트웨어.
+Solana program (sBPF)	Solana 프로그램 (sBPF)
+Some plugins couldn't be read:	읽지 못한 플러그인이 있습니다:
+Something a program borrows from the operating system or a library, like "open a file".	프로그램이 운영체제나 라이브러리에서 빌려 쓰는 기능. "파일 열기" 같은 것입니다.
+Something a program or library offers for other programs to use.	프로그램이나 라이브러리가 다른 프로그램이 쓰도록 내놓는 기능.
+Source	소스
+Start	시작
+Start a Frida session	Frida 세션 시작
+Start a GDB session	GDB 세션 시작
+Start a Rizin debug session	Rizin 디버그 세션 시작
+Start a rebuild	다시 만들기 시작
+Start a stand-in backend	대역 서버 시작
+Start an activity	액티비티 시작
+Start building	만들기 시작
+Start from them	이 파일에서 시작
+Start it	시작하기
+Start with Simple mode; you can set up AI later in Settings.	간단 모드로 시작하세요. AI는 나중에 설정에서 정할 수 있습니다.
+Starting…	시작하는 중…
+Starting… it opens in its own window.	시작하는 중… 별도 창으로 열립니다.
+Still working. Bigger jobs can take a few minutes.	아직 작업 중입니다. 큰 작업은 몇 분 걸릴 수 있습니다.
+Stop	중지
+Stop a pinned build	고정한 빌드 중지
+Stop a rebuild	다시 만들기 중지
+Stop a stand-in backend	대역 서버 중지
+Stop generated assets	에셋 생성 중지
+Stop listing {folder}	{folder} 목록에서 빼기
+Stopped here	여기서 멈춤
+Stops the current step and sends your notes straight away.	지금 단계를 멈추고 메모를 바로 보냅니다.
+Strings	문자열
+Studio	스튜디오
+Studio (dark)	스튜디오 (어둡게)
+Studio Light	스튜디오 밝게
+Study	분석
+Study apps by running them	앱을 실행하며 분석
+Studying	분석 중
+Studying software to understand it.	소프트웨어를 분석해 이해합니다.
+Summarise what changed	바뀐 점 요약
+Swift types	Swift 타입
+Switch Beginner / Experienced	간단 / 고급 전환
+Switch Clean room / Deep	클린룸 / 심층 전환
+Switch light / dark theme	밝은 / 어두운 테마 전환
+Switch target	대상 바꾸기
+System	시스템
+System services	시스템 서비스
+Take a texture out of an Unreal game	Unreal 게임에서 텍스처 꺼내기
+Take an asset out of a Unity game	Unity 게임에서 에셋 꺼내기
+Take back a note	메모 거두기
+Take back: puts it in the box again	거두기: 입력란으로 다시 돌려놓습니다
+Take files out of an Unreal pak	Unreal pak에서 파일 꺼내기
+Take out packed files	묶인 파일 꺼내기
+Target	대상
+Targets	대상
+That folder already has {names}, where Craft Anything keeps its own files. Pick another folder, or move those out first.	그 폴더에는 이미 {names} 항목이 있습니다. Craft Anything이 자체 파일을 두는 곳입니다. 다른 폴더를 고르거나 먼저 그 항목을 옮겨야 합니다.
+That folder is already a project, so it's open now.	그 폴더는 이미 프로젝트라서 바로 열었습니다.
+The Rust toolchain (rustup.rs).	Rust 툴체인 (rustup.rs).
+The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	빌더가 스스로 질문에 답하고 무엇을 골랐는지 알려 주므로("결정함: …") 나중에 바꿀 수 있습니다.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	빌더가 새로 고안한 디자인 설명을 바탕으로 게임의 3D 모델과 텍스처를 만들며, 비용은 fal.ai 계정에서 나갑니다. 게임이 빠르게 돌도록 모델은 로우폴리로 만듭니다. 텍스처를 입힌 모델은 {model}, 그림은 {picture}입니다. 프로젝트마다 예산은 {budget}이며, 넘기 전에 먼저 묻습니다. 키는 시스템 키체인에 보관합니다.
+The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	빌더가 이 파일(코드, 메모, 그림)을 읽고 그 옆의 새 앱 폴더에 앱을 만듭니다. 원래 파일은 그대로 둡니다.
+The builder will decide its questions and tell you what it chose.	빌더가 질문을 스스로 정하고 무엇을 골랐는지 알려 줍니다.
+The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	빌더가 이 파일을 직접 고치고 잘 되는 것을 남깁니다. Craft Anything은 그 옆에 자체 기록 몇 개를 더합니다.
+The builder's questions	빌더의 질문
+The builder's questions come to you as cards, and it waits for your answer.	빌더의 질문이 카드로 오고, 빌더는 답을 기다립니다.
+The builder's questions will come to you.	빌더의 질문을 직접 받습니다.
+The built-in engines still show you everything they find.	내장 엔진은 찾은 것을 그래도 모두 보여 줍니다.
+The code	코드
+The code format Android apps use.	Android 앱이 쓰는 코드 형식입니다.
+The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	API 가격으로 본 코딩 에이전트의 추정치이며 실제 청구액이 아닙니다. 구독 요금제에는 이 금액이 청구되지 않습니다.
+The download keeps going in the background.	다운로드는 백그라운드에서 계속됩니다.
+The first instruction a program runs when it starts.	프로그램이 시작할 때 처음 실행하는 명령입니다.
+The full toolset, evidence and logs.	전체 도구 묶음, 근거, 로그.
+The installer is open. Follow its steps, then come back here.	설치 프로그램이 열렸습니다. 안내를 따라 마친 뒤 여기로 돌아오면 됩니다.
+The lowest-level human-readable form of machine code: one small instruction per line.	사람이 읽을 수 있는 가장 낮은 수준의 기계어 형태로, 한 줄에 작은 명령 하나씩입니다.
+The names were removed from the program before it was shipped, so we have to work them out.	배포 전에 프로그램에서 이름을 지웠기 때문에 이름을 추론해야 합니다.
+The packed contents of an Electron app (a website inside a desktop app)	Electron 앱의 묶인 내용 (데스크톱 앱 안의 웹사이트)
+The program's machine code written out as one tiny instruction per line.	프로그램의 기계어를 한 줄에 아주 작은 명령 하나씩 풀어 쓴 것입니다.
+The project's name and round	프로젝트 이름과 회차
+The raw result	원본 결과
+The smallest unit of data in a file: a number from 0 to 255.	파일 데이터의 가장 작은 단위로, 0부터 255까지의 숫자입니다.
+The smallest units of data in a file: numbers from 0 to 255.	파일 데이터의 가장 작은 단위들로, 0부터 255까지의 숫자입니다.
+The {name} view isn't available yet in this build.	이 빌드에서는 아직 {name} 보기를 쓸 수 없습니다.
+The {} view isn't available yet in this build.	이 빌드에서는 아직 {} 보기를 쓸 수 없습니다.
+Theme	테마
+There's no /{name} command. You can use {commands}.	/{name} 명령은 없습니다. 쓸 수 있는 명령: {commands}.
+There's no AI brain set up yet, so here's what the built-in engines found:	아직 설정한 AI가 없어 내장 엔진이 찾은 내용을 보여 드립니다:
+They're my app: edit them in place	이 파일이 곧 앱: 그 자리에서 고치기
+Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	프로그램이 운영체제나 라이브러리에서 빌려 쓰는 기능입니다. 예: "파일 열기", "창 그리기".
+Things a program or library offers for other programs to use.	프로그램이나 라이브러리가 다른 프로그램이 쓰도록 내놓는 기능입니다.
+Things we couldn't establish yet are listed here, with what would settle them.	아직 확인하지 못한 사항과 이를 확인할 방법이 여기에 나옵니다.
+This answer won't be there after a restart:	이 답은 다시 시작하면 사라집니다:
+This build stopped part-way	이 빌드는 중간에 멈췄습니다
+This can't be undone.	되돌릴 수 없습니다.
+This folder already has files	이 폴더에 이미 파일이 있습니다
+This is a big one. You can leave this open and come back later.	오래 걸리는 작업입니다. 이 창을 열어 두고 나중에 돌아와도 됩니다.
+This is outside what the builder may do on its own. Nothing happens until you say so.	빌더가 혼자 할 수 있는 범위를 벗어납니다. 허락하기 전에는 아무것도 하지 않습니다.
+This keeps going in the background, and each download is checked against its publisher's checksum before it's used.	백그라운드에서 계속 진행되며, 내려받은 파일은 쓰기 전에 배포자의 체크섬과 대조합니다.
+This project is waiting its turn. Send your message once it starts.	이 프로젝트는 차례를 기다리고 있습니다. 시작되면 메시지를 보내면 됩니다.
+This runs code from the target or changes a device. Clicking Run is your OK.	대상의 코드를 실행하거나 기기를 바꿉니다. 실행을 누르면 허락한 것으로 봅니다.
+This runs code from the target or changes a device. Nothing runs until you say so.	대상의 코드를 실행하거나 기기를 바꿉니다. 허락하기 전에는 아무것도 실행하지 않습니다.
+This tool takes no settings.	이 도구는 설정이 없습니다.
+This updates by itself when it's done.	끝나면 저절로 갱신됩니다.
+This view arrives with the next engines. The Hex and Result views work today.	이 보기는 다음 엔진과 함께 나옵니다. 지금은 Hex 보기와 결과 보기를 쓸 수 있습니다.
+Those aren't pictures we can use (PNG, JPEG, WebP or GIF, up to 20 MB).	쓸 수 있는 그림이 아닙니다 (PNG, JPEG, WebP, GIF, 20 MB까지).
+Time spent	걸린 시간
+Tip: press Ctrl/⌘ K to run any tool.	팁: Ctrl/⌘ K를 누르면 어떤 도구든 실행할 수 있습니다.
+Tokens	토큰
+Tools may now run code from what you open without asking. Turn this back on unless you're sure.	이제 도구가 묻지 않고 연 파일의 코드를 실행할 수 있습니다. 확신이 없으면 다시 켜 두는 편이 좋습니다.
+Tools that run code from a target or change a phone always ask first, unless you allowed them for a project.	대상의 코드를 실행하거나 휴대폰을 바꾸는 도구는 프로젝트에서 허락하지 않은 한 항상 먼저 묻습니다.
+Trace a UI action	UI 동작 추적
+Trace a feature	기능 추적
+Try again	다시 시도
+Try asking	질문 예시
+Try it out, then ask below for any changes.	써 보고, 바꿀 점이 있으면 아래에서 요청하면 됩니다.
+Turn a program's machine code back into something that reads like source code. It's a reconstruction, not the original.	프로그램의 기계어를 소스 코드처럼 읽히는 형태로 되돌립니다. 원본이 아니라 재구성한 것입니다.
+Turn off	끄기
+Turn off an AI	AI 끄기
+Turn on	켜기
+Turn on Deep mode	심층 모드 켜기
+Turn on an AI	AI 켜기
+Turning a plugin on or off takes effect from the next start.	플러그인을 켜거나 끈 것은 다음 실행부터 적용됩니다.
+Type a command or tool…	명령이나 도구 입력…
+Type the website's address:	웹사이트 주소 입력:
+Type your question after /btw.	/btw 뒤에 질문을 입력합니다.
+Unity assets	Unity 에셋
+Unity bundle	Unity 번들
+Unity's own installer. It only opens if Unity's signature checks out.	Unity 공식 설치 프로그램입니다. Unity 서명이 확인될 때만 열립니다.
+Unknown	알 수 없음
+Unknown: we couldn't establish this yet.	알 수 없음: 아직 확인하지 못했습니다.
+Unknowns	미확인 사항
+Unload a Frida script	Frida 스크립트 해제
+Unreal IoStore	Unreal IoStore
+Unreal builds games with Apple's Xcode, free in the App Store.	Unreal은 Apple의 Xcode로 게임을 만듭니다. App Store에서 무료로 받을 수 있습니다.
+Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal은 있지만 Visual Studio의 C++ 도구도 필요합니다.
+Unreal pak	Unreal pak
+Update a hypothesis	가설 갱신
+Update an open question	남은 질문 갱신
+Update the checklist	체크리스트 갱신
+Update the plan	계획 갱신
+Use	사용
+Use an API key…	API 키 사용…
+Use as a goal	목표로 사용
+Use the projects folder	프로젝트 폴더 사용
+Use this	이것 사용
+Use {name}	{name} 사용
+Value flow	값 흐름
+Version	버전
+Waiting	대기 중
+Waiting for another build to finish: this one starts next.	다른 빌드가 끝나기를 기다리는 중입니다. 이 빌드가 다음 차례입니다.
+Waiting for other builds to finish: {n} in line.	다른 빌드가 끝나기를 기다리는 중입니다. {n}번째 차례입니다.
+Waiting: the builder reads it at its next step. Up arrow to edit.	대기 중: 빌더가 다음 단계에서 읽습니다. 위 화살표로 고칠 수 있습니다.
+Waiting: the builder reads these at its next step. Up arrow to edit the last.	대기 중: 빌더가 다음 단계에서 읽습니다. 위 화살표로 마지막 메모를 고칠 수 있습니다.
+Want answers in plain words?	쉬운 말로 답을 받을까요?
+Watch a Mac app's calls	Mac 앱의 호출 지켜보기
+Watch a page over time	페이지 변화 지켜보기
+We didn't find an AI on this computer yet	이 컴퓨터에서 아직 AI를 찾지 못했습니다
+We list the web addresses and messages we can see inside it. Watching it live needs your OK first.	안에서 보이는 웹 주소와 메시지를 보여 줍니다. 실시간으로 지켜보려면 먼저 허락이 필요합니다.
+We only read it; nothing runs. Every answer shows how sure we are.	읽기만 하고 실행하지 않습니다. 답마다 얼마나 확실한지 표시합니다.
+WebAssembly module	WebAssembly 모듈
+WebAssembly: fast compiled code that runs inside web browsers.	WebAssembly: 웹 브라우저 안에서 도는 빠른 컴파일 코드입니다.
+Website address	웹사이트 주소
+Website pages	웹사이트 페이지
+Websites	웹사이트
+Welcome	환영합니다
+What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	새 게임이 묻지 않고 그림과 3D 모델 생성에 쓸 수 있는 금액입니다. 프로젝트마다 따로 둡니다.
+What a program exports	프로그램이 내보내는 것
+What a program imports	프로그램이 가져오는 것
+What are its main parts?	주요 부분은 무엇인가요?
+What brings you here?	무엇을 하러 오셨나요?
+What can Craft Anything do?	Craft Anything으로 무엇을 할 수 있나요?
+What data was sent?	어떤 데이터를 보냈나요?
+What do you want to look inside?	무엇을 살펴볼까요?
+What do you want to make?	무엇을 만들까요?
+What do you want to recreate?	무엇을 다시 만들까요?
+What does it need from the page?	페이지에서 무엇이 필요한가요?
+What does it send over the internet?	인터넷으로 무엇을 보내나요?
+What does this app do?	이 앱은 무엇을 하나요?
+What does this app store?	이 앱은 무엇을 저장하나요?
+What does this contract do?	이 컨트랙트는 무엇을 하나요?
+What does this module do?	이 모듈은 무엇을 하나요?
+What does this program do?	이 프로그램은 무엇을 하나요?
+What does {what} do?	{what}의 역할은 무엇인가요?
+What happened in this build	이 빌드에서 있었던 일
+What is it	종류
+What is this?	이것은 무엇인가요?
+What it calls	호출하는 것
+What kind of file is this?	어떤 종류의 파일인가요?
+What permissions does it ask for?	어떤 권한을 요청하나요?
+What pictures and textures are made with.	그림과 텍스처를 만드는 데 씁니다.
+What settings are in here?	여기에 어떤 설정이 있나요?
+What tables are in here?	여기에 어떤 테이블이 있나요?
+What we couldn't check	확인하지 못한 것
+What would you like to find out?	무엇을 알아볼까요?
+What would you like to know about {name}?	{name}에 대해 무엇을 알아볼까요?
+What's at this address	이 주소에 있는 것
+What's in this folder?	이 폴더에는 무엇이 있나요?
+What's inside this archive?	이 압축 파일 안에는 무엇이 있나요?
+Whatever Settings → AI builds with.	설정 → AI에서 고른 빌더를 씁니다.
+When a folder you pick has files	고른 폴더에 파일이 있을 때
+When the builder needs a choice made: show it to you and wait, or let it decide and say what it chose. Each project can choose for itself under its prompt box.	빌더가 결정해야 할 때, 나에게 보여 주고 기다릴지 아니면 스스로 정하고 알려 줄지 고릅니다. 프로젝트마다 입력란 아래에서 따로 정할 수 있습니다.
+When you rebuild an app or game, start it once to picture its window and compare the rebuild with it. It runs that program.	앱이나 게임을 다시 만들 때 원본을 한 번 실행해 창을 캡처하고, 다시 만든 결과와 비교합니다. 그 프로그램을 실행합니다.
+Where am I	현재 위치
+Where is Ghidra installed?	Ghidra는 어디에 설치되어 있나요?
+Where is the program?	프로그램은 어디에 있나요?
+Where should new projects go?	새 프로젝트를 어디에 둘까요?
+Where we found it	찾은 위치
+Whether they're the app to edit in place, or material the app starts from beside them.	이 파일이 그 자리에서 고칠 앱인지, 옆에 만들 앱의 재료인지 정합니다.
+Which AI answers your questions	질문에 답할 AI
+Which file is the main program?	어느 파일이 주 프로그램인가요?
+Which files does it read or write?	어떤 파일을 읽거나 쓰나요?
+Which function is this in	이 위치가 속한 함수
+Which servers does it talk to?	어떤 서버와 통신하나요?
+Which servers were contacted?	어떤 서버에 접속했나요?
+Which websites does it load?	어떤 웹사이트를 불러오나요?
+Who builds what you make	만들기를 맡을 빌더
+Who calls it	호출하는 곳
+Who can move funds?	누가 자금을 옮길 수 있나요?
+Who signed this Windows program	이 Windows 프로그램에 서명한 곳
+Who uses this Android class?	이 Android 클래스를 누가 쓰나요?
+Who uses this Java class?	이 Java 클래스를 누가 쓰나요?
+Why we ask	묻는 이유
+Window / focus info	창 / 포커스 정보
+Windows resources	Windows 리소스
+Wireshark tools check	Wireshark 도구 검사
+Without it, Deep mode uses Craft Anything's own decompiler, which is rougher.	없으면 심층 모드는 Craft Anything 자체 디컴파일러를 쓰며, 결과가 더 거칩니다.
+Work out a copy's size	복사본 크기 계산
+Work out what an installed app is built on	설치된 앱이 무엇으로 만들어졌는지 알아내기
+Workbench	작업대
+Worked it out	추론
+Worked it out: computed step by step from things we saw.	추론: 본 것에서 한 단계씩 계산했습니다.
+Worked through {n} steps	{n}단계 완료
+Working on it	작업 중
+Working on your answer	답을 준비하는 중
+Working out how much space a copy takes…	복사본 크기 계산 중…
+Working…	작업 중…
+Working… ({n} steps so far)	작업 중… ({n}단계 진행)
+Write a project file	프로젝트 파일 쓰기
+Write a readable report	읽기 쉬운 보고서 쓰기
+Write comment	주석 쓰기
+Write inline comment	줄 주석 쓰기
+Write pseudo-C to a folder	의사 C를 폴더로 내보내기
+Write the brief	개요 쓰기
+Write the handoff	인계 문서 쓰기
+Wrote {what} to {}	{what} 저장 위치: {}
+You answered: {a}	내 답: {a}
+You can add a Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studio) or an agent you already use, later in Settings → AI.	Claude, ChatGPT, OpenRouter 키나 로컬 모델(Ollama, LM Studio), 이미 쓰는 에이전트는 나중에 설정 → AI에서 추가할 수 있습니다.
+You chose:	고른 항목:
+You're all set	준비를 마쳤습니다
+Your app is ready	앱이 완성되었습니다
+Your brains	내 AI
+Your fal.ai key	내 fal.ai 키
+Your game is ready	게임이 완성되었습니다
+Your message wasn't sent: another project was opened while its pictures were copied.	메시지를 보내지 못했습니다. 그림을 복사하는 동안 다른 프로젝트가 열렸습니다.
+Your own tool installs (optional)	직접 설치한 도구 (선택)
+Your project starts as soon as it's done.	끝나는 대로 프로젝트가 시작됩니다.
+Your version	내 버전
+Your website is ready	웹사이트가 완성되었습니다
+a new folder in {dir}	{dir} 안의 새 폴더
+a picture	(그림 1장)
+about ${n}	약 ${n}
+address, e.g. http://192.168.1.20:11434/v1	주소, 예: http://192.168.1.20:11434/v1
+and {n} more	외 {n}개
+arguments (optional)	인수 (선택)
+call graph	호출 그래프
+clean room	클린룸
+command, https:// address or .wasm file	명령, https:// 주소 또는 .wasm 파일
+deep mode	심층 모드
+entry point	진입점
+files	파일
+findings	발견 사항
+first run	첫 실행
+found on this computer; set up when you start	이 컴퓨터에서 찾음, 시작할 때 설정
+from the builder's own memory of the build	빌드에 대한 빌더 자신의 기억에서
+from the project's files	프로젝트 파일에서
+id, e.g. docs	ID, 예: docs
+is required	항목은 꼭 채워야 합니다
+isn't available yet	기능은 아직 쓸 수 없습니다
+job result	작업 결과
+job {title} panicked: {what}	작업 {title} 비정상 종료: {what}
+just now	방금
+managed	자동 관리
+model (optional)	모델 (선택)
+must be a number	항목에는 숫자를 넣어야 합니다
+must be a whole number	항목에는 정수를 넣어야 합니다
+name, e.g. Studio box	이름, 예: 작업실 컴퓨터
+number	숫자
+objdump output	objdump 출력
+or start with /btw to just ask	그냥 물어보려면 /btw로 시작
+pinned builds couldn't be read: {}	고정한 빌드를 읽지 못했습니다: {}
+say how to use the files there	그 파일을 어떻게 쓸지 설명
+scene	장면
+scenes	장면
+source map	소스 맵
+start page	시작 페이지
+the app is built beside your files, starting from them	내 파일을 바탕으로 그 옆에 앱을 만듭니다
+the built-in engines	내장 엔진
+the prompt box changed height	입력란 높이가 바뀜
+title bar	제목 표시줄
+under $0.01	$0.01 미만
+yesterday	어제
+your files there are the app, edited in place	그 파일이 곧 앱이며 그 자리에서 고칩니다
+{:.1} GB	{:.1} GB
+{:.1}M	{:.1}M
+{backend}: {input_tokens} in / {output_tokens} out{cost}	{backend}: 입력 {input_tokens} / 출력 {output_tokens}{cost}
+{cost} (estimate)	{cost} (추정)
+{c} · {size}	{c} · {size}
+{done} of {all} done	{all}개 중 {done}개 완료
+{gb} GB for bigger ones	더 큰 것은 {gb} GB
+{gb} GB for programs up to {size}	{size}까지의 프로그램은 {gb} GB
+{gb} GB up to {size}	{size}까지 {gb} GB
+{held} of {n} requirements met	요구 사항 {n}개 중 {held}개 충족
+{id} · {summary}	{id} · {summary}
+{in} in, {out} out.	입력 {in}, 출력 {out}.
+{k}: {s}	{k}: {s}
+{lbl}  {}	{lbl}  {}
+{line}, and {n} more	{line} 외 {n}개
+{mb} MB	{mb} MB
+{name} builds what you make.	만들기는 {name} 담당입니다.
+{name} builds what you make; answers come from {brain}.	만들기는 {name} 담당이고, 답은 {brain}에서 옵니다.
+{name} is ready	{name} 준비 완료
+{name} is ready.	{name} 준비를 마쳤습니다.
+{name} isn't available yet in this build.	이 빌드에서는 아직 {name} 기능을 쓸 수 없습니다.
+{name} isn't on this computer yet.	아직 이 컴퓨터에 {name}이(가) 없습니다.
+{name} key	{name} 키
+{n} actions done so far	지금까지 동작 {n}개 완료
+{n} days ago	{n}일 전
+{n} h ago	{n}시간 전
+{n} item(s)	{n}개 항목
+{n} job(s) running	작업 {n}개 실행 중
+{n} min ago	{n}분 전
+{n} picture(s) to match.	맞출 그림 {n}장.
+{n} step(s) didn't work and were retried or skipped.	{n}단계가 실패해 다시 시도하거나 건너뛰었습니다.
+{n} tokens	토큰 {n}개
+{n} · ${spent:.2} of ${budget:.2}	{n} · ${budget:.2} 중 ${spent:.2}
+{n} · ${spent} of ${budget}	{n} · ${budget} 중 ${spent}
+{scenes} {}	{scenes} {}
+{text}, {}	{text}, {}
+{title} hit a bug and stopped safely. ({what})	{title}에서 버그가 나서 안전하게 멈췄습니다. ({what})
+{title} {id}	{title} {id}
+{title} · {:.0}%	{title} · {:.0}%
+{tool} finished	{tool} 완료
+{tool}: {}	{tool}: {}
+{what} panicked: {msg}	{what} 비정상 종료: {msg}
+{} GB	{} GB
+{} isn't available yet in this build.	이 빌드에서는 아직 {} 기능을 쓸 수 없습니다.
+{} item(s)	{}개 항목
+{} key	{} 키
+{} report.md	{} report.md
+{} {name}	{} {name}
+{} {said}	{} {said}
+{} {then}	{} {then}
+{} {v}	{} {v}
+{} {why}	{} {why}
+{} {} · {}{cost}	{} {} · {}{cost}
+{} · {mode}	{} · {mode}
+{}: {e}	{}: {e}
+{}: {some}{more}.	{}: {some}{more}.
+{}: {state}	{}: {state}
+{}h {:02}m	{}시간 {:02}분
+{}m {:02}s	{}분 {:02}초
+— use the filter to find the rest.	— 나머지는 필터로 찾을 수 있습니다.
+… {n} more	… 외 {n}개
+… {n} older	… 이전 항목 {n}개
+… {} more	… 외 {}개
+… {} older	… 이전 항목 {}개
+← Back	← 뒤로
+↑↓ to move · Enter to run · Esc to close	↑↓ 이동 · Enter 실행 · Esc 닫기

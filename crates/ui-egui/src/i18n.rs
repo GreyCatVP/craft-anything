@@ -25,6 +25,7 @@ pub static LANGUAGES: &[LangInfo] = &[
     LangInfo { code: "zh-hans", name: "简体中文", source: include_str!("i18n/zh-hans.tsv") },
     LangInfo { code: "zh-hant", name: "繁體中文", source: include_str!("i18n/zh-hant.tsv") },
     LangInfo { code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv") },
+    LangInfo { code: "ko", name: "한국어", source: include_str!("i18n/ko.tsv") },
 ];
 
 /// Match a locale to a registered UI language. An explicit script wins over the region.
@@ -153,7 +154,7 @@ mod tests {
             out
         }
         let mut catalogs = Vec::new();
-        for lang in LANGUAGES.iter().filter(|l| matches!(l.code, "zh-hans" | "zh-hant" | "ru")) {
+        for lang in LANGUAGES.iter().filter(|l| matches!(l.code, "zh-hans" | "zh-hant" | "ru" | "ko")) {
             let mut keys = std::collections::BTreeSet::new();
             for (i, line) in lang.source.lines().enumerate() {
                 if line.trim().is_empty() || line.starts_with('#') {

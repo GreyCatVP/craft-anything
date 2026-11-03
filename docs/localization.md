@@ -1,6 +1,6 @@
 # Chinese UI localisation
 
-The desktop app offers **Русский** (`ru`), **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
+The desktop app offers **한국어** (`ko`), **Русский** (`ru`), **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
 alongside English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
 existing `language` setting. **System** uses the operating system's preferred
 supported language; if none matches, it uses English. An explicit choice takes
@@ -32,6 +32,9 @@ Keep placeholders such as `{name}` and `{n}` intact, along with command IDs,
 shortcuts, escapes and trailing `…`. Update both Chinese catalogs when English
 source keys change. Common terms include 净室 / 淨室 (Clean room), 深度 (Deep),
 构建 / 建置 (Build), 证据 / 證據 (Evidence), and 项目 / 專案 (Project).
+The Korean catalog `ko.tsv` uses 클린룸 (Clean room), 심층 (Deep), 분석 / 만들기 / 검사 / 완성
+(Study / Build / Check / Ready), 근거 (Evidence) and 프로젝트 (Project); short labels are nouns and
+sentences use the formal 합니다 style.
 
 ## Validation
 
