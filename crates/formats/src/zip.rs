@@ -213,6 +213,16 @@ pub fn raw_entry_data<'a>(data: &'a [u8], e: &ZipEntry) -> Result<&'a [u8], ZipE
 
 /// Read and decompress one entry, refusing to produce more than `max_bytes`.
 pub fn read_entry(data: &[u8], e: &ZipEntry, max_bytes: u64) -> Result<Vec<u8>, ZipError> {
+    let out = read_entry_unverified(data, e, max_bytes)?;
+    let found = crc32(&out);
+    if found != e.crc32 {
+        return Err(ZipError::CrcMismatch { expected: e.crc32, found });
+    }
+    Ok(out)
+}
+
+/// Like [`read_entry`] but without comparing the stored CRC-32, so a caller that accepts a mismatch can still get the bytes.
+pub fn read_entry_unverified(data: &[u8], e: &ZipEntry, max_bytes: u64) -> Result<Vec<u8>, ZipError> {
     if e.encrypted {
         return Err(ZipError::Unsupported(format!("{} is encrypted", e.name)));
     }
@@ -230,10 +240,6 @@ pub fn read_entry(data: &[u8], e: &ZipEntry, max_bytes: u64) -> Result<Vec<u8>, 
         93 => crate::decompress::zstd(raw, max_bytes).map_err(|err| ZipError::Corrupt(format!("zstd stream for {} is damaged: {err}", e.name)))?,
         m => return Err(ZipError::Unsupported(format!("compression method {m} ({}) for {}", e.method_name(), e.name))),
     };
-    let found = crc32(&out);
-    if found != e.crc32 {
-        return Err(ZipError::CrcMismatch { expected: e.crc32, found });
-    }
     Ok(out)
 }
 

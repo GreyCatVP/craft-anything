@@ -678,7 +678,15 @@ fn core_archive_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
                     Ok(d) => members.push((e.name.clone(), Member::Owned(d))),
                     Err(err @ zip::ZipError::CrcMismatch { .. }) => {
                         contradictions.push(json!({"path": e.name, "reason": err.to_string()}));
-                        members.push((e.name.clone(), Member::Skip(err.to_string())));
+                        let m = if p.if_tampered == IntegrityPolicy::Continue {
+                            match zip::read_entry_unverified(&bytes, e, p.max_bytes) {
+                                Ok(d) => Member::Owned(d),
+                                Err(read_err) => Member::Skip(read_err.to_string()),
+                            }
+                        } else {
+                            Member::Skip(err.to_string())
+                        };
+                        members.push((e.name.clone(), m));
                     }
                     Err(err) => members.push((e.name.clone(), Member::Skip(err.to_string()))),
                 }
@@ -928,6 +936,25 @@ mod tests {
         assert_eq!(err.code, ErrorCode::FileHashMismatch);
         let ok = call(&e, "core_archive_show", json!({"path": p, "if_tampered": "continue"})).unwrap();
         assert_eq!(ok["result"]["contradictions"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn extract_if_tampered_continue_writes_the_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut z = fx::zip_stored(&[("a.txt", b"hello")]);
+        let pos = z.windows(5).position(|w| w == b"hello").unwrap();
+        z[pos] = b'j';
+        let p = dir.path().join("bad.zip");
+        std::fs::write(&p, &z).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let err = call(&e, "core_archive_extract", json!({"path": p})).unwrap_err();
+        assert_eq!(err.code, ErrorCode::FileHashMismatch);
+        let ok = call(&e, "core_archive_extract", json!({"path": p, "if_tampered": "continue"})).unwrap();
+        let r = &ok["result"];
+        assert_eq!(r["files_written"], 1, "{r}");
+        assert_eq!(r["contradictions"].as_array().unwrap().len(), 1);
+        let out = std::path::PathBuf::from(r["output_directory"].as_str().unwrap());
+        assert_eq!(std::fs::read(out.join("a.txt")).unwrap(), b"jello");
     }
 
     #[test]
