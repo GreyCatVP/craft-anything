@@ -9,7 +9,7 @@
 use crate::inbox::Inbox;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use crate::tools::interaction_tools::{Verdict, ask_approval, inbox, inside, resolve, workspace_of};
-use crate::workspace::{AssetRecord, Workspace};
+use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, Workspace};
 use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Catalogue, Generated, Shape, about_usd, charged_usd, fal, usd};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
@@ -33,6 +33,9 @@ impl AssetKeys {
 
 /// Remembered when the person says "always" to going over the budget.
 const OVER_BUDGET: &str = "assets:over-budget";
+
+/// How long a generation waits for another process's generation in the same project to finish.
+const SPEND_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Expose image, model and audio generation tools with network and filesystem effects declared.
 pub fn specs() -> Vec<ToolSpec> {
@@ -234,6 +237,23 @@ fn canonical_future(path: &Path) -> Result<PathBuf, ToolError> {
     }
 }
 
+/// Refuse a destination that is one of Craft Anything's records (in a project whose app is the
+/// project folder, they sit beside the person's files), named directly or through a link.
+fn not_a_record(ws: &Workspace, path: &Path) -> Result<(), ToolError> {
+    let refused = || ToolError::invalid("save_as must not be one of Craft Anything's own records");
+    if ws.is_own_record(path) {
+        return Err(refused());
+    }
+    let root = canonical_future(&ws.root)?;
+    let resolved = canonical_future(path)?;
+    for name in OWN_NAMES.iter().filter(|n| **n != "checks") {
+        if inside(&canonical_future(&root.join(name))?, &resolved) {
+            return Err(refused());
+        }
+    }
+    Ok(())
+}
+
 /// Reject paths whose resolved ancestors escape the root, including through symbolic links.
 fn confined(root: &Path, path: &Path) -> Result<(), ToolError> {
     let root = canonical_future(root)?;
@@ -326,12 +346,13 @@ fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, re
 }
 
 /// What a generation needs: the keys, the providers, the inbox (for the over-budget question) and
-/// the project.
+/// the project, with its spending lock held until the generation's receipts are written.
 struct Job {
     keys: std::sync::Arc<AssetKeys>,
     providers: AssetProviders,
     inbox: Inbox,
     ws: Workspace,
+    _spending: SpendLock,
 }
 
 /// Load generation context only for an opted-in project whose manifest this build can safely update.
@@ -351,7 +372,10 @@ fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
             "Make these assets with simple shapes and colours instead, and tell the person they can turn on generated assets for this game in the app.",
         ));
     }
-    Ok(Job { keys, providers, inbox, ws })
+    // Held through the budget check, the paid calls and their receipts: another process sharing
+    // this project then sees every earlier receipt and never writes the ledger at the same time.
+    let spending = ws.lock_spending(SPEND_LOCK_WAIT)?;
+    Ok(Job { keys, providers, inbox, ws, _spending: spending })
 }
 
 /// Explain which provider lacks credentials and offer a fallback that requires no paid assets.
@@ -382,6 +406,7 @@ fn save_path(ws: &Workspace, save_as: &str, ext: &str) -> Result<(PathBuf, Strin
     let path = resolve(&app, rel).filter(|p| inside(&app, p) && *p != app).ok_or_else(|| ToolError::invalid("save_as must be a file path inside app/"))?;
     confined(&ws.root, &app)?;
     confined(&app, &path)?;
+    not_a_record(ws, &path)?;
     if path.is_dir() {
         return Err(ToolError::invalid("save_as must name a file, not a directory"));
     }
@@ -495,6 +520,7 @@ fn keep(ws: &Workspace, path: &Path, rel: &str, kind: &str, made_from: &str, g: 
             std::fs::create_dir_all(parent).map_err(|e| ToolError::io(parent.display(), e))?;
         }
         confined(&ws.app_dir(), path)?;
+        not_a_record(ws, path)?;
         crate::project::write_atomic(path, &g.bytes)
     };
     save().map_err(|e| {
@@ -972,6 +998,63 @@ mod tests {
         assert!((records[1].cost_usd - 0.4).abs() < 1e-9);
         assert!(w.app_dir().join("crate.png").exists() && !w.app_dir().join("crate.glb").exists());
         assert_eq!(*picture.calls.lock().unwrap(), [AssetKind::Image]);
+    }
+
+    /// Records whether the project's spending lock was taken by the generation calling it.
+    struct LockProbe(PathBuf, craft_anything_platform::sync::Mutex<Option<bool>>);
+
+    impl AssetProvider for LockProbe {
+        fn id(&self) -> &'static str {
+            "elevenlabs"
+        }
+        fn name(&self) -> &'static str {
+            "lock probe"
+        }
+        fn generate(&self, _key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+            // A second handle stands for another process sharing the project.
+            let held = Workspace::open(&self.0).unwrap().lock_spending(Duration::ZERO).is_err();
+            *self.1.lock().unwrap() = Some(held);
+            Ok(Generated { url: String::new(), bytes: b"ID3".to_vec(), cost_usd: req.listed_cost() })
+        }
+    }
+
+    /// A generation holds the project's spending lock through its paid call and releases it after
+    /// its receipt; another process's generation then waits instead of using a stale total.
+    #[test]
+    fn a_generation_holds_the_spending_lock_until_its_receipt_is_written() {
+        let (_d, w) = ws();
+        let probe = std::sync::Arc::new(LockProbe(w.root.clone(), Default::default()));
+        let engine = engine_with(&w, vec![probe.clone()]);
+        let params = json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"});
+        engine.call("assets_sound_generate", params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap();
+        assert_eq!(*probe.1.lock().unwrap(), Some(true), "held during the paid call");
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+        w.lock_spending(Duration::ZERO).expect("released once the receipt is written");
+    }
+
+    /// Where the app is the project folder, an asset never lands on Craft Anything's records, named
+    /// directly or through a link that resolves into one, and nothing is spent trying.
+    #[test]
+    fn assets_never_overwrite_the_projects_own_records() {
+        let (_d, mut w) = ws();
+        w.manifest.app_in_root = true;
+        w.save().unwrap();
+        std::fs::create_dir_all(w.root.join("reference")).unwrap();
+        for record in ["reference/picture-1.png", "pinned/old.png", "inbox/x.png", "./capture/shot.png"] {
+            assert_eq!(save_path(&w, record, "png").unwrap_err().code, ErrorCode::BadInput, "{record}");
+        }
+        assert_eq!(save_path(&w, "Assets/crate.png", "png").unwrap().1, "Assets/crate.png");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(w.root.join("reference"), w.root.join("art")).unwrap();
+            assert_eq!(save_path(&w, "art/sky.png", "png").unwrap_err().code, ErrorCode::BadInput, "a link into a record");
+        }
+        let (engine, stub) = recording_engine(&w, "elevenlabs", None);
+        let params = json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"reference/chime.mp3"});
+        let error = engine.call("assets_sound_generate", params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::BadInput);
+        assert!(stub.calls.lock().unwrap().is_empty() && stub.estimates.lock().unwrap().is_empty());
+        assert!(w.try_assets().unwrap().is_empty());
     }
 
     /// Build an isolated auto-mode engine with one keyed recording provider and an optional estimate override.

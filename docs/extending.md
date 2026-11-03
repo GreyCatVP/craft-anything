@@ -104,6 +104,14 @@ no usable output. The provider marks the error with `assets::charged`, and the t
 charge for the intended file before returning the error, so a retry is checked against the budget
 it already used. A charge that can't be recorded is reported as such, never dropped.
 
+One project's paid generations run one at a time, across processes too: each holds the project's
+`assets.lock` (an operating-system file lock, released when its process exits) from the budget
+check until its receipts are written, so a second process never admits spending against a stale
+total or writes the ledger at the same time. A generation that can't take the lock within 30
+seconds stops with "Another asset generation for this project is still running". Generated files
+never land on Craft Anything's own records, named directly or through a link, which matters where
+the app is the project folder itself.
+
 This is not a reservation journal or a guarantee against process crashes or ambiguous provider
 timeouts. A provider may charge a request whose result never reaches the app, or a ledger write
 itself can fail. Use provider-side spending limits when a hard account-level cap is needed.

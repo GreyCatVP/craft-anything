@@ -511,6 +511,17 @@ pub struct AssetRecord {
 /// The list of generated assets, in the workspace folder.
 const ASSETS: &str = "assets.json";
 
+/// Taken while one paid generation is admitted, run and recorded.
+const ASSETS_LOCK: &str = "assets.lock";
+
+/// Held from a paid generation's budget check until its receipt is written, so processes sharing a
+/// project never admit spending against a stale total or overwrite each other's receipts. It is an
+/// operating-system file lock: the system releases it when the holder exits, even after a crash.
+#[derive(Debug)]
+pub struct SpendLock {
+    _file: std::fs::File,
+}
+
 /// Bound untrusted ledger reads, including files that grow after opening.
 const MAX_ASSET_LEDGER_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -914,7 +925,37 @@ impl Workspace {
         asset_total(&self.try_assets()?)
     }
 
+    /// Take the project's spending lock, waiting up to `wait` for another process's generation to
+    /// finish. Every paid generation holds it from its budget check until its receipt is written.
+    pub fn lock_spending(&self, wait: std::time::Duration) -> Result<SpendLock, ToolError> {
+        let path = self.root.join(ASSETS_LOCK);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if !metadata.is_file() => {
+                return Err(ToolError::invalid("The asset spending lock must be a regular file, not a link, directory or special file."));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(ToolError::io(path.display(), e)),
+        }
+        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(|e| ToolError::io(path.display(), e))?;
+        let start = std::time::Instant::now();
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(SpendLock { _file: file }),
+                Err(std::fs::TryLockError::WouldBlock) if start.elapsed() < wait => {
+                    std::thread::sleep(std::time::Duration::from_millis(100).min(wait));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(ToolError::new(ErrorCode::TimedOut, "Another asset generation for this project is still running.")
+                        .with_remediation("Wait for it to finish, then try again: one project's paid generations run one at a time."));
+                }
+                Err(std::fs::TryLockError::Error(e)) => return Err(ToolError::io(path.display(), e)),
+            }
+        }
+    }
+
     /// Add a paid generation receipt, preserving an unreadable ledger and rejecting invalid charges.
+    /// Callers hold [`Workspace::lock_spending`] so no other process writes the ledger meanwhile.
     pub fn record_asset(&self, rec: AssetRecord) -> Result<(), ToolError> {
         let mut all = self.try_assets()?;
         all.push(rec);
@@ -1002,6 +1043,7 @@ pub const OWN_NAMES: &[&str] = &[
     ACTIVITY_LOG,
     ACTIVITY_LOG_OLD,
     ASSETS,
+    ASSETS_LOCK,
     "transcript.json",
     "extract-transcript.json",
     AGENT_SESSION_FILE,
@@ -1162,6 +1204,28 @@ mod tests {
         assert!(ws.try_assets().is_err());
         assert!(ws.record_asset(asset_receipt(0.2)).is_err());
         assert!(path.is_dir());
+    }
+
+    /// The spending lock is exclusive across handles to the same project, bounded while another
+    /// holder keeps it, released when dropped, and refuses a lock path that isn't a regular file.
+    #[test]
+    fn the_spending_lock_is_exclusive_bounded_and_released() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Game", "A game", TargetRef::None).unwrap();
+        let held = ws.lock_spending(std::time::Duration::ZERO).unwrap();
+        // Another handle stands for another process: separate opens of the same file conflict.
+        let other = Workspace::open(&ws.root).unwrap();
+        let start = std::time::Instant::now();
+        let busy = other.lock_spending(std::time::Duration::from_millis(250)).unwrap_err();
+        assert_eq!(busy.code, ErrorCode::TimedOut);
+        assert!(start.elapsed() >= std::time::Duration::from_millis(250), "it waited for the holder");
+        drop(held);
+        other.lock_spending(std::time::Duration::ZERO).unwrap();
+        assert!(ws.is_own_record(&ws.root.join(ASSETS_LOCK)), "the lock is one of the project's own records");
+        let d2 = tempfile::tempdir().unwrap();
+        let ws2 = Workspace::create(d2.path(), "Game", "A game", TargetRef::None).unwrap();
+        std::fs::create_dir(ws2.root.join(ASSETS_LOCK)).unwrap();
+        assert_eq!(ws2.lock_spending(std::time::Duration::ZERO).unwrap_err().code, ErrorCode::BadInput);
     }
 
     /// New invalid charges and an overflowing append cannot damage an existing valid ledger.

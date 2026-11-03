@@ -20,7 +20,8 @@ version up to the current one, then turn the document into Rust types. The step 
 | `<project>/feed.json` | `ai::rebuild::feed` (written by the run) | `FEED_VERSION` = 1 (`{version, items}`; a bare list = 0) | read as before, saved as current | never written over; the conversation is rebuilt from the project for display |
 
 Other JSON in a project (`assets.json`, `inbox/`, `checks/`, evidence records) has no version yet;
-add one the first time its shape changes.
+add one the first time its shape changes. `assets.lock` is an empty file that only carries the
+operating system's lock on the project's spending; it holds no data.
 
 `craft.json` version 3 adds an optional `asset_providers` list. Missing or null keeps the legacy
 behavior: all providers are allowed when `generate_assets` is true. An explicit list allows only

@@ -74,7 +74,9 @@ treating it as zero. The sidebar shows unavailable spending until the ledger is 
 costs are recorded before output publication; failed output saves retain their receipt, and late
 cost overruns stop any following paid stage after preserving known spending. A failure after the
 provider accepted the work (a failed Scenario job, a broken download or response) records the charge
-the provider reported before returning the error. This is checked
+the provider reported before returning the error. One project's paid generations run one at a time
+across processes (an `assets.lock` file lock held from the budget check to the receipt), and a
+generated file never overwrites the project's own records. This is checked
 receipt accounting, not a crash-safe reservation journal or an invoice reconciliation service.
 
 ### Linux Unreal setup
