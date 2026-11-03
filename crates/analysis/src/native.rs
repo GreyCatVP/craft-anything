@@ -525,7 +525,6 @@ fn call_graph_capped(prog: &Program, start: u64, forward: bool, max_depth: usize
         }
         for (site, n, label) in neighbours(prog, cur, forward) {
             if edges.len() >= max_edges {
-                truncated = true;
                 edges_capped = true;
                 break 'walk;
             }
@@ -550,11 +549,14 @@ fn call_graph_capped(prog: &Program, start: u64, forward: bool, max_depth: usize
             }
         }
     }
-    if edges_capped {
-        limitations.push(Limitation::new("truncated", format!("stopped after {max_edges} call edges")));
-    } else if truncated {
+    // Both can apply: the walk may have hit the depth or function limit before the edge limit.
+    if truncated {
         limitations.push(Limitation::new("truncated", format!("stopped at depth {max_depth} or {max_nodes} functions")));
     }
+    if edges_capped {
+        limitations.push(Limitation::new("truncated", format!("stopped after {max_edges} call edges")));
+    }
+    let truncated = truncated || edges_capped;
     limitations.push(Limitation::new("direct_calls_only", "only statically resolved calls are followed; calls through pointers are not"));
     let total: usize = levels.values().map(Vec::len).sum();
     let result = json!({
@@ -1195,6 +1197,10 @@ mod tests {
         assert_eq!(capped.result["edges"].as_array().unwrap().len(), 1);
         assert_eq!(capped.result["truncated"], true);
         assert!(capped.limitations.iter().any(|l| l.message.contains("1 call edges")));
+        // When the function limit was hit first, both reasons are reported.
+        let both = call_graph_capped(&p, main.entry, true, 3, 1, 2, &none);
+        let msgs: Vec<&str> = both.limitations.iter().map(|l| l.message.as_str()).collect();
+        assert!(msgs.iter().any(|m| m.contains("1 functions")) && msgs.iter().any(|m| m.contains("2 call edges")), "{msgs:?}");
         let helper = p.function_by_name("helper").unwrap();
         let path = call_path(&p, main.entry, Some(Goal::Function(helper.entry)), true, &none);
         assert_eq!(path.result["goal_result"], "reached");
