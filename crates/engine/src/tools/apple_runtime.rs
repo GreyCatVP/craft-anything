@@ -234,6 +234,41 @@ fn apple_calls_observe(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, T
     }
 }
 
+/// What a breakpoint's command prints before the function's name; each such line is one hit.
+const HIT_MARK: &str = "CRAFT_HIT";
+
+/// The command file takes one command per line, so a line break in a name or argument would add a
+/// command of the caller's choosing (lldb can run Python and shell commands).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn single_line(p: &ObserveCallsParams) -> Result<(), ToolError> {
+    let bad = |s: &str| s.chars().any(char::is_control);
+    let names = p.breakpoints.iter().flat_map(|b| match b {
+        Breakpoint::Function { name, module } => vec![name.as_str(), module.as_deref().unwrap_or_default()],
+        Breakpoint::ObjcMethod { class_name, selector } => vec![class_name.as_str(), selector.as_str()],
+    });
+    let text = names.chain(p.arguments.iter().map(String::as_str)).chain([p.executable.as_str()]);
+    if text.into_iter().any(bad) {
+        return Err(ToolError::invalid("The executable, arguments and breakpoint names must not contain line breaks or other control characters."));
+    }
+    Ok(())
+}
+
+/// A failed debugger run is not an observation: lldb exits non-zero when it rejects its command
+/// file, and a run that never launched the program says nothing about what it calls (#251).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn lldb_failure(success: bool, code: Option<i32>, stderr: &str) -> Option<ToolError> {
+    if success {
+        return None;
+    }
+    let tail: String = stderr.chars().rev().take(600).collect::<Vec<_>>().into_iter().rev().collect();
+    let how = code.map_or_else(|| "was stopped by the system".to_string(), |c| format!("exited with code {c}"));
+    Some(
+        ToolError::new(ErrorCode::ProgramFailed, format!("lldb {how} before the call observation finished, so nothing was observed. {}", tail.trim()))
+            .with_remediation("Check that the program runs on its own and that lldb (Xcode's command-line tools) can debug it; a program with the hardened runtime needs `codesign` to allow debugging.")
+            .with_details(serde_json::json!({"exit_code": code, "stderr_tail": tail})),
+    )
+}
+
 /// Build an lldb Python command that sets breakpoints, runs, and prints each hit as JSON.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn lldb_script(p: &ObserveCallsParams) -> String {
@@ -252,8 +287,14 @@ fn lldb_script(p: &ObserveCallsParams) -> String {
             }
         }
     }
-    // A breakpoint command that records the argument registers and continues.
-    setup.push_str("breakpoint command add --script-type python -o 'frame = bp_loc.GetThread().GetSelectedFrame() if bp_loc else None\\nprint(\"CRAFT_HIT\", frame.GetFunctionName() if frame else \"?\")\\nreturn False' 1\n");
+    // A breakpoint command on every breakpoint set above that prints the function and continues
+    // (`return False` doesn't stop). lldb wraps the text in a function whose arguments include
+    // `frame`, and a command line can't hold line breaks, so the statements are separated by `;`:
+    // a literal backslash and `n` between them was a Python `SyntaxError` that stopped lldb before
+    // it launched anything (#251).
+    let breakpoints: usize = p.breakpoints.iter().map(|b| if matches!(b, Breakpoint::ObjcMethod { .. }) { 2 } else { 1 }).sum();
+    let ids = (1..=breakpoints).map(|i| i.to_string()).collect::<Vec<_>>().join(" ");
+    setup.push_str(&format!("breakpoint command add --script-type python -o 'print(\"{HIT_MARK}\", frame.GetFunctionName()); return False' {ids}\n"));
     let args = p.arguments.iter().map(|a| a.replace('"', "\\\"")).map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(" ");
     setup.push_str(&format!("process launch -- {args}\n"));
     setup
@@ -288,6 +329,7 @@ mod macos {
                 .with_remediation("Install the macOS command-line developer tools (xcode-select --install).")
         })?;
 
+        single_line(&p)?;
         let setup = lldb_script(&p);
 
         let root = private_root()?;
@@ -306,11 +348,19 @@ mod macos {
         if let Some(wd) = &p.working_directory {
             cmd = cmd.cwd(wd);
         }
-        let out = cmd.run()?;
+        let out = cmd.run();
         let _ = std::fs::remove_dir_all(&root);
+        let out = out?;
+        if let Some(e) = lldb_failure(out.success, out.code, &out.stderr_text()) {
+            return Err(e);
+        }
 
-        let hits: Vec<Value> =
-            out.stdout_text().lines().filter_map(|l| l.strip_prefix("CRAFT_HIT ").map(|f| json!({"function": f.trim()}))).take(p.max_events).collect();
+        let hits: Vec<Value> = out
+            .stdout_text()
+            .lines()
+            .filter_map(|l| l.strip_prefix(HIT_MARK).and_then(|r| r.strip_prefix(' ')).map(|f| json!({"function": f.trim()})))
+            .take(p.max_events)
+            .collect();
         let truncated = hits.len() >= p.max_events;
         let summary = format!(
             "Observed {} call(s) under lldb while running {}.",
@@ -653,6 +703,61 @@ mod tests {
         let e = Engine::new(crate::testing::session());
         let err = e.call("runtime_ui_read", json!({"pid": 1}), CallOptions::new(Caller::Mcp)).unwrap_err();
         assert_eq!(err.code, craft_anything_evidence::ErrorCode::ConsentRequired);
+    }
+
+    /// #251: the callback had a literal backslash and `n` between its Python statements, which lldb
+    /// rejected before it launched anything; and only breakpoint 1 got it.
+    #[test]
+    fn the_breakpoint_callback_is_one_valid_line_and_covers_every_breakpoint() {
+        use super::{Breakpoint, ObserveCallsParams, lldb_script};
+        let p = ObserveCallsParams {
+            executable: "/tmp/probe".into(),
+            arguments: Vec::new(),
+            working_directory: None,
+            breakpoints: vec![
+                Breakpoint::Function { name: "alpha".into(), module: None },
+                Breakpoint::ObjcMethod { class_name: "NSApplication".into(), selector: "run".into() },
+            ],
+            duration_ms: 10_000,
+            max_events: 100,
+        };
+        let script = lldb_script(&p);
+        let callback = script.lines().find(|l| l.starts_with("breakpoint command add")).unwrap();
+        assert!(!callback.contains("\\n"), "no literal backslash-n: {callback}");
+        assert!(callback.contains("print(\"CRAFT_HIT\", frame.GetFunctionName()); return False' 1 2 3"), "alpha plus both Objective-C forms: {callback}");
+        // The command comes after every breakpoint it names and before the launch.
+        let at = |needle: &str| script.find(needle).unwrap();
+        assert!(
+            at("breakpoint set --name \"+[NSApplication run]\"") < at("breakpoint command add") && at("breakpoint command add") < at("process launch"),
+            "{script}"
+        );
+    }
+
+    #[test]
+    fn a_failed_debugger_run_is_an_error_not_zero_calls() {
+        use super::lldb_failure;
+        assert!(lldb_failure(true, Some(0), "").is_none());
+        let e = lldb_failure(false, Some(1), "SyntaxError('unexpected character after line continuation character')").unwrap();
+        assert_eq!(e.code, craft_anything_evidence::ErrorCode::ProgramFailed);
+        assert!(e.message.contains("exited with code 1") && e.message.contains("SyntaxError") && e.message.contains("nothing was observed"), "{}", e.message);
+        assert!(lldb_failure(false, None, "").unwrap().message.contains("stopped by the system"));
+    }
+
+    /// A line break in a name or argument would add a command to the command file.
+    #[test]
+    fn names_and_arguments_cannot_add_debugger_commands() {
+        use super::{Breakpoint, ObserveCallsParams, single_line};
+        let with = |name: &str, arg: &str| ObserveCallsParams {
+            executable: "/tmp/probe".into(),
+            arguments: vec![arg.into()],
+            working_directory: None,
+            breakpoints: vec![Breakpoint::Function { name: name.into(), module: None }],
+            duration_ms: 1000,
+            max_events: 1,
+        };
+        assert!(single_line(&with("alpha", "--flag")).is_ok());
+        assert!(single_line(&with("alpha\nscript import os", "x")).is_err());
+        assert!(single_line(&with("alpha", "x\r\nquit")).is_err());
     }
 
     #[test]

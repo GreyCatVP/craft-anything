@@ -177,6 +177,13 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**A debugger failure reported as an observation.** `apple_calls_observe` built a Python callback
+with `\n` between statements in a Rust string, so lldb rejected it and exited 1 before launching
+anything; the tool ignored the exit status and returned "Observed 0 call(s)" with confidence
+observed (#251). A run that never started the thing it observes is a failure, not a count of zero:
+check the exit status before building evidence, and compile generated code (here, with Python)
+before trusting it. lldb itself was not run here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias

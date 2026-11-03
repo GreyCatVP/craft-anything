@@ -380,6 +380,13 @@ Owner: open · Status: in progress
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
 - [ ] UI tree on Linux (AT-SPI)
+- [x] `apple_calls_observe`: the breakpoint callback is one valid line (it had a literal backslash
+      and `n` between statements, so lldb stopped before launching, #251), covers every breakpoint
+      instead of only the first, a failed lldb run is an error and not "0 calls", and names or
+      arguments with line breaks are refused (they'd add commands to lldb's command file). The
+      callback body was compiled with Python; lldb itself was not run
+- [ ] Run `apple_calls_observe` on a Mac against a small program with `lldb` (the #251 probe):
+      the hit for `alpha` is recorded, and a program lldb can't debug says so
 - [ ] Window capture tried on macOS and Linux (only Windows so far); games behind a launcher
 - [ ] Short scripted input sessions (enigo) to record screens of the original
 
