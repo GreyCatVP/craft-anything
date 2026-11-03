@@ -737,10 +737,36 @@ fn cpp_tools(p: &Places, unreal: Option<&Installed>) -> bool {
     if p.program_files.iter().flat_map(|pf| subdirs(&pf.join("Microsoft Visual Studio"))).flat_map(|y| subdirs(&y)).any(|e| e.join("VC/Tools/MSVC").is_dir()) {
         return true;
     }
+    // Visual Studio on another drive or in a folder of the person's choosing: its installer records
+    // every instance's folder under ProgramData (#669).
+    if p.program_data
+        .iter()
+        .flat_map(|d| subdirs(&d.join("Microsoft/VisualStudio/Packages/_Instances")))
+        .filter_map(|i| vs_instance_root(&i))
+        .any(|r| r.join("VC/Tools/MSVC").is_dir())
+    {
+        return true;
+    }
     // A system clang can have the wrong version or sysroot. Look inside the selected Linux engine.
     let Some(unreal) = unreal.filter(|i| i.program.ends_with("Engine/Binaries/Linux/UnrealEditor")) else { return false };
     let Some(root) = unreal.program.ancestors().nth(4) else { return false };
     subdirs(&root.join("Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64")).iter().any(|sdk| sdk.join("x86_64-unknown-linux-gnu/bin/clang++").is_file())
+}
+
+/// The installer's record of one instance is about 15 KB; anything far larger isn't one.
+const MAX_VS_STATE_BYTES: u64 = 1 << 20;
+
+/// Where the Visual Studio installer put one instance, from its `state.json`. A missing, oversized
+/// or unreadable record counts as no instance.
+fn vs_instance_root(instance: &Path) -> Option<PathBuf> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(instance.join("state.json")).ok()?.take(MAX_VS_STATE_BYTES + 1).read_to_string(&mut text).ok()?;
+    if text.len() as u64 > MAX_VS_STATE_BYTES {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+    v["installationPath"].as_str().filter(|s| !s.is_empty()).map(PathBuf::from)
 }
 
 // ---- getting one ---------------------------------------------------------------------------------
@@ -1053,6 +1079,35 @@ mod tests {
         touch(&pf, "Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40/x", b"");
         assert!(inventory(&p).ready(Builder::Unreal));
         assert!(!inv.ready(Builder::Rust), "PATH isn't searched here");
+    }
+
+    #[test]
+    fn visual_studio_outside_program_files_is_found_through_its_installer_record() {
+        let d = tempfile::tempdir().unwrap();
+        let pf = d.path().join("pf");
+        touch(&pf, "Epic Games/UE_5.8/Engine/Binaries/Win64/UnrealEditor.exe", b"");
+        let data = d.path().join("data");
+        let instances = data.join("Microsoft/VisualStudio/Packages/_Instances");
+        let vs = d.path().join("E/Development C++");
+        let record = |id: &str, json: &[u8]| touch(&instances, &format!("{id}/state.json"), json);
+        let p = Places { program_files: vec![pf], program_data: Some(data.clone()), store: d.path().join("store"), ..Default::default() };
+
+        // Records that lead nowhere: unreadable JSON, no path, a folder without the C++ tools, too large.
+        record("broken", b"{ not json");
+        record("nopath", br#"{"installationPath":""}"#);
+        let elsewhere = d.path().join("no tools here");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        record("empty", serde_json::to_string(&serde_json::json!({"installationPath": elsewhere})).unwrap().as_bytes());
+        touch(&vs, "VC/Tools/MSVC/14.51.36231/x", b"");
+        let padded = format!("{{\"installationPath\":{},\"pad\":\"{}\"}}", serde_json::json!(vs), " ".repeat(MAX_VS_STATE_BYTES as usize));
+        record("huge", padded.as_bytes());
+        assert!(!inventory(&p).ready(Builder::Unreal), "none of these records is a usable Visual Studio");
+
+        // The installer's own record, as Visual Studio 2026 writes it, with a byte-order mark.
+        let mut json = "\u{feff}".as_bytes().to_vec();
+        json.extend(serde_json::to_vec(&serde_json::json!({"installationPath": vs, "installationVersion": "18.11.3"})).unwrap());
+        record("4a1f2c9e", &json);
+        assert!(inventory(&p).ready(Builder::Unreal), "Visual Studio on another drive must count");
     }
 
     #[test]

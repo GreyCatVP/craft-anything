@@ -352,9 +352,8 @@ Owner: open · Status: in progress
 Owner: maintainers · Status: in progress
 - [ ] Give Linux-specific Clang guidance in Unreal's guided installer when the bundled compiler
       is missing (the requirements summary is already platform-specific).
-- [ ] Find Visual Studio's C++ tools for Unreal wherever the Visual Studio installer put them, not
-      only under Program Files (#669) — claimed: FuryNocturn, branch
-      bugfix/vs-cpp-tools-registered-instances
+- [x] Find Visual Studio's C++ tools for Unreal wherever the Visual Studio installer put them, not
+      only under Program Files (#669): the installer's instance records are read too
 
 ---
 
