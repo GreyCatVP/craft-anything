@@ -560,6 +560,11 @@ Gaps found while using the app for real projects.
       — claimed: Nghiathan13, branch bugfix/r2.9-linux-gpu-choice
 - [ ] Linux GPU choice on a desktop with monitors on two GPUs, and on an Intel + NVIDIA laptop:
       covered by unit tests on fake `/sys/class/drm` folders, not run on such a machine yet (#571)
+- [ ] "Work on my project" on New project, beside "Make my own version" and "Just look inside":
+      pick the folder of a project you already have, say what to change, and its files are edited
+      in place. Until now that was only reachable through "Choose a folder…" under Make's Start,
+      on a screen that asks what to recreate
+      — claimed: xerenon, branch feature/r2.9-work-on-my-project
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
