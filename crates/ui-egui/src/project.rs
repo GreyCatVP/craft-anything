@@ -1708,6 +1708,11 @@ impl CraftApp {
         if self.headless {
             return;
         }
+        // One at a time: a second paste would take the first one's place as the paste a message
+        // waits for, and the first picture would turn up in the next message.
+        if self.pasting().is_some() {
+            return;
+        }
         // Where it goes is decided now: another project may be open by the time it's read.
         let project = if attach {
             match &self.workspace {
@@ -1732,8 +1737,15 @@ impl CraftApp {
                 Ok(Done::Pasted { project, files })
             });
             // A message sent before the picture is in waits for it (`send_message`).
-            self.pending_paste = root.map(|root| PendingPaste { job, root, send: false });
+            if let Some(root) = root {
+                self.pending_paste = Some(PendingPaste { job, root, send: false });
+            }
         }
+    }
+
+    /// The paste into a project's prompt box that is still being read, if one is.
+    pub(crate) fn pasting(&self) -> Option<&PendingPaste> {
+        self.pending_paste.as_ref().filter(|p| self.jobs.running().any(|j| j.id == p.job))
     }
 
     /// A job finished: when it was the paste a message is waiting for, the message goes now, with
@@ -1768,10 +1780,10 @@ impl CraftApp {
             return self.toast(tr("This project is waiting its turn. Send your message once it starts."), true);
         }
         // A picture still being pasted goes with the message: it's sent once the picture is in.
-        if let Some(p) = self.pending_paste.as_mut().filter(|p| p.root == ws.root)
-            && self.jobs.running().any(|j| j.id == p.job)
-        {
-            p.send = true;
+        if self.pasting().is_some_and(|p| p.root == ws.root) {
+            if let Some(p) = self.pending_paste.as_mut() {
+                p.send = true;
+            }
             return;
         }
         self.state.project_input.clear();
@@ -1879,6 +1891,8 @@ mod tests {
             Ok(Done::Pasted { project, files })
         });
         app.pending_paste = Some(PendingPaste { job, root, send: false });
+        // While it's read, it's the one paste: another Ctrl+V waits (`paste_pictures` checks this).
+        assert!(app.pasting().is_some_and(|p| p.job == job));
         app.state.project_input = "Like this".into();
         app.send_message();
         assert_eq!(app.state.project_input, "Like this", "it waits for the picture");
@@ -1890,6 +1904,7 @@ mod tests {
         }
         assert!(app.state.project_input.is_empty() && app.state.project_attachments.is_empty(), "the message went");
         assert!(app.jobs.running().any(|j| j.title == "Attach pictures"), "with its picture");
+        assert!(app.pasting().is_none(), "a next paste can start");
     }
 
     /// A paste read while the person went Home goes nowhere, though the project is still the
