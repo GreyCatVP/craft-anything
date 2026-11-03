@@ -23,8 +23,6 @@ pub(crate) struct BundleVisitor<'s> {
     pub info: BundleInfo,
     /// esbuild wrapper binding → module id, for dependency resolution.
     esbuild_vars: HashMap<Key, String>,
-    /// Raw esbuild deps (callee bindings) per module index.
-    esbuild_raw: Vec<(usize, Vec<Key>)>,
 }
 
 /// A function-ish table value.
@@ -80,6 +78,7 @@ impl Func<'_, '_> {
 struct DepVisitor<'n> {
     require_name: Option<&'n str>,
     scoping: Option<&'n Scoping>,
+    esbuild_vars: Option<&'n HashMap<Key, String>>,
     deps: Vec<String>,
     esbuild: Vec<Key>,
     esbuild_seen: HashSet<Key>,
@@ -101,7 +100,10 @@ impl<'a> Visit<'a> for DepVisitor<'_> {
                 {
                     self.deps.push(d);
                 }
-            } else if it.arguments.is_empty() && self.esbuild.len() < 4096 {
+            } else if it.arguments.is_empty()
+                && self.esbuild.len() < 4096
+                && let Some(wrappers) = self.esbuild_vars
+            {
                 // Minifiers rename the wrapper. Resolve by binding, not by its spelling, so a
                 // short name also works without confusing a local parameter with the wrapper.
                 let key = match self.scoping {
@@ -109,6 +111,7 @@ impl<'a> Visit<'a> for DepVisitor<'_> {
                     None => Some(Key::Name(n.to_string())),
                 };
                 if let Some(key) = key
+                    && wrappers.contains_key(&key)
                     && self.esbuild_seen.insert(key.clone())
                 {
                     self.esbuild.push(key);
@@ -119,22 +122,68 @@ impl<'a> Visit<'a> for DepVisitor<'_> {
     }
 }
 
+/// Revisit only discovered module bodies once all wrapper bindings, including forward
+/// declarations, are known. Unrelated calls never occupy the bounded dependency buffer.
+struct EsbuildDeps<'s> {
+    scoping: Option<&'s Scoping>,
+    wrappers: &'s HashMap<Key, String>,
+    modules: &'s mut [BundleModule],
+    module_indices: HashMap<(u32, u32), usize>,
+}
+
+impl EsbuildDeps<'_> {
+    fn collect(&mut self, f: &Func<'_, '_>) -> bool {
+        let span = f.span();
+        let Some(&idx) = self.module_indices.get(&(span.start, span.end)) else { return false };
+        let mut dv = DepVisitor {
+            require_name: None,
+            scoping: self.scoping,
+            esbuild_vars: Some(self.wrappers),
+            deps: Vec::new(),
+            esbuild: Vec::new(),
+            esbuild_seen: HashSet::new(),
+        };
+        match f {
+            Func::Function(func) => dv.visit_function(func, ScopeFlags::Function),
+            Func::Arrow(a) => dv.visit_arrow_function_expression(a),
+        }
+        if let Some(module) = self.modules.get_mut(idx) {
+            for key in dv.esbuild {
+                if let Some(dep) = self.wrappers.get(&key)
+                    && !module.deps.contains(dep)
+                {
+                    module.deps.push(dep.clone());
+                }
+            }
+        }
+        true
+    }
+}
+
+impl<'a> Visit<'a> for EsbuildDeps<'_> {
+    fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
+        if !self.collect(&Func::Function(it)) {
+            walk::walk_function(self, it, flags);
+        }
+    }
+
+    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        if !self.collect(&Func::Arrow(it)) {
+            walk::walk_arrow_function_expression(self, it);
+        }
+    }
+}
+
 impl<'s> BundleVisitor<'s> {
     pub fn new(src: &'s str, lines: &'s LineIndex, webpack_hint: bool, scoping: Option<&'s Scoping>) -> Self {
-        BundleVisitor { src, lines, scoping, webpack_hint, info: BundleInfo::default(), esbuild_vars: HashMap::new(), esbuild_raw: Vec::new() }
+        BundleVisitor { src, lines, scoping, webpack_hint, info: BundleInfo::default(), esbuild_vars: HashMap::new() }
     }
 
     /// Resolve esbuild wrapper calls to module ids once every wrapper is known.
-    pub fn finish(mut self) -> BundleInfo {
-        for (idx, raw) in std::mem::take(&mut self.esbuild_raw) {
-            let deps: Vec<String> = raw.iter().filter_map(|v| self.esbuild_vars.get(v).cloned()).collect();
-            if let Some(m) = self.info.modules.get_mut(idx) {
-                for d in deps {
-                    if !m.deps.contains(&d) {
-                        m.deps.push(d);
-                    }
-                }
-            }
+    pub fn finish(mut self, program: &Program<'_>) -> BundleInfo {
+        if !self.esbuild_vars.is_empty() {
+            let module_indices = self.info.modules.iter().enumerate().map(|(idx, m)| ((m.start, m.end), idx)).collect();
+            EsbuildDeps { scoping: self.scoping, wrappers: &self.esbuild_vars, modules: &mut self.info.modules, module_indices }.visit_program(program);
         }
         self.info
     }
@@ -151,16 +200,26 @@ impl<'s> BundleVisitor<'s> {
             "browserify" => params.first().cloned(),
             _ => None,
         };
-        let mut dv =
-            DepVisitor { require_name: require_name.as_deref(), scoping: self.scoping, deps: Vec::new(), esbuild: Vec::new(), esbuild_seen: HashSet::new() };
+        let mut dv = DepVisitor {
+            require_name: require_name.as_deref(),
+            scoping: self.scoping,
+            esbuild_vars: None,
+            deps: Vec::new(),
+            esbuild: Vec::new(),
+            esbuild_seen: HashSet::new(),
+        };
         let mut fp = Fingerprint::new();
         match f {
             Func::Function(func) => {
-                dv.visit_function(func, ScopeFlags::Function);
+                if require_name.is_some() {
+                    dv.visit_function(func, ScopeFlags::Function);
+                }
                 fp.visit_function(func, ScopeFlags::Function);
             }
             Func::Arrow(a) => {
-                dv.visit_arrow_function_expression(a);
+                if require_name.is_some() {
+                    dv.visit_arrow_function_expression(a);
+                }
                 fp.visit_arrow_function_expression(a);
             }
         }
@@ -178,11 +237,7 @@ impl<'s> BundleVisitor<'s> {
             sha256: sha256_hex(text.as_bytes()),
             fingerprint: fp.finish(),
         });
-        let idx = self.info.modules.len() - 1;
-        if !dv.esbuild.is_empty() {
-            self.esbuild_raw.push((idx, dv.esbuild));
-        }
-        Some(idx)
+        Some(self.info.modules.len() - 1)
     }
 
     fn key_id(&self, key: &PropertyKey<'_>) -> Option<String> {

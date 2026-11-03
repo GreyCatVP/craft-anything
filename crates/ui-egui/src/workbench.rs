@@ -224,11 +224,11 @@ fn rail_list(app: &mut CraftApp, ui: &mut Ui, kind: RailKind, fill: &Fill) {
     match fill {
         Fill::Idle => {
             app.ensure_rail_loaded();
-            ui.add(egui::Spinner::new().color(t.accent));
+            ui.add(crate::widgets::Spinner::new().color(t.accent));
         }
         Fill::Loading => {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().color(t.accent));
+                ui.add(crate::widgets::Spinner::new().color(t.accent));
                 ui.label(RichText::new(tr("Loading…")).color(t.text_dim));
             });
         }
@@ -467,7 +467,7 @@ fn tool_view(app: &mut CraftApp, ui: &mut Ui, tab: CenterTab) {
         }
         Fill::Loading => {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().color(Tokens::get(ui.ctx()).accent));
+                ui.add(crate::widgets::Spinner::new().color(Tokens::get(ui.ctx()).accent));
                 ui.label(tr("Working…"));
             });
         }
@@ -691,7 +691,7 @@ fn result_view(app: &mut CraftApp, ui: &mut Ui) {
     match (fill, selected) {
         (Some(Fill::Loading), _) => {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().color(t.accent));
+                ui.add(crate::widgets::Spinner::new().color(t.accent));
                 ui.label(tr("Working…"));
             });
         }

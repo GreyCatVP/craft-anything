@@ -1,5 +1,17 @@
 # zh-hans: original Chinese UI translations. Licensed MIT OR Apache-2.0.
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
+OpenCode default	OpenCode 默认设置
+Model default	模型默认设置
+Thinking depth	思考深度
+OpenCode model	OpenCode 模型
+Remote program	远程程序
+Reload models	重新加载模型
+Apply	应用
+OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode 中没有可见的聊天模型。请在 OpenCode 中连接服务提供商，然后重新加载。
+The saved model is no longer visible. Choose another model or the OpenCode default.	已保存的模型不再可见。请选择其他模型或使用 OpenCode 默认设置。
+The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	此模型不支持已保存的思考深度。请选择默认设置或可用的深度。
+List an agent's models	列出智能体的模型
+Choose an agent's model and thinking	选择智能体的模型和思考深度
  GB	 GB
  and {n} more	，另有 {n} 项
  {ascii}	 {ascii}
@@ -160,7 +172,7 @@ Asking for its models…	正在获取可用模型…
 Asset catalog	资源目录
 At most this many rounds of fixes after the first build.	首次构建后，最多进行这么多轮修正。
 Attach pictures	附上图片
-Attach pictures (or drop them here)	附加图片 (或拖到这里)
+Attach pictures (or drop or paste them here)	附加图片 (或拖到这里、粘贴到这里)
 Auto mode	自动模式
 Automatic	自动
 Automatic ({name})	自动 ({name})
@@ -616,6 +628,7 @@ List segments	列出区段
 List shared Cutter sessions	列出共享的 Cutter 会话
 List strings	列出字符串
 Live: the project's latest build	当前：项目的最新构建
+Load a picture	加载图片
 Load a screenshot	加载截图
 Loading…	正在加载…
 Log	日志
@@ -707,7 +720,7 @@ Not now	暂时不要
 Nothing allowed yet.	尚未允许任何操作。
 Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below.	尚无可用的构建助手：请安装 Claude Code (并先登录一次)，或在下方添加配置了 API 密钥的 AI。
 Nothing found	未找到内容
-Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have.	尚未找到。我们会查找你已有的 API 密钥、本地模型服务器 (Ollama、LM Studio) 和智能体应用。
+Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below.	尚未找到。我们会查找你已有的 API 密钥、本地模型服务器 (Ollama、LM Studio) 和智能体应用。其他端口或其他电脑上的服务器可以在下方按地址添加。
 Nothing inside it is read.	不会读取其内部内容。
 Nothing inside it is read; Craft Anything works from what you can see. Your version gets its own art.	不会读取其内部内容；Craft Anything 仅依据你能看到的内容工作。你的版本会使用自己的美术素材。
 Nothing inside the original is read: not its code, files or page source. Craft Anything works from what you can see: pictures, the page as a visitor sees it, and watching it run.	不会读取原作的内部内容，包括代码、文件和网页源码。Craft Anything 仅根据可见内容工作：图片、访客所见的网页以及运行时的表现。
@@ -787,6 +800,7 @@ Page through evidence	分页浏览证据
 Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	应用的某个部分卡住，已将其停止，其他部分继续运行。你的工作已保留。
 Part of the app is stuck. Restarting clears it, and your work is kept.	应用的某个部分卡住了。重启即可恢复，你的工作会保留。
 Part of this screen hit a bug and was skipped. Your work is safe.	此界面的一部分出现错误，已跳过。你的工作内容是安全的。
+Paste pictures	粘贴图片
 Paste your API key (kept in your system keychain)	粘贴 API 密钥 (保存在系统钥匙串中)
 Paste your {name} key	粘贴你的 {name} 密钥
 Path	路径
@@ -1066,6 +1080,7 @@ The builder's questions	构建助手的问题
 The builder's questions come to you as cards, and it waits for your answer.	构建助手的问题会以卡片形式交给你，并等待你的回答。
 The builder's questions will come to you.	构建助手的问题会交给你回答。
 The built-in engines still show you everything they find.	内置引擎仍会显示它们发现的所有内容。
+The clipboard can't be read:	无法读取剪贴板:
 The code	代码
 The code format Android apps use.	Android 应用使用的代码格式。
 The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	这是编程智能体按 API 价格估算的费用，并非你的实际账单；订阅不会按此金额收费。
@@ -1076,6 +1091,8 @@ The installer is open. Follow its steps, then come back here.	安装程序已打
 The lowest-level human-readable form of machine code: one small instruction per line.	机器码最底层的可读形式，每行一条简短指令。
 The names were removed from the program before it was shipped, so we have to work them out.	程序发布前移除了这些名称，因此需要推导它们。
 The packed contents of an Electron app (a website inside a desktop app)	Electron 应用的打包内容 (桌面应用中的网站)
+The pasted picture wasn't attached: another screen was opened meanwhile.	粘贴的图片没有附加:期间打开了另一个页面。
+The picture on the clipboard is too large.	剪贴板中的图片太大。
 The program's machine code written out as one tiny instruction per line.	将程序的机器码写成每行一条简单指令的形式。
 The project's name and round	项目名称与轮次
 The raw result	原始结果
@@ -1086,6 +1103,7 @@ The {} view isn't available yet in this build.	此版本暂不提供 {} 视图�
 Theme	主题
 There's no /{name} command. You can use {commands}.	没有 /{name} 命令。你可以使用 {commands}。
 There's no AI brain set up yet, so here's what the built-in engines found:	尚未设置 AI 助手，以下是内置引擎的发现：
+There's no picture on the clipboard to paste.	剪贴板中没有可粘贴的图片。
 They're my app: edit them in place	这些就是我的应用：原位编辑
 Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	程序借用操作系统或库提供的功能，例如“打开文件”或“绘制窗口”。
 Things a program or library offers for other programs to use.	程序或库提供给其他程序使用的功能。
@@ -1319,6 +1337,8 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 {mb} MB	{mb} MB
 {name} builds what you make.	由 {name} 构建你的作品。
 {name} builds what you make; answers come from {brain}.	由 {name} 负责构建，{brain} 负责回答。
+{name} can't be attached: a message takes pictures up to 20 MB.	无法附加 {name}:消息中的图片最大为 20 MB。
+{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.	无法附加 {name}:它不是 PNG、JPEG、GIF 或 WebP 图片。
 {name} is ready	{name} 已就绪
 {name} is ready.	{name} 已就绪。
 {name} isn't available yet in this build.	此版本尚未提供{name}。

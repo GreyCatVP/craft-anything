@@ -18,8 +18,8 @@ pub fn builtin(model: &str) -> Option<Price> {
         "claude-fable-5-1" => p(10.0, 50.0, 0.25),
         "claude-opus-5" => p(5.0, 25.0, 0.50),
         "claude-sonnet-5" => p(2.0, 10.0, 0.20),
-        // OpenRouter's list price (checked 2026-10-20); cached input isn't listed, so the default.
-        "kimi-k3" => Price { input_per_mtok: 0.239, output_per_mtok: 11.936, cache_read_per_mtok: None, cache_write_per_mtok: None },
+        // OpenRouter's list price (checked 2026-11-03).
+        "kimi-k3.1-pro" => p(2.0, 10.0, 0.20),
         _ => return None,
     })
 }
@@ -76,10 +76,10 @@ mod tests {
         assert!((c - (4.0 + 2.0 + 0.2)).abs() < 1e-9, "{c}");
         assert_eq!(cost("anthropic/claude-sonnet-5-5", &Usage { output_tokens: 1_000_000, ..Default::default() }, &BTreeMap::new(), false), Some(10.0));
         assert_eq!(cost("mystery", &u, &BTreeMap::new(), false), None);
-        // Kimi K3 through OpenRouter is priced by its model id.
-        let k =
-            cost("moonshotai/kimi-k3", &Usage { input_tokens: 1_000_000, output_tokens: 1_000_000, ..Default::default() }, &BTreeMap::new(), false).unwrap();
-        assert!((k - (0.239 + 11.936)).abs() < 1e-9, "{k}");
+        // Kimi K3.1 Pro through OpenRouter is priced by its model id.
+        let k = cost("moonshotai/kimi-k3.1-pro", &Usage { input_tokens: 1_000_000, output_tokens: 1_000_000, ..Default::default() }, &BTreeMap::new(), false)
+            .unwrap();
+        assert!((k - (2.0 + 10.0)).abs() < 1e-9, "{k}");
         assert_eq!(cost("mystery", &u, &BTreeMap::new(), true), Some(0.0));
         let mut o = BTreeMap::new();
         o.insert("mystery".into(), Price { input_per_mtok: 1.0, output_per_mtok: 1.0, cache_read_per_mtok: None, cache_write_per_mtok: None });

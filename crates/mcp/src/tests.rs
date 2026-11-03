@@ -315,3 +315,49 @@ fn claude_code_connections_get_a_budget_that_fits_its_limit() {
     set.handle_request("initialize", &hello("claude-code")).unwrap();
     assert_eq!(set.budget(), 500_000, "an explicit budget wins");
 }
+
+/// #563: "Always for this project" on a consent card was dropped, so the same tool was asked about
+/// every time. It is remembered in the project, and a tool it was said for isn't asked again.
+#[test]
+fn always_for_this_project_on_a_consent_card_is_remembered() {
+    use craft_anything_engine::inbox::{Answer, Inbox, InboxDir};
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path(), "t", "r", TargetRef::None).unwrap();
+    let engine = Arc::new(Engine::new(craft_anything_engine::testing::session()));
+    engine.session().ext.insert(Arc::new(InboxDir(ws.inbox_dir())));
+    let server = Server::new(engine, ServerOptions::default(), Box::new(Buf::default()));
+    let inbox = Inbox::new(ws.inbox_dir());
+
+    // Allowed once: this call goes through, and nothing is remembered.
+    let root = ws.inbox_dir();
+    let answerer = |always: bool| {
+        let inbox = Inbox::new(root.clone());
+        std::thread::spawn(move || {
+            for _ in 0..400 {
+                if let Some(r) = inbox.pending().first() {
+                    inbox.answer(&r.id, &Answer { allow: Some(true), always, ..Default::default() }).unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+    };
+    let once = answerer(false);
+    assert_eq!(server.ask_consent("web_session_run", "why", &CancelToken::default()), Some(true));
+    once.join().unwrap();
+    assert!(Workspace::open(&ws.root).unwrap().manifest.allowed_actions.is_empty());
+
+    // Always: remembered as `tool:<id>`, and the next call isn't asked (the token is already
+    // cancelled, so asking would be refused, not waited on).
+    let always = answerer(true);
+    assert_eq!(server.ask_consent("web_session_run", "why", &CancelToken::default()), Some(true));
+    always.join().unwrap();
+    assert_eq!(Workspace::open(&ws.root).unwrap().manifest.allowed_actions, vec!["tool:web_session_run".to_string()]);
+    let cancelled = CancelToken::default();
+    cancelled.cancel();
+    assert_eq!(server.ask_consent("web_session_run", "why", &cancelled), Some(true), "not asked again");
+    assert!(inbox.pending().is_empty());
+    // Another tool is still asked about.
+    assert_eq!(server.ask_consent("browser_other", "why", &cancelled), Some(false));
+}

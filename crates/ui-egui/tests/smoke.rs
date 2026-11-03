@@ -1267,6 +1267,33 @@ fn command_palette_opens_and_lists_tools() {
     assert!(!h.state().state.palette.open);
 }
 
+/// #584: the palette's list jumped back to the top after every scroll, because the selected row
+/// asked to be scrolled into view on every frame.
+#[test]
+fn the_command_palette_stays_where_it_was_scrolled() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
+    h.run_steps(3);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+    h.run_steps(3);
+    let before = h.get_by_label("Session status").rect();
+    // Over the list's first rows (this one may be below what the list shows).
+    h.event(egui::Event::PointerMoved(egui::pos2(before.center().x, 250.0)));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -300.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(20);
+    let after = h.get_by_label("Session status").rect();
+    assert!(after.top() < before.top() - 100.0, "it scrolled and stayed scrolled: {before:?} → {after:?}");
+    // The arrow keys still bring the selection back into view.
+    h.key_press(egui::Key::ArrowDown);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(20);
+    assert_eq!(h.get_by_label("Session status").rect().top(), before.top());
+}
+
 /// A stand-in model server whose every answer lists an embedding model, then `qwen3:8b`. Its
 /// OpenAI-style address.
 fn model_server() -> String {
@@ -1387,6 +1414,56 @@ fn a_claude_ais_effort_is_set_in_settings() {
     assert!(wait(&mut h, |a| a.backend_options.get("Claude Code").and_then(|o| o.effort) == Some(Effort::Max)));
     h.run_steps(2);
     h.get_by_value("max");
+}
+
+/// The picker exposes only the chosen model's depths and clears an old depth when changing models.
+#[test]
+fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
+    use craft_anything_ai::{AgentModel, BackendConfig, BackendKind, Effort};
+    use craft_anything_ui_egui::builders::AgentModelPicker;
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.hub
+            .add_backend(
+                BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true },
+                None,
+            )
+            .unwrap();
+        a.backends = a.hub.backends();
+        a.backend_options = a.hub.options();
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a.agent_model_picker = Some(AgentModelPicker {
+            request: 1,
+            context: a.hub.model_context("OpenCode").unwrap(),
+            model: Some("test/deep".into()),
+            thinking: None,
+            result: Some(Ok(vec![
+                AgentModel { id: "test/deep".into(), name: "Deep".into(), thinking: Effort::ALL.into() },
+                AgentModel { id: "test/small".into(), name: "Small".into(), thinking: vec![Effort::Low] },
+            ])),
+        });
+        a
+    });
+    h.run_steps(3);
+    h.get_all_by_label("Thinking depth").last().unwrap().click();
+    h.run_steps(2);
+    for label in ["Low", "Medium", "High", "Xhigh", "Max"] {
+        h.get_by_label(label);
+    }
+    h.get_by_label("Max").click();
+    h.run_steps(2);
+    assert_eq!(h.state().agent_model_picker.as_ref().unwrap().thinking, Some(Effort::Max));
+    h.get_by_label("OpenCode model").click();
+    h.run_steps(2);
+    h.get_by_label("Small · test/small").click();
+    h.run_steps(2);
+    assert!(h.state().agent_model_picker.as_ref().unwrap().thinking.is_none(), "a model change resets the draft depth");
+    h.get_all_by_label("Thinking depth").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("Low");
+    assert!(h.query_by_label("Max").is_none());
+    assert!(h.query_by_label("Xhigh").is_none());
 }
 
 #[test]
@@ -2516,4 +2593,26 @@ fn a_narrow_window_folds_the_sidebar_and_puts_the_project_details_above_the_feed
     assert!(h.query_by_label("Open folder").is_none(), "folded away until opened");
     let send = h.get_by_label("Send (Enter)").rect();
     assert!(send.max.x <= 760.0 && send.max.y <= 820.0, "the prompt box fits: {send:?}");
+}
+
+/// #74: a graphics driver can crash while the first frames are presented, so the start's mark is
+/// cleared only after frames were shown; the callback runs once, keeps frames coming until then,
+/// and also runs when the window is closed before that.
+#[test]
+fn the_first_frames_callback_runs_once_after_frames_were_shown() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let mut h = harness(move || {
+        let mut app = demo::app(demo::engine(Mode::Beginner, false));
+        app.after_first_frames(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
+        });
+        app
+    });
+    h.run_steps(8);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "once the frames were shown, and only once");
+    h.run_steps(8);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

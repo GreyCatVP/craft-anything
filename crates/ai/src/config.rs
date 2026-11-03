@@ -27,6 +27,43 @@ use craft_anything_engine::Settings;
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
+
+/// Read settings strictly before a model-selection save; only a missing file uses the current session.
+/// Malformed files and I/O errors are returned rather than replaced by default settings.
+fn settings_for_selection(path: &Path, current: &Settings) -> Result<Settings, ToolError> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => craft_anything_engine::settings::read_settings(&text).map_err(|e| {
+            ToolError::new(ErrorCode::BadSettings, format!("The settings couldn't be read: {e}"))
+                .with_remediation("Fix config.toml before changing the AI's model.")
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(current.clone()),
+        Err(e) => Err(ToolError::io(path.display(), e)),
+    }
+}
+
+/// Commit validated options through one path for hub and tool callers, which already hold the session.
+/// Preserve unrelated disk changes, reject a changed backend or project, and update memory only after saving.
+pub(crate) fn save_agent_selection(
+    session: &mut craft_anything_engine::Session,
+    path: &Path,
+    context: &crate::ModelContext,
+    options: BackendOptions,
+) -> Result<bool, ToolError> {
+    let current = AiConfig::from_table(&session.settings.ai)?;
+    let name = &context.backend.config.name;
+    let mut next = settings_for_selection(path, &session.settings)?;
+    let mut config = AiConfig::from_table(&next.ai)?;
+    let Some(entry) = config.backends.iter_mut().find(|e| &e.config.name == name) else { return Ok(false) };
+    if current.get(name) != Some(&context.backend) || *entry != context.backend || session.project.as_ref().map(|p| p.root.clone()) != context.directory {
+        return Err(ToolError::invalid("The AI settings changed while its models were loading. Reload the models and try again."));
+    }
+    entry.options = options;
+    next.ai = config.to_table()?;
+    next.save_to(path)?;
+    session.settings = next;
+    Ok(true)
+}
 
 /// Per-backend options beyond [`BackendConfig`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -58,6 +95,9 @@ pub struct BackendOptions {
     /// Agent CLIs: the model to ask the CLI for (passed with its model flag when it has one).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_model: Option<String>,
+    /// OpenCode's model variant. Absent means the model's own default thinking depth.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_thinking: Option<Effort>,
     /// Wall-clock limit in seconds for one agent CLI turn (default: 24 hours for a builder, which may
     /// analyse and build a big game; 30 minutes for questions).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,6 +118,16 @@ pub struct BackendEntry {
 }
 
 impl BackendEntry {
+    /// Older configurations can put OpenCode's variant directly in its model reference.
+    fn thinking_from_model(&mut self) {
+        if self.config.kind != BackendKind::AgentCli || self.config.model != "opencode" {
+            return;
+        }
+        let Some((model, variant)) = self.options.cli_model.as_deref().and_then(|m| m.rsplit_once('#')) else { return };
+        let Some(depth) = Effort::parse(variant) else { return };
+        self.options.cli_thinking.get_or_insert(depth);
+        self.options.cli_model = Some(model.to_string());
+    }
     /// An agent CLI's `model` names the agent (`opencode`), and the model it should use goes in
     /// `cli_model`. People also write the agent's program in `command` and the model in `model`
     /// (`command = "opencode"`, `model = "deepseek/deepseek-flash"`); that ran the plain adapter
@@ -143,7 +193,10 @@ impl AiConfig {
             ToolError::new(ErrorCode::BadSettings, format!("The [ai] settings couldn't be read: {e}"))
                 .with_remediation("Fix or remove the [ai] section in config.toml.")
         })?;
-        c.backends.iter_mut().for_each(BackendEntry::model_from_command);
+        for backend in &mut c.backends {
+            backend.model_from_command();
+            backend.thinking_from_model();
+        }
         Ok(c)
     }
 
@@ -214,6 +267,23 @@ impl AiConfig {
 
 #[cfg(test)]
 mod tests {
+    /// Legacy embedded variants migrate to separate model/depth settings and survive serialization.
+    #[test]
+    fn opencode_embedded_variants_migrate_and_every_depth_round_trips() {
+        for depth in crate::Effort::ALL {
+            let table: toml::Table = toml::from_str(&format!(
+                "[[backends]]\nname = 'OpenCode'\nkind = 'agent_cli'\nmodel = 'opencode'\ncli_model = 'test/model#{}'\n",
+                depth.as_str()
+            ))
+            .unwrap();
+            let config = super::AiConfig::from_table(&table).unwrap();
+            let entry = config.get("OpenCode").unwrap();
+            assert_eq!(entry.options.cli_model.as_deref(), Some("test/model"));
+            assert_eq!(entry.options.cli_thinking, Some(depth));
+            assert_eq!(super::AiConfig::from_table(&config.to_table().unwrap()).unwrap(), config);
+        }
+    }
+
     #[test]
     fn the_default_builder_is_the_same_from_the_list_as_from_the_config() {
         use crate::{BackendConfig, BackendKind, Role, default_builder};

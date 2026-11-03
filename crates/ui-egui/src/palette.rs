@@ -101,6 +101,9 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
         p.selected = p.selected.saturating_sub(1);
     }
     p.selected = p.selected.min(n.saturating_sub(1));
+    // The list follows the selection only when the keys or typing moved it: every frame would pull
+    // the wheel's scroll back to it (#584).
+    let mut follow = down || up;
     let mut chosen: Option<usize> = None;
     let screen = ctx.content_rect();
     let width = 620.0_f32.min(screen.width() - 40.0);
@@ -128,6 +131,7 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
                     r.request_focus();
                     if r.changed() {
                         app.state.palette.selected = 0;
+                        follow = true;
                     }
                 });
                 ui.add_space(6.0);
@@ -142,7 +146,7 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
                         if on || r.hovered() {
                             ui.painter().rect_filled(rect, t.radius_sm, if on { t.accent_soft } else { t.hover });
                         }
-                        if on {
+                        if on && follow {
                             r.scroll_to_me(None);
                         }
                         let (icon, title, sub, tag) = match e {

@@ -152,6 +152,8 @@ pub struct SseEvent {
 
 /// Longest single SSE line we accept (protects memory against a hostile server).
 const MAX_SSE_LINE: usize = 8 * 1024 * 1024;
+/// Most data retained for one event, including newlines between its `data:` fields.
+const MAX_SSE_EVENT_DATA: usize = 8 * 1024 * 1024;
 
 /// Parse an SSE stream, calling `f` for each event. `f` returns false to stop early.
 /// Handles CRLF, multi-line `data:`, comments (`:`), and a final event without a blank line.
@@ -194,6 +196,10 @@ pub fn parse_sse<R: Read>(r: R, mut f: impl FnMut(SseEvent) -> Result<bool, Tool
         match field {
             "event" => cur.event = Some(value.to_string()),
             "data" => {
+                let size = cur.data.len().saturating_add(usize::from(has_data)).saturating_add(value.len());
+                if size > MAX_SSE_EVENT_DATA {
+                    return Err(ToolError::new(ErrorCode::OverLimit, "The stream sent an event whose data was too large."));
+                }
                 if has_data {
                     cur.data.push('\n');
                 }
@@ -241,6 +247,37 @@ mod tests {
         })
         .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn sse_event_data_is_bounded_across_lines() {
+        let first = "é".repeat(2 * 1024 * 1024);
+        let full = format!("data:{first}\ndata:{}\n", "x".repeat(4 * 1024 * 1024 - 1));
+        for stream in [format!("data:{first}\ndata:{first}\n\n"), format!("data:{first}\ndata:{first}"), format!("{full}data:\n\n")] {
+            let mut emitted = 0;
+            let error = parse_sse(stream.as_bytes(), |_| {
+                emitted += 1;
+                Ok(true)
+            })
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::OverLimit);
+            assert_eq!(emitted, 0, "an oversized event must not reach the provider parser");
+            assert!(!error.message.contains('é'), "the error must not echo response data");
+        }
+    }
+
+    #[test]
+    fn sse_event_data_limit_preserves_boundaries_and_eof() {
+        let first = "é".repeat(2 * 1024 * 1024);
+        let full = format!("data:{first}\r\ndata:{}\r\n", "x".repeat(4 * 1024 * 1024 - 1));
+        let stream = format!("{full}\r\ndata:\r\n\r\n{full}");
+        let mut lengths = Vec::new();
+        parse_sse(stream.as_bytes(), |event| {
+            lengths.push(event.data.len());
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(lengths, [8 * 1024 * 1024, 0, 8 * 1024 * 1024]);
     }
 
     #[test]

@@ -31,22 +31,22 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
             out.push(Detected { suggestion: cfg(name, kind, model), reason: format!("Found {var} in your environment"), needs_key: false });
         }
     }
-    // Kimi K3 builds through OpenRouter: with its key found, or one the person pastes.
+    // Kimi K3.1 Pro builds through OpenRouter: with its key found, or one the person pastes.
     let found = get("OPENROUTER_API_KEY").is_some_and(|v| !v.trim().is_empty());
     out.push(Detected {
-        suggestion: cfg(KIMI_NAME, BackendKind::Openrouter, crate::openai::KIMI_K3),
+        suggestion: cfg(KIMI_NAME, BackendKind::Openrouter, crate::openai::KIMI_K3_1),
         reason: if found {
-            "Kimi K3 through OpenRouter, with the OPENROUTER_API_KEY in your environment".into()
+            "Kimi K3.1 Pro through OpenRouter, with the OPENROUTER_API_KEY in your environment".into()
         } else {
-            "Kimi K3 through OpenRouter: paste your OpenRouter key".into()
+            "Kimi K3.1 Pro through OpenRouter: paste your OpenRouter key".into()
         },
         needs_key: !found,
     });
     out
 }
 
-/// The name Kimi K3 is added under.
-pub const KIMI_NAME: &str = "Kimi K3 (OpenRouter)";
+/// The name Kimi K3.1 Pro is added under.
+pub const KIMI_NAME: &str = "Kimi K3.1 Pro (OpenRouter)";
 
 /// Is something listening at this URL's host:port? (bounded TCP connect)
 pub fn port_open(base_url: &str, timeout: Duration) -> bool {
@@ -55,14 +55,17 @@ pub fn port_open(base_url: &str, timeout: Duration) -> bool {
     addrs.iter().any(|a| TcpStream::connect_timeout(a, timeout).is_ok())
 }
 
-/// Words in the names of models that turn text into numbers, rank or transcribe, and can't chat:
-/// an embedding model listed first was used for every message and each one failed (#127).
-const NOT_CHAT: &[&str] = &["embed", "minilm", "bge-", "rerank", "whisper", "tts"];
+/// Task tokens and known model families that turn text into numbers, rank or transcribe.
+/// Match the model name, not its publisher: `matts/llama-3-instruct` can chat (#127).
+const NOT_CHAT: &[&str] = &["embed", "embedding", "embeddings", "embeddinggemma", "minilm", "bge", "rerank", "reranker", "whisper", "tts", "xtts"];
 
-/// The first model a server lists that can chat (else its first, so something is chosen).
+/// The first model a server lists that can chat. A specialised model isn't a chat fallback.
 pub(crate) fn chat_model(models: &[String]) -> Option<String> {
-    let chats = |m: &&String| !NOT_CHAT.iter().any(|w| m.to_ascii_lowercase().contains(w));
-    models.iter().find(chats).or(models.first()).cloned()
+    let chats = |m: &&String| {
+        let name = m.rsplit('/').next().unwrap_or(m).to_ascii_lowercase();
+        !name.split(|c: char| !c.is_ascii_alphanumeric()).any(|token| NOT_CHAT.contains(&token))
+    };
+    models.iter().find(chats).cloned()
 }
 
 /// One local server: connect, then list models.
@@ -78,7 +81,11 @@ pub fn probe_local(label: &str, base: &str) -> Option<Detected> {
         // No answer in time: it may still be loading a model.
         Err(_) => Vec::new(),
     };
-    let model = chat_model(&models).unwrap_or_default();
+    let model = match chat_model(&models) {
+        Some(model) => model,
+        None if models.is_empty() => String::new(),
+        None => return None,
+    };
     let reason = match models.len() {
         0 => format!("Found {label} running at {base}"),
         1 => format!("Found {label} running with 1 model"),
@@ -158,13 +165,43 @@ pub(crate) fn on_this_network(url: &str) -> bool {
     }
 }
 
-/// Every local server to probe: the usual addresses, then those OpenCode names elsewhere.
+/// The ports just above LM Studio's 1234, where its server goes when 1234 is taken or the person
+/// moved it (#73: 1235). Whatever answers there is checked like any other server: it must speak
+/// the OpenAI API and list models.
+const LM_STUDIO_NEARBY: std::ops::RangeInclusive<u16> = 1235..=1239;
+
+/// Where LM Studio keeps its server settings, under the home folder (newer, then older versions).
+/// Taken from LM Studio's own folders as they were seen, not from its documentation.
+const LM_STUDIO_SETTINGS: &[&str] = &[".lmstudio/.internal/http-server-config.json", ".cache/lm-studio/.internal/http-server-config.json"];
+
+/// The server port in LM Studio's settings file (`"port": 1235`).
+pub(crate) fn lmstudio_port(text: &str) -> Option<u16> {
+    let doc = craft_anything_formats::jsonc::parse(text, false).ok()?.to_value();
+    doc.get("port").and_then(serde_json::Value::as_u64).and_then(|p| u16::try_from(p).ok()).filter(|p| *p != 0)
+}
+
+/// Every local server to probe: the usual addresses, the port LM Studio's settings name, those
+/// OpenCode names elsewhere, then the ports next to LM Studio's. Each address once, under the most
+/// specific name.
 fn local_servers() -> Vec<(String, String)> {
+    let read = |p: &std::path::Path| std::fs::metadata(p).ok().filter(|m| m.len() <= 1024 * 1024).and_then(|_| std::fs::read_to_string(p).ok());
+    let home = dirs::home_dir();
+    let lm_port = home.iter().flat_map(|h| LM_STUDIO_SETTINGS.iter().map(move |f| h.join(f))).find_map(|p| read(&p).as_deref().and_then(lmstudio_port));
+    let opencode = opencode_config(|v| std::env::var(v).ok(), home).and_then(|p| read(&p)).as_deref().map(opencode_servers).unwrap_or_default();
+    servers_to_probe(lm_port, opencode)
+}
+
+/// [`local_servers`] without the files: `lm_port` is the port LM Studio's settings name, and
+/// `opencode` the servers OpenCode's settings name.
+fn servers_to_probe(lm_port: Option<u16>, opencode: Vec<(String, String)>) -> Vec<(String, String)> {
     let mut all: Vec<(String, String)> = LOCAL_SERVERS.iter().map(|(l, b)| (l.to_string(), b.to_string())).collect();
-    let config = opencode_config(|v| std::env::var(v).ok(), dirs::home_dir());
-    let text = config.filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() <= 1024 * 1024)).and_then(|p| std::fs::read_to_string(p).ok());
-    for (label, base) in text.as_deref().map(opencode_servers).unwrap_or_default() {
-        if !all.iter().any(|(_, b)| b.trim_end_matches('/') == base) {
+    let extra = lm_port
+        .map(|p| ("LM Studio".to_string(), format!("http://127.0.0.1:{p}/v1")))
+        .into_iter()
+        .chain(opencode)
+        .chain(LM_STUDIO_NEARBY.map(|p| (format!("AI server on port {p}"), format!("http://127.0.0.1:{p}/v1"))));
+    for (label, base) in extra {
+        if !all.iter().any(|(_, b)| b.trim_end_matches('/') == base.trim_end_matches('/')) {
             all.push((label, base));
         }
     }
@@ -214,22 +251,37 @@ pub fn detect_all() -> Vec<Detected> {
     }
     let mut hosts = crate::ssh::ssh_hosts();
     hosts.truncate(5);
-    let ssh: Vec<Detected> = hosts
-        .into_iter()
-        .map(|h| {
-            let mut c = cfg(&format!("Claude Code on {h}"), BackendKind::AgentCli, "claude-code");
-            c.ssh_host = Some(h.clone());
-            Detected { suggestion: c, reason: format!("SSH host {h} from ~/.ssh/config (runs an agent CLI there)"), needs_key: false }
-        })
-        .collect();
+    let ssh: Vec<Detected> = hosts.into_iter().flat_map(remote_agents).collect();
     parts.push((100, ssh));
     parts.sort_by_key(|(i, _)| *i);
     parts.into_iter().flat_map(|(_, v)| v).collect()
 }
 
+/// SSH aliases are suggestions, not proof that an agent is installed there.
+fn remote_agents(host: String) -> Vec<Detected> {
+    [("claude-code", "Claude Code"), ("opencode", "OpenCode")]
+        .into_iter()
+        .map(|(id, label)| {
+            let mut c = cfg(&format!("{label} on {host}"), BackendKind::AgentCli, id);
+            c.ssh_host = Some(host.clone());
+            Detected { suggestion: c, reason: format!("SSH host {host} from ~/.ssh/config (check that {label} is installed there)"), needs_key: false }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Non-Git SSH hosts offer both supported agent suggestions without probing the remote computer.
+    #[test]
+    fn ssh_hosts_offer_opencode_as_well_as_claude_code() {
+        let found = remote_agents("test-box".into());
+        assert_eq!(found.iter().map(|d| d.suggestion.model.as_str()).collect::<Vec<_>>(), ["claude-code", "opencode"]);
+        let oc = &found[1].suggestion;
+        assert_eq!(oc.name, "OpenCode on test-box");
+        assert_eq!(oc.ssh_host.as_deref(), Some("test-box"));
+    }
 
     #[test]
     fn env_detection() {
@@ -237,9 +289,9 @@ mod tests {
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].suggestion.kind, BackendKind::Openrouter);
         assert!(d[0].reason.contains("OPENROUTER_API_KEY"));
-        // Kimi K3 rides on the same key, so it needs none of its own.
-        assert_eq!((d[1].suggestion.model.as_str(), d[1].needs_key), (crate::openai::KIMI_K3, false));
-        // Without a key, Kimi K3 is still offered, asking for one.
+        // Kimi K3.1 Pro rides on the same key, so it needs none of its own.
+        assert_eq!((d[1].suggestion.model.as_str(), d[1].needs_key), (crate::openai::KIMI_K3_1, false));
+        // Without a key, Kimi K3.1 Pro is still offered, asking for one.
         let none = env_keys(|_| Some("  ".into()));
         assert_eq!(none.len(), 1);
         assert!(none[0].needs_key && none[0].suggestion.name == KIMI_NAME);
@@ -272,10 +324,36 @@ mod tests {
         let names = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(chat_model(&names(&["nomic-embed-text:latest", "llama3.2:3b"])).as_deref(), Some("llama3.2:3b"));
         assert_eq!(chat_model(&names(&["mxbai-embed-large", "all-MiniLM-L6-v2", "qwen3:8b"])).as_deref(), Some("qwen3:8b"));
-        assert_eq!(chat_model(&names(&["nomic-embed-text"])).as_deref(), Some("nomic-embed-text"), "something is chosen");
+        assert_eq!(chat_model(&names(&["nomic-embed-text"])), None, "an embedding model cannot answer a chat request");
         assert_eq!(chat_model(&[]), None);
         let url = crate::tests::serve("200 OK", r#"{"object":"list","data":[{"id":"nomic-embed-text:latest"},{"id":"gemma3:4b"}]}"#);
         assert_eq!(probe_local("Ollama", &url).unwrap().suggestion.model, "gemma3:4b");
+    }
+
+    #[test]
+    fn specialised_only_servers_are_not_offered_for_chat() {
+        for body in [
+            r#"{"object":"list","data":[{"id":"nomic-embed-text"}]}"#,
+            r#"{"object":"list","data":[{"id":"bge-reranker-v2"}]}"#,
+            r#"{"object":"list","data":[{"id":"whisper-large"}]}"#,
+            r#"{"object":"list","data":[{"id":"tts-1"}]}"#,
+            r#"{"object":"list","data":[{"id":"all-MiniLM-L6-v2"}]}"#,
+        ] {
+            let url = crate::tests::serve("200 OK", body);
+            assert!(probe_local("Local server", &url).is_none(), "{body} has no chat model");
+        }
+    }
+
+    #[test]
+    fn task_markers_do_not_match_publishers_or_unrelated_words() {
+        for model in ["matts/llama-3-instruct", "embedding-author/qwen-2.5-instruct", "embedded-chat", "whisper/gemma-3"] {
+            assert_eq!(chat_model(&[model.into()]).as_deref(), Some(model));
+        }
+        let url = crate::tests::serve("200 OK", r#"{"object":"list","data":[{"id":"matts/llama-3-instruct"}]}"#);
+        assert_eq!(probe_local("Local", &url).unwrap().suggestion.model, "matts/llama-3-instruct");
+        for model in ["vendor/text-embedding-3-small", "nomic-embed-text:latest", "BAAI/bge-m3", "vendor/embeddinggemma-300m", "XTTS-v2"] {
+            assert!(chat_model(&[model.into()]).is_none(), "{model}");
+        }
     }
 
     /// #83: a server set up in OpenCode (here LM Studio on another port) is offered; hosted
@@ -309,6 +387,32 @@ mod tests {
         let found = opencode_servers(&format!(r#"{{"provider": {{"lmstudio": {{"name": "LM Studio", "options": {{"baseURL": "{url}"}}}}}}}}"#));
         let (label, base) = found.first().unwrap();
         assert_eq!(probe_local(label, base).unwrap().suggestion.name, "LM Studio from OpenCode (local)");
+    }
+
+    /// #73: LM Studio on another port was missed: its settings name the port, and the ports next to
+    /// 1234 are probed too. Each address is probed once, under the most specific name.
+    #[test]
+    fn lm_studio_on_another_port_is_probed() {
+        assert_eq!(lmstudio_port(r#"{"port": 1235, "networkInterface": "127.0.0.1", "cors": false}"#), Some(1235));
+        for bad in ["", "not json", r#"{"port": 0}"#, r#"{"port": 70000}"#, r#"{"port": "1235"}"#, r#"{"cors": true}"#] {
+            assert_eq!(lmstudio_port(bad), None, "{bad}");
+        }
+        let bases = |v: &[(String, String)]| v.iter().map(|(_, b)| b.clone()).collect::<Vec<_>>();
+        let plain = servers_to_probe(None, Vec::new());
+        let base_count = LOCAL_SERVERS.len();
+        assert_eq!(plain.len(), base_count + LM_STUDIO_NEARBY.count(), "the usual servers, then the ports next to 1234");
+        assert!(bases(&plain).contains(&"http://127.0.0.1:1235/v1".to_string()));
+        // A port from LM Studio's settings, away from 1234, is probed as LM Studio.
+        let moved = servers_to_probe(Some(4321), Vec::new());
+        assert!(moved.contains(&("LM Studio".to_string(), "http://127.0.0.1:4321/v1".to_string())), "{moved:?}");
+        // The usual port named again adds nothing; OpenCode's name for 1235 wins over the generic one.
+        assert_eq!(servers_to_probe(Some(1234), Vec::new()).len(), plain.len());
+        let from_opencode = servers_to_probe(None, vec![("LM Studio from OpenCode".into(), "http://127.0.0.1:1235/v1".into())]);
+        assert_eq!(from_opencode.len(), plain.len(), "no address twice");
+        assert!(from_opencode.contains(&("LM Studio from OpenCode".to_string(), "http://127.0.0.1:1235/v1".to_string())));
+        // What answers on one of those ports is found like a server at a usual address.
+        let url = crate::tests::serve("200 OK", r#"{"object":"list","data":[{"id":"gemma"}]}"#);
+        assert_eq!(probe_local("LM Studio", &url).unwrap().suggestion.model, "gemma");
     }
 
     #[test]

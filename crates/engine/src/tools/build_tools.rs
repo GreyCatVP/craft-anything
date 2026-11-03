@@ -6,7 +6,7 @@
 //! dev servers are refused, anything else asks the person (or goes ahead in Auto mode, except
 //! what's never done unasked). Ids follow docs/tool-ids.md.
 
-use super::interaction_tools::{approve, inbox, inside, resolve, workspace_of};
+use super::interaction_tools::{approve, inbox, inside, really_inside, resolve, workspace_of};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use crate::workspace::Workspace;
 use craft_anything_evidence::{ErrorCode, ToolError};
@@ -193,16 +193,17 @@ fn workspace(ctx: &Ctx<'_>) -> Result<Workspace, ToolError> {
     })
 }
 
-/// `rel` inside the project folder, or an error (no escaping with `..` or an absolute path).
+/// `rel` inside the project folder, or an error (no escaping with `..`, an absolute path or a
+/// link that leads out of the project).
 /// Models often write the project's folders from the root (`/app/src/main.rs`): a path like that
 /// whose first folder the project has is read inside the project, where it was meant (#24).
 fn in_project(ws: &Workspace, rel: &str) -> Result<PathBuf, ToolError> {
     let from_root = rel.trim_start_matches(['/', '\\']);
     let names_a_folder = from_root != rel
         && from_root.split(['/', '\\']).next().is_some_and(|first| !first.is_empty() && (ws.root.join(first).is_dir() || ws.root.join(first) == ws.app_dir()));
-    [Some(rel), names_a_folder.then_some(from_root)].into_iter().flatten().find_map(|r| resolve(&ws.root, r).filter(|p| inside(&ws.root, p))).ok_or_else(|| {
-        ToolError::invalid(format!("{rel} is outside the project.")).with_remediation("Use a path relative to the project folder, like app/src/main.rs.")
-    })
+    [Some(rel), names_a_folder.then_some(from_root)].into_iter().flatten().find_map(|r| resolve(&ws.root, r).filter(|p| really_inside(&ws.root, p))).ok_or_else(
+        || ToolError::invalid(format!("{rel} is outside the project.")).with_remediation("Use a path relative to the project folder, like app/src/main.rs."),
+    )
 }
 
 fn shown(ws: &Workspace, p: &Path) -> String {
@@ -232,7 +233,10 @@ fn build_files_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             }
             let path = e.path();
             let name = e.file_name().to_string_lossy().into_owned();
-            if path.is_dir() {
+            // A link is listed but never followed: it may lead out of the project.
+            if e.file_type().is_ok_and(|t| t.is_symlink()) {
+                entries.push(json!({"path": shown(&ws, &path), "link": true}));
+            } else if path.is_dir() {
                 entries.push(json!({"path": format!("{}/", shown(&ws, &path))}));
                 if d + 1 < depth && !SKIP.contains(&name.as_str()) {
                     stack.push((path, d + 1));
@@ -391,6 +395,42 @@ mod tests {
         assert!(call(&e, "build_file_edit", json!({"path": "app/src/main.rs", "old_text": "nope", "new_text": "x"})).is_err());
         assert!(call(&e, "build_file_read", json!({"path": "../../etc/passwd"})).is_err());
         assert!(call(&e, "build_file_write", json!({"path": "../outside.txt", "content": "x"})).is_err());
+    }
+
+    /// A link to a folder; false where this system won't let a test make one.
+    fn link_dir(target: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(target, link);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(target, link);
+        made.is_ok()
+    }
+
+    #[test]
+    fn a_link_in_the_project_cannot_lead_outside_it() {
+        let (_d, ws, e) = building();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+        std::fs::create_dir_all(ws.app_dir().join("src")).unwrap();
+        if !link_dir(outside.path(), &ws.app_dir().join("out")) {
+            eprintln!("skipped: this system won't make links for tests");
+            return;
+        }
+        assert!(call(&e, "build_file_read", json!({"path": "app/out/secret.txt"})).is_err());
+        assert!(call(&e, "build_file_edit", json!({"path": "app/out/secret.txt", "old_text": "secret", "new_text": "x"})).is_err());
+        assert!(call(&e, "build_file_write", json!({"path": "app/out/new.txt", "content": "x"})).is_err());
+        assert!(call(&e, "build_file_write", json!({"path": "app/out/deeper/new.txt", "content": "x"})).is_err());
+        assert_eq!(std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(), "secret");
+        assert!(!outside.path().join("new.txt").exists() && !outside.path().join("deeper").exists());
+        // Listing shows the link but doesn't walk into it.
+        let list = call(&e, "build_files_list", json!({})).unwrap();
+        assert!(list["entries"].as_array().unwrap().iter().any(|x| x["path"] == "app/out" && x["link"] == true), "{list}");
+        assert!(!list.to_string().contains("secret.txt"), "{list}");
+        assert!(call(&e, "build_files_list", json!({"path": "app/out"})).is_err());
+        // A link that stays inside the project still works.
+        assert!(link_dir(&ws.app_dir().join("src"), &ws.app_dir().join("alias")));
+        call(&e, "build_file_write", json!({"path": "app/alias/lib.rs", "content": "x"})).unwrap();
+        assert!(ws.app_dir().join("src/lib.rs").is_file());
     }
 
     /// #280: a line longer than a page left reading stuck at it, with nothing shown.

@@ -88,10 +88,19 @@ pub fn children(data: &[u8], parent: &Tlv) -> Vec<Tlv> {
 
 /// Dotted form of an OBJECT IDENTIFIER's content.
 pub fn oid(content: &[u8]) -> String {
+    if content.is_empty() || content.len() > 64 {
+        return "invalid".into();
+    }
     let mut parts: Vec<String> = Vec::new();
     let mut v: u64 = 0;
     let mut first = true;
-    for &b in content.iter().take(64) {
+    let mut arc_start = true;
+    for &b in content {
+        // DER subidentifiers use the shortest base-128 encoding.
+        if arc_start && b == 0x80 {
+            return "invalid".into();
+        }
+        arc_start = b & 0x80 == 0;
         v = match v.checked_mul(128) {
             Some(x) => x | u64::from(b & 0x7f),
             None => return "invalid".into(),
@@ -113,6 +122,9 @@ pub fn oid(content: &[u8]) -> String {
             }
             v = 0;
         }
+    }
+    if !arc_start {
+        return "invalid".into();
     }
     parts.join(".")
 }

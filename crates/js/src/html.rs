@@ -30,7 +30,7 @@ pub struct HtmlFacts {
 fn attributes(src: &str, lower: &str, mut i: usize) -> (Vec<(String, String)>, usize) {
     let b = lower.as_bytes();
     let mut out = Vec::new();
-    while i < b.len() && out.len() < 64 {
+    while i < b.len() {
         while b.get(i).is_some_and(|c| c.is_ascii_whitespace() || *c == b'/') {
             i += 1;
         }
@@ -75,7 +75,7 @@ fn attributes(src: &str, lower: &str, mut i: usize) -> (Vec<(String, String)>, u
         }
         if name.is_empty() {
             i += 1;
-        } else {
+        } else if out.len() < 64 {
             out.push((name, decode_entities(&value)));
         }
     }
@@ -83,11 +83,57 @@ fn attributes(src: &str, lower: &str, mut i: usize) -> (Vec<(String, String)>, u
 }
 
 fn decode_entities(s: &str) -> String {
-    s.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">")
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find('&') {
+        out.push_str(rest.get(..at).unwrap_or_default());
+        rest = rest.get(at + 1..).unwrap_or_default();
+        let decoded = rest
+            .strip_prefix('#')
+            .and_then(|number| {
+                let (digits, radix) = number.strip_prefix(['x', 'X']).map_or((number, 10), |n| (n, 16));
+                let count = digits.bytes().take_while(|c| if radix == 16 { c.is_ascii_hexdigit() } else { c.is_ascii_digit() }).count();
+                if count == 0 {
+                    return None;
+                }
+                let value = digits.get(..count).and_then(|s| u32::from_str_radix(s, radix).ok()).unwrap_or(u32::MAX);
+                let consumed = rest.len() - digits.len() + count;
+                let consumed = consumed + usize::from(rest.as_bytes().get(consumed) == Some(&b';'));
+                // HTML maps the numeric C1 references through the Windows-1252 table.
+                const C1: [u32; 32] = [
+                    0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019,
+                    0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
+                ];
+                let value = value.checked_sub(0x80).and_then(|i| C1.get(i as usize)).copied().unwrap_or(value);
+                Some((char::from_u32(value).filter(|c| *c != '\0').unwrap_or('\u{fffd}'), consumed))
+            })
+            .or_else(|| {
+                [("amp;", '&'), ("quot;", '"'), ("apos;", '\''), ("lt;", '<'), ("gt;", '>')]
+                    .into_iter()
+                    .find_map(|(name, value)| rest.starts_with(name).then_some((value, name.len())))
+            });
+        if let Some((c, consumed)) = decoded {
+            out.push(c);
+            rest = rest.get(consumed..).unwrap_or_default();
+        } else {
+            out.push('&');
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn get<'v>(attrs: &'v [(String, String)], k: &str) -> Option<&'v str> {
     attrs.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
+}
+
+/// Find an actual closing tag, not a longer name such as `</scripture>`.
+fn closing_tag(lower: &str, from: usize, name: &str) -> Option<usize> {
+    let needle = format!("</{name}");
+    lower.get(from..)?.match_indices(&needle).find_map(|(offset, _)| {
+        let at = from + offset;
+        lower.as_bytes().get(at + needle.len()).filter(|c| c.is_ascii_whitespace() || matches!(c, b'/' | b'>')).map(|_| at)
+    })
 }
 
 /// Scan an HTML document.
@@ -104,13 +150,16 @@ pub fn scan_html(src: &str) -> HtmlFacts {
         }
         let at = pos + rel;
         let rest = lower.get(at + 1..).unwrap_or("");
-        let name_len = rest.bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'-').count();
-        let name = rest.get(..name_len).unwrap_or("");
-        let after = at + 1 + name_len;
+        // Inspect only the names we handle: malformed runs of `<` must not rescan the remaining document.
+        let name = ["script", "link", "meta", "title", "style", "textarea", "xmp", "iframe", "noembed", "noframes", "plaintext"]
+            .into_iter()
+            .find(|name| rest.starts_with(*name) && rest.as_bytes().get(name.len()).is_none_or(|c| c.is_ascii_whitespace() || matches!(*c, b'/' | b'>')))
+            .unwrap_or_default();
+        let after = at + 1 + name.len();
         match name {
             "script" => {
                 let (attrs, end) = attributes(src, &lower, after);
-                let close = lower.get(end..).and_then(|r| r.find("</script")).map_or(lower.len(), |c| end + c);
+                let close = closing_tag(&lower, end, "script").unwrap_or(lower.len());
                 let module = get(&attrs, "type").is_some_and(|t| t.eq_ignore_ascii_case("module"));
                 let line = lines.line(u32::try_from(at).unwrap_or(u32::MAX));
                 let src_attr = get(&attrs, "src").map(String::from);
@@ -122,10 +171,16 @@ pub fn scan_html(src: &str) -> HtmlFacts {
                 }
                 pos = close.max(end).max(at + 1);
             }
+            "style" | "textarea" | "xmp" | "iframe" | "noembed" | "noframes" => {
+                let (_, end) = attributes(src, &lower, after);
+                pos = closing_tag(&lower, end, name).unwrap_or(lower.len()).max(at + 1);
+            }
+            "plaintext" => break,
             "link" => {
                 let (attrs, end) = attributes(src, &lower, after);
                 let rel_attr = get(&attrs, "rel").unwrap_or("").to_ascii_lowercase();
-                if (rel_attr == "modulepreload" || (rel_attr == "preload" && get(&attrs, "as") == Some("script")))
+                let script_destination = get(&attrs, "as").is_some_and(|value| value.eq_ignore_ascii_case("script"));
+                if rel_attr.split_ascii_whitespace().any(|token| token == "modulepreload" || (token == "preload" && script_destination))
                     && let Some(h) = get(&attrs, "href")
                     && out.preloads.len() < MAX_TAGS
                 {
@@ -142,12 +197,18 @@ pub fn scan_html(src: &str) -> HtmlFacts {
             }
             "title" => {
                 let (_, end) = attributes(src, &lower, after);
-                let close = lower.get(end..).and_then(|r| r.find("</title")).map_or(end, |c| end + c);
+                let close = closing_tag(&lower, end, "title").unwrap_or(lower.len());
                 out.title = src.get(end..close).map(|t| t.trim().chars().take(200).collect());
                 pos = close.max(at + 1);
             }
             _ if rest.starts_with("!--") => {
                 pos = lower.get(at..).and_then(|r| r.find("-->")).map_or(lower.len(), |c| at + c + 3);
+            }
+            _ if rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                || rest.strip_prefix('/').and_then(|s| s.as_bytes().first()).is_some_and(u8::is_ascii_alphabetic) =>
+            {
+                let (_, end) = attributes(src, &lower, after);
+                pos = end.max(at + 1);
             }
             _ => pos = at + 1,
         }

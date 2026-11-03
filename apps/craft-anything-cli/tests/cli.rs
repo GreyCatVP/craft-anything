@@ -8,6 +8,31 @@ fn cli(args: &[&str], config: &std::path::Path) -> Output {
     Process::new(env!("CARGO_BIN_EXE_craft-anything-cli")).args(args).env("CRAFT_ANYTHING_CONFIG_DIR", config).timeout(Duration::from_secs(60)).run().unwrap()
 }
 
+/// The CLI lists installation-specific depths and refuses unsupported selections using an isolated agent fixture.
+#[cfg(unix)]
+#[test]
+fn opencode_cli_lists_supported_depths_and_rejects_unsupported_choices() {
+    use std::os::unix::fs::PermissionsExt;
+    let cfg = tempfile::tempdir().unwrap();
+    let program = cfg.path().join("agent");
+    let response = json!({"data":[{"id":"model","providerID":"test","name":"Test model","enabled":true,"type":"chat","variants":[{"id":"low"},{"id":"max"}]}]});
+    std::fs::write(&program, format!("#!/bin/sh\ncat <<'MODELS'\n{response}\nMODELS\n")).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(cli(&["ai", "add", "OpenCode", "--kind", "agent_cli", "--model", "opencode"], cfg.path()).success);
+    assert!(cli(&["ai", "program", "OpenCode", program.to_str().unwrap()], cfg.path()).success);
+    let listing = cli(&["ai", "model", "OpenCode", "--format", "json"], cfg.path());
+    let list: Value = serde_json::from_slice(&listing.stdout).unwrap();
+    assert_eq!(list["models"][0]["thinking"], json!(["low", "max"]));
+    assert!(cli(&["ai", "model", "OpenCode", "test/model", "--thinking", "max"], cfg.path()).success);
+    assert!(!cli(&["ai", "model", "OpenCode", "--thinking", "xhigh"], cfg.path()).success);
+    let saved = std::fs::read_to_string(cfg.path().join("config.toml")).unwrap();
+    assert!(saved.contains("cli_thinking = \"max\""), "invalid choices must not replace the saved choice");
+    assert!(cli(&["ai", "model", "OpenCode", "--default"], cfg.path()).success);
+    let saved = std::fs::read_to_string(cfg.path().join("config.toml")).unwrap();
+    assert!(!saved.contains("cli_model") && !saved.contains("cli_thinking"));
+    assert_eq!(cli(&["ai", "model", "OpenCode", "test/model", "--default"], cfg.path()).code, Some(2));
+}
+
 #[test]
 fn commands_and_exit_codes() {
     let cfg = tempfile::tempdir().unwrap();

@@ -486,14 +486,34 @@ impl Server {
 
     /// Ask the person (through the session's inbox) to allow one consent-gated call. `None` when
     /// there is no inbox.
+    ///
+    /// "Always for this project" is remembered in the project (the inbox's folder is the project's,
+    /// `allowed_actions` as `tool:<id>`), and a tool the person already always allowed isn't asked
+    /// about again (#563: it was asked every time, whatever was chosen).
     fn ask_consent(&self, name: &str, why: &str, token: &CancelToken) -> Option<bool> {
         let dir = self.engine.session().ext.get::<craft_anything_engine::inbox::InboxDir>()?;
         let inbox = craft_anything_engine::inbox::Inbox::new(dir.0.clone());
+        let kind = format!("tool:{name}");
+        let mut project = dir.0.parent().and_then(|root| craft_anything_engine::workspace::Workspace::open(root).ok());
+        if project.as_ref().is_some_and(|p| p.manifest.allowed_actions.contains(&kind)) {
+            return Some(true);
+        }
         let title = self.engine.registry().get(name).map(|s| s.title).unwrap_or(name);
         let id =
-            inbox.post(craft_anything_engine::inbox::RequestKind::Approval, &format!("Allow: {title}"), why, Vec::new(), false, Some(name.to_string())).ok()?;
+            inbox.post(craft_anything_engine::inbox::RequestKind::Approval, &format!("Allow: {title}"), why, Vec::new(), false, Some(kind.clone())).ok()?;
         let answer = inbox.wait(&id, Duration::from_secs(30 * 60), &|| token.is_cancelled());
-        Some(answer.and_then(|a| a.allow).unwrap_or(false))
+        let allowed = answer.as_ref().and_then(|a| a.allow).unwrap_or(false);
+        if allowed
+            && answer.is_some_and(|a| a.always)
+            && let Some(p) = project.as_mut()
+        {
+            let _ = p.set_person(|m| {
+                if !m.allowed_actions.contains(&kind) {
+                    m.allowed_actions.push(kind);
+                }
+            });
+        }
+        Some(allowed)
     }
 
     fn success_body(&self, name: &str, out: &ToolOutput) -> Value {

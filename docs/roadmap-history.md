@@ -70,6 +70,8 @@ Owner: open · Status: done (branch chore/r0.5-cleanups)
       Rt = 15 (e.g. the word `0xc0c7fef3`), so one such word failed the whole analysis of a 32-bit
       ARM program; the word now decodes as invalid
 - [x] ARM32 value-flow graphs use r0 for word results and ARM scratch registers for calls (#239).
+      Conditional A32 calls also keep definitions from the skipped path, including calls to known
+      non-returning targets (follow-up to #436).
 - [x] Unchecked `o + 4`/`o + 8` on section and program header offsets in `formats/src/dart.rs`
       (`Elf::parse`): a header table near `usize::MAX` panicked in debug builds (in release the
       wrapped reads were thrown away, since the entry's first field was already out of range); an
@@ -81,6 +83,8 @@ Owner: open · Status: done (branch chore/r0.5-cleanups)
 - [x] Missing `database` icon for SQLite in the UI (`kind_icon`)
 - [x] Deduplicate the five private `fn spec(` helpers in the tool modules
 - [x] Keep dependencies between recognised esbuild wrappers after identifier minification (#270).
+      Follow-up to #438: only recognised wrapper calls count toward the 4096 dependency
+      budget; public regressions cover unrelated calls, forward declarations, arrows and the cap.
 - [x] rustfmt drift on main (11 files)
 - [x] Checked arithmetic on file offsets in `fsread/extfs.rs`: an inode offset near `usize::MAX`
       overflows `o + 128` (two sites), found by a lint scan of `crates/formats` (#42)
@@ -899,6 +903,8 @@ Owner: open · Status: in progress
 A saved analysis should answer a narrow question without running again, and an app's own code
 should give away more of how it is set up.
 - [x] Preserve every unassigned window when comparing application preferences (#237).
+- [x] Keep window labels distinct when a literal binding resembles an occurrence suffix,
+      preserving the binding name and actual occurrence number (review follow-up to #440).
 - [x] `core_evidence_browse` pages keep only the rows that match (`matching`: field → value or list
       of values, `a.b` inside a row, null for a missing field), return only chosen fields (`fields`)
       and list the field names of the matching rows (`field_names`); offsets count matching rows.

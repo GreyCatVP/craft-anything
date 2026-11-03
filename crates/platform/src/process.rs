@@ -368,7 +368,30 @@ fn use_search_path(cmd: &mut std::process::Command) {
 }
 
 fn spawn_error(name: &str, program: &OsStr, e: std::io::Error, remediation: Option<&str>) -> ToolError {
-    match e.kind() {
+    let found = crate::which::which_in(&program.to_string_lossy(), crate::which::search_path()).into_iter().next();
+    spawn_error_for(name, program, e, remediation, found)
+}
+
+/// `found` is where the program was looked up. "Not found" from the system for a file that is
+/// there means something it needs is missing (the interpreter of an npm script, #152, #95): saying
+/// the program isn't installed sent people to reinstall what they had.
+fn spawn_error_for(name: &str, program: &OsStr, e: std::io::Error, remediation: Option<&str>, found: Option<std::path::PathBuf>) -> ToolError {
+    match (e.kind(), found) {
+        (std::io::ErrorKind::NotFound, Some(path)) => ToolError::new(
+            ErrorCode::ProgramFailed,
+            format!("{name} is at {} but could not be started: {e}.", path.display()),
+        )
+        .with_remediation(format!(
+            "The file is there, so something it needs to run is missing. Programs installed with npm need Node.js on the PATH: run `{}` in a terminal to see what it says.",
+            program.to_string_lossy()
+        ))
+        .with_details(serde_json::json!({"program": program.to_string_lossy(), "reason": "found_but_not_started", "path": path.to_string_lossy()})),
+        (kind, _) => spawn_error_kind(name, program, e, kind, remediation),
+    }
+}
+
+fn spawn_error_kind(name: &str, program: &OsStr, e: std::io::Error, kind: std::io::ErrorKind, remediation: Option<&str>) -> ToolError {
+    match kind {
         std::io::ErrorKind::NotFound => ToolError::new(ErrorCode::EngineMissing, format!("{name} isn't installed or isn't on your PATH."))
             .with_remediation(remediation.map(str::to_string).unwrap_or_else(|| format!("Install {name}, or set its full path in Settings.")))
             .with_details(serde_json::json!({"program": program.to_string_lossy(), "reason": "not_found"})),
@@ -1271,6 +1294,30 @@ mod error_tests {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    /// #152, #95: a program that is there but can't start (an npm script whose `node` is missing)
+    /// said "isn't installed or isn't on your PATH". It names the file and what to look at; a
+    /// program that really isn't there still says so.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_is_there_but_cannot_start_is_not_called_missing() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("opencode");
+        std::fs::write(&script, "#!/nonexistent/interpreter\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let err = Process::new(script.as_os_str()).arg("--version").run().unwrap_err();
+        assert_eq!(err.code, ErrorCode::ProgramFailed);
+        assert!(err.message.contains("is at") && err.message.contains("could not be started"), "{}", err.message);
+        assert!(!err.message.contains("isn't installed"), "{}", err.message);
+        assert!(err.remediation.unwrap_or_default().contains("Node.js"));
+        assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("found_but_not_started"));
+
+        let err = Process::new("craft-anything-no-such-program").run().unwrap_err();
+        assert_eq!(err.code, ErrorCode::EngineMissing);
+        assert!(err.message.contains("isn't installed or isn't on your PATH"), "{}", err.message);
+        assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("not_found"));
+    }
 
     #[test]
     fn captures_output_and_exit_code() {

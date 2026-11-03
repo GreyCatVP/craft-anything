@@ -81,9 +81,10 @@ pub struct ToolDef {
     pub schema: Value,
 }
 
-/// How hard the model should think: Claude's effort levels, least to most (the order counts: a
-/// level a model lacks steps down to the nearest one below).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// Shared thinking levels for API backends and agent CLI variants, ordered least to most.
+/// Claude maps unsupported levels down with [`Effort::within`]; OpenCode requires the exact
+/// variant in its live catalogue. The `effort` and `cli_thinking` settings remain independent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Effort {
     Low,
@@ -100,6 +101,7 @@ impl Effort {
     /// Every level, least to most.
     pub const ALL: [Effort; 5] = [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
 
+    /// The stable lowercase id used in settings, API requests and agent model references.
     pub fn as_str(self) -> &'static str {
         match self {
             Effort::Low => "low",
@@ -110,9 +112,21 @@ impl Effort {
         }
     }
 
+    /// Parse a known level, ignoring surrounding whitespace and case.
     pub fn parse(s: &str) -> Option<Effort> {
         let s = s.trim();
         Effort::ALL.into_iter().find(|e| e.as_str().eq_ignore_ascii_case(s))
+    }
+
+    /// The display label for this level in model pickers and validation messages.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Xhigh => "Xhigh",
+            Self::Max => "Max",
+        }
     }
 
     /// This level on a model that offers only `levels`: the nearest one at or below it (as Claude
@@ -206,20 +220,30 @@ pub enum Delta {
 
 /// Cooperative cancellation for a conversation.
 #[derive(Debug, Clone, Default)]
-pub struct Stop(Arc<AtomicBool>);
+pub struct Stop {
+    stopped: Arc<AtomicBool>,
+    tool: Option<craft_anything_engine::CancelToken>,
+}
 
 impl Stop {
+    /// Link discovery to cancellation of the engine tool that owns it.
+    pub fn for_tool(cancel: craft_anything_engine::CancelToken) -> Self {
+        Self { tool: Some(cancel), ..Default::default() }
+    }
+
+    /// Request cancellation for every clone sharing this conversation's stop flag.
     pub fn stop(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.stopped.store(true, Ordering::SeqCst);
     }
 
     /// Clear a previous stop (at the start of the next message).
     pub fn reset(&self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.stopped.store(false, Ordering::SeqCst);
     }
 
+    /// Whether the conversation or its owning engine tool has requested cancellation.
     pub fn is_stopped(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.stopped.load(Ordering::SeqCst) || self.tool.as_ref().is_some_and(|c| c.is_cancelled())
     }
 
     pub fn check(&self) -> Result<(), ToolError> {

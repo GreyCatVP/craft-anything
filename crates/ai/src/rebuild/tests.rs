@@ -1,6 +1,9 @@
 use super::check::build_check;
 use super::*;
 
+#[path = "note_progress_tests.rs"]
+mod note_progress;
+
 // Helpers that take a built-in kind's id, so each test reads as one line.
 fn kind(id: &str) -> Arc<dyn TargetKind> {
     KindRegistry::built_in().get(id).unwrap()
@@ -377,6 +380,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     assert!(w.added(&mut ws).is_none(), "nothing added, nothing to say");
     let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into(), pictures: Vec::new() };
@@ -474,6 +478,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let mut agent = RecordedTurns::default();
     worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Build the app").into()), None).unwrap();
@@ -1388,6 +1393,32 @@ fn website_kind_compares_only_when_there_is_an_original() {
     assert_eq!(ids(&scratch), [CheckResult::BUILD]);
 }
 
+/// #494: the website check, run for real with no site to look at, fails with a note that names the
+/// places a site is accepted and where the app is: `app/`, or the project folder for a project
+/// that edits its own folder.
+#[test]
+fn the_website_check_with_no_site_says_where_it_looked() {
+    let d = tempfile::tempdir().unwrap();
+    for in_root in [false, true] {
+        let mut ws = Workspace::create(
+            &d.path().join(if in_root { "root" } else { "app" }),
+            "Site",
+            "Clone it",
+            TargetRef::Website { url: "https://example.com".into() },
+        )
+        .unwrap();
+        ws.manifest.app_in_root = in_root;
+        let place = if in_root { "the project folder" } else { "app/" };
+        let r = check_worker(&ws, false).run_checks(&ws, &kinds::WebsiteKind, 1).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(!r[0].passed && r[0].check == CheckResult::WEB_VISUAL, "{:?}", r[0]);
+        let note = &r[0].note;
+        assert!(note.contains(&format!("No built site found in {place} yet")), "{note}");
+        assert!(note.contains(&format!("index.html straight in {place}")) && note.contains("dist/, build/ or out/"), "{note}");
+        assert!(in_root || !note.contains("project folder"), "{note}");
+    }
+}
+
 #[test]
 fn a_picked_game_is_rebuilt_with_its_own_engine_when_we_can() {
     let d = tempfile::tempdir().unwrap();
@@ -1426,6 +1457,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     w.attach(&ws).unwrap();
     // The model writes a file with the Build tools, then answers.
@@ -1553,6 +1585,7 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let check = |round| w.run_checks(&ws, &SheetKind, round).unwrap().remove(0);
 
@@ -1637,6 +1670,10 @@ mod picking_up_a_build {
             "flaky"
         }
         fn run(&self, cx: &mut CheckCx) -> Result<CheckResult, ToolError> {
+            let rejection = std::fs::read_to_string(cx.ws.root.join("reject-build")).unwrap_or_default();
+            if !rejection.is_empty() && (rejection != "once" || cx.ws.manifest.checks.is_empty()) {
+                return Ok(CheckResult::new(self.id(), cx.round, false, "The app is still missing."));
+            }
             let file = cx.ws.app_dir().join("check-fails");
             let left: u32 = std::fs::read_to_string(&file).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
             if left > 0 {
@@ -1702,11 +1739,13 @@ mod picking_up_a_build {
     }
 
     fn try_it(b: &Bench, ws: &Workspace) -> (bool, Vec<feed::FeedItem>) {
-        let mut kinds = KindRegistry::built_in();
-        kinds.register(Arc::new(FlakyKind));
-        let run =
-            RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), RunOptions { kinds, backend: Some("Stand-in".into()), ..RunOptions::default() })
-                .unwrap();
+        try_with(b, ws, RunOptions::default())
+    }
+
+    fn try_with(b: &Bench, ws: &Workspace, mut opts: RunOptions) -> (bool, Vec<feed::FeedItem>) {
+        opts.kinds.register(Arc::new(FlakyKind));
+        opts.backend = Some("Stand-in".into());
+        let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), opts).unwrap();
         let began = Instant::now();
         let mut ok = None;
         while ok.is_none() {
@@ -1807,6 +1846,383 @@ mod picking_up_a_build {
         assert!(!told.contains("Their request"), "not the first-build brief again: {told}");
     }
 
+    #[test]
+    fn unchanged_builder_turns_stop_after_two_and_stay_stopped_when_reopened() {
+        let b = bench();
+        let ws = worked_on(&b);
+        std::fs::write(ws.root.join("reject-build"), "not ready").unwrap();
+        let (ok, feed) = try_it(&b, &ws);
+        assert!(!ok, "{feed:?}");
+        assert_eq!(prompts_given(&b), 2, "a third unchanged turn would spend more without progress");
+        assert!(
+            feed.iter().any(|i| matches!(i, feed::FeedItem::Error { message, .. } if message.contains("two builder turns"))),
+            "the stop explains what happened: {feed:?}"
+        );
+        let reopened = Workspace::open(&ws.root).unwrap();
+        let (ok, _) = try_it(&b, &reopened);
+        assert!(!ok);
+        assert_eq!(prompts_given(&b), 2, "Try again must keep the saved progress limit");
+    }
+
+    #[test]
+    fn single_turn_runs_share_the_same_unchanged_turn_limit() {
+        let b = bench();
+        let ws = worked_on(&b);
+        std::fs::write(ws.root.join("reject-build"), "not ready").unwrap();
+        for expected in [1, 2, 2] {
+            let (ok, _) = try_with(&b, &ws, RunOptions { max_rounds: 0, ..RunOptions::default() });
+            assert!(!ok);
+            assert_eq!(prompts_given(&b), expected);
+        }
+    }
+
+    #[test]
+    fn a_real_edit_or_nonempty_new_request_starts_another_attempt() {
+        let b = bench();
+        let ws = worked_on(&b);
+        std::fs::write(ws.root.join("reject-build"), "not ready").unwrap();
+        assert!(!try_it(&b, &ws).0);
+        assert_eq!(prompts_given(&b), 2);
+        std::fs::write(ws.app_dir().join("index.html"), "a new starting point").unwrap();
+        assert!(!try_it(&b, &ws).0);
+        assert_eq!(prompts_given(&b), 4, "a real edit reset the previous limit");
+        let opts = RunOptions { message: Some("Use the new index.html and add a working button.".into()), ..RunOptions::default() };
+        assert!(!try_with(&b, &ws, opts).0);
+        assert_eq!(prompts_given(&b), 6, "a new request starts another attempt");
+        let empty = RunOptions { message: Some("   ".into()), ..RunOptions::default() };
+        assert!(!try_with(&b, &ws, empty).0);
+        assert_eq!(prompts_given(&b), 6, "an empty message cannot erase the saved count");
+    }
+
+    #[test]
+    fn a_successful_check_can_finish_the_second_unchanged_turn() {
+        let b = bench();
+        let ws = worked_on(&b);
+        std::fs::write(ws.root.join("reject-build"), "once").unwrap();
+        assert!(try_it(&b, &ws).0);
+        assert_eq!(prompts_given(&b), 2);
+        assert_eq!(BuildProgress::load(&ws.root).unwrap().unchanged_turns, 2);
+    }
+
+    #[test]
+    fn a_saved_check_only_run_is_not_blocked_by_the_progress_limit() {
+        let b = bench();
+        let mut ws = worked_on(&b);
+        ws.manifest.awaiting_check = true;
+        ws.save().unwrap();
+        let mut progress = BuildProgress::load(&ws.root).unwrap();
+        progress.before_turn(ws.app_fingerprint(&CancelToken::default()).unwrap());
+        progress.unchanged_turns = 2;
+        progress.save(&ws.root).unwrap();
+        assert!(try_it(&b, &ws).0);
+        assert_eq!(prompts_given(&b), 0);
+    }
+
+    #[test]
+    fn a_failed_check_only_resume_detects_manual_edits_before_refusing_more_build_turns() {
+        for edited in [false, true] {
+            let b = bench();
+            let mut ws = worked_on(&b);
+            std::fs::write(ws.root.join("reject-build"), "not ready").unwrap();
+            ws.manifest.awaiting_check = true;
+            ws.save().unwrap();
+            let mut progress = BuildProgress::load(&ws.root).unwrap();
+            progress.before_turn(ws.app_fingerprint(&CancelToken::default()).unwrap());
+            progress.unchanged_turns = 2;
+            progress.save(&ws.root).unwrap();
+            if edited {
+                std::fs::write(ws.app_dir().join("index.html"), "a manual correction").unwrap();
+            }
+            assert!(!try_it(&b, &ws).0);
+            assert_eq!(prompts_given(&b), if edited { 2 } else { 0 }, "edited={edited}");
+            assert_eq!(BuildProgress::load(&ws.root).unwrap().unchanged_turns, 2);
+        }
+    }
+
+    #[test]
+    fn scan_io_errors_skip_only_the_guard_and_cancellation_is_never_skipped() {
+        for fail_scan_first in [false, true] {
+            let b = bench();
+            let ws = worked_on(&b);
+            let worker = check_worker(&ws, false);
+            let mut progress = BuildProgress::default();
+            progress.before_turn(ws.app_fingerprint(&CancelToken::default()).unwrap());
+            progress.unchanged_turns = 2;
+            progress.save(&ws.root).unwrap();
+            let mut available = true;
+            let mut fingerprints = AppFingerprintCache::default();
+            if fail_scan_first {
+                // A deterministic read_dir I/O failure, including when tests run as root.
+                std::fs::remove_dir(ws.app_dir()).unwrap();
+                std::fs::write(ws.app_dir(), "the app directory is temporarily unavailable").unwrap();
+                assert!(worker.progress_fingerprint(&ws, &mut progress, &mut available, &mut fingerprints).unwrap().is_none());
+                assert!(!available);
+                assert_eq!(progress, BuildProgress::default());
+                assert_eq!(BuildProgress::load(&ws.root).unwrap(), progress);
+                std::fs::remove_file(ws.app_dir()).unwrap();
+                std::fs::create_dir(ws.app_dir()).unwrap();
+                assert!(
+                    worker.progress_fingerprint(&ws, &mut progress, &mut available, &mut fingerprints).unwrap().is_none(),
+                    "a recovered directory does not resume comparisons within the same run"
+                );
+            }
+            let before = progress.clone();
+            worker.stop.cancel();
+            assert_eq!(worker.progress_fingerprint(&ws, &mut progress, &mut available, &mut fingerprints).unwrap_err().code, ErrorCode::Cancelled);
+            assert_eq!(progress, before, "cancellation does not erase a known comparison");
+            assert_eq!(BuildProgress::load(&ws.root).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn a_skipped_scan_does_not_hide_the_builders_own_failure() {
+        let b = bench();
+        let ws = worked_on(&b);
+        let nested = (0..65).fold(ws.app_dir().join("nested"), |p, _| p.join("d"));
+        std::fs::create_dir_all(nested).unwrap();
+        // Authentication is a typed provider failure. A plain exit 1 is transient, regardless
+        // of the English words it prints, and is covered by the retry-policy tests.
+        let mut config = b.hub.config();
+        let mut entry = config.get("Stand-in").unwrap().clone();
+        entry.config.model = "opencode".into();
+        config.upsert(entry);
+        b.hub.engine.session().settings.ai = config.to_table().unwrap();
+        let agent = b._dir.path().join("agent.sh");
+        let script = std::fs::read_to_string(&agent).unwrap();
+        let script = script.replacen("#!/bin/sh\n", "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format'; exit 0; fi\n", 1);
+        let error = json!({"type":"error","error":{"name":"APIError","data":{"message":"fixture sign in needed","statusCode":401,"isRetryable":false}}});
+        std::fs::write(&agent, script.replace("echo Done.", &format!("printf '%s\\n' '{error}'\nexit 1"))).unwrap();
+        let (ok, feed) = try_it(&b, &ws);
+        assert!(!ok);
+        assert_eq!(prompts_given(&b), 1, "the unavailable scan does not block or repeat the builder");
+        assert!(feed.iter().any(|i| matches!(i, feed::FeedItem::Error { message, .. } if message.contains("fixture sign in needed"))), "{feed:?}");
+        let saved = Workspace::open(&ws.root).unwrap();
+        assert!(!saved.manifest.awaiting_check, "a failed turn has not finished its build");
+        assert!(saved.manifest.checks.is_empty(), "the failed builder is not described as a successful check");
+    }
+
+    #[test]
+    fn scan_limits_do_not_block_builds_or_keep_a_stale_stall_count() {
+        for only_check in [false, true] {
+            let b = bench();
+            let mut ws = worked_on(&b);
+            let mut progress = BuildProgress::default();
+            progress.before_turn(ws.app_fingerprint(&CancelToken::default()).unwrap());
+            progress.unchanged_turns = 2;
+            progress.save(&ws.root).unwrap();
+            ws.manifest.awaiting_check = only_check;
+            ws.save().unwrap();
+            let nested = (0..65).fold(ws.app_dir().join("nested"), |p, _| p.join("d"));
+            std::fs::create_dir_all(&nested).unwrap();
+            assert_eq!(ws.app_fingerprint(&CancelToken::default()).unwrap_err().code, ErrorCode::OverLimit);
+            std::fs::write(ws.root.join("reject-build"), "once").unwrap();
+            let (ok, feed) = try_it(&b, &ws);
+            assert!(ok, "a scan limit must not fail the build (only_check={only_check}): {feed:?}");
+            assert_eq!(prompts_given(&b), if only_check { 1 } else { 2 });
+            assert_eq!(BuildProgress::load(&ws.root).unwrap(), BuildProgress::default(), "an unknown comparison breaks the saved streak");
+            let notices = feed
+                .iter()
+                .filter_map(|i| match i {
+                    feed::FeedItem::Work { notes, .. } => Some(notes.iter().filter(|n| n.contains("without the unchanged-turn limit")).count()),
+                    _ => None,
+                })
+                .sum::<usize>();
+            assert_eq!(notices, 1, "one notice explains that this run skipped the unavailable guard");
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.status, Status::Ready);
+            std::fs::remove_dir_all(ws.app_dir().join("nested")).unwrap();
+            assert!(try_it(&b, &ws).0);
+            assert_eq!(BuildProgress::load(&ws.root).unwrap().unchanged_turns, 1, "the next readable run starts a new comparison");
+        }
+    }
+
+    #[test]
+    fn a_post_turn_scan_limit_keeps_the_finished_turn_for_check_only_recovery() {
+        let b = bench();
+        let ws = worked_on(&b);
+        std::fs::write(ws.app_dir().join("check-fails"), "2").unwrap();
+        let nested = (0..65).fold(ws.app_dir().join("nested"), |p, _| p.join("d"));
+        let agent = b._dir.path().join("agent.sh");
+        let script = std::fs::read_to_string(&agent).unwrap();
+        std::fs::write(&agent, format!("{script}\nmkdir -p '{}'\n", nested.display())).unwrap();
+        let (ok, feed) = try_it(&b, &ws);
+        assert!(!ok, "the original check failure still stops the run");
+        let saved = Workspace::open(&ws.root).unwrap();
+        assert!(saved.manifest.awaiting_check, "the successful builder turn is saved before an unavailable scan");
+        assert_eq!(saved.manifest.last_reply, "Done.");
+        assert_eq!(prompts_given(&b), 1);
+        assert_eq!(BuildProgress::load(&ws.root).unwrap(), BuildProgress::default());
+        assert!(
+            feed.iter().any(|i| matches!(i, feed::FeedItem::Error { message, .. } if message.contains("The build is finished, but it couldn't be checked"))),
+            "{feed:?}"
+        );
+        assert!(try_it(&b, &saved).0, "Try again can finish the checks while the scan is still unavailable");
+        assert_eq!(prompts_given(&b), 1, "the completed builder turn is not repeated");
+        assert!(!Workspace::open(&ws.root).unwrap().manifest.awaiting_check);
+    }
+
+    #[test]
+    fn an_api_builder_has_the_same_two_unchanged_turn_limit() {
+        use crate::agent::tests::{Scripted, turn};
+        use crate::agent::{ApiConversation, EngineHost, LoopConfig, ModelSlot};
+        use crate::model::{Block, StopReason};
+        let b = bench();
+        let mut ws = worked_on(&b);
+        std::fs::write(ws.root.join("reject-build"), "not ready").unwrap();
+        let seen = Arc::default();
+        let script = Scripted {
+            turns: (0..5).map(|_| turn(vec![Block::Text { text: "No files changed.".into() }], StopReason::EndTurn)).collect(),
+            seen: Arc::clone(&seen),
+        };
+        let mut worker = check_worker(&ws, false);
+        let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: true, effort: None, max_turns: 10, context_tokens: 0 };
+        let api = ApiConversation::start(Arc::new(EngineHost(worker.engine.clone())), vec![slot], LoopConfig::default()).unwrap();
+        let entry = crate::BackendEntry {
+            config: crate::BackendConfig {
+                name: "Scripted".into(),
+                kind: BackendKind::OpenaiCompatible,
+                model: "scripted".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            },
+            options: Default::default(),
+        };
+        let mut opts = RunOptions::default();
+        opts.kinds.register(Arc::new(FlakyKind));
+        let error = worker.run(&mut ws, entry, Some(api), None, &opts).unwrap_err();
+        assert!(error.message.contains("two builder turns"), "{error:?}");
+        assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn new_notes_during_a_turn_or_check_get_their_own_attempt_but_empty_notes_do_not() {
+        use crate::agent::tests::{Scripted, turn};
+        use crate::agent::{ApiConversation, EngineHost, LoopConfig, ModelSlot};
+        use crate::model::{Block, ChatModel, Delta, Stop, StopReason, TurnRequest, TurnResult};
+        type Notes = Arc<Mutex<Vec<Note>>>;
+        fn note(text: &str) -> Note {
+            Note { id: 42, text: text.into(), shown: text.into(), pictures: Vec::new() }
+        }
+        struct NoteModel {
+            script: Scripted,
+            notes: Notes,
+            add: bool,
+            claim: bool,
+            dir: std::path::PathBuf,
+            text: &'static str,
+        }
+        impl ChatModel for NoteModel {
+            fn turn(&mut self, req: &TurnRequest<'_>, delta: &mut dyn FnMut(Delta), stop: &Stop) -> Result<TurnResult, ToolError> {
+                if self.add && self.script.seen.lock().unwrap().len() == 1 {
+                    self.notes.lock().unwrap().push(note(self.text));
+                    if self.claim {
+                        notes::hand_over(&self.dir, 42, self.text).unwrap();
+                        assert_eq!(notes::claim(&self.dir), [self.text]);
+                    }
+                }
+                self.script.turn(req, delta, stop)
+            }
+            fn model(&self) -> String {
+                self.script.model()
+            }
+        }
+        struct NoteCheck {
+            notes: Notes,
+            add: bool,
+            text: &'static str,
+        }
+        impl Check for NoteCheck {
+            fn id(&self) -> &'static str {
+                "note-check"
+            }
+            fn run(&self, cx: &mut CheckCx) -> Result<CheckResult, ToolError> {
+                if self.add && cx.round == 2 {
+                    self.notes.lock().unwrap().push(note(self.text));
+                }
+                Ok(CheckResult::new(self.id(), cx.round, false, "The app is still missing."))
+            }
+        }
+        struct NoteKind {
+            notes: Notes,
+            add: bool,
+            text: &'static str,
+        }
+        impl TargetKind for NoteKind {
+            fn id(&self) -> &'static str {
+                "note-kind"
+            }
+            fn words(&self) -> KindWords {
+                FlakyKind.words()
+            }
+            fn detect(&self, _: &DetectCx) -> Option<u32> {
+                Some(1001)
+            }
+            fn default_stack(&self, _: &DetectCx) -> &'static str {
+                "Anything"
+            }
+            fn goal(&self) -> &'static str {
+                "a thing"
+            }
+            fn checks(&self, _: &Workspace) -> Vec<Box<dyn Check>> {
+                vec![Box::new(NoteCheck { notes: self.notes.clone(), add: self.add, text: self.text })]
+            }
+        }
+        for mode in ["queued-turn", "queued-check", "hook"] {
+            for text in ["Use the built-in renderer", "   "] {
+                let b = bench();
+                let mut ws = worked_on(&b);
+                let mut worker = check_worker(&ws, false);
+                let seen = Arc::default();
+                let script = Scripted {
+                    turns: (0..5).map(|_| turn(vec![Block::Text { text: "No files changed.".into() }], StopReason::EndTurn)).collect(),
+                    seen: Arc::clone(&seen),
+                };
+                let model = NoteModel {
+                    script,
+                    notes: worker.notes.clone(),
+                    add: mode != "queued-check",
+                    claim: mode == "hook",
+                    dir: notes::notes_dir(&ws.inbox_dir()),
+                    text,
+                };
+                let slot = ModelSlot { name: "Scripted".into(), model: Box::new(model), local: true, effort: None, max_turns: 10, context_tokens: 0 };
+                let api = ApiConversation::start(Arc::new(EngineHost(worker.engine.clone())), vec![slot], LoopConfig::default()).unwrap();
+                let entry = crate::BackendEntry {
+                    config: crate::BackendConfig {
+                        name: "Scripted".into(),
+                        kind: BackendKind::OpenaiCompatible,
+                        model: "scripted".into(),
+                        base_url: None,
+                        ssh_host: None,
+                        enabled: true,
+                    },
+                    options: Default::default(),
+                };
+                let mut opts = RunOptions::default();
+                opts.kinds.register(Arc::new(NoteKind { notes: worker.notes.clone(), add: mode == "queued-check", text }));
+                let error = worker.run(&mut ws, entry, Some(api), None, &opts).unwrap_err();
+                assert!(error.message.contains("two builder turns"), "{error:?}");
+                let requests = seen.lock().unwrap();
+                let expected = if text.trim().is_empty() {
+                    2
+                } else if mode == "hook" {
+                    3
+                } else {
+                    4
+                };
+                assert_eq!(requests.len(), expected, "mode={mode}, text={text:?}");
+                if !text.trim().is_empty() && mode != "hook" {
+                    assert!(requests[2].last().unwrap().text().contains(text), "the queued instruction reaches the builder");
+                }
+                assert!(worker.notes.lock().unwrap().is_empty(), "each instruction is consumed once");
+                assert!(!notes::was_read(&notes::notes_dir(&ws.inbox_dir()), 42));
+                assert_eq!(BuildProgress::load(&ws.root).unwrap().unchanged_turns, 2);
+                assert!(!try_it(&b, &ws).0);
+                assert_eq!(prompts_given(&b), 0, "plain Try again still cannot reset the saved count");
+            }
+        }
+    }
+
     /// #469: after the builder changed, the session the old one saved isn't handed to the new
     /// one, which starts from the brief; the same agent still carries on.
     #[test]
@@ -1891,6 +2307,7 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     }
 }
 
@@ -2293,6 +2710,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let entry = crate::BackendEntry {
         config: crate::BackendConfig {
@@ -2334,6 +2752,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         decompiled: false,
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
+        reset_progress_after_notes: false,
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
     let reply = w.turn(&mut ws, &mut builder, kind("app").as_ref(), &BuilderPrompt::Message(("Build it.").into()), None).unwrap();
@@ -2509,7 +2928,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Site", "Clone it", TargetRef::None).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
-    let w = Worker {
+    let mut w = Worker {
         wake: Default::default(),
         engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
         tx,
@@ -2527,6 +2946,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let dir = notes::notes_dir(&ws.inbox_dir());
     notes::hand_over(&dir, 1, "make the header blue").unwrap();
@@ -2674,6 +3094,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let first = BuilderPrompt::ResumedElsewhere { extra: Some("Make it blue".into()), handoff: None };
     let reply = w.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("The person asks: make it blue".into()), Some(first)).unwrap();
@@ -2732,6 +3153,7 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let e = w
         .turn_with_wait(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("Carry on.".into()), None, |_, _| {
@@ -2799,6 +3221,7 @@ fn the_builders_conversation_travels_with_the_project() {
         decompiled: false,
         usage: None,
         self_check: None,
+        reset_progress_after_notes: false,
     };
     let adapter = KeepsSessions(store.path().to_path_buf());
     // No session yet, or one this computer doesn't have: nothing to keep, nothing said.

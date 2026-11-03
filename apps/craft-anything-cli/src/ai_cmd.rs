@@ -61,7 +61,16 @@ pub enum AiCommand {
     Program { name: String, path: Option<String> },
     /// Set the model an AI uses (Claude Code: the model it's asked for); leave it out to list the
     /// ones it can use.
-    Model { name: String, model: Option<String> },
+    Model {
+        name: String,
+        model: Option<String>,
+        /// OpenCode thinking variant; only those offered by the selected model are accepted.
+        #[arg(long, value_parser = ["low", "medium", "high", "xhigh", "max"])]
+        thinking: Option<String>,
+        /// Use OpenCode's default model and thinking depth.
+        #[arg(long, conflicts_with_all = ["model", "thinking"])]
+        default: bool,
+    },
     /// Set how hard a Claude backend thinks (the Claude API or Claude Code): low, medium, high,
     /// xhigh or max, or `default` for the usual level; leave it out to see the level and choices.
     Effort { name: String, level: Option<String> },
@@ -186,6 +195,8 @@ fn read_key(key_env: &Option<String>, key_stdin: bool) -> Result<Option<String>,
     Ok(None)
 }
 
+/// Dispatch AI configuration, discovery and model-selection commands through the shared hub.
+/// Render results in the requested format and return an exit status for success or failure.
 pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
     let hub = match hub(cli) {
         Ok(h) => h,
@@ -258,14 +269,38 @@ pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
                 Err(e) => fail(&e, f),
             }
         }
-        AiCommand::Model { name, model: None } => match hub.model_choices(name) {
+        AiCommand::Model { name, model, thinking, default } if *default || thinking.is_some() => {
+            let depth = thinking.as_deref().and_then(craft_anything_ai::Effort::parse);
+            let model = if *default { None } else { model.clone().or_else(|| hub.options().get(name).and_then(|o| o.cli_model.clone())) };
+            match hub.set_agent_model(name, model.as_deref(), depth) {
+                Ok(found) => {
+                    emit(&json!({"name": name, "model": model, "thinking": depth, "found": found}), f);
+                    if found { 0 } else { 1 }
+                }
+                Err(e) => fail(&e, f),
+            }
+        }
+        AiCommand::Model { name, model: None, .. }
+            if hub.model_context(name).is_ok_and(|c| {
+                c.backend.config.kind == BackendKind::AgentCli && craft_anything_ai::cli_agents::adapter_for(&c.backend.config.model).has_model_catalog()
+            }) =>
+        {
+            match hub.model_context(name).and_then(|c| hub.agent_models(&c)) {
+                Ok(models) => {
+                    emit(&json!({"name": name, "models": models}), f);
+                    0
+                }
+                Err(e) => fail(&e, f),
+            }
+        }
+        AiCommand::Model { name, model: None, .. } => match hub.model_choices(name) {
             Ok(models) => {
                 emit(&json!({"name": name, "models": models}), f);
                 0
             }
             Err(e) => fail(&e, f),
         },
-        AiCommand::Model { name, model: Some(model) } => match hub.set_model(name, model) {
+        AiCommand::Model { name, model: Some(model), .. } => match hub.set_model(name, model) {
             Ok(found) => {
                 emit(&json!({"name": name, "model": model.trim(), "found": found}), f);
                 if found { 0 } else { 1 }

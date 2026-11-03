@@ -98,7 +98,16 @@ impl SourceMap {
             let Some((l, c, map)) = found else { return Vec::new() };
             let rel_line = line.saturating_sub(*l);
             let rel_col = if rel_line == 0 { column.saturating_sub(*c) } else { column };
-            return map.original_positions(rel_line, rel_col);
+            return map
+                .original_positions(rel_line, rel_col)
+                .into_iter()
+                .filter_map(|mut position| {
+                    if rel_line == 0 {
+                        position.generated_column = position.generated_column.checked_add(*c)?;
+                    }
+                    Some(position)
+                })
+                .collect();
         }
         let Some(segs) = self.lines.get(line as usize) else { return Vec::new() };
         // Greatest generated column <= column.
@@ -284,34 +293,32 @@ pub fn find_source_mapping_url(js: &str) -> Option<String> {
     None
 }
 
-/// Decode a `data:application/json;base64,…` URL (or a plain percent-free `data:` URL).
+/// Decode a `data:` URL, including percent escapes and optional base64 content.
 pub fn decode_data_url(url: &str) -> Option<Vec<u8>> {
     let rest = url.strip_prefix("data:")?;
     let (meta, payload) = rest.split_once(',')?;
-    if meta.ends_with(";base64") { base64_decode(payload) } else { Some(payload.as_bytes().to_vec()) }
+    let decoded: std::borrow::Cow<'_, [u8]> = if payload.contains('%') {
+        let hex = |b: u8| match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        };
+        let mut decoded = Vec::with_capacity(payload.len());
+        let mut bytes = payload.bytes();
+        while let Some(b) = bytes.next() {
+            decoded.push(if b == b'%' { (hex(bytes.next()?)? << 4) | hex(bytes.next()?)? } else { b });
+        }
+        std::borrow::Cow::Owned(decoded)
+    } else {
+        std::borrow::Cow::Borrowed(payload.as_bytes())
+    };
+    if meta.ends_with(";base64") { base64_decode(std::str::from_utf8(&decoded).ok()?) } else { Some(decoded.into_owned()) }
 }
 
 /// Standard or URL-safe base64, padding optional. `None` on any invalid character.
-pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(s.len() / 4 * 3 + 3);
-    let mut acc = 0u32;
-    let mut bits = 0u32;
-    for c in s.bytes() {
-        let v = match c {
-            b'=' => break,
-            b'-' => 62,
-            b'_' => 63,
-            b' ' | b'\n' | b'\r' | b'\t' => continue,
-            _ => b64(c)? as u32,
-        };
-        acc = (acc << 6) | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(((acc >> bits) & 0xff) as u8);
-        }
-    }
-    Some(out)
+pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    crate::bytes::decode_base64(text, true)
 }
 
 #[cfg(test)]

@@ -26,6 +26,14 @@ pub const DEFAULT_MAX_TURNS: u32 = 40;
 /// Steps one builder message may take (writing, building and fixing a project takes many).
 pub const BUILDER_MAX_TURNS: u32 = 400;
 
+/// The build tool whose result says whether the command succeeded (`succeeded`, typed).
+const BUILD_COMMAND_TOOL: &str = "build_command_run";
+
+/// Build commands that fail one after another, with none succeeding in between, before a step
+/// stops (#399: a model wrote code against APIs that don't exist, never got it to compile, and
+/// spent 9.4M tokens in one stage). Each failed build sends the whole conversation again.
+pub const MAX_FAILED_BUILDS: u32 = 25;
+
 /// What the loop needs from the engine (a trait so tests can inject behaviour).
 pub trait ToolHost: Send + Sync {
     /// Tool definitions for the enabled toolsets (without the meta-tools).
@@ -256,6 +264,33 @@ pub struct LoopConfig {
     /// Override the input tokens the conversation may grow to before it's trimmed. Zero uses
     /// the active backend's budget, or its local/cloud default (see [`crate::context`]).
     pub context_tokens: u64,
+    /// A builder on a local model is offered the tools for building, not the whole Core set (see
+    /// [`lean_for_local`]).
+    pub lean_for_local: bool,
+}
+
+/// The Core tools a builder on a local model keeps. The Core set is 25-odd tools for studying a
+/// target (evidence, unknowns, hypotheses, reports…) that make a building model explore instead
+/// of writing; their descriptions alone take about 5,000 tokens, more than Ollama's default
+/// context holds (#417). Kept are the Build tools, every other enabled toolset, and the Core tools
+/// the builder's brief names: asking the person, the check, the generated assets and the unknowns.
+const LOCAL_BUILDER_CORE: &[&str] = &[
+    "core_person_ask",
+    "rebuild_check",
+    "rebuild_words",
+    "assets_image_generate",
+    "assets_model_generate",
+    "assets_spent",
+    "assets_note",
+    "core_unknowns_show",
+    "core_unknown_add",
+    "core_unknown_edit",
+];
+
+/// Drop the Core tools a local builder doesn't need (the models that can take them all don't pass
+/// through here).
+fn lean_for_local(tools: Vec<ToolDef>, host: &dyn ToolHost) -> Vec<ToolDef> {
+    tools.into_iter().filter(|t| host.toolset_of(&t.name) != Some(Toolset::Core) || LOCAL_BUILDER_CORE.contains(&t.name.as_str())).collect()
 }
 
 /// The state the worker keeps between user messages.
@@ -277,6 +312,8 @@ pub struct AgentLoop {
     /// Estimated history size sent with that turn, before its reply and tool results were added.
     last_history_estimate: u64,
     failure: Arc<Mutex<Option<TurnFailure>>>,
+    /// Build commands that failed in a row in this step (see [`MAX_FAILED_BUILDS`]).
+    failed_builds: u32,
 }
 
 impl AgentLoop {
@@ -286,6 +323,9 @@ impl AgentLoop {
 
     fn tool_defs(&self) -> Vec<ToolDef> {
         let mut tools = self.host.tools(&self.enabled);
+        if self.cfg.lean_for_local && self.chain.get(self.current).is_some_and(|s| s.local) {
+            tools = lean_for_local(tools, self.host.as_ref());
+        }
         tools.push(ToolDef {
             name: "list_toolsets".into(),
             description: "List the groups of tools (toolsets), which are enabled, and what each covers.".into(),
@@ -327,6 +367,7 @@ impl AgentLoop {
         let mut msg_usage = Usage::default();
         let mut msg_cost: Option<f64> = Some(0.0);
         let mut turns = 0u32;
+        self.failed_builds = 0;
         loop {
             if self.stop.is_stopped() {
                 self.emit(AgentEvent::Status { text: "Stopped.".into() });
@@ -388,6 +429,16 @@ impl AgentLoop {
                     let results = self.run_tools(&uses);
                     self.history.push(Msg { role: Speaker::User, blocks: results });
                     self.save_transcript();
+                    if self.failed_builds >= MAX_FAILED_BUILDS {
+                        self.emit(AgentEvent::Error {
+                            message: format!("The build command failed {} times in a row, so this step stopped before spending more.", self.failed_builds),
+                            remediation: Some(
+                                "Ask for a fix (say what to change), or try a stronger model. Try again carries on from the project as it is.".into(),
+                            ),
+                            log: None,
+                        });
+                        break;
+                    }
                 }
                 StopReason::MaxTokens if !uses.is_empty() => {
                     // Tool input may be cut off: don't run anything, tell the model.
@@ -657,6 +708,16 @@ impl AgentLoop {
         }
         match r {
             Ok(out) => {
+                // A build that ran and failed is still an Ok result: `succeeded` says which.
+                if name == BUILD_COMMAND_TOOL
+                    && let ToolOutput::Value(v) = &out
+                {
+                    match v.get("succeeded").and_then(Value::as_bool) {
+                        Some(true) => self.failed_builds = 0,
+                        Some(false) => self.failed_builds = self.failed_builds.saturating_add(1),
+                        None => {}
+                    }
+                }
                 let (text, summary, ev) = compact(&out);
                 (text, true, summary, ev)
             }
@@ -744,6 +805,7 @@ impl ApiConversation {
             last_input: 0,
             last_history_estimate: 0,
             failure: failure.clone(),
+            failed_builds: 0,
         };
         let busy2 = busy.clone();
         std::thread::Builder::new()
@@ -879,6 +941,60 @@ pub(crate) mod tests {
         assert_eq!(bad.len(), 1);
     }
 
+    /// #417: a builder on a local model gets the Build tools and the question tool, not the whole
+    /// Core set; other toolsets stay.
+    #[test]
+    fn a_local_builder_is_not_offered_the_study_tools() {
+        let host = FakeHost { calls: Mutex::default(), journal: Mutex::default() };
+        let all = host.tools(&BTreeSet::from([Toolset::Core, Toolset::Runtime]));
+        let names = |v: &[ToolDef]| v.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&all), ["look", "danger"]);
+        // `look` is a Core tool that isn't kept; `danger` belongs to another toolset.
+        assert_eq!(names(&lean_for_local(all, &host)), ["danger"]);
+        let ask = vec![ToolDef { name: "core_person_ask".into(), description: "d".into(), schema: json!({"type":"object"}) }];
+        struct CoreHost;
+        impl ToolHost for CoreHost {
+            fn tools(&self, _: &BTreeSet<Toolset>) -> Vec<ToolDef> {
+                Vec::new()
+            }
+            fn toolset_of(&self, _: &str) -> Option<Toolset> {
+                Some(Toolset::Core)
+            }
+            fn call(&self, _: &str, _: Value, _: bool, _: CancelToken) -> Result<ToolOutput, ToolError> {
+                Err(ToolError::internal("unused"))
+            }
+            fn journal(&self, _: &str, _: Value) {}
+            fn investigation(&self) -> String {
+                "{}".into()
+            }
+            fn clean_room(&self) -> bool {
+                true
+            }
+            fn title(&self, id: &str) -> String {
+                id.into()
+            }
+        }
+        assert_eq!(names(&lean_for_local(ask, &CoreHost)), ["core_person_ask"], "the question tool stays");
+    }
+
+    /// #417, with the real tools: the tool descriptions a local builder is sent in Clean room fell
+    /// from 33-41 tools (23,000-30,000 characters) to 13 (about 10,000).
+    #[test]
+    fn the_real_local_builder_tool_list_is_small_and_can_write_files() {
+        let engine = craft_anything_engine::Engine::shared(craft_anything_engine::testing::session(), crate::tools());
+        let host = EngineHost(engine);
+        let enabled = BTreeSet::from([Toolset::Core, Toolset::Build]);
+        let all = host.tools(&enabled);
+        let lean = lean_for_local(all.clone(), &host);
+        let names: Vec<&str> = lean.iter().map(|t| t.name.as_str()).collect();
+        let size = |v: &[ToolDef]| v.iter().map(|t| t.description.len() + t.schema.to_string().len()).sum::<usize>();
+        for needed in ["build_file_write", "build_file_edit", "build_file_read", "build_files_list", "build_command_run", "core_person_ask", "rebuild_check"] {
+            assert!(names.contains(&needed), "{needed} in {names:?}");
+        }
+        assert!(!names.contains(&"core_journal_read") && !names.contains(&"core_session_show"), "{names:?}");
+        assert!(lean.len() <= 20 && size(&lean) * 2 < size(&all), "{} tools, {} of {} characters", lean.len(), size(&lean), size(&all));
+    }
+
     /// A scripted model: returns canned turns and records requests.
     pub struct Scripted {
         pub turns: VecDeque<Result<TurnResult, ToolError>>,
@@ -931,6 +1047,7 @@ pub(crate) mod tests {
         fn toolset_of(&self, id: &str) -> Option<Toolset> {
             match id {
                 "look" => Some(Toolset::Core),
+                "build_command_run" => Some(Toolset::Core),
                 "danger" => Some(Toolset::Runtime),
                 _ => None,
             }
@@ -939,6 +1056,11 @@ pub(crate) mod tests {
             self.calls.lock().unwrap().push((id.to_string(), consent));
             if id == "danger" && !consent {
                 return Err(ToolError::new(ErrorCode::ConsentRequired, "needs your OK"));
+            }
+            if id == "build_command_run" {
+                return Ok(ToolOutput::Value(
+                    json!({"command": "cargo build", "exit_code": 0, "succeeded": input.get("ok").and_then(Value::as_bool) == Some(true)}),
+                ));
             }
             if id == "look" && input.get("large").and_then(Value::as_bool) == Some(true) {
                 return Ok(ToolOutput::Value(json!({"content": "n".repeat(8000)})));
@@ -1031,6 +1153,47 @@ pub(crate) mod tests {
         assert!(matches!(events.last(), Some(AgentEvent::TurnDone { input_tokens: 50, .. })));
         // cost known for the priced model id
         assert!(matches!(events.last(), Some(AgentEvent::TurnDone { cost_usd: Some(_), .. })));
+    }
+
+    /// #399: a model that never gets its code to compile kept going for 400 steps and 9.4M tokens.
+    /// A step stops after [`MAX_FAILED_BUILDS`] failed build commands in a row, says why, and keeps
+    /// what was done; a build that succeeds starts the count again.
+    #[test]
+    fn a_step_stops_after_many_failed_builds_in_a_row() {
+        let build = |ok: bool, n: usize| {
+            turn(vec![Block::ToolUse { id: format!("b{n}"), name: BUILD_COMMAND_TOOL.into(), input: json!({"ok": ok}) }], StopReason::ToolUse)
+        };
+        let run = |turns: Vec<Result<TurnResult, ToolError>>| {
+            let host = Arc::new(FakeHost { calls: Mutex::default(), journal: Mutex::default() });
+            let script = Scripted { turns: VecDeque::from(turns), seen: Arc::default() };
+            let slot = ModelSlot { name: "Fake".into(), model: Box::new(script), local: false, effort: None, max_turns: 400, context_tokens: 0 };
+            let mut c = ApiConversation::start(host, vec![slot], LoopConfig { beginner: true, ..LoopConfig::default() }).unwrap();
+            c.send("build it");
+            drain_until_done(&mut c, |_, _| {})
+        };
+        let n = MAX_FAILED_BUILDS as usize;
+        // All failing: stopped at the limit with a reason, not by running out of script.
+        let events = run((0..n + 5).map(|i| build(false, i)).collect());
+        let stopped = events.iter().find_map(|e| match e {
+            AgentEvent::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        });
+        assert!(stopped.as_deref().is_some_and(|m| m.contains(&format!("failed {n} times in a row"))), "{stopped:?}");
+        assert_eq!(events.iter().filter(|e| matches!(e, AgentEvent::ToolFinished { .. })).count(), n, "no more builds after the limit");
+        // A success in between starts the count again: the same number of failures, split, goes on.
+        let mut turns: Vec<_> = (0..n - 1).map(|i| build(false, i)).collect();
+        turns.push(build(true, 99));
+        turns.extend((0..n - 1).map(|i| build(false, 100 + i)));
+        turns.push(turn(vec![Block::Text { text: "done".into() }], StopReason::EndTurn));
+        let events = run(turns);
+        assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "done")));
+    }
+
+    #[test]
+    fn the_build_tool_the_limit_counts_exists() {
+        let e = craft_anything_engine::Engine::new(craft_anything_engine::testing::session());
+        assert!(e.registry().get(BUILD_COMMAND_TOOL).is_some_and(|s| !s.effects.is_empty()));
     }
 
     #[test]

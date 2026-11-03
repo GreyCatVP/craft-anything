@@ -103,6 +103,7 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         };
         // Websites are photographed for the builder; anything else looks right from pictures.
         let website = matches!(resolve_target(d), TargetRef::Website { .. }) || d.editing_url;
+        let previews = app.previews(ui.ctx(), &app.state.make.pictures.clone());
         let out = crate::prompt_box::show(
             ui,
             &mut app.state.make.request,
@@ -112,6 +113,7 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
                 hint: tr(hint),
                 rows: (3, 10),
                 attach: (!website).then_some("Add pictures of the original (optional: screenshots help it look right)"),
+                previews: &previews,
                 stop_button: None,
                 stopping: false,
                 send: false,
@@ -125,6 +127,9 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         }
         if out.attach {
             app.pick(Pick::Pictures);
+        }
+        if out.paste {
+            app.paste_pictures(false);
         }
         let submit = out.send;
         if app.state.make.request.trim().is_empty() {
