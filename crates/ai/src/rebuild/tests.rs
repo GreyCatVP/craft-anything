@@ -1,5 +1,8 @@
 use super::check::build_check;
 use super::*;
+use craft_anything_engine::asset_choice::AssetChoice;
+use craft_anything_engine::workspace::{Manifest, TypeAssets};
+use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
 
 #[path = "note_progress_tests.rs"]
 mod note_progress;
@@ -15,63 +18,120 @@ fn choose(request: &str, target: &TargetRef) -> (&'static str, &'static str) {
 fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
-/// Every built-in provider, each with a key set up.
-const ALL_KEYED: &[(&str, bool)] = &[("fal", true), ("scenario", true), ("elevenlabs", true)];
-/// Every built-in provider, none with a key.
-const NO_KEYS: &[(&str, bool)] = &[("fal", false), ("scenario", false), ("elevenlabs", false)];
+/// The built-in providers, each with a key set up.
+const ALL_KEYED: &[ProviderKey<'static>] = &[
+    ProviderKey { id: "fal", name: "fal.ai", has_key: true },
+    ProviderKey { id: "scenario", name: "Scenario", has_key: true },
+    ProviderKey { id: "elevenlabs", name: "ElevenLabs", has_key: true },
+];
+/// The built-in providers, none with a key.
+const NO_KEYS: &[ProviderKey<'static>] = &[
+    ProviderKey { id: "fal", name: "fal.ai", has_key: false },
+    ProviderKey { id: "scenario", name: "Scenario", has_key: false },
+    ProviderKey { id: "elevenlabs", name: "ElevenLabs", has_key: false },
+];
+
+/// What a brief context borrows besides the project: Settings' asset defaults (none chosen) and what
+/// each type has used, read once from the ledger as a builder prompt does.
+struct Snapshot {
+    settings: AssetSettings,
+    usage: Option<BTreeMap<AssetKind, TypeUsage>>,
+}
+
+impl Snapshot {
+    fn of(ws: &Workspace) -> Snapshot {
+        let settings = AssetSettings::default();
+        Snapshot { usage: asset_usage(ws, &settings), settings }
+    }
+
+    fn cx<'a>(&'a self, ws: &'a Workspace, providers: &'a [ProviderKey<'a>]) -> BriefCx<'a> {
+        BriefCx { ws, deep: false, ghidra: false, editor: None, asset_providers: providers, asset_settings: &self.settings, asset_usage: self.usage.as_ref() }
+    }
+}
+
+/// An asset type as a project keeps it: made with `provider`'s `model`, counted in `unit`, limited to `limit`.
+fn made_with(provider: &str, model: &str, unit: Unit, limit: f64) -> TypeAssets {
+    let choice = AssetChoice { provider: Some(provider.into()), model: model.into(), model_name: model.into(), unit, pricing: Pricing::After { unit } };
+    TypeAssets { choice, limit, limit_on: true, since_ms: 0 }
+}
+
+/// Every type of `m` chosen: the ones in `picks` (kind, provider, model, unit, limit) as given, the rest Off.
+fn use_types(m: &mut Manifest, picks: &[(AssetKind, &str, &str, Unit, f64)]) {
+    for kind in AssetKind::ALL {
+        let t =
+            picks.iter().find(|p| p.0 == kind).map_or_else(TypeAssets::default, |&(_, provider, model, unit, limit)| made_with(provider, model, unit, limit));
+        m.assets.types.insert(kind, t);
+    }
+}
+
+/// Pictures and 3D models at Scenario, nothing else: what most game tests below mean by "generated assets".
+const SCENARIO_ART: &[(AssetKind, &str, &str, Unit, f64)] =
+    &[(AssetKind::Image, "scenario", "model_gemini", Unit::Credits, 500.0), (AssetKind::Model3d, "scenario", "model_meshy", Unit::Credits, 500.0)];
 
 /// Quote model guidance with one checked ledger snapshot, as a builder prompt does.
 fn assets_note(ws: &Workspace) -> String {
-    super::assets_note(&BriefCx {
-        ws,
-        deep: false,
-        ghidra: false,
-        editor: None,
-        assets: true,
-        asset_providers: ALL_KEYED,
-        asset_spent: ws.try_assets_spent().ok(),
-    })
+    let snapshot = Snapshot::of(ws);
+    super::assets_note(&snapshot.cx(ws, ALL_KEYED))
 }
 
-/// Two enabled providers, one with a key: only the keyed provider's modalities are offered and priced,
-/// so an ElevenLabs key alone never sends the builder to Scenario's picture or 3D tools.
+/// Pictures and 3D models at Scenario, speech and music at ElevenLabs. With only some of the keys,
+/// only the types of the keyed providers are offered, so an ElevenLabs key alone never sends the
+/// builder to Scenario's picture or 3D tools.
 #[test]
-fn an_enabled_provider_without_a_key_is_not_offered() {
-    use craft_anything_engines::assets::AssetKind;
+fn a_type_whose_chosen_provider_has_no_key_is_not_offered() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     ws.set_person(|m| {
         m.generate_assets = true;
-        m.assets.legacy_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+        use_types(
+            m,
+            &[
+                (AssetKind::Image, "scenario", "model_gemini", Unit::Credits, 500.0),
+                (AssetKind::Model3d, "scenario", "model_meshy", Unit::Credits, 500.0),
+                (AssetKind::Speech, "elevenlabs", "eleven_flash", Unit::Credits, 500.0),
+                (AssetKind::Music, "elevenlabs", "music_v1", Unit::Credits, 500.0),
+            ],
+        );
     })
     .unwrap();
-    let cx = |keys| BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: true, asset_providers: keys, asset_spent: Some(0.0) };
-    // fal has a key but is disabled; Scenario is enabled without one.
-    let only_audio: &[(&str, bool)] = &[("fal", true), ("scenario", false), ("elevenlabs", true)];
-    let cx_audio = cx(only_audio);
+    let snapshot = Snapshot::of(&ws);
+    // fal has a key but nothing is chosen from it; Scenario is chosen without one.
+    let only_audio = [
+        ProviderKey { id: "fal", name: "fal.ai", has_key: true },
+        ProviderKey { id: "scenario", name: "Scenario", has_key: false },
+        ProviderKey { id: "elevenlabs", name: "ElevenLabs", has_key: true },
+    ];
+    let cx_audio = snapshot.cx(&ws, &only_audio);
     assert!(!asset_kind_allowed(&cx_audio, AssetKind::Image) && !asset_kind_allowed(&cx_audio, AssetKind::Model3d));
     assert!(asset_kind_allowed(&cx_audio, AssetKind::Speech) && asset_kind_allowed(&cx_audio, AssetKind::Music));
+    assert!(!asset_kind_allowed(&cx_audio, AssetKind::SoundEffect), "fal has a key, but sound effects are Off");
     let note = super::assets_note(&cx_audio);
     assert!(!note.contains("assets_image_generate") && !note.contains("assets_model_generate"), "{note}");
-    assert!(note.contains("assets_speech_generate") && note.contains("assets_music_generate"), "{note}");
+    assert!(note.contains("assets_speech_generate") && note.contains("assets_music_generate") && !note.contains("assets_sound_generate"), "{note}");
     let game = kind("game");
     let brief = game.brief_sections(&cx_audio).join("\n");
     assert!(!brief.contains("assets_image_generate"), "{brief}");
+    let said = project_assets_note(&cx_audio);
+    assert!(said.contains("Pictures: Scenario \u{b7} model_gemini, but this builder has no Scenario key, so none can be made."), "{said}");
+    assert!(said.contains("Speech: ElevenLabs \u{b7} eleven_flash, 0 of 500 credits used."), "{said}");
     // With Scenario's key, its pictures and models are offered again.
-    let all: &[(&str, bool)] = &[("fal", true), ("scenario", true), ("elevenlabs", true)];
-    let note = super::assets_note(&cx(all));
+    let note = super::assets_note(&snapshot.cx(&ws, ALL_KEYED));
     assert!(note.contains("assets_image_generate") && note.contains("assets_model_generate"), "{note}");
     // A provider missing from the snapshot's registry is never usable.
-    assert!(!asset_kind_allowed(&cx(&[("elevenlabs", true)]), AssetKind::Image));
+    let elevenlabs_only = [ProviderKey { id: "elevenlabs", name: "ElevenLabs", has_key: true }];
+    assert!(!asset_kind_allowed(&snapshot.cx(&ws, &elevenlabs_only), AssetKind::Image));
+    // The ledger could not be read: nothing is offered whatever the keys.
+    let unreadable = BriefCx { asset_usage: None, ..snapshot.cx(&ws, ALL_KEYED) };
+    assert!(!asset_kind_allowed(&unreadable, AssetKind::Speech));
+    assert_eq!(project_assets_note(&unreadable), ASSET_POLICY_UNAVAILABLE);
+    assert_eq!(super::assets_note(&unreadable), ASSET_POLICY_UNAVAILABLE);
 }
 
-/// Build a test brief for a built-in kind using the catalogue's default asset models.
+/// A brief for a built-in kind. `assets`: every provider has a key.
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
-    super::brief(
-        kind(k).as_ref(),
-        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws, deep, ghidra, editor, assets, asset_providers: if assets { ALL_KEYED } else { NO_KEYS } },
-        extra,
-    )
+    let snapshot = Snapshot::of(ws);
+    let cx = BriefCx { deep, ghidra, editor, ..snapshot.cx(ws, if assets { ALL_KEYED } else { NO_KEYS }) };
+    super::brief(kind(k).as_ref(), &cx, extra)
 }
 fn refine(k: &str, check: &CheckResult) -> String {
     kind(k).refine(check)
@@ -305,20 +365,23 @@ fn engine_stacks_get_their_own_steps_checks_and_play() {
     assert_eq!(launch(d.path(), None).map(|l| l.0), Some(build.join(exe("Game"))), "crash reporters aren't the game");
 }
 
-/// Game art instructions require both permission and credentials; shared asset policy also reaches apps.
+/// Game art instructions require the person's choice for a type and credentials for its provider;
+/// the project's choices also reach apps.
 #[test]
 fn games_hear_about_generated_assets_only_when_allowed_and_with_a_key() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     ws.manifest.stack = "Unity".into();
-    assert!(!brief(&ws, "game", false, false, None, true, None).contains("assets_model_generate"), "a key alone isn't the person's choice");
+    use_types(&mut ws.manifest, SCENARIO_ART);
+    assert!(!brief(&ws, "game", false, false, None, true, None).contains("assets_model_generate"), "a key and a choice aren't the person's go-ahead");
     ws.manifest.generate_assets = true;
     let with = brief(&ws, "game", false, false, None, true, None);
-    assert!(with.contains("assets_model_generate") && with.contains("$5.00") && with.contains("Assets/Generated/"), "{with}");
+    assert!(with.contains("assets_model_generate") && with.contains("Assets/Generated/"), "{with}");
+    assert!(with.contains("Pictures: Scenario \u{b7} model_gemini, 0 of 500 credits used."), "{with}");
     assert!(with.contains("never a recognisable character, logo or brand artwork"));
     assert!(!brief(&ws, "game", false, false, None, false, None).contains("assets_model_generate"), "no key, no asset tools");
     let app = brief(&ws, "app", false, false, None, true, None);
-    assert!(app.contains("Project asset providers:") && app.contains("share one budget"));
+    assert!(app.contains("Generated assets in this project:") && app.contains("3D models: Scenario"), "{app}");
     assert!(!app.contains("assets_model_generate"), "long game art guidance stays game-specific");
 }
 
@@ -332,15 +395,20 @@ fn a_new_project_keeps_the_persons_asset_choice() {
     }
 }
 
-/// Art estimates quote the asset table's default models, whatever Settings chose: the builder no
-/// longer picks models, and the project's choice per type is what the tools use.
+/// The builder does not choose models and is not quoted a table's prices: what it is told about a
+/// type is the person's choice and its limit, and the tools it may use for the types that are on.
 #[test]
-fn the_assets_note_reads_prices_from_the_asset_table() {
+fn the_assets_note_leaves_models_and_prices_to_the_persons_choice() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     ws.manifest.generate_assets = true;
+    use_types(&mut ws.manifest, SCENARIO_ART);
     let note = assets_note(&ws);
-    assert!(note.contains("a picture (about $0.15)") && note.contains("(about $0.65 each)"), "{note}");
+    assert!(note.contains("assets_image_generate") && note.contains("assets_model_generate"), "{note}");
+    for gone in ["about $", "budget", "choose models", "choosing models", "assets_key_status", "project_assets_"] {
+        assert!(!note.contains(gone), "{gone:?} in {note}");
+    }
+    assert!(note.contains("with the provider and model the person chose for it"), "{note}");
 }
 
 #[test]
@@ -408,13 +476,7 @@ impl Conversation for RecordedTurns {
         if let Some(root) = &self.1
             && self.0.len() == 1
         {
-            Workspace::open(root)
-                .unwrap()
-                .set_person(|m| {
-                    m.generate_assets = false;
-                    m.assets.legacy_budget_usd = Some(0.75);
-                })
-                .unwrap();
+            Workspace::open(root).unwrap().set_person(|m| m.generate_assets = false).unwrap();
             events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
         }
         if let Some(available) = &self.2
@@ -471,8 +533,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     sidebar
         .set_person(|m| {
             m.generate_assets = true;
-            m.assets.legacy_providers = Some(vec!["scenario".into()]);
-            m.assets.legacy_budget_usd = Some(7.25);
+            use_types(m, &[(AssetKind::Image, "scenario", "model_gemini", Unit::Credits, 750.0)]);
         })
         .unwrap();
     worker.notes.lock().unwrap().push(Note { id: 1, text: "Use generated textures".into(), shown: "Use generated textures".into(), pictures: Vec::new() });
@@ -480,23 +541,18 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message((&added).into()), None).unwrap();
     let note = agent.0.last().unwrap();
     assert!(note.contains("Use generated textures") && note.contains("Current asset policy for this turn (replaces earlier asset instructions)"));
-    assert!(note.contains("scenario: enabled") && note.contains("fal: disabled") && note.contains("$7.25"));
+    assert!(note.contains("Pictures: Scenario \u{b7} model_gemini, 0 of 750 credits used.") && note.contains("3D models: off."), "{note}");
 
-    sidebar
-        .set_person(|m| {
-            m.assets.legacy_providers = Some(vec!["elevenlabs".into()]);
-            m.assets.legacy_budget_usd = Some(0.75);
-        })
-        .unwrap();
+    sidebar.set_person(|m| use_types(m, &[(AssetKind::SoundEffect, "elevenlabs", "eleven_text_to_sound_v2", Unit::Credits, 40.0)])).unwrap();
     sidebar
         .record_asset(craft_anything_engine::workspace::AssetRecord {
             file: "chime.mp3".into(),
             kind: "sound".into(),
             prompt: "a chime".into(),
             provider: "elevenlabs".into(),
-            model: "eleven_v3".into(),
-            amount: Some(0.25),
-            unit: Some(craft_anything_engines::assets::model::Unit::Usd),
+            model: "eleven_text_to_sound_v2".into(),
+            amount: Some(25.0),
+            unit: Some(Unit::Credits),
             cost_missing: false,
             at_ms: 1,
         })
@@ -507,21 +563,26 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     let refinement = refine("app", &CheckResult::new(CheckResult::BUILD, 1, false, "Fix the build"));
     worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message((&refinement).into()), None).unwrap();
     let note = agent.0.last().unwrap();
-    assert!(note.contains("Current asset policy for this turn") && note.contains("scenario: disabled") && note.contains("elevenlabs: enabled"));
-    assert!(note.contains("$0.75") && note.contains("estimated spent $0.25, remaining $0.50"));
+    assert!(note.contains("Current asset policy for this turn") && note.contains("Pictures: off."), "{note}");
+    assert!(note.contains("Sound effects: ElevenLabs \u{b7} eleven_text_to_sound_v2, 25 of 40 credits used."), "{note}");
     assert_eq!(ws.manifest, before_turn, "policy reads never replace run-owned state");
 
     // Real game guidance must use current policy on both the initial brief and every follow-up.
     std::fs::create_dir_all(ws.root.join("reference")).unwrap();
     std::fs::write(ws.root.join("reference/picture.png"), b"fixture").unwrap();
-    for (stale_enabled, current_enabled, current_budget, stale_budget) in [(true, false, 0.75, 5.0), (false, true, 5.0, 0.75)] {
+    for (stale_enabled, current_enabled, current_limit, stale_limit) in [(true, false, 150.0, 500.0), (false, true, 500.0, 150.0)] {
         ws.manifest.generate_assets = stale_enabled;
-        ws.manifest.assets.legacy_budget_usd = Some(stale_budget);
+        use_types(&mut ws.manifest, &[(AssetKind::Image, "scenario", "model_gemini", Unit::Credits, stale_limit)]);
         sidebar
             .set_person(|m| {
                 m.generate_assets = current_enabled;
-                m.assets.legacy_providers = Some(vec!["scenario".into()]);
-                m.assets.legacy_budget_usd = Some(current_budget);
+                use_types(
+                    m,
+                    &[
+                        (AssetKind::Image, "scenario", "model_gemini", Unit::Credits, current_limit),
+                        (AssetKind::Model3d, "scenario", "model_meshy", Unit::Credits, 321.0),
+                    ],
+                );
             })
             .unwrap();
         let game = kind("game");
@@ -533,9 +594,9 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         for prompt in [initial, followup, added, refinement] {
             worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
             let sent = agent.0.last().unwrap();
-            assert_eq!(sent.matches("Project asset providers:").count(), 1, "{sent}");
-            assert!(sent.contains(&format!("${current_budget:.2}")), "{sent}");
-            assert!(!sent.contains(&format!("${stale_budget:.2}")), "{sent}");
+            assert_eq!(sent.matches("Generated assets in this project:").count(), usize::from(current_enabled), "{sent}");
+            assert_eq!(sent.contains(&format!("of {current_limit} credits used")), current_enabled, "{sent}");
+            assert!(!sent.contains(&format!("of {stale_limit} credits used")), "{sent}");
             assert_eq!(sent.contains("Realistic assets:"), current_enabled, "{sent}");
             assert_eq!(sent.contains("assets_model_generate"), current_enabled, "{sent}");
             assert_eq!(sent.contains("Generated assets are now off"), !current_enabled, "{sent}");
@@ -548,11 +609,16 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     assert!(sent.contains("Custom follow-up sentinel: Unsaved progress in this worker"), "{sent}");
     assert!(sent.contains("picture(s) of the original"));
     // A master switch alone cannot enable any modality; audio permission cannot enable visual tools.
-    for (providers, visual, audio) in [(vec![], false, false), (vec!["elevenlabs"], false, true), (vec!["scenario"], true, false)] {
+    let audio_at_elevenlabs: &[(AssetKind, &str, &str, Unit, f64)] = &[
+        (AssetKind::Speech, "elevenlabs", "eleven_flash", Unit::Credits, 500.0),
+        (AssetKind::SoundEffect, "elevenlabs", "eleven_text_to_sound_v2", Unit::Credits, 500.0),
+        (AssetKind::Music, "elevenlabs", "music_v1", Unit::Credits, 500.0),
+    ];
+    for (picks, visual, audio) in [(&[][..], false, false), (audio_at_elevenlabs, false, true), (SCENARIO_ART, true, false)] {
         sidebar
             .set_person(|m| {
                 m.generate_assets = true;
-                m.assets.legacy_providers = Some(providers.iter().map(|id| (*id).into()).collect());
+                use_types(m, picks);
             })
             .unwrap();
         // A local target also exercises game_steps' permission-sensitive instructions.
@@ -568,7 +634,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
             }
             assert_eq!(sent.contains("Generated assets are now off"), !visual && !audio, "{sent}");
             assert!(sent.contains("picture(s) of the original"), "{sent}");
-            assert_eq!(sent.matches("Project asset providers:").count(), 1);
+            assert_eq!(sent.matches("Generated assets in this project:").count(), usize::from(visual || audio), "{sent}");
         }
     }
     let mut interrupted = RecordedTurns(Vec::new(), Some(ws.root.clone()), None);
@@ -588,10 +654,10 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         .unwrap();
     assert_eq!(waits, 1, "the cut-off turn is retried once");
     assert_eq!(interrupted.0.len(), 2);
-    assert!(interrupted.0[0].contains("Realistic assets:") && interrupted.0[0].contains("$5.00"));
-    assert!(interrupted.0[1].contains("Generated assets are now off") && interrupted.0[1].contains("$0.75"));
-    assert!(!interrupted.0[1].contains("assets_model_generate") && !interrupted.0[1].contains("$5.00"));
-    assert_eq!(interrupted.0[1].matches("Project asset providers:").count(), 1);
+    assert!(interrupted.0[0].contains("Realistic assets:") && interrupted.0[0].contains("Pictures: Scenario"));
+    assert!(interrupted.0[1].contains("Generated assets are now off"));
+    assert!(!interrupted.0[1].contains("assets_model_generate") && !interrupted.0[1].contains("Pictures:"));
+    assert_eq!(interrupted.0[1].matches("Generated assets in this project:").count(), 0);
     sidebar.set_person(|m| m.generate_assets = true).unwrap();
     // Invalid spending refuses generation in initial and follow-up game guidance, never assuming zero.
     std::fs::write(ws.root.join("assets.json"), "not JSON").unwrap();
@@ -599,7 +665,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         worker.turn(&mut ws, &mut agent, kind("game").as_ref(), &prompt, None).unwrap();
         let sent = agent.0.last().unwrap();
         assert!(sent.contains("Do not generate assets or authorize new spending"), "{sent}");
-        assert!(!sent.contains("Realistic assets:") && !sent.contains("assets_model_generate") && !sent.contains("estimated spent $0.00"), "{sent}");
+        assert!(!sent.contains("Realistic assets:") && !sent.contains("assets_model_generate") && !sent.contains("credits used"), "{sent}");
     }
     ws.manifest = before_turn.clone();
 
@@ -613,7 +679,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     worker.turn(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message(("Try the fix again").into()), None).unwrap();
     let note = agent.0.last().unwrap();
     assert!(note.contains("Do not generate assets or authorize new spending"));
-    assert!(!note.contains("elevenlabs: enabled"), "unreadable choices never fall back to earlier permission");
+    assert!(!note.contains("Pictures:"), "unreadable choices never fall back to earlier permission");
     assert_eq!(ws.manifest, before_turn);
 }
 
@@ -624,7 +690,7 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
     let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
     ws.set_person(|m| {
         m.generate_assets = true;
-        m.assets.legacy_providers = Some(vec!["scenario".into()]);
+        use_types(m, SCENARIO_ART);
     })
     .unwrap();
     let mut worker = check_worker(&ws, false);
@@ -648,10 +714,10 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
             available.store(has_key, Ordering::SeqCst);
             worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
             let sent = agent.0.last().unwrap();
-            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("has no Scenario key"), !has_key, "{sent}");
             assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
             assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
-            assert!(sent.contains("scenario: enabled"), "key availability must not change project permission: {sent}");
+            assert!(sent.contains("Pictures: Scenario \u{b7} model_gemini"), "key availability must not change the project's choice: {sent}");
         }
     }
     for initial in [false, true] {
@@ -669,27 +735,27 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
             .unwrap();
         assert_eq!(interrupted.0.len(), 2);
         for (sent, has_key) in interrupted.0.iter().zip([initial, !initial]) {
-            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains("has no Scenario key"), !has_key, "{sent}");
             assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
             assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
         }
     }
 }
 
-/// A saved key for a disabled provider cannot make an enabled, unkeyed provider usable.
+/// A saved key for another provider cannot make a type whose chosen provider has no key usable.
 #[test]
-fn a_disabled_providers_key_does_not_enable_builder_asset_guidance() {
+fn another_providers_key_does_not_enable_builder_asset_guidance() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
     let mut worker = check_worker(&ws, false);
-    // The only saved key belongs to fal, whether or not that provider is enabled.
+    // The only saved key belongs to fal, whether or not the project uses that provider.
     worker.asset_keys_available = Box::new(|provider| provider.id() == "fal");
     let game = kind("game");
     let mut agent = RecordedTurns::default();
-    for (enabled, has_key) in [("scenario", false), ("fal", true)] {
+    for (chosen, name, unit, has_key) in [("scenario", "Scenario", Unit::Credits, false), ("fal", "fal.ai", Unit::Usd, true)] {
         ws.set_person(|m| {
             m.generate_assets = true;
-            m.assets.legacy_providers = Some(vec![enabled.into()]);
+            use_types(m, &[(AssetKind::Image, chosen, "m1", unit, 5.0), (AssetKind::Model3d, chosen, "m2", unit, 5.0)]);
         })
         .unwrap();
         for prompt in [
@@ -699,12 +765,12 @@ fn a_disabled_providers_key_does_not_enable_builder_asset_guidance() {
         ] {
             worker.turn(&mut ws, &mut agent, game.as_ref(), &prompt, None).unwrap();
             let sent = agent.0.last().unwrap();
-            assert_eq!(sent.contains("No asset provider key"), !has_key, "{sent}");
+            assert_eq!(sent.contains(&format!("has no {name} key")), !has_key, "{sent}");
             assert_eq!(sent.contains("Realistic assets:"), has_key, "{sent}");
             assert_eq!(sent.contains("assets_image_generate"), has_key, "{sent}");
             assert_eq!(sent.contains("assets_model_generate"), has_key, "{sent}");
-            assert!(sent.contains(&format!("{enabled}: enabled")), "key availability must not change provider permission: {sent}");
-            assert_eq!(sent.matches("Project asset providers:").count(), 1, "{sent}");
+            assert!(sent.contains(&format!("Pictures: {name} \u{b7} m1")), "key availability must not change the project's choice: {sent}");
+            assert_eq!(sent.matches("Generated assets in this project:").count(), 1, "{sent}");
         }
     }
 }
@@ -1184,6 +1250,7 @@ fn games_get_the_mechanics_sheet_and_decompile_only_in_deep_mode() {
     // Generated assets replace the original's art; its sounds and the rest still come from the game.
     let mut gen_ws = ws.clone();
     gen_ws.manifest.generate_assets = true;
+    use_types(&mut gen_ws.manifest, SCENARIO_ART);
     let generated = brief(&gen_ws, "game", true, false, None, true, None);
     assert!(generated.contains("instead of copying the original's") && generated.contains("Realistic assets"), "{generated}");
     assert!(!generated.contains("Art, sounds, models") && generated.contains("Sounds, music, fonts, animations and maps"), "{generated}");
@@ -1314,11 +1381,8 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let ws = Workspace::create(d.path(), "Deck", "Make slides", TargetRef::None).unwrap();
     let checks = kinds.get("slides").unwrap().checks(&ws);
     assert_eq!(checks.iter().map(|c| c.id()).collect::<Vec<_>>(), ["outline"]);
-    let b = super::brief(
-        &SlidesKind,
-        &BriefCx { asset_spent: ws.try_assets_spent().ok(), ws: &ws, deep: false, ghidra: false, editor: None, assets: false, asset_providers: NO_KEYS },
-        None,
-    );
+    let snapshot = Snapshot::of(&ws);
+    let b = super::brief(&SlidesKind, &snapshot.cx(&ws, NO_KEYS), None);
     assert!(b.contains("What to build: a slide deck."), "{b}");
 }
 
@@ -1488,12 +1552,12 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx { asset_spent: Some(0.0), ws, deep: false, ghidra: false, editor: None, assets: false, asset_providers: NO_KEYS };
-    assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
+    let snapshot = Snapshot::of(&ws);
+    assert!(kinds::WebsiteKind.brief_sections(&snapshot.cx(&ws, NO_KEYS)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
     assert_eq!(routes(&ws).len(), 4);
-    let s = kinds::WebsiteKind.brief_sections(&cx(&ws)).join(" ");
+    let s = kinds::WebsiteKind.brief_sections(&snapshot.cx(&ws, NO_KEYS)).join(" ");
     assert!(s.contains("/pricing (capture/routes/pricing/)"), "{s}");
 
     // Opened menus, pop-ups and tabs are listed when the study pictured some.
@@ -1504,7 +1568,7 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
         {"kind": "dialog", "label": "Sign up", "changed": ["address changed"]}
     ]});
     std::fs::write(states.join("states.json"), serde_json::to_vec(&list).unwrap()).unwrap();
-    let s = kinds::WebsiteKind.brief_sections(&cx(&ws)).join(" ");
+    let s = kinds::WebsiteKind.brief_sections(&snapshot.cx(&ws, NO_KEYS)).join(" ");
     assert!(s.contains("state-1.png (Products, menu)") && !s.contains("Sign up"), "only pictured states: {s}");
 }
 
@@ -2507,50 +2571,179 @@ fn website_check_compares_the_text_and_names_what_is_missing() {
     assert!(text_likeness(&json!({"text": ""}), &built).is_none(), "nothing to compare");
 }
 
-/// Every project kind receives current provider permissions, including revocation after assets exist.
+/// Every project kind receives the project's current asset choices, including revocation after assets exist.
 #[test]
 fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let d = tempfile::tempdir().unwrap();
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
-    /// Isolate workspace policy and key availability from unrelated brief settings.
-    fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
-        BriefCx {
-            asset_spent: ws.try_assets_spent().ok(),
-            ws,
-            deep: false,
-            ghidra: false,
-            editor: None,
-            assets,
-            asset_providers: if assets { ALL_KEYED } else { NO_KEYS },
-        }
+    fn said(ws: &Workspace, keys: &[ProviderKey<'_>]) -> String {
+        let snapshot = Snapshot::of(ws);
+        project_assets_note(&snapshot.cx(ws, keys))
     }
-    assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
-    // Turned on after the first build, with a key: the follow-up carries the asset note and budget.
+    assert!(said(&ws, ALL_KEYED).contains("now off"));
+    // Turned on after the first build, but nothing is chosen for any type: still nothing to make.
     ws.set_person(|m| m.generate_assets = true).unwrap();
-    let on = project_assets_note(&cx(&ws, true));
-    assert!(on.contains("scenario: enabled") && on.contains("$5.00"), "{on:?}");
-    assert!(project_assets_note(&cx(&ws, false)).contains("No asset provider key"));
-    ws.set_person(|m| m.assets.legacy_providers = Some(vec!["scenario".into()])).unwrap();
-    let explicit = project_assets_note(&cx(&ws, true));
-    assert!(explicit.contains("scenario: enabled") && explicit.contains("fal: disabled") && explicit.contains("elevenlabs: disabled"));
+    assert!(said(&ws, ALL_KEYED).contains("now off"));
+    // Pictures are chosen: the follow-up carries the choice and its limit.
+    ws.set_person(|m| use_types(m, &[(AssetKind::Image, "scenario", "model_gemini", Unit::Credits, 500.0)])).unwrap();
+    let on = said(&ws, ALL_KEYED);
+    assert!(on.contains("Pictures: Scenario \u{b7} model_gemini, 0 of 500 credits used.") && on.contains("Music: off."), "{on:?}");
+    assert!(said(&ws, NO_KEYS).contains("has no Scenario key") && said(&ws, NO_KEYS).contains("None of these can be made by this builder"));
     for kind in ["game", "app", "website"] {
-        assert!(brief(&ws, kind, false, false, None, true, None).contains("scenario: enabled"));
+        assert!(brief(&ws, kind, false, false, None, true, None).contains("Pictures: Scenario"), "{kind}");
     }
+    // Another provider for pictures: said as it is now.
+    ws.set_person(|m| use_types(m, &[(AssetKind::Image, "fal", "fal-ai/flux/dev", Unit::Usd, 2.0)])).unwrap();
+    assert!(said(&ws, ALL_KEYED).contains("Pictures: fal.ai \u{b7} fal-ai/flux/dev, $0.00 of $2.00 used."));
     // Turned off after some were made: say so.
     let rec = craft_anything_engine::workspace::AssetRecord {
-        file: "a.glb".into(),
-        kind: "model".into(),
+        file: "a.png".into(),
+        kind: "image".into(),
         prompt: "a crate".into(),
-        provider: "scenario".into(),
-        model: "model_meshy-7-1-img23d".into(),
+        provider: "fal".into(),
+        model: "fal-ai/flux/dev".into(),
         amount: Some(0.5),
-        unit: Some(craft_anything_engines::assets::model::Unit::Usd),
+        unit: Some(Unit::Usd),
         cost_missing: false,
         at_ms: 1,
     };
     ws.record_asset(rec).unwrap();
+    assert!(said(&ws, ALL_KEYED).contains("$0.50 of $2.00 used."));
     ws.set_person(|m| m.generate_assets = false).unwrap();
-    assert!(project_assets_note(&cx(&ws, true)).contains("now off"));
+    assert!(said(&ws, ALL_KEYED).contains("now off"));
+}
+
+/// One sentence for each type: who makes it, and what it has used of its limit in the provider's own unit.
+#[test]
+fn the_brief_states_each_types_choice_and_limit() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
+    let priced = |provider: &str, name: &str, unit: Unit, pricing: Pricing, limit: f64, on: bool| {
+        let mut t = made_with(provider, "m", unit, limit);
+        t.choice.model_name = name.into();
+        t.choice.pricing = pricing;
+        t.limit_on = on;
+        t
+    };
+    let per_request = |unit, x| Pricing::Before { unit, rate: Rate::PerRequest(x) };
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        m.assets.types.insert(AssetKind::Image, priced("scenario", "Gemini 3.1", Unit::Credits, per_request(Unit::Credits, 20.0), 500.0, true));
+        m.assets.types.insert(AssetKind::Model3d, priced("fal", "Tripo P1", Unit::Usd, per_request(Unit::Usd, 0.4), 5.0, true));
+        m.assets.types.insert(AssetKind::Speech, priced("elevenlabs", "Flash", Unit::Credits, Pricing::After { unit: Unit::Credits }, 50.0, false));
+        m.assets.types.insert(AssetKind::SoundEffect, priced("fal", "Stable Audio", Unit::Usd, Pricing::Unknown, 5.0, true));
+        m.assets.types.insert(AssetKind::Music, TypeAssets::default());
+    })
+    .unwrap();
+    let generation = |file: &str, kind: &str, provider: &str, amount: f64, unit: Unit| craft_anything_engine::workspace::AssetRecord {
+        file: file.into(),
+        kind: kind.into(),
+        prompt: "p".into(),
+        provider: provider.into(),
+        model: "m".into(),
+        amount: Some(amount),
+        unit: Some(unit),
+        cost_missing: false,
+        at_ms: 1,
+    };
+    for r in [
+        generation("a.png", "image", "scenario", 120.0, Unit::Credits),
+        generation("b.glb", "model", "fal", 1.2, Unit::Usd),
+        generation("c.mp3", "speech", "elevenlabs", 3.0, Unit::Credits),
+    ] {
+        ws.record_asset(r).unwrap();
+    }
+    // The names are the provider's, as the registry has them.
+    let providers = [
+        ProviderKey { id: "fal", name: "fal", has_key: true },
+        ProviderKey { id: "scenario", name: "Scenario", has_key: true },
+        ProviderKey { id: "elevenlabs", name: "ElevenLabs", has_key: true },
+    ];
+    let snapshot = Snapshot::of(&ws);
+    let note = project_assets_note(&snapshot.cx(&ws, &providers));
+    for sentence in [
+        "Pictures: Scenario \u{b7} Gemini 3.1, 120 of 500 credits used.",
+        "3D models: fal \u{b7} Tripo P1, $1.20 of $5.00 used.",
+        "Speech: ElevenLabs \u{b7} Flash, 3 credits used, no limit.",
+        "Sound effects: fal \u{b7} Stable Audio, price unknown, usage not tracked.",
+        "Music: off.",
+    ] {
+        assert!(note.contains(sentence), "{sentence:?} is not in {note}");
+    }
+    assert!(!note.contains("No limits apply"), "{note}");
+    // The builder is told these are the person's, in words that do not hand it the switches.
+    assert!(note.contains("don't change them or work around them"), "{note}");
+    for handed_over in ["project_assets_", "assets_key_", "assets_models_list", "re-enable", "choose models", "choosing models"] {
+        assert!(!note.contains(handed_over), "{handed_over:?} in {note}");
+    }
+
+    // "Ignore budget": no limit applies to any type, and the sentences say what they count, not a limit.
+    ws.set_person(|m| m.assets.ignore_budget = true).unwrap();
+    let snapshot = Snapshot::of(&ws);
+    let note = project_assets_note(&snapshot.cx(&ws, &providers));
+    assert!(note.contains("No limits apply in this project (the person chose to ignore the budget)."), "{note}");
+    assert!(note.contains("Pictures: Scenario \u{b7} Gemini 3.1, 120 credits used, no limit."), "{note}");
+    assert!(note.contains("3D models: fal \u{b7} Tripo P1, $1.20 used, no limit."), "{note}");
+    assert!(note.contains("Sound effects: fal \u{b7} Stable Audio, price unknown, usage not tracked."), "{note}");
+
+    // A cost that could not be read is said, because the person is asked again for that type.
+    ws.set_person(|m| m.assets.ignore_budget = false).unwrap();
+    let mut unread = generation("d.png", "image", "scenario", 0.0, Unit::Credits);
+    unread.amount = None;
+    unread.cost_missing = true;
+    ws.record_asset(unread).unwrap();
+    let snapshot = Snapshot::of(&ws);
+    let note = project_assets_note(&snapshot.cx(&ws, &providers));
+    assert!(note.contains("120 of 500 credits used (an earlier cost could not be read, so the person is asked before the next one)."), "{note}");
+
+    // The ledger cannot be read: nothing is said about spending, and nothing is assumed spent.
+    std::fs::write(ws.root.join("assets.json"), "not JSON").unwrap();
+    let snapshot = Snapshot::of(&ws);
+    assert!(snapshot.usage.is_none());
+    assert_eq!(project_assets_note(&snapshot.cx(&ws, &providers)), ASSET_POLICY_UNAVAILABLE);
+}
+
+/// A type that is Off (or whose project is off) is stated as off and its tool is not offered.
+#[test]
+fn an_off_type_is_not_offered_to_the_builder() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
+    ws.manifest.stack = "Unity".into();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        use_types(
+            m,
+            &[(AssetKind::Model3d, "scenario", "model_meshy", Unit::Credits, 500.0), (AssetKind::Music, "elevenlabs", "music_v1", Unit::Credits, 500.0)],
+        );
+    })
+    .unwrap();
+    let snapshot = Snapshot::of(&ws);
+    let cx = snapshot.cx(&ws, ALL_KEYED);
+    // Every provider has a key, but pictures, speech and sound effects are Off.
+    for kind in [AssetKind::Image, AssetKind::Speech, AssetKind::SoundEffect] {
+        assert!(!asset_kind_allowed(&cx, kind), "{kind:?}");
+    }
+    assert!(asset_kind_allowed(&cx, AssetKind::Model3d) && asset_kind_allowed(&cx, AssetKind::Music));
+    let note = project_assets_note(&cx);
+    for off in ["Pictures: off.", "Speech: off.", "Sound effects: off."] {
+        assert!(note.contains(off), "{off} is not in {note}");
+    }
+    let game = super::assets_note(&cx);
+    assert!(!game.contains("assets_image_generate") && !game.contains("assets_speech_generate") && !game.contains("assets_sound_generate"), "{game}");
+    assert!(game.contains("assets_model_generate") && game.contains("assets_music_generate"), "{game}");
+    assert!(game.contains("new picture precursors are not permitted"), "pictures are off, so a 3D model can start only from one that exists: {game}");
+    let full = brief(&ws, "game", false, false, None, true, None);
+    assert!(!full.contains("assets_image_generate") && !full.contains("assets_sound_generate"), "{full}");
+
+    // With the project's switch off, nothing is offered whatever each type says.
+    ws.set_person(|m| m.generate_assets = false).unwrap();
+    let snapshot = Snapshot::of(&ws);
+    let cx = snapshot.cx(&ws, ALL_KEYED);
+    assert!(AssetKind::ALL.into_iter().all(|kind| !asset_kind_allowed(&cx, kind)));
+    assert!(super::assets_note(&cx).is_empty());
+    assert!(project_assets_note(&cx).contains("Generated assets are now off"));
+    let full = brief(&ws, "game", false, false, None, true, None);
+    assert!(!full.contains("_generate"), "{full}");
 }
 
 #[test]
@@ -2989,7 +3182,7 @@ fn a_new_project_starts_with_the_asset_defaults_from_settings() {
     assert_eq!(saved.assets.types.len(), 5, "every type is stored, so later changes to Settings leave the project alone");
     settings.assets.defaults.clear();
     assert_eq!(saved.assets.effective(AssetKind::Music, &settings.assets).choice.provider.as_deref(), Some("elevenlabs"));
-    // Until the asset tools check each type's limit, they still check one dollar budget.
+    // The old project panel and project_assets_budget still show one dollar budget, so it starts at Settings' dollar limit.
     assert_eq!(saved.legacy_budget_usd(), 8.0);
 }
 

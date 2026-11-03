@@ -2,7 +2,11 @@
 //! refinements.
 
 use super::*;
-use craft_anything_engines::assets::{AssetKind, Catalogue, Shape, about_usd};
+use craft_anything_engine::settings::AssetSettings;
+use craft_anything_engine::tools::asset_tools::{limit_applies, type_words};
+use craft_anything_engine::workspace::{TypeAssets, TypeUsage, type_usage};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{Unit, amount};
 
 pub(super) const RULES: &str = "\
 Rules:
@@ -127,62 +131,103 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
     })
 }
 
-/// Current provider choices and shared spending limits, for every first brief and follow-up.
-///
-/// Temporary: it still reads the project's old provider list and single budget
-/// (`assets.legacy_providers`, `legacy_budget_usd`) until Task 12 of the per-type assets plan
-/// rewrites the brief by each type's choice and limit.
-pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
-    let mut ids: Vec<String> = cx.asset_providers.iter().map(|(id, _)| (*id).to_owned()).collect();
-    for id in cx.ws.manifest.assets.legacy_providers.iter().flatten() {
-        if !ids.contains(id) {
-            ids.push(id.clone());
-        }
-    }
-    let states =
-        ids.iter().map(|id| format!("{id}: {}", if cx.ws.manifest.asset_provider_allowed(id) { "enabled" } else { "disabled" })).collect::<Vec<_>>().join(", ");
-    let budget = cx.ws.manifest.legacy_budget_usd();
-    let Some(spent) = cx.asset_spent else { return ASSET_POLICY_UNAVAILABLE.into() };
-    let remaining = (budget - spent).max(0.0);
-    let status = format!(
-        "Project asset providers: {states}. These are the person's choices: do not re-enable a disabled provider unless they request it. Only enabled providers may generate assets; each needs its own key. Model overrides and image precursors must also use enabled providers. Images, 3D models and audio share one budget: ${budget:.2}, estimated spent ${spent:.2}, remaining ${remaining:.2}."
-    );
-    if !ids.iter().any(|id| cx.ws.manifest.asset_provider_allowed(id)) {
-        format!("{status} Generated assets are now off for this project. Do not generate new assets. Keep the ones already in app/.")
-    } else if cx.assets {
-        format!("{status} Use project_assets_allow to inspect the current provider choices and assets_key_status to check keys before choosing models.")
-    } else {
-        format!("{status} No asset provider key is available to this builder; use existing assets or simple shapes and colours.")
-    }
-}
+/// Said when generated assets are off for the project, or no type has a provider chosen.
+const ASSETS_NOW_OFF: &str = "Generated assets are now off for this project. Do not generate new assets. Keep the ones already in app/.";
+
+/// Said after the types, when at least one can be made: whose choices they are, and what is left to the builder.
+const ASSET_CHOICES_ARE_THEIRS: &str = " These are the person's choices and limits: don't change them or work around them; if another model or a higher limit would help, say so in your summary for the person. Generate only the types above that name a model, each with its own tool; a tool makes the asset with the provider and model chosen here and needs that provider's key. When a limit is reached the person is asked first; if they say no, use the assets already made, or simple shapes and colours.";
+
+/// Said after the types, when none of them can be made by this builder for want of a key.
+const ASSET_KEYS_MISSING: &str = " None of these can be made by this builder: use existing assets or simple shapes and colours.";
 
 /// Fail closed when either the manifest or checked spending cannot establish current permission.
 pub(super) const ASSET_POLICY_UNAVAILABLE: &str = "The project's current asset choices or spending could not be read safely. Do not generate assets or authorize new spending. Keep existing assets until the settings can be read.";
 
-/// Whether the project allows `provider` and a usable key for it is set up in this snapshot.
+/// What each asset type of `ws` has used, from one read of its ledger. `None` when the ledger cannot
+/// be read safely (damaged, newer, too large): spending is then never assumed to be none.
+pub(super) fn asset_usage(ws: &Workspace, settings: &AssetSettings) -> Option<BTreeMap<AssetKind, TypeUsage>> {
+    let records = ws.try_assets().ok()?;
+    Some(AssetKind::ALL.into_iter().map(|kind| (kind, type_usage(&records, kind, &ws.manifest.assets.effective(kind, settings)))).collect())
+}
+
+/// Whether a usable key for `provider` is set up in this snapshot.
 fn provider_usable(cx: &BriefCx<'_>, provider: &str) -> bool {
-    cx.ws.manifest.asset_provider_allowed(provider) && cx.asset_providers.iter().any(|&(id, has_key)| has_key && id == provider)
+    cx.asset_providers.iter().any(|p| p.has_key && p.id == provider)
 }
 
-/// Whether a model of this kind is usable in the current checked snapshot: its provider is allowed
-/// and keyed. Catalogue provider ids keep new providers data-driven instead of assuming every key
-/// unlocks every modality.
+/// Whether `kind` can be made now in this checked snapshot: generated assets are on, a provider is
+/// chosen for it, and that provider has a key. Which provider a type uses is the project's choice
+/// for it, so one provider's key never unlocks another type's.
 pub(super) fn asset_kind_allowed(cx: &BriefCx<'_>, kind: AssetKind) -> bool {
-    if !cx.assets || cx.asset_spent.is_none() {
-        return false;
-    }
-    let table = Catalogue::built_in();
-    let allowed = |provider: &str| provider_usable(cx, provider);
-    match kind {
-        AssetKind::Image => table.images().iter().any(|model| allowed(&model.provider)),
-        AssetKind::Model3d => table.models_3d().iter().any(|model| allowed(&model.provider)),
-        _ => table.audio_models().iter().any(|model| model.kind == kind && allowed(&model.provider)),
-    }
+    cx.asset_usage.is_some()
+        && cx.ws.manifest.asset_type_on(kind, cx.asset_settings).and_then(|t| t.choice.provider).is_some_and(|provider| provider_usable(cx, &provider))
 }
 
-/// Game asset guidance includes only permitted modalities, using the same checked spending snapshot.
+/// A name as it is said in the brief: one line, and not longer than a name should be.
+fn shown(name: &str) -> String {
+    name.chars().filter(|c| !c.is_control()).take(80).collect::<String>().trim().to_owned()
+}
+
+/// A number of credits, without the cents of a dollar: "500", "12.5".
+fn number(x: f64) -> String {
+    format!("{x:.2}").trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// What a type has used, and the limit that applies to it, in the words of its provider's unit. The
+/// limit is the one generation enforces ([`limit_applies`]); a price that is not known is not counted.
+fn usage_words(ws: &Workspace, t: &TypeAssets, usage: TypeUsage) -> String {
+    let unit = t.choice.unit;
+    if !t.choice.pricing.tracked() {
+        return "price unknown, usage not tracked".into();
+    }
+    if !limit_applies(ws, t) {
+        return format!("{} used, no limit", amount(unit, usage.amount));
+    }
+    let used = match unit {
+        Unit::Usd => format!("{} of {} used", amount(unit, usage.amount), amount(unit, t.limit)),
+        Unit::Credits => format!("{} of {} {} used", number(usage.amount), number(t.limit), if t.limit == 1.0 { "credit" } else { "credits" }),
+    };
+    if usage.cost_missing { format!("{used} (an earlier cost could not be read, so the person is asked before the next one)") } else { used }
+}
+
+/// One sentence for an asset type: what the project makes it with and what it has used.
+fn type_sentence(cx: &BriefCx<'_>, kind: AssetKind, usage: TypeUsage) -> String {
+    let mut label = type_words(kind).0.to_owned();
+    if let Some(first) = label.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    let Some(t) = cx.ws.manifest.asset_type_on(kind, cx.asset_settings) else { return format!("{label}: off.") };
+    let id = t.choice.provider.as_deref().unwrap_or_default();
+    let provider = shown(cx.asset_providers.iter().find(|p| p.id == id).map_or(id, |p| p.name));
+    let model = shown(if t.choice.model_name.trim().is_empty() { &t.choice.model } else { &t.choice.model_name });
+    if !provider_usable(cx, id) {
+        return format!("{label}: {provider} \u{b7} {model}, but this builder has no {provider} key, so none can be made.");
+    }
+    format!("{label}: {provider} \u{b7} {model}, {}.", usage_words(cx.ws, &t, usage))
+}
+
+/// The project's choice for each asset type and what it has used of its limit, for every first brief
+/// and follow-up: one sentence per type, then what is left to the builder. The builder is told these
+/// are the person's to change, never its own.
+pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
+    let Some(usage) = cx.asset_usage else { return ASSET_POLICY_UNAVAILABLE.into() };
+    if !AssetKind::ALL.into_iter().any(|kind| cx.ws.manifest.asset_type_on(kind, cx.asset_settings).is_some()) {
+        return ASSETS_NOW_OFF.into();
+    }
+    let sentences: Vec<String> = AssetKind::ALL.into_iter().map(|kind| type_sentence(cx, kind, usage.get(&kind).copied().unwrap_or_default())).collect();
+    let mut note = format!("Generated assets in this project: {}", sentences.join(" "));
+    if cx.ws.manifest.assets.ignore_budget {
+        note.push_str(" No limits apply in this project (the person chose to ignore the budget).");
+    }
+    note.push_str(if AssetKind::ALL.into_iter().any(|kind| asset_kind_allowed(cx, kind)) { ASSET_CHOICES_ARE_THEIRS } else { ASSET_KEYS_MISSING });
+    note
+}
+
+/// Game asset guidance includes only the types that can be made now, using the same checked snapshot.
 pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
-    let Some(spent) = cx.asset_spent else { return ASSET_POLICY_UNAVAILABLE.into() };
+    if cx.asset_usage.is_none() {
+        return ASSET_POLICY_UNAVAILABLE.into();
+    }
     let images = asset_kind_allowed(cx, AssetKind::Image);
     let models = asset_kind_allowed(cx, AssetKind::Model3d);
     let audio = [
@@ -201,33 +246,23 @@ pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
         Some(game::Builder::Unreal) => "save them under Content/Generated/ and import them with an editor Python script run through UnrealEditor-Cmd",
         _ => "e.g. assets/generated/",
     };
-    let budget = ws.manifest.legacy_budget_usd();
     let mut note = if images || models { "Realistic assets:" } else { "Generated audio:" }.to_string();
-    note.push_str(" Use enabled asset providers and choose models they supply. Each operation requires its own provider key; a key for one provider does not unlock the others.");
+    note.push_str(" Each tool below makes its type with the provider and model the person chose for it, and needs that provider's key; a key for one provider does not unlock the others.");
+    if images {
+        note.push_str(" assets_image_generate makes a picture for textures, skies, backgrounds and menu art.");
+    }
+    if models {
+        let source = if images { "a description or an existing picture" } else { "an existing picture; new picture precursors are not permitted" };
+        note.push_str(&format!(" assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from {source}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast."));
+    }
     if images || models {
-        let table = Catalogue::built_in();
-        let allowed = |provider: &str| provider_usable(cx, provider);
-        // Quote only usable models: a disabled or unkeyed default is not a usable estimate. The
-        // generation tools use each type's model chosen in the project; until this note states
-        // those (Task 12 of the per-type assets plan), it quotes the old table's defaults.
-        let picture = table.image_model(None).ok().filter(|m| allowed(&m.provider)).or_else(|| table.images().iter().find(|m| allowed(&m.provider)));
-        let model = table.model_3d(None).ok().filter(|m| allowed(&m.provider)).or_else(|| table.models_3d().iter().find(|m| allowed(&m.provider)));
-        if images {
-            let price = picture.map(|m| format!(" ({})", about_usd(m.cost(Shape::Square)))).unwrap_or_default();
-            note.push_str(&format!(" assets_image_generate makes a picture{price} for textures, skies, backgrounds and menu art."));
-        }
-        if models {
-            let price = model.map(|m| format!(" ({} each)", about_usd(m.cost(true) + picture.map_or(0.0, |p| p.cost(Shape::Square))))).unwrap_or_default();
-            let source = if images { "a description or an existing picture" } else { "an existing picture; new picture precursors are not permitted" };
-            note.push_str(&format!(" assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from {source}{price}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast."));
-        }
-        note.push_str(" Picture and 3D prices are estimates for permitted models; selected models can differ. Every visual asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork.");
+        note.push_str(" Every visual asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork.");
     }
     for audio_note in audio_notes {
         note.push(' ');
         note.push_str(audio_note);
     }
-    note.push_str(&format!(" This project's asset budget is ${budget:.2} (${spent:.2} used), shared by every operation. Prioritize assets essential to play and use existing assets for the rest. Save each one inside app/ where the engine loads it ({folder}). Use assets_key_status to check configured providers before choosing models. List each generated file in app/CREDITS.md with the provider actually used."));
+    note.push_str(&format!(" Prioritize assets essential to play and use existing assets for the rest. Save each one inside app/ where the engine loads it ({folder}). List each generated file in app/CREDITS.md with the provider actually used."));
     note
 }
 

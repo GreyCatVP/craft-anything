@@ -8,6 +8,7 @@
 
 pub mod agent;
 pub mod anthropic;
+pub mod asset_models;
 pub mod cli_agents;
 pub mod config;
 pub mod context;
@@ -290,6 +291,7 @@ impl ChatModel for Tunneled {
 pub fn tools() -> Vec<craft_anything_engine::ToolSpec> {
     let mut v = rebuild::tools::specs();
     v.extend(key_tools::specs());
+    v.extend(asset_models::specs());
     v.extend(model_tools::specs());
     v
 }

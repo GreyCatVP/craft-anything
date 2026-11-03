@@ -56,9 +56,9 @@ pub fn new_project(
     let now = craft_anything_engine::inbox::now_ms();
     ws.set_person(|m| {
         m.assets = ProjectAssets::from_defaults(&settings.assets, now);
-        // Temporary: the brief still states one dollar budget, so it starts at Settings' dollar
-        // limit as before; Task 12 of the per-type assets plan drops it. The generation tools
-        // check each type's own limit.
+        // Temporary: the brief and the generation tools use each type's own limit, but the old
+        // project panel and `project_assets_budget` still show one dollar budget, so it starts at
+        // Settings' dollar limit as before; Task 14 of the per-type assets plan drops it with them.
         m.assets.legacy_budget_usd = Some(settings.assets.budget());
         m.generate_assets = generate_assets;
         m.builder = builder.map(str::to_string);

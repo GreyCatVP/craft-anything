@@ -85,7 +85,7 @@ impl TargetKind for GameKind {
 
     /// Refresh game art guidance for follow-ups when the project permits generation and a key is available.
     fn follow_up_sections(&self, cx: &BriefCx) -> Vec<String> {
-        if !cx.assets || cx.asset_spent.is_none() {
+        if cx.asset_usage.is_none() {
             return Vec::new();
         }
         let note = assets_note(cx);

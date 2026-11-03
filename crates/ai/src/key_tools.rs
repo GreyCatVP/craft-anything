@@ -75,7 +75,7 @@ pub struct SetParams {
 }
 
 /// The session's asset providers (a fork's or a test's, else the built-in ones).
-fn providers(ctx: &Ctx<'_>) -> AssetProviders {
+pub(crate) fn providers(ctx: &Ctx<'_>) -> AssetProviders {
     ctx.session.ext.get::<AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default()
 }
 

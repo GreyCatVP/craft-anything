@@ -181,7 +181,7 @@ pub struct MusicParams {
 }
 
 /// What generations of `kind` are called, many of them and one.
-pub(crate) fn type_words(kind: AssetKind) -> (&'static str, &'static str) {
+pub fn type_words(kind: AssetKind) -> (&'static str, &'static str) {
     match kind {
         AssetKind::Image => ("pictures", "picture"),
         AssetKind::Model3d => ("3D models", "3D model"),
@@ -531,7 +531,7 @@ impl Receipt<'_> {
 
 /// Whether `t`'s limit is enforced in this project: it is switched on, the project doesn't ignore
 /// the budget, and the type's price is one to count with.
-pub(crate) fn limit_applies(ws: &Workspace, t: &TypeAssets) -> bool {
+pub fn limit_applies(ws: &Workspace, t: &TypeAssets) -> bool {
     t.limit_on && !ws.manifest.assets.ignore_budget && t.choice.pricing.tracked()
 }
 

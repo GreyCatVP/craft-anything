@@ -21,16 +21,18 @@ use crate::cli_agents::{Builder, CliSpec};
 use crate::{AgentEvent, AiHub, BackendKind, Conversation, Role};
 use craft_anything_engine::inbox::{Answer, Inbox, InboxDir, Request};
 use craft_anything_engine::project::{Project, Purpose};
+use craft_anything_engine::settings::AssetSettings;
 use craft_anything_engine::workspace::progress::{AppFingerprintCache, BuildProgress};
-use craft_anything_engine::workspace::{CheckResult, ProjectUsage, Status, TargetRef, Workspace};
+use craft_anything_engine::workspace::{CheckResult, ProjectUsage, Status, TargetRef, TypeUsage, Workspace};
 use craft_anything_engine::{CallOptions, Caller, CancelToken, Engine, ToolOutput};
+use craft_anything_engines::assets::AssetKind;
 use craft_anything_engines::game;
 use craft_anything_evidence::{ErrorCode, ToolError};
 pub use craft_anything_platform::serve::StaticServer;
 use craft_anything_platform::serve::serve_dir;
 use craft_anything_platform::sync::Mutex;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -58,7 +60,8 @@ pub mod tools;
 
 use brief::*;
 pub use kinds::{
-    AppKind, BriefCx, BuildCheck, Check, CheckCx, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, TargetKind, WebVisualCheck, WebsiteKind,
+    AppKind, BriefCx, BuildCheck, Check, CheckCx, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, ProviderKey, TargetKind, WebVisualCheck,
+    WebsiteKind,
 };
 pub use locate::game_folder;
 use locate::*;
@@ -954,38 +957,43 @@ impl Worker {
     /// Render all policy-sensitive sections from one disk snapshot, overlaying only asset choices
     /// on a clone so custom kind hooks still see this run's unsaved progress. Failed reads deny spending.
     fn turn_prompt(&self, ws: &Workspace, kind: &dyn TargetKind, prompt: &BuilderPrompt) -> String {
-        let mut snapshot = ws.clone();
-        let spent = match Workspace::open(&ws.root) {
-            Ok(current) if !current.is_read_only() => {
-                snapshot.manifest.generate_assets = current.manifest.generate_assets;
-                snapshot.manifest.assets.clone_from(&current.manifest.assets);
-                current.try_assets_spent().ok()
-            }
-            _ => None,
-        };
-        if spent.is_none() {
-            snapshot.manifest.generate_assets = false;
-        }
-        let (deep, ghidra, providers) = {
+        let (deep, ghidra, providers, asset_settings) = {
             let session = self.engine.session();
             (
                 !session.clean_room(),
                 session.settings.ghidra_launcher().is_some(),
                 // The session's registry, so providers a fork registers are offered and checked too.
                 session.ext.get::<craft_anything_engines::assets::AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default(),
+                session.settings.assets.clone(),
             )
         };
+        let mut snapshot = ws.clone();
+        let usage = match Workspace::open(&ws.root) {
+            Ok(current) if !current.is_read_only() => {
+                snapshot.manifest.generate_assets = current.manifest.generate_assets;
+                snapshot.manifest.assets.clone_from(&current.manifest.assets);
+                asset_usage(&current, &asset_settings)
+            }
+            _ => None,
+        };
+        if usage.is_none() {
+            snapshot.manifest.generate_assets = false;
+        }
         // Key lookups can touch the keychain: they run after the session lock is released.
-        let keyed: Vec<(&str, bool)> =
-            providers.ids().into_iter().filter_map(|id| providers.get(id)).map(|p| (p.id(), (self.asset_keys_available)(p.as_ref()))).collect();
+        let keyed: Vec<ProviderKey<'_>> = providers
+            .ids()
+            .into_iter()
+            .filter_map(|id| providers.get(id))
+            .map(|p| ProviderKey { id: p.id(), name: p.name(), has_key: (self.asset_keys_available)(p.as_ref()) })
+            .collect();
         let cx = BriefCx {
             ws: &snapshot,
             deep,
             ghidra,
             editor: self.editor.as_deref(),
-            assets: spent.is_some() && keyed.iter().any(|&(id, has_key)| has_key && snapshot.manifest.asset_provider_allowed(id)),
             asset_providers: &keyed,
-            asset_spent: spent,
+            asset_settings: &asset_settings,
+            asset_usage: usage.as_ref(),
         };
         match prompt {
             BuilderPrompt::Initial { extra, api, originals } => {

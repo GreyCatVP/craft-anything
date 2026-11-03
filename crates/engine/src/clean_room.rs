@@ -46,6 +46,7 @@ pub const TOOLS: &[&str] = &[
     "assets_key_set",
     "assets_key_remove",
     "assets_key_status",
+    "assets_models_list",
     // Projects and the rebuild run.
     "project_list",
     "project_show",
@@ -168,7 +169,7 @@ mod tests {
     #[test]
     fn every_engine_tool_in_the_table_exists_and_none_is_listed_twice() {
         let r = crate::Registry::with_all_tools();
-        let higher_layers = ["rebuild_", "assets_key_", "ai_", "setup_"];
+        let higher_layers = ["rebuild_", "assets_key_", "assets_models_", "ai_", "setup_"];
         for id in TOOLS {
             assert!(r.get(id).is_some() || higher_layers.iter().any(|p| id.starts_with(p)), "{id} isn't a tool");
             assert_eq!(TOOLS.iter().filter(|t| *t == id).count(), 1, "{id} is listed twice");

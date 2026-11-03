@@ -224,9 +224,9 @@ impl AssetSettings {
     /// The dollar limit for a new project.
     ///
     /// Temporary: the callers that still think in one budget (a new project's starting budget in
-    /// `ai::rebuild::project`, which only the rebuild brief still reads, and the Engines and project
-    /// screens) use it until Tasks 12, 13 and 14 of the per-type assets plan move them to
-    /// [`Self::default_limit`].
+    /// `ai::rebuild::project`, which only the project panel and `project_assets_budget` still read,
+    /// and the Engines and project screens) use it until Tasks 13 and 14 of the per-type assets plan
+    /// move them to [`Self::default_limit`].
     pub fn budget(&self) -> f64 {
         self.default_limit(Unit::Usd)
     }
