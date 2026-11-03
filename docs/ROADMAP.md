@@ -532,6 +532,9 @@ Owner: maintainers · Status: in progress
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
 Gaps found while using the app for real projects.
+- [x] Agent paragraphs with glossary terms and long file links wrap together without pushing
+      their card or later messages under the sidebar (#523); Project and Ask bounds checked at two sizes
+      — claimed: carl-dourado, branch hotfix/r2.9-523-message-width
 - [x] A prompt brought back with Up keeps its pictures (their paths are absolute, so they don't
       come back after the project is moved)
 - [ ] Change a project's builder from its page (a tool, so the CLI and MCP can too) — in PR #245
