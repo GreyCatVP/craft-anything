@@ -28,7 +28,8 @@ pub enum ZipError {
 /// One central-directory entry.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ZipEntry {
-    /// Entry name as stored (forward slashes). Decoded lossily when not valid UTF-8.
+    /// Entry name as stored (forward slashes). Bit 11 selects lossy UTF-8; otherwise
+    /// valid UTF-8 is preserved and remaining names are decoded as CP437.
     pub name: String,
     pub method: u16,
     pub flags: u16,
@@ -160,7 +161,7 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
             }
             x = body + usize::from(len);
         }
-        let name = String::from_utf8_lossy(name_bytes).replace('\\', "/");
+        let name = decode_name(name_bytes, flags).replace('\\', "/");
         entries.push(ZipEntry {
             is_dir: name.ends_with('/'),
             name,
@@ -176,6 +177,23 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         pos = pos.checked_add(46 + name_len + extra_len + comment_len).ok_or_else(|| ZipError::Corrupt("directory overflow".into()))?;
     }
     Ok(ZipArchive { entries, declared_entries: total, truncated, zip64, prefix_bytes: prefix })
+}
+
+fn decode_name(bytes: &[u8], flags: u16) -> String {
+    if flags & 0x0800 != 0 || bytes.is_ascii() {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    if let Ok(name) = std::str::from_utf8(bytes) {
+        return name.to_owned();
+    }
+    const CP437: [char; 128] = [
+        'Ç', 'ü', 'é', 'â', 'ä', 'à', 'å', 'ç', 'ê', 'ë', 'è', 'ï', 'î', 'ì', 'Ä', 'Å', 'É', 'æ', 'Æ', 'ô', 'ö', 'ò', 'û', 'ù', 'ÿ', 'Ö', 'Ü', '¢', '£', '¥',
+        '₧', 'ƒ', 'á', 'í', 'ó', 'ú', 'ñ', 'Ñ', 'ª', 'º', '¿', '⌐', '¬', '½', '¼', '¡', '«', '»', '░', '▒', '▓', '│', '┤', '╡', '╢', '╖', '╕', '╣', '║', '╗',
+        '╝', '╜', '╛', '┐', '└', '┴', '┬', '├', '─', '┼', '╞', '╟', '╚', '╔', '╩', '╦', '╠', '═', '╬', '╧', '╨', '╤', '╥', '╙', '╘', '╒', '╓', '╫', '╪', '┘',
+        '┌', '█', '▄', '▌', '▐', '▀', 'α', 'ß', 'Γ', 'π', 'Σ', 'σ', 'µ', 'τ', 'Φ', 'Θ', 'Ω', 'δ', '∞', 'φ', 'ε', '∩', '≡', '±', '≥', '≤', '⌠', '⌡', '÷', '≈',
+        '°', '∙', '·', '√', 'ⁿ', '²', '■', '\u{00a0}',
+    ];
+    bytes.iter().map(|&byte| if byte.is_ascii() { char::from(byte) } else { CP437.get(usize::from(byte - 0x80)).copied().unwrap_or('\u{fffd}') }).collect()
 }
 
 fn find_eocd(data: &[u8]) -> Option<usize> {
@@ -289,6 +307,46 @@ mod tests {
         out.extend_from_slice(&cd_off.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
         out
+    }
+
+    fn build_named_entry(name: &[u8], flags: u16) -> Vec<u8> {
+        let mut zip = build(&[(&"x".repeat(name.len()), b"")]);
+        let central = 30 + name.len();
+        zip[6..8].copy_from_slice(&flags.to_le_bytes());
+        zip[30..central].copy_from_slice(name);
+        zip[central + 8..central + 10].copy_from_slice(&flags.to_le_bytes());
+        zip[central + 46..central + 46 + name.len()].copy_from_slice(name);
+        zip
+    }
+
+    #[test]
+    fn a_cp437_name_without_the_utf8_flag_is_decoded() {
+        let zip = build_named_entry(b"caf\x82.txt", 0);
+        assert_eq!(parse(&zip, 10).unwrap().entries[0].name, "café.txt");
+    }
+
+    #[test]
+    fn a_cp437_box_drawing_name_without_the_utf8_flag_is_decoded() {
+        let zip = build_named_entry(b"\xc9.txt", 0);
+        assert_eq!(parse(&zip, 10).unwrap().entries[0].name, "╔.txt");
+    }
+
+    #[test]
+    fn a_utf8_name_with_the_utf8_flag_is_preserved() {
+        let zip = build_named_entry("한글/é.txt".as_bytes(), 0x0800);
+        assert_eq!(parse(&zip, 10).unwrap().entries[0].name, "한글/é.txt");
+    }
+
+    #[test]
+    fn a_valid_utf8_name_without_the_utf8_flag_is_preserved() {
+        let zip = build_named_entry("é.txt".as_bytes(), 0);
+        assert_eq!(parse(&zip, 10).unwrap().entries[0].name, "é.txt");
+    }
+
+    #[test]
+    fn an_ascii_name_is_preserved() {
+        let zip = build_named_entry(b"dir/file.txt", 0);
+        assert_eq!(parse(&zip, 10).unwrap().entries[0].name, "dir/file.txt");
     }
 
     #[test]
