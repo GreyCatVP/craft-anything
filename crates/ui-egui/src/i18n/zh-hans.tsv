@@ -99,6 +99,8 @@ Add a folder…	添加文件夹…
 Add a plugin	添加插件
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	添加 AI 助手后，我就能为你解读这些证据、回答后续问题，并指出依据。
 Add an AI by its address	按地址添加 AI
+Add another	再添加一个
+Add it again, to choose another account's folder for it.	再添加一次，以便为它选择另一个账号的文件夹。
 Add more info. The builder reads it at its next step.	补充更多信息。构建助手会在下一步读取。
 Add pictures	添加图片
 Add pictures of the original	添加原作图片
@@ -245,6 +247,7 @@ Choose what the builder's questions get	选择如何处理构建助手的问题
 Choose what to recreate, say what you want, then press Start.	选择要重现的对象，描述你的需求，然后点击开始。
 Choose…	选择…
 Classes	类
+Claude Code folder (CLAUDE_CONFIG_DIR)	Claude Code 文件夹 (CLAUDE_CONFIG_DIR)
 Clean room	净室
 Clean room / Deep	净室 / 深度
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	净室模式从不读取原作的代码、文件或页面源代码。深度模式会使用 Craft Anything 的全部工具读取它们。
@@ -572,6 +575,7 @@ It's mine, or I'm allowed to look	这是我的，或我已获准查看
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	将删除此副本及其保存的所有内容。项目本身保持不变。
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	将删除其文件夹及其中的全部内容：构建成果、检查结果和对话。
 Its own code	自身代码
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	它自己的登录信息、设置和对话：换一个文件夹就是换一个账号。留空：使用默认文件夹。
 Java archive overview	Java 归档概览
 Java class	Java 类
 Java method bytecode and pseudo-Java	Java 方法字节码与伪 Java 代码
@@ -1006,6 +1010,7 @@ Send now	立即发送
 Server address	服务器地址
 Session status	会话状态
 Set a project's asset budget	设置项目素材预算
+Set an AI's folder	设置 AI 的文件夹
 Set an AI's program	设置 AI 的程序
 Set model options	设置模型选项
 Set one up	设置一个

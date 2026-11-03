@@ -99,6 +99,8 @@ Add a folder…	新增資料夾…
 Add a plugin	新增外掛
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	新增 AI 助手後，我就能為你解讀這些證據、回答後續問題，並指出依據。
 Add an AI by its address	依位址新增 AI
+Add another	再新增一個
+Add it again, to choose another account's folder for it.	再新增一次，以便為它選擇另一個帳號的資料夾。
 Add more info. The builder reads it at its next step.	補充更多資訊。建置助手會在下一步讀取。
 Add pictures	新增圖片
 Add pictures of the original	新增原作圖片
@@ -245,6 +247,7 @@ Choose what the builder's questions get	選擇如何處理建置助手的問題
 Choose what to recreate, say what you want, then press Start.	選擇要重現的對象，描述你的需求，然後點選開始。
 Choose…	選擇…
 Classes	類別
+Claude Code folder (CLAUDE_CONFIG_DIR)	Claude Code 資料夾 (CLAUDE_CONFIG_DIR)
 Clean room	淨室
 Clean room / Deep	淨室 / 深度
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	淨室模式從不讀取原作的程式碼、檔案或網頁原始碼。深度模式會使用 Craft Anything 的全部工具讀取它們。
@@ -572,6 +575,7 @@ It's mine, or I'm allowed to look	這是我的，或我已獲准查看
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	將刪除此副本及其儲存的所有內容。專案本身保持不變。
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	將刪除其資料夾及其中的全部內容：建置成果、檢查結果和對話。
 Its own code	本身的程式碼
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	它自己的登入資訊、設定和對話：換一個資料夾就是換一個帳號。留空：使用預設資料夾。
 Java archive overview	Java 封存檔概觀
 Java class	Java 類別
 Java method bytecode and pseudo-Java	Java 方法位元組碼與虛擬 Java 程式碼
@@ -1006,6 +1010,7 @@ Send now	立即傳送
 Server address	伺服器位址
 Session status	工作階段狀態
 Set a project's asset budget	設定專案素材預算
+Set an AI's folder	設定 AI 的資料夾
 Set an AI's program	設定 AI 的程式
 Set model options	設定模型選項
 Set one up	設定一個

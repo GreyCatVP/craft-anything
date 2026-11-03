@@ -1159,6 +1159,54 @@ fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
     assert!(h.query_by_label("Xhigh").is_none());
 }
 
+/// Claude Code's folder (its sign-in, so its account) is chosen in Settings → AI, and a second
+/// Claude Code can be added for a second account.
+#[test]
+fn claude_codes_account_folder_is_set_in_settings() {
+    use craft_anything_ai::{BackendConfig, BackendKind};
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        let cfg = BackendConfig {
+            name: "Claude Code".into(),
+            kind: BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        a.hub.add_backend(cfg, None).unwrap();
+        a.detected = Some(demo::detected());
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code")));
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    // Typed, `~/` and all, and saved on Enter.
+    let field = "Claude Code folder (CLAUDE_CONFIG_DIR)";
+    h.get_by_label(field).focus();
+    h.run_steps(2);
+    h.get_by_label(field).type_text("~/.claude-work");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    let chosen = |a: &CraftApp| a.backend_options.get("Claude Code").and_then(|o| o.config_dir.clone());
+    assert!(wait(&mut h, |a| chosen(a).as_deref() == Some("~/.claude-work")));
+    h.run_steps(2);
+    assert_eq!(h.get_by_label(field).value().as_deref(), Some("~/.claude-work"), "shows what's saved");
+    assert!(h.state().folder_inputs.is_empty(), "nothing left being typed");
+    // A relative folder is refused; the saved one stays.
+    h.state_mut().set_agent_folder("Claude Code", Some("claude-work".into()));
+    h.run_steps(4);
+    assert_eq!(chosen(h.state()).as_deref(), Some("~/.claude-work"));
+    // Emptied, it's the usual folder again.
+    h.state_mut().set_agent_folder("Claude Code", Some(String::new()));
+    assert!(wait(&mut h, |a| chosen(a).is_none()));
+    // Added already, so it's offered again under the next free name.
+    h.get_by_label("Add another").click();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
+}
+
 #[test]
 fn settings_window_tabs_draw() {
     let mut h = harness(|| {

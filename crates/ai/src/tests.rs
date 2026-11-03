@@ -304,6 +304,40 @@ fn an_agent_apps_program_is_set_and_cleared() {
     assert_eq!(program(&h), None, "blank finds it by its usual name again");
 }
 
+/// Claude Code's folder (`CLAUDE_CONFIG_DIR`) is chosen per AI, so two can be two accounts; only
+/// a full path, and only for an agent app that keeps one.
+#[test]
+fn claude_codes_folder_is_set_per_ai() {
+    let (h, _d) = hub();
+    let claude = |name: &str, ssh: Option<&str>| BackendConfig {
+        name: name.into(),
+        kind: BackendKind::AgentCli,
+        model: "claude-code".into(),
+        base_url: None,
+        ssh_host: ssh.map(str::to_string),
+        enabled: true,
+    };
+    h.add_backend(claude("Claude Code", None), None).unwrap();
+    h.add_backend(claude("Claude Code 2", None), None).unwrap();
+    h.add_backend(claude("Claude on box", Some("box")), None).unwrap();
+    h.add_backend(BackendConfig { model: "codex".into(), ..claude("Codex", None) }, None).unwrap();
+    let folder = |h: &AiHub, name: &str| h.options().get(name).and_then(|o| o.config_dir.clone());
+    assert!(h.set_config_dir("Claude Code 2", Some(" ~/.claude-work ")).unwrap());
+    assert_eq!((folder(&h, "Claude Code"), folder(&h, "Claude Code 2").as_deref()), (None, Some("~/.claude-work")));
+    let here = if cfg!(windows) { r"C:\Claude\work" } else { "/Users/someone/Claude work" };
+    assert!(h.set_config_dir("Claude Code", Some(here)).unwrap());
+    assert_eq!(folder(&h, "Claude Code").as_deref(), Some(here));
+    assert!(h.set_config_dir("Claude on box", Some("/home/someone/.claude-b")).unwrap(), "a path on that computer");
+    assert!(h.set_config_dir("Claude Code", Some("claude-work")).unwrap_err().message.contains("isn't a full path"));
+    assert!(h.set_config_dir("Codex", Some("/x")).unwrap_err().message.contains("doesn't keep a folder"));
+    assert!(h.set_config_dir("Codex", None).unwrap(), "clearing is always fine");
+    assert!(!h.set_config_dir("Nobody", Some("/x")).unwrap(), "only a configured backend");
+    assert!(h.set_config_dir("Claude Code 2", Some(" ")).unwrap());
+    assert_eq!(folder(&h, "Claude Code 2"), None, "blank is its usual folder again");
+    assert_eq!(folder(&h, "Claude Code").as_deref(), Some(here), "each AI keeps its own");
+    assert_eq!(crate::folder_var(&claude("x", None)), Some("CLAUDE_CONFIG_DIR"));
+}
+
 /// #123, #127: the model an AI uses is changed; Claude Code is offered Claude's models.
 #[test]
 fn an_ais_model_is_changed() {

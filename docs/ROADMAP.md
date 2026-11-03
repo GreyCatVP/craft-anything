@@ -595,9 +595,15 @@ Gaps found while using the app for real projects.
       refused and a folder that's already a project opens. Until now that was only reachable
       through "Choose a folder…" under Make's Start, on a screen that asks what to recreate
       — claimed: xerenon, branch feature/r2.9-work-on-my-project; PR #686
-- [ ] Choose Claude Code's folder (`CLAUDE_CONFIG_DIR`) per AI, so one computer can build with
-      two Claude accounts; an app opened from the Dock never sees the shell's variable
+- [x] Choose Claude Code's folder (`CLAUDE_CONFIG_DIR`) per AI, so one computer can build with
+      two Claude accounts; an app opened from the Dock never sees the shell's variable. Settings →
+      AI (a typed folder, and Add another) and `ai folder`; live-checked from the CLI with an empty
+      folder (not signed in, and the fix names the folder) overriding the shell's own variable,
+      and by a build in the app with a typed `~/` folder. A sign-in that expired says so instead
+      of "isn't signed in" (the folder's `.claude.json` still names the account)
       — claimed: Claude (Opus 5.5), branch feature/claude-config-dir
+- [ ] A live build with two Claude Code AIs signed in to two accounts, and one over SSH with a
+      `~/` folder (the remote line is unit-tested, not run on another computer)
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
