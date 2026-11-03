@@ -595,6 +595,9 @@ Gaps found while using the app for real projects.
       refused and a folder that's already a project opens. Until now that was only reachable
       through "Choose a folder…" under Make's Start, on a screen that asks what to recreate
       — claimed: xerenon, branch feature/r2.9-work-on-my-project; PR #686
+- [ ] Choose Claude Code's folder (`CLAUDE_CONFIG_DIR`) per AI, so one computer can build with
+      two Claude accounts; an app opened from the Dock never sees the shell's variable
+      — claimed: Claude (Opus 5.5), branch feature/claude-config-dir
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
