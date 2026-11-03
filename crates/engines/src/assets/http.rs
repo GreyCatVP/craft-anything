@@ -127,6 +127,11 @@ pub(super) mod tests {
 
     /// Serve a finite response sequence on loopback and record request headers and payloads.
     pub fn serve(answers: impl FnOnce(&str) -> Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
+        serve_after(Duration::ZERO, answers)
+    }
+
+    /// [`serve`], with each answer held back for `delay` after its request has been read.
+    pub fn serve_after(delay: Duration, answers: impl FnOnce(&str) -> Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -166,6 +171,7 @@ pub(super) mod tests {
                 let mut payload = vec![0; len];
                 reader.read_exact(&mut payload).unwrap();
                 recorded.lock().unwrap().push(format!("{head}{}", String::from_utf8_lossy(&payload)));
+                std::thread::sleep(delay);
                 write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             }
         });

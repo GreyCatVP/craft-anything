@@ -6,7 +6,7 @@
 //! inputs and its prices from the platform API.
 
 use super::inputs::{REMEDIATION, clipped, runnable};
-use super::model::{ListedModel, ModelDetail, ModelList, Pricing, Rate, Unit};
+use super::model::{ListedModel, MAX_ASSET_BUDGET_USD, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::openapi::input_fields;
 use super::tables::{InputRoles, KnownModels};
 use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, SizeBy, charged, http};
@@ -14,7 +14,7 @@ use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The provider id the asset table names.
 pub const ID: &str = "fal";
@@ -42,11 +42,13 @@ pub struct Fal {
     base: String,
     /// Where models and prices are listed.
     api_base: String,
+    /// How long [`Fal::list`] may go on starting requests.
+    list_deadline: Duration,
 }
 
 impl Default for Fal {
     fn default() -> Fal {
-        Fal { base: BASE.to_string(), api_base: API_BASE.to_string() }
+        Fal { base: BASE.to_string(), api_base: API_BASE.to_string(), list_deadline: LIST_DEADLINE }
     }
 }
 
@@ -149,26 +151,36 @@ const NAME_LENGTH: usize = 80;
 /// The longest model id kept, and the longest cursor followed.
 const ID_LENGTH: usize = 100;
 const CURSOR_LENGTH: usize = 200;
+/// How long one request of the platform API may take.
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a whole [`Fal::list`] (every page, then every batch of prices) goes on starting
+/// requests. It is checked before each one, so the call can end up to [`LIST_TIMEOUT`] later.
+const LIST_DEADLINE: Duration = Duration::from_secs(3 * 60);
 
 impl Fal {
     /// The models fal lists for `kind` that this app can run, with their prices.
     ///
-    /// Every page is a request; fal limits how many it answers without a key, so the list can end
-    /// early: then the models read so far are returned, and `error` says the list is incomplete. A
-    /// failure before anything was read is an error. Prices need a key: without one every price is
-    /// [`Pricing::Unknown`]. A price request that fails leaves the models it covered unpriced and is
-    /// reported in `error` as well.
+    /// Every page is a request; fal limits how many it answers without a key, and the whole call
+    /// has a deadline, so the list can end early: then the models read so far are returned, and
+    /// `error` says the list is incomplete. A failure before anything was read is an error. Prices
+    /// need a key: without one every price is [`Pricing::Unknown`]. A price request that fails, or
+    /// that does not return all the prices, leaves those models unpriced and is reported in `error`
+    /// as well.
     pub fn list(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
         let key = key.map(http::key).transpose()?;
+        let deadline = Instant::now() + self.list_deadline;
         let mut models: Vec<ListedModel> = Vec::new();
         let mut listed: HashSet<String> = HashSet::new();
-        let (mut pages, mut stopped, mut cut_short) = (0, None, false);
+        let (mut pages, mut stopped, mut cut_short) = (0, None, None::<String>);
         'categories: for category in categories(kind) {
             let mut cursor: Option<String> = None;
             loop {
                 if pages == MAX_PAGES {
-                    cut_short = true;
+                    cut_short = Some(format!("only the first {MAX_PAGES} pages were read."));
+                    break 'categories;
+                }
+                if time_is_up(deadline) {
+                    stopped = Some(too_slow());
                     break 'categories;
                 }
                 let page = match self.page(key, category, cursor.as_deref()) {
@@ -180,15 +192,19 @@ impl Fal {
                 };
                 pages += 1;
                 for model in &page.models {
-                    if let Some(model) = listed_model(model, kind)
+                    if let Some(model) = listed_model(model, category, kind)
                         && listed.insert(model.id.clone())
                     {
                         models.push(model);
                     }
                 }
                 match page.next {
-                    Some(next) => cursor = Some(next),
-                    None => break,
+                    Next::Cursor(next) => cursor = Some(next),
+                    Next::None => break,
+                    Next::Unreachable => {
+                        cut_short = Some("fal.ai promised a next page but gave nothing to ask for it with.".to_string());
+                        break 'categories;
+                    }
                 }
             }
         }
@@ -201,20 +217,20 @@ impl Fal {
         if let Some(e) = &stopped {
             problems.push(format!("The list is incomplete: {}", words(e)));
         }
-        if cut_short {
-            problems.push(format!("The list is incomplete: only the first {MAX_PAGES} pages were read."));
+        if let Some(why) = cut_short {
+            problems.push(format!("The list is incomplete: {why}"));
         }
         if let Some(key) = key
-            && let Some(e) = self.fill_prices(key, &mut models)
+            && let Some(why) = self.fill_prices(key, &mut models, deadline)
         {
-            problems.push(format!("Prices could not be read: {}", words(&e)));
+            problems.push(format!("Prices could not be read: {why}"));
         }
         Ok(ModelList { models, error: (!problems.is_empty()).then(|| problems.join(" ")) })
     }
 
     /// One model with all its inputs and its price, as `key` gets them. A model fal no longer
-    /// serves is a [`ErrorCode::BadSettings`] error that names it; a price that cannot be read is
-    /// an error too, because a run must not go ahead as if it were free.
+    /// serves, or is retiring, is a [`ErrorCode::BadSettings`] error that names it; a price that
+    /// cannot be read is an error too, because a run must not go ahead as if it were free.
     pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
         let key = http::key(key)?;
         if !endpoint_ok(model) {
@@ -231,12 +247,21 @@ impl Fal {
             .and_then(Value::as_array)
             .and_then(|models| models.iter().find(|m| m.get("endpoint_id").and_then(Value::as_str) == Some(model)))
             .ok_or_else(|| gone(model))?;
+        if is_retiring(found) {
+            return Err(retiring(model));
+        }
         let fields = input_fields(found.get("openapi").unwrap_or(&Value::Null))?;
-        let pricing = self.fetch_prices(key, &[model])?.remove(model).unwrap_or(Pricing::Unknown);
+        let mut priced = self.fetch_prices(key, &[model])?;
+        let pricing = match priced.table.remove(model) {
+            Some(pricing) => pricing,
+            // The row may be on a page fal did not send: that is not the same as having no price.
+            None if priced.more => return Err(http::garbled("fal.ai's prices could not be read.").with_remediation("Try again in a moment.")),
+            None => Pricing::Unknown,
+        };
         Ok(ModelDetail { id: model.to_string(), name: name_of(found, model), kinds: kinds_of(category_of(found), model), fields, pricing })
     }
 
-    /// One page of a category: the models on it, and the cursor of the next page if there is one.
+    /// One page of a category: the models on it, and how to ask for the next page if there is one.
     fn page(&self, key: Option<&str>, category: &str, cursor: Option<&str>) -> Result<Page, ToolError> {
         let mut url = format!("{}/v1/models?category={}&expand=openapi-3.0&limit={PAGE_SIZE}", self.api_base, encode(category));
         if let Some(cursor) = cursor {
@@ -248,38 +273,44 @@ impl Fal {
             return Err(http::garbled("fal.ai's model list could not be read."));
         };
         models.truncate(MAX_PAGE_MODELS);
-        let more = answer.get("has_more").and_then(Value::as_bool) != Some(false);
-        let next = answer.get("next_cursor").and_then(Value::as_str).filter(|c| more && !c.is_empty() && c.len() <= CURSOR_LENGTH).map(str::to_string);
-        Ok(Page { models, next })
+        Ok(Page { models, next: next_of(&answer) })
     }
 
     /// Put each model's price in `models`, a batch of ids at a time. Stops at the first request
-    /// that fails (the rest would fail the same way) and returns why; the models not reached keep
-    /// [`Pricing::Unknown`].
-    fn fill_prices(&self, key: &str, models: &mut [ListedModel]) -> Option<ToolError> {
+    /// that fails (the rest would fail the same way) or when `deadline` has passed, and returns why;
+    /// the models not reached keep [`Pricing::Unknown`], and so do those a batch left out when fal
+    /// said it had more prices than it sent.
+    fn fill_prices(&self, key: &str, models: &mut [ListedModel], deadline: Instant) -> Option<String> {
+        let mut left_out = false;
         for batch in models.chunks_mut(PRICE_BATCH) {
+            if time_is_up(deadline) {
+                return Some("there was no time left to ask for them.".to_string());
+            }
             let ids: Vec<&str> = batch.iter().map(|m| m.id.as_str()).collect();
             match self.fetch_prices(key, &ids) {
-                Ok(mut table) => {
+                Ok(mut priced) => {
                     for model in batch.iter_mut() {
-                        if let Some(pricing) = table.remove(&model.id) {
+                        if let Some(pricing) = priced.table.remove(&model.id) {
                             model.pricing = pricing;
                         }
                     }
+                    left_out |= priced.more;
                 }
-                Err(e) => return Some(e),
+                Err(e) => return Some(words(&e)),
             }
         }
-        None
+        left_out.then(|| "fal.ai said there are more prices than it sent.".to_string())
     }
 
-    /// What fal charges for each of up to [`PRICE_BATCH`] models; a model it names no price for is absent.
-    fn fetch_prices(&self, key: &str, ids: &[&str]) -> Result<HashMap<String, Pricing>, ToolError> {
+    /// What fal charges for each of up to [`PRICE_BATCH`] models; a model it names no price for is
+    /// absent. Its answer has a cursor field, but the pricing page gives no way to send one back,
+    /// so an answer that says there is more is reported as such (`more`) and not followed.
+    fn fetch_prices(&self, key: &str, ids: &[&str]) -> Result<Prices, ToolError> {
         let query: Vec<String> = ids.iter().map(|id| format!("endpoint_id={}", encode(id))).collect();
         let url = format!("{}/v1/models/pricing?{}", self.api_base, query.join("&"));
         let answer = read(self.send(Some(key), &url)?, http::MAX_JSON, true)?;
         let rows = answer.get("prices").and_then(Value::as_array).ok_or_else(|| http::garbled("fal.ai's prices could not be read."))?;
-        Ok(rows.iter().take(PRICE_BATCH * 2).filter_map(price_row).collect())
+        Ok(Prices { table: rows.iter().take(PRICE_BATCH * 2).filter_map(price_row).collect(), more: !matches!(next_of(&answer), Next::None) })
     }
 
     /// A GET to fal's platform API. The key, when there is one, goes only to this address.
@@ -298,7 +329,42 @@ impl Fal {
 
 struct Page {
     models: Vec<Value>,
-    next: Option<String>,
+    next: Next,
+}
+
+/// Where a list goes on after an answer.
+enum Next {
+    /// The answer was the last.
+    None,
+    /// Ask again with this cursor.
+    Cursor(String),
+    /// The answer says there is more, but gives nothing usable to ask for it with.
+    Unreachable,
+}
+
+/// What an answer says comes after it: `has_more`, or failing that the presence of a cursor.
+fn next_of(answer: &Value) -> Next {
+    let cursor = answer.get("next_cursor").and_then(Value::as_str).filter(|c| !c.is_empty());
+    match (answer.get("has_more").and_then(Value::as_bool).unwrap_or(cursor.is_some()), cursor) {
+        (false, _) => Next::None,
+        (true, Some(cursor)) if cursor.len() <= CURSOR_LENGTH => Next::Cursor(cursor.to_string()),
+        (true, _) => Next::Unreachable,
+    }
+}
+
+/// The prices of a batch of models, and whether fal said it had more than it sent.
+struct Prices {
+    table: HashMap<String, Pricing>,
+    more: bool,
+}
+
+fn time_is_up(deadline: Instant) -> bool {
+    Instant::now() >= deadline
+}
+
+fn too_slow() -> ToolError {
+    ToolError::new(ErrorCode::TimedOut, "Reading fal.ai's model list took too long, so it was cut short.")
+        .with_remediation("Refresh the list to read the rest.")
 }
 
 /// The answer's JSON, or why there is none. fal's rate limit is told apart because it is the one
@@ -327,26 +393,52 @@ fn gone(model: &str) -> ToolError {
         .with_remediation(REMEDIATION)
 }
 
-/// fal's categories whose models may make `kind`, in the order they are read.
-fn categories(kind: AssetKind) -> &'static [&'static str] {
-    match kind {
-        AssetKind::Image => &["text-to-image"],
-        AssetKind::Model3d => &["image-to-3d", "text-to-3d"],
-        // Speech, sound effects and music are all filed under `text-to-audio`; the table says which.
-        AssetKind::Speech => &["text-to-speech", "text-to-audio"],
-        AssetKind::SoundEffect | AssetKind::Music => &["text-to-audio"],
-    }
+fn retiring(model: &str) -> ToolError {
+    ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is being retired at fal.ai.", clipped(model, NAME_LENGTH))).with_remediation(REMEDIATION)
 }
 
-/// What a model makes. fal's own category says so for pictures, 3D models and speech; where it
-/// does not (`text-to-audio` holds speech, sound effects and music alike) the known-models table
-/// does, and a model it does not know makes nothing we can say.
+/// Whether fal has marked the model as one it is retiring.
+fn is_retiring(model: &Value) -> bool {
+    model.pointer("/metadata/status").and_then(Value::as_str) == Some("deprecated")
+}
+
+/// What the models of a fal category make.
+enum Makes {
+    /// The category says so.
+    One(AssetKind),
+    /// The category holds several kinds; the known-models table says which of them a model makes.
+    OneOf(&'static [AssetKind]),
+}
+
+/// The fal categories this app reads, and what their models make. The one place that says both
+/// which categories a kind is listed from ([`categories`]) and what a listed model is ([`kinds_of`]).
+const CATEGORIES: &[(&str, Makes)] = &[
+    ("text-to-image", Makes::One(AssetKind::Image)),
+    ("image-to-3d", Makes::One(AssetKind::Model3d)),
+    ("text-to-3d", Makes::One(AssetKind::Model3d)),
+    ("text-to-speech", Makes::One(AssetKind::Speech)),
+    // fal files speech, sound effects and music models alike under `text-to-audio`.
+    ("text-to-audio", Makes::OneOf(&[AssetKind::Speech, AssetKind::SoundEffect, AssetKind::Music])),
+];
+
+/// The fal categories whose models may make `kind`, in the order they are read.
+fn categories(kind: AssetKind) -> Vec<&'static str> {
+    let may = |makes: &Makes| match makes {
+        Makes::One(one) => *one == kind,
+        Makes::OneOf(some) => some.contains(&kind),
+    };
+    CATEGORIES.iter().filter(|(_, makes)| may(makes)).map(|(category, _)| *category).collect()
+}
+
+/// What the model `id` of a fal `category` makes. The category says so where it can; where it
+/// holds several kinds the known-models table does, and a model it does not know makes nothing we
+/// can say. A category this app does not read is left to the known-models table as well.
 fn kinds_of(category: &str, id: &str) -> Vec<AssetKind> {
-    match category {
-        "text-to-image" => vec![AssetKind::Image],
-        "image-to-3d" | "text-to-3d" => vec![AssetKind::Model3d],
-        "text-to-speech" => vec![AssetKind::Speech],
-        _ => KnownModels::built_in().kinds(ID, id).map(<[AssetKind]>::to_vec).unwrap_or_default(),
+    let known = || KnownModels::built_in().kinds(ID, id).unwrap_or_default();
+    match CATEGORIES.iter().find(|(name, _)| *name == category) {
+        Some((_, Makes::One(one))) => vec![*one],
+        Some((_, Makes::OneOf(some))) => known().iter().copied().filter(|kind| some.contains(kind)).collect(),
+        None => known().to_vec(),
     }
 }
 
@@ -355,12 +447,13 @@ fn category_of(model: &Value) -> &str {
 }
 
 /// The model of one list entry, if it makes `kind` and its inputs are ones this app can fill.
-fn listed_model(model: &Value, kind: AssetKind) -> Option<ListedModel> {
+/// `category` is the one the page was asked for; the category a model says of itself is not used.
+fn listed_model(model: &Value, category: &str, kind: AssetKind) -> Option<ListedModel> {
     let id = model.get("endpoint_id")?.as_str().filter(|id| endpoint_ok(id))?;
-    if model.pointer("/metadata/status").and_then(Value::as_str) == Some("deprecated") {
+    if is_retiring(model) {
         return None;
     }
-    let kinds = kinds_of(category_of(model), id);
+    let kinds = kinds_of(category, id);
     if !kinds.contains(&kind) {
         return None;
     }
@@ -418,27 +511,28 @@ fn price_row(row: &Value) -> Option<(String, Pricing)> {
 /// A price turned into how it is charged.
 type RateOf = fn(f64) -> Rate;
 
-/// How fal's billing units are read. A unit not named here (the GPU or compute seconds some models
-/// fall back to, a plain "second" that may be either, anything fal adds) is a price per a quantity
-/// this app cannot know before the run: the model's cost is known only after it.
-const BILLED_PER: &[(&str, RateOf)] = &[
-    ("image", Rate::PerRequest),
-    ("video", Rate::PerRequest),
-    ("request", Rate::PerRequest),
-    ("generation", Rate::PerRequest),
-    ("output", Rate::PerRequest),
-    ("megapixel", Rate::PerMegapixel),
-    ("mp", Rate::PerMegapixel),
-    ("character", Rate::PerCharacter),
-    ("audio_second", Rate::PerSecond),
-    ("video_second", Rate::PerSecond),
-    ("output_second", Rate::PerSecond),
-];
+/// The billing units read as a price before the run, as one unit per run or per megapixel.
+///
+/// What fal documents (https://fal.ai/docs/platform-apis/v1/models/pricing and the billing guide at
+/// https://fal.ai/docs/documentation/model-apis/pricing, read 2026-11-03):
+/// - `image` and `video` are the unit strings of the pricing page ("'image', 'video', or
+///   provider-specific GPU/compute unit"); its example is `unit: image`.
+/// - The guide says models charge "per request" and "per megapixel" without spelling the unit, so
+///   `request` and `megapixel` are readings of that prose (`megapixels` was the brief's spelling).
+///   None of the four was seen from the live API: its prices need a key.
+///
+/// A unit not named here (the GPU or compute seconds some models fall back to, a plain "second"
+/// that may be either, a spelling of characters, outputs or generations nobody has documented, or
+/// anything fal adds) is a price per a quantity this app cannot know before the run: the model's
+/// cost is known only after it.
+const BILLED_PER: &[(&str, RateOf)] =
+    &[("image", Rate::PerRequest), ("video", Rate::PerRequest), ("request", Rate::PerRequest), ("megapixel", Rate::PerMegapixel)];
 
-/// What a price from fal's price list means. Only a plain dollar amount is a price (Ruling 5): a
-/// number that is not finite or is negative, or any other currency, is no price at all.
+/// What a price from fal's price list means. Only a plain dollar amount is a price (Rulings 5 and
+/// 16): a number that is not finite, is negative or is above the most a project may spend, or a
+/// price in another currency, is no price at all.
 fn pricing_of(unit_price: f64, unit: &str, currency: &str) -> Pricing {
-    if !currency.eq_ignore_ascii_case("usd") || !unit_price.is_finite() || unit_price < 0.0 {
+    if !currency.eq_ignore_ascii_case("usd") || !unit_price.is_finite() || !(0.0..=MAX_ASSET_BUDGET_USD).contains(&unit_price) {
         return Pricing::Unknown;
     }
     // "Megapixels", "GPU-seconds" → "megapixel", "gpu_second".
@@ -1080,30 +1174,177 @@ mod listing_tests {
         }
     }
 
+    /// The design: a chosen model that is deprecated at the provider fails with a typed error that
+    /// names it and says to choose another, the same as one that has gone.
+    #[test]
+    fn a_model_being_retired_is_a_clear_error_too() {
+        let mut retiring = picture_model("acme/retiring", "Retiring");
+        retiring["metadata"]["status"] = json!("deprecated");
+        let (base, seen) = http::tests::serve(|_| vec![(200, page(vec![retiring], None))]);
+        let err = fal(base).describe(KEY, "acme/retiring").unwrap_err();
+        assert_eq!(err.code, ErrorCode::BadSettings);
+        assert!(err.message.contains("acme/retiring") && err.message.contains("retired"), "{}", err.message);
+        let remediation = err.remediation.as_deref().unwrap();
+        assert!(remediation.contains("Choose another model") && remediation.contains("Generated Assets"), "{remediation}");
+        assert_eq!(seen.lock().unwrap().len(), 1, "no price is asked for a model that cannot be used");
+        // A model whose status fal gives as active, or does not give, is described.
+        let mut bare = picture_model("acme/bare", "Bare");
+        bare["metadata"].as_object_mut().unwrap().remove("status");
+        let (base, _) = http::tests::serve(|_| {
+            vec![(200, page(vec![picture_model("acme/active", "Active")], None)), (200, prices(&[])), (200, page(vec![bare], None)), (200, prices(&[]))]
+        });
+        let fal = fal(base);
+        assert!(fal.describe(KEY, "acme/active").is_ok());
+        assert!(fal.describe(KEY, "acme/bare").is_ok());
+    }
+
+    #[test]
+    fn a_page_is_read_only_up_to_its_bound() {
+        let crowd: Vec<Value> = (0..MAX_PAGE_MODELS + 50).map(|i| picture_model(&format!("acme/m{i}"), "M")).collect();
+        let (base, _) = http::tests::serve(|_| vec![(200, page(crowd, None))]);
+        let list = fal(base).list(None, AssetKind::Image).unwrap();
+        assert_eq!(list.models.len(), MAX_PAGE_MODELS, "a server that sends more than a page can hold is not believed");
+        assert_eq!(list.models.last().map(|m| m.id.as_str()), Some("acme/m99"));
+    }
+
+    #[test]
+    fn a_page_larger_than_the_limit_is_refused() {
+        // One byte over what a page may be: the whole body is read, the page is not.
+        let (base, _) = http::tests::serve(|_| vec![(200, "x".repeat(usize::try_from(http::MAX_LIST_PAGE).unwrap() + 1))]);
+        let err = fal(base).list(Some(KEY), AssetKind::Image).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OverLimit);
+        assert!(!err.message.contains("xxxx"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_next_page_that_cannot_be_asked_for_ends_the_list_and_says_so() {
+        for (cursor, has_more) in [(json!("a".repeat(10_000)), true), (json!(null), true), (json!(""), true), (json!("a".repeat(CURSOR_LENGTH + 1)), false)] {
+            let first = json!({"models": [picture_model("acme/one", "One")], "next_cursor": cursor, "has_more": has_more}).to_string();
+            let (base, seen) = http::tests::serve(|_| vec![(200, first)]);
+            let list = fal(base).list(None, AssetKind::Image).unwrap();
+            assert_eq!(ids(&list), ["acme/one"]);
+            assert_eq!(seen.lock().unwrap().len(), 1, "no cursor, no second page");
+            // A page that says it is the last one is just the last one, whatever else it carries.
+            assert_eq!(list.error.is_some(), has_more, "{cursor}: {:?}", list.error);
+            if has_more {
+                assert!(list.error.as_deref().is_some_and(|e| e.contains("incomplete") && e.contains("next page")), "{:?}", list.error);
+            }
+        }
+        // A cursor of the longest allowed size is followed.
+        let longest = "a".repeat(CURSOR_LENGTH);
+        let (base, seen) = http::tests::serve(|_| vec![(200, page(vec![], Some(&longest))), (200, page(vec![], None))]);
+        assert_eq!(fal(base).list(None, AssetKind::Image).unwrap().error, None);
+        assert!(seen.lock().unwrap()[1].contains(&format!("&cursor={longest} ")));
+    }
+
+    /// The deadline covers the whole call: pages and price batches alike.
+    #[test]
+    fn a_list_that_takes_too_long_is_cut_short() {
+        // The one answer arrives after the deadline, so no second page and no prices are asked for.
+        let (base, seen) = http::tests::serve_after(Duration::from_millis(800), |_| vec![(200, page(vec![picture_model("acme/one", "One")], Some("Mg")))]);
+        let slow = Fal { list_deadline: Duration::from_millis(500), ..fal(base) };
+        let list = slow.list(Some(KEY), AssetKind::Image).unwrap();
+        assert_eq!(ids(&list), ["acme/one"], "what was read is kept");
+        assert_eq!(list.models[0].pricing, Pricing::Unknown);
+        let error = list.error.as_deref().unwrap();
+        assert!(error.contains("incomplete") && error.contains("cut short"), "{error}");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        // Out of time before the first request: nothing was read, so it is an error.
+        let none = Fal { list_deadline: Duration::ZERO, ..fal("http://127.0.0.1:9".into()) };
+        assert_eq!(none.list(Some(KEY), AssetKind::Image).unwrap_err().code, ErrorCode::TimedOut);
+    }
+
+    #[test]
+    fn prices_that_say_there_are_more_are_not_left_silently_unknown() {
+        for more in [json!({"next_cursor": "Mg", "has_more": true}), json!({"next_cursor": "Mg"}), json!({"next_cursor": null, "has_more": true})] {
+            let mut answer = json!({"prices": [{"endpoint_id": "acme/one", "unit_price": 0.04, "unit": "image", "currency": "USD"}]});
+            answer.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
+            let (base, _) = http::tests::serve(|_| {
+                vec![(200, page(vec![picture_model("acme/one", "One"), picture_model("acme/two", "Two")], None)), (200, answer.to_string())]
+            });
+            let list = fal(base).list(Some(KEY), AssetKind::Image).unwrap();
+            assert_eq!(list.models[0].pricing, Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.04) }, "what came is used");
+            assert_eq!(list.models[1].pricing, Pricing::Unknown);
+            assert!(list.error.as_deref().is_some_and(|e| e.starts_with("Prices could not be read") && e.contains("more")), "{more}: {:?}", list.error);
+        }
+        // A price list that says it is complete is complete, though a model has no row in it.
+        let (base, _) = http::tests::serve(|_| vec![(200, page(vec![picture_model("acme/one", "One")], None)), (200, prices(&[]))]);
+        assert_eq!(fal(base).list(Some(KEY), AssetKind::Image).unwrap().error, None);
+        // For one model the price is needed: a list that says it is incomplete, with no row, is no price.
+        let (base, _) = http::tests::serve(|_| {
+            vec![(200, page(vec![picture_model("acme/one", "One")], None)), (200, json!({"prices": [], "next_cursor": "Mg", "has_more": true}).to_string())]
+        });
+        assert_eq!(fal(base).describe(KEY, "acme/one").unwrap_err().code, ErrorCode::GarbledOutput);
+    }
+
+    /// One table says which categories a kind is read from and what a model in a category makes.
+    #[test]
+    fn the_category_asked_for_decides_what_a_model_makes() {
+        // The page asked for text-to-3d echoes another category on its model: the page decides.
+        let echoed = model("acme/echo", "Echo", "image-to-video", json!({"properties": {"image_url": {"type": "string"}}, "required": ["image_url"]}));
+        let (base, _) = http::tests::serve(|_| vec![(200, page(vec![echoed], None)), (200, page(vec![], None))]);
+        let list = fal(base).list(None, AssetKind::Model3d).unwrap();
+        assert_eq!(ids(&list), ["acme/echo"]);
+        assert_eq!(list.models[0].kinds, [AssetKind::Model3d]);
+        // The same table in both directions: every kind has a category, and a category that
+        // settles its kind is read for that kind alone.
+        for kind in AssetKind::ALL {
+            assert!(!categories(kind).is_empty(), "{kind:?}");
+            for category in categories(kind) {
+                let makes = kinds_of(category, "acme/unknown");
+                assert!(makes.is_empty() || makes == [kind], "{category} for {kind:?}: {makes:?}");
+            }
+        }
+        assert_eq!(categories(AssetKind::Music), ["text-to-audio"]);
+        assert_eq!(categories(AssetKind::Speech), ["text-to-speech", "text-to-audio"]);
+        // A model in an audio category makes what the table says of it, among the audio kinds only.
+        assert_eq!(kinds_of("text-to-audio", "fal-ai/csm-1b"), [AssetKind::Speech]);
+        assert!(kinds_of("text-to-audio", "fal-ai/flux/dev").is_empty(), "the table says it makes pictures: not an audio kind");
+        assert!(kinds_of("text-to-audio", "acme/unknown").is_empty());
+        // And a category the table has no row for falls back to the known-models table.
+        assert_eq!(kinds_of("image-to-image", "fal-ai/flux/dev"), [AssetKind::Image]);
+        assert!(kinds_of("image-to-image", "acme/unknown").is_empty());
+    }
+
     #[test]
     fn units_are_read_as_how_a_price_is_charged() {
         let rate = |unit: &str, price: f64| pricing_of(price, unit, "USD");
         let usd = |rate| Pricing::Before { unit: Unit::Usd, rate };
-        for unit in ["image", "Images", "video", "request", "generation", "output"] {
+        for unit in ["image", "Images", "video", "request", "Requests"] {
             assert_eq!(rate(unit, 0.04), usd(Rate::PerRequest(0.04)), "{unit}");
         }
-        for unit in ["megapixels", "megapixel", "Megapixel", "mp"] {
+        for unit in ["megapixels", "megapixel", "Megapixel"] {
             assert_eq!(rate(unit, 0.025), usd(Rate::PerMegapixel(0.025)), "{unit}");
         }
-        for unit in ["audio_second", "video-seconds", "Output Second"] {
-            assert_eq!(rate(unit, 0.01), usd(Rate::PerSecond(0.01)), "{unit}");
-        }
-        assert_eq!(rate("character", 0.00003), usd(Rate::PerCharacter(0.00003)));
         // Everything else is a quantity this app cannot know before the run: GPU time, a plain
-        // "second" (video seconds or compute seconds, the page does not say), or a unit not seen yet.
-        for unit in ["gpu_second", "gpu-seconds", "second", "H100_second", "1000_characters", "", "something new"] {
+        // "second" (video seconds or compute seconds, the page does not say), a unit nobody has
+        // documented (spellings of a character, an output, a generation, ...) or one not seen yet.
+        for unit in [
+            "gpu_second",
+            "gpu-seconds",
+            "second",
+            "H100_second",
+            "character",
+            "1000_characters",
+            "audio_second",
+            "output_second",
+            "output",
+            "generation",
+            "mp",
+            "",
+            "something new",
+        ] {
             assert_eq!(rate(unit, 0.01), Pricing::After { unit: Unit::Usd }, "{unit:?}");
         }
-        // A price that is not a plain non-negative dollar amount is no price at all (Ruling 5).
-        for price in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.001, -1e300] {
+        // A price that is not a plain dollar amount is no price at all (Ruling 5): not a number, below
+        // nothing, or (Ruling 16) above the most a project may spend, which no real model charges.
+        for price in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.001, -1e300, 1e300, MAX_ASSET_BUDGET_USD + 0.01] {
             assert_eq!(rate("image", price), Pricing::Unknown, "{price}");
             assert_eq!(rate("gpu_second", price), Pricing::Unknown, "{price}");
         }
+        assert_eq!(rate("image", MAX_ASSET_BUDGET_USD), usd(Rate::PerRequest(MAX_ASSET_BUDGET_USD)), "the most is still a price");
+        let absurd = price_row(&json!({"endpoint_id": "acme/absurd", "unit_price": 1e300, "unit": "image", "currency": "USD"}));
+        assert_eq!(absurd, Some(("acme/absurd".to_string(), Pricing::Unknown)));
         assert_eq!(rate("image", 0.0), usd(Rate::PerRequest(0.0)), "free is a price");
         for currency in ["EUR", "", "credits"] {
             assert_eq!(pricing_of(1.0, "image", currency), Pricing::Unknown, "{currency:?}");

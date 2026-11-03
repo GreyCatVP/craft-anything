@@ -540,8 +540,9 @@ impl Manifest {
 pub const ASSET_BUDGET_USD: f64 = 5.0;
 /// The starting limit for an asset type billed in credits (Scenario, ElevenLabs).
 pub const ASSET_CREDIT_LIMIT: f64 = 500.0;
-/// The largest budget a project or Settings accepts for generated assets.
-pub const MAX_ASSET_BUDGET_USD: f64 = 10_000.0;
+/// The largest budget a project or Settings accepts for generated assets. Defined beside the
+/// asset types in the engines crate, which also refuses a fetched price above it.
+pub use craft_anything_engines::assets::model::MAX_ASSET_BUDGET_USD;
 
 /// One paid generation and what it cost, including generations whose output could not be saved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

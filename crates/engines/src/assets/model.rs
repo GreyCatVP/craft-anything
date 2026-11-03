@@ -7,7 +7,9 @@ use super::{AssetKind, under_a_cent, usd};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The most credits a limit can be set to (dollar limits stop at `MAX_ASSET_BUDGET_USD`).
+/// The most dollars a limit can be set to. A price per unit above it is not believed either.
+pub const MAX_ASSET_BUDGET_USD: f64 = 10_000.0;
+/// The most credits a limit can be set to, and the most credits a price per unit can be.
 pub const MAX_ASSET_CREDITS: f64 = 10_000_000.0;
 
 /// What a provider bills in. Credits are never converted to dollars.
