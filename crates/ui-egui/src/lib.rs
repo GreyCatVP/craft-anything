@@ -379,6 +379,8 @@ pub struct CraftApp {
     /// What was typed for each note still waiting for a builder, by note id, to put back in the
     /// prompt box when the note is taken back.
     pub drafts: std::collections::HashMap<u64, project::Draft>,
+    /// A picture still being pasted into the open project's prompt box (`paste_pictures`).
+    pub pending_paste: Option<project::PendingPaste>,
     /// Each project's building time and AI use, every build together (read from its usage.json).
     pub usage: std::collections::HashMap<PathBuf, usage::ProjectClock>,
     /// All AI use since the app opened: builds and chat.
@@ -472,6 +474,7 @@ impl CraftApp {
             server_form: ServerForm::default(),
             runs: craft_anything_ai::rebuild::RunSet::new(craft_anything_engine::settings::BuildSettings::default().parallel),
             drafts: Default::default(),
+            pending_paste: None,
             usage: Default::default(),
             session_usage: Default::default(),
             workspace: None,
@@ -1481,9 +1484,7 @@ impl CraftApp {
             theme::apply(ctx, want.0, want.1);
             self.applied_theme = Some(want);
         }
-        for f in self.jobs.poll() {
-            guard("job result", || self.handle_done(f));
-        }
+        self.take_finished_jobs();
         if let Some(url) = self.open_url.take() {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
@@ -1685,6 +1686,17 @@ pub fn app_icon(size: f32) -> egui::Image<'static> {
 /// The configured backends and the ones chosen to build and to extract (read off the UI thread).
 pub(crate) fn backends(hub: &AiHub) -> Done {
     Done::Backends(hub.backends(), hub.chosen(craft_anything_ai::Role::Builder), hub.chosen(craft_anything_ai::Role::Extractor), hub.options())
+}
+
+impl CraftApp {
+    /// Act on every background job that has finished since the last frame.
+    pub(crate) fn take_finished_jobs(&mut self) {
+        for f in self.jobs.poll() {
+            let (job, ok) = (f.job, f.result.is_ok());
+            guard("job result", || self.handle_done(f));
+            guard("pasted message", || self.paste_done(job, ok));
+        }
+    }
 }
 
 pub fn guard<R>(what: &str, f: impl FnOnce() -> R) -> Option<R> {

@@ -1674,6 +1674,14 @@ fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engin
     }
 }
 
+/// A picture being pasted into a project's prompt box: its job, and whether Send was pressed
+/// meanwhile (the message then goes once the picture is in, with it).
+pub struct PendingPaste {
+    pub job: u64,
+    pub root: PathBuf,
+    pub send: bool,
+}
+
 /// What was typed for a note while its project's builder worked.
 pub struct Draft {
     pub root: PathBuf,
@@ -1714,13 +1722,27 @@ impl CraftApp {
         keep.extend(self.state.unsent.values().flat_map(|(_, files)| files.iter().cloned()));
         keep.extend(self.drafts.values().flat_map(|d| d.attachments.iter().cloned()));
         #[cfg(not(target_arch = "wasm32"))]
-        self.jobs.spawn(tr("Paste pictures"), false, move |_| {
-            let files = crate::paste::read_pictures(&craft_anything_engine::workspace::pasted_dir(), &keep)?;
-            if files.is_empty() {
-                return Err(tr("There's no picture on the clipboard to paste."));
-            }
-            Ok(Done::Pasted { project, files })
-        });
+        {
+            let root = project.clone();
+            let job = self.jobs.spawn(tr("Paste pictures"), false, move |_| {
+                let files = crate::paste::read_pictures(&craft_anything_engine::workspace::pasted_dir(), &keep)?;
+                if files.is_empty() {
+                    return Err(tr("There's no picture on the clipboard to paste."));
+                }
+                Ok(Done::Pasted { project, files })
+            });
+            // A message sent before the picture is in waits for it (`send_message`).
+            self.pending_paste = root.map(|root| PendingPaste { job, root, send: false });
+        }
+    }
+
+    /// A job finished: when it was the paste a message is waiting for, the message goes now, with
+    /// its picture. If the paste failed, what was typed stays in the box to send again.
+    pub(crate) fn paste_done(&mut self, job: u64, ok: bool) {
+        let Some(p) = self.pending_paste.take_if(|p| p.job == job) else { return };
+        if p.send && ok && self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| w.root == p.root) {
+            self.send_message();
+        }
     }
 
     /// Pasted pictures were read: attached to the project they were pasted in while its screen is
@@ -1744,6 +1766,13 @@ impl CraftApp {
         // Before anything is taken from the box: a project waiting its turn keeps what was typed.
         if self.queue_position().is_some() {
             return self.toast(tr("This project is waiting its turn. Send your message once it starts."), true);
+        }
+        // A picture still being pasted goes with the message: it's sent once the picture is in.
+        if let Some(p) = self.pending_paste.as_mut().filter(|p| p.root == ws.root)
+            && self.jobs.running().any(|j| j.id == p.job)
+        {
+            p.send = true;
+            return;
         }
         self.state.project_input.clear();
         let attachments = std::mem::take(&mut self.state.project_attachments);
@@ -1829,6 +1858,38 @@ mod tests {
         busy.join().unwrap();
         assert!(app.settings.deep_mode, "a busy engine at startup must not mean default settings");
         drop(release.0);
+    }
+
+    /// Send pressed while a picture is still being pasted: the message waits for it and goes with it,
+    /// instead of going without it and leaving the picture for the next message.
+    #[test]
+    fn a_message_sent_while_a_picture_is_pasted_waits_for_it() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let root = ws.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        app.state.screen = Screen::Project;
+        let shot = d.path().join("shot.png");
+        std::fs::write(&shot, b"\x89PNG\r\n\x1a\n").unwrap();
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (project, files) = (Some(root.clone()), vec![shot.clone()]);
+        let job = app.jobs.spawn("Paste pictures", false, move |_| {
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(10));
+            Ok(Done::Pasted { project, files })
+        });
+        app.pending_paste = Some(PendingPaste { job, root, send: false });
+        app.state.project_input = "Like this".into();
+        app.send_message();
+        assert_eq!(app.state.project_input, "Like this", "it waits for the picture");
+        go.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.pending_paste.is_some() && std::time::Instant::now() < deadline {
+            app.take_finished_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(app.state.project_input.is_empty() && app.state.project_attachments.is_empty(), "the message went");
+        assert!(app.jobs.running().any(|j| j.title == "Attach pictures"), "with its picture");
     }
 
     /// A paste read while the person went Home goes nowhere, though the project is still the

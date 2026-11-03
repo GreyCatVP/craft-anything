@@ -83,8 +83,9 @@ pub fn picture_wanted(ctx: &egui::Context) -> bool {
 
 /// The pictures on the clipboard, as files: copied picture files as they are, or a copied image
 /// saved as a PNG in `dir` (clearing out old pastes not in `keep`). Empty when it holds neither.
-/// A copied picture a message can't take (over 20 MB) refuses the paste, rather than showing as
-/// attached and being left out when the message goes. Blocking: run it on a worker.
+/// A copied picture a message can't take (over 20 MB, or not a picture inside whatever its name
+/// says) refuses the paste, rather than showing as attached and being left out when the message
+/// goes, or sent as a file the builder can't read. Blocking: run it on a worker.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_pictures(dir: &Path, keep: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("{} {e}", crate::i18n::tr("The clipboard can't be read:")))?;
@@ -102,13 +103,17 @@ pub fn read_pictures(dir: &Path, keep: &[PathBuf]) -> Result<Vec<PathBuf>, Strin
 /// Copied picture files, if a message can take every one; else which one it can't.
 #[cfg(not(target_arch = "wasm32"))]
 fn attachable(files: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
-    match files.iter().find(|f| !craft_anything_engine::workspace::attachable_picture(f)) {
-        Some(f) => {
-            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            Err(crate::i18n::trf("{name} can't be attached: a message takes pictures up to 20 MB.", &[("name", name.as_str())]))
+    use craft_anything_engine::workspace::{attachable_picture, picture_content};
+    let name = |f: &Path| f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    for f in &files {
+        if !attachable_picture(f) {
+            return Err(crate::i18n::trf("{name} can't be attached: a message takes pictures up to 20 MB.", &[("name", name(f).as_str())]));
         }
-        None => Ok(files),
+        if !picture_content(f) {
+            return Err(crate::i18n::trf("{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.", &[("name", name(f).as_str())]));
+        }
     }
+    Ok(files)
 }
 
 #[cfg(test)]
@@ -126,12 +131,17 @@ mod tests {
     fn copied_picture_files_a_message_cant_take_refuse_the_paste() {
         let dir = tempfile::tempdir().unwrap();
         let small = dir.path().join("small.png");
-        std::fs::write(&small, b"png").unwrap();
+        std::fs::write(&small, b"\x89PNG\r\n\x1a\n").unwrap();
         let big = dir.path().join("huge screenshot.png");
         std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
         assert_eq!(attachable(vec![small.clone()]).unwrap(), vec![small.clone()]);
-        let refused = attachable(vec![small, big]).unwrap_err();
+        let refused = attachable(vec![small.clone(), big]).unwrap_err();
         assert!(refused.contains("huge screenshot.png") && refused.contains("20 MB"), "{refused}");
+        // A picture's name on something else: the builder couldn't read it.
+        let fake = dir.path().join("notes.png");
+        std::fs::write(&fake, b"just some text").unwrap();
+        let refused = attachable(vec![small, fake]).unwrap_err();
+        assert!(refused.contains("notes.png") && refused.contains("isn't a PNG"), "{refused}");
     }
 
     /// V with Ctrl (Cmd) held.

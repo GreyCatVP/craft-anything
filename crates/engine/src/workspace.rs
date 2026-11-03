@@ -1052,6 +1052,21 @@ const MAX_PASTED_PIXELS: u64 = 15360 * 8640;
 /// The largest picture a message sends ([`copy_pictures`] skips bigger files).
 const MAX_PICTURE_BYTES: u64 = 20 * 1024 * 1024;
 
+/// Whether the file starts the way a PNG, JPEG, GIF or WebP picture does, whatever its name says.
+/// Reads its first bytes, so not while drawing.
+pub fn picture_content(p: &Path) -> bool {
+    use std::io::Read as _;
+    let mut head = Vec::with_capacity(12);
+    if std::fs::File::open(p).and_then(|f| f.take(12).read_to_end(&mut head)).is_err() {
+        return false;
+    }
+    head.starts_with(b"\x89PNG\r\n\x1a\n")
+        || head.starts_with(&[0xFF, 0xD8, 0xFF])
+        || head.starts_with(b"GIF87a")
+        || head.starts_with(b"GIF89a")
+        || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP".as_slice()))
+}
+
 /// A picture file a message can take: a picture ([`is_picture`]) of at most 20 MB. Reads its
 /// size, so not while drawing.
 pub fn attachable_picture(p: &Path) -> bool {
@@ -1144,6 +1159,28 @@ mod tests {
         }
         let copied = copy_pictures(&dir.path().join("attachments"), &[small, big]).unwrap();
         assert_eq!(copied.len(), 1, "the big one is left out: {copied:?}");
+    }
+
+    #[test]
+    fn a_picture_is_told_by_its_first_bytes_not_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, bytes: &[u8]| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, bytes).unwrap();
+            p
+        };
+        for yes in [
+            file("a.png", b"\x89PNG\r\n\x1a\n...."),
+            file("b.jpg", &[0xFF, 0xD8, 0xFF, 0xE0]),
+            file("c.gif", b"GIF89a.."),
+            file("d.webp", b"RIFF\x10\0\0\0WEBPVP8 "),
+            file("e.png", &[0xFF, 0xD8, 0xFF, 0xDB]),
+        ] {
+            assert!(picture_content(&yes), "{}", yes.display());
+        }
+        for no in [file("f.png", b"png"), file("g.webp", b"RIFF\0\0\0\0WAVE"), file("h.png", b""), dir.path().join("gone.png")] {
+            assert!(!picture_content(&no), "{}", no.display());
+        }
     }
 
     #[test]

@@ -101,6 +101,7 @@ Getting Unity Hub	Récupération de Unity Hub
 Getting the Epic Games Launcher	Récupération de l'Epic Games Launcher
 The installer is open. Follow its steps, then come back here.	L'installateur est ouvert. Suivez ses étapes, puis revenez ici.
 {name} can't be attached: a message takes pictures up to 20 MB.	Impossible de joindre {name} : un message accepte des images de 20 Mo au plus.
+{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.	Impossible de joindre {name} : ce n'est pas une image PNG, JPEG, GIF ou WebP.
 {name} is ready.	{name} est prêt.
 Starting…	Démarrage…
 Getting Ghidra	Récupération de Ghidra
