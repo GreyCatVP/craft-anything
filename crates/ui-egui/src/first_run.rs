@@ -98,7 +98,7 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
     header(
         ui,
         "Who builds what you make",
-        "A coding agent such as Claude Code builds it, and an AI answers your questions in plain words. Change this any time in Settings → AI.",
+        "A coding agent such as Antigravity (agy) or Claude Code builds it, and an AI answers your questions in plain words. Change this any time in Settings → AI.",
     );
     // Whether something can build yet, in one line: the same rule Make and Start use.
     match app.default_builder() {
@@ -112,8 +112,10 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
             ui.horizontal_wrapped(|ui| {
                 icons::show(ui, "triangle-alert", 16.0, t.warning);
                 ui.label(
-                    RichText::new(tr("Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below."))
-                        .color(t.text_dim),
+                    RichText::new(tr(
+                        "Nothing can build yet: install Antigravity (agy) or Claude Code (and sign in once), or add an AI with an API key below.",
+                    ))
+                    .color(t.text_dim),
                 );
             });
         }
@@ -141,7 +143,7 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
                     icons::show(ui, "radar", 22.0, t.text_faint);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(tr("We didn't find an AI on this computer yet")).font(theme::medium(theme::BODY)));
-                        ui.label(RichText::new(tr("You can add a Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studio) or an agent you already use, later in Settings → AI.")).color(t.text_dim));
+                        ui.label(RichText::new(tr("You can add an Antigravity, Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studio) or an agent you already use, later in Settings → AI.")).color(t.text_dim));
                     });
                 });
             });

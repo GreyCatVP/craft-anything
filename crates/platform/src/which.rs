@@ -17,14 +17,15 @@ pub fn which_all(name: &str) -> Vec<PathBuf> {
 /// other installers put command-line programs. OpenCode's installer uses `~/.opencode/bin`, or
 /// `~/bin` when there is one (#112).
 #[cfg(unix)]
-const USUAL_HOME_DIRS: &[&str] = &[".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin", ".volta/bin", ".cargo/bin", ".opencode/bin", "bin"];
+const USUAL_HOME_DIRS: &[&str] =
+    &[".local/bin", ".gemini/bin", ".claude/local", ".npm-global/bin", ".bun/bin", ".volta/bin", ".cargo/bin", ".opencode/bin", "bin"];
 #[cfg(unix)]
 const USUAL_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
-// Claude Code's installer, npm (without a custom prefix), WinGet's portable packages (Claude
+// Claude Code's installer, Antigravity (`~/.gemini/bin`), npm (without a custom prefix), WinGet's portable packages (Claude
 // Code's WinGet install), bun and cargo; PATH may not have them yet in an app started before
 // the install.
 #[cfg(windows)]
-const USUAL_HOME_DIRS: &[&str] = &[r".local\bin", r"AppData\Roaming\npm", r"AppData\Local\Microsoft\WinGet\Links", r".bun\bin", r".cargo\bin"];
+const USUAL_HOME_DIRS: &[&str] = &[r".local\bin", r".gemini\bin", r"AppData\Roaming\npm", r"AppData\Local\Microsoft\WinGet\Links", r".bun\bin", r".cargo\bin"];
 #[cfg(not(any(unix, windows)))]
 const USUAL_HOME_DIRS: &[&str] = &[];
 // WinGet's portable packages installed for every user (`--scope machine`).
@@ -145,8 +146,10 @@ fn npmrc_prefix(home: &Path) -> Option<PathBuf> {
 fn with_usual_dirs(path: Option<OsString>, home: Option<PathBuf>) -> Option<OsString> {
     let mut dirs: Vec<PathBuf> = path.as_ref().map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
     let before = dirs.len();
+    let ag_home = std::env::var_os("ANTIGRAVITY_HOME").map(PathBuf::from);
+    let ag_dirs = ag_home.into_iter().flat_map(|h| [h.join("bin"), h.join(".gemini").join("bin")]);
     let in_home = home.iter().flat_map(|h| USUAL_HOME_DIRS.iter().map(move |d| h.join(d)).chain(nvm_bins(h)).chain(npm_global_bin(h)));
-    for d in in_home.chain(USUAL_DIRS.iter().map(PathBuf::from)) {
+    for d in in_home.chain(ag_dirs).chain(USUAL_DIRS.iter().map(PathBuf::from)) {
         if !dirs.contains(&d) {
             dirs.push(d);
         }

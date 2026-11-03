@@ -1743,6 +1743,8 @@ mod tests {
         let hint = craft_anything_ai::cli_agents::sign_in_hint("Not logged in").unwrap();
         assert_eq!(command_in(&hint), Some("claude auth login"));
         assert_eq!(command_in("Run `codex login` in a terminal."), Some("codex login"));
+        let agy_hint = craft_anything_ai::cli_agents::sign_in_hint_for("antigravity", "Not logged in").unwrap();
+        assert_eq!(command_in(&agy_hint), Some("agy"));
         for none in ["Try again later.", "Files go in `app/`.", "An `unclosed quote"] {
             assert_eq!(command_in(none), None, "{none}");
         }

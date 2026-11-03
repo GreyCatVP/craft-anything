@@ -27,7 +27,7 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "setup_plan",
             "Plan connecting agent apps",
-            "What connecting Craft Anything to coding-agent apps (Claude Code, Codex, Cursor…) would change: each config file, the lines that change, and the skill files. Writes nothing.",
+            "What connecting Craft Anything to coding-agent apps (Antigravity, Claude Code, Codex, Cursor…) would change: each config file, the lines that change, and the skill files. Writes nothing.",
             "Shows what connecting your agent apps would change.",
             Effects::READ_ONLY,
             schema_of::<SetupParams>,
@@ -66,7 +66,7 @@ pub fn specs() -> Vec<ToolSpec> {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetupParams {
-    /// Client ids to set up (claude_code, codex, cursor…); empty refreshes the ones already set up.
+    /// Client ids to set up (antigravity, claude_code, codex, cursor…); empty refreshes the ones already set up.
     #[serde(default)]
     pub clients: Vec<String>,
     /// Every agent app found on this computer.

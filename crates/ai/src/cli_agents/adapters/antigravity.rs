@@ -2,18 +2,57 @@
 //!
 //! Antigravity runs prompts non-interactively with `--output-format stream-json -p <prompt>`.
 //! In builder mode, `--dangerously-skip-permissions` is passed so tool requests proceed without prompting.
+//! In question mode, `--mode plan` is passed without permission bypass so it can only read and plan.
 
 use super::*;
+
+pub const DEFAULT_MODEL: &str = "gemini-3.8-flash-high";
+pub const MODELS: &[&str] =
+    &["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"];
+
+/// Antigravity's failure in plain words and its fix when the person can make one.
+pub fn antigravity_failure(why: &str) -> (String, Option<String>) {
+    let w = why.to_ascii_lowercase();
+    let remediation = if ["authenticat", "oauth", "log in", "login", "not logged", "unauthorized", "api key"].iter().any(|token| w.contains(token)) {
+        Some("Sign in to Antigravity: open a terminal and run `agy` (or sign in via Antigravity IDE), then try again.".into())
+    } else {
+        None
+    };
+    (format!("Antigravity stopped: {why}"), remediation)
+}
+
+/// Antigravity answering a question about a build: runs with `--mode plan` without auto-skipping
+/// permissions so files cannot be modified.
+fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
+    if let Some(m) = &cx.options.cli_model {
+        a.extend(["--model".into(), m.clone()]);
+    } else {
+        a.extend(["--model".into(), DEFAULT_MODEL.into()]);
+    }
+    if let Some(r) = cx.resume {
+        a.extend(["--conversation".into(), r.to_string()]);
+    }
+    a.extend(["--mode".into(), "plan".into()]);
+    a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), format!("{}{}", cx.preamble, cx.prompt)]);
+    a
+}
 
 pub struct Antigravity;
 
 impl AgentAdapter for Antigravity {
     fn ids(&self) -> &'static [&'static str] {
-        &["antigravity", "agy"]
+        &["antigravity", "agy", "gemini-cli", "gemini"]
+    }
+
+    fn answers_questions(&self) -> bool {
+        true
     }
 
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = cx.options.args.clone();
+        if cx.question {
+            return question_args(a, cx);
+        }
         if cx.builder {
             a.push("--dangerously-skip-permissions".into());
         }
@@ -37,6 +76,15 @@ impl AgentAdapter for Antigravity {
 
     fn resumes(&self) -> bool {
         true
+    }
+
+    fn signed_in(&self, program: &str) -> Option<bool> {
+        let out = Process::new(program).args(["models"]).timeout(Duration::from_secs(10)).stdout_cap(64 * 1024).run().ok()?;
+        Some(out.status.success() && !out.stdout_text().trim().is_empty())
+    }
+
+    fn sign_in_fix(&self) -> Option<String> {
+        Some("Sign in to Antigravity: open a terminal and run `agy` (or sign in via Antigravity IDE), then try again.".into())
     }
 
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
@@ -83,6 +131,7 @@ impl AgentAdapter for Antigravity {
             "result" => {
                 p.saw_result = true;
                 if let Some(res) = v.get("result") {
+                    p.cost_usd = res.get("cost_usd").or_else(|| res.get("total_cost_usd")).and_then(Value::as_f64);
                     if let Some(u) = res.get("usage") {
                         let in_tok = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
                         let cache_tok = u.get("cache_read_tokens").and_then(Value::as_u64).unwrap_or(0);
@@ -93,15 +142,46 @@ impl AgentAdapter for Antigravity {
                     }
                     if res.get("status").and_then(Value::as_str) == Some("ERROR") {
                         let why = res.get("error").or_else(|| res.get("response")).and_then(Value::as_str).unwrap_or("run failed");
-                        out.push(AgentEvent::Error { message: format!("Antigravity: {why}"), remediation: None, log: None });
+                        let (message, remediation) = antigravity_failure(why);
+                        out.push(AgentEvent::Error { message, remediation, log: None });
                     }
                 }
             }
             "error" => {
                 let msg = v.pointer("/error/message").or_else(|| v.get("error")).and_then(Value::as_str).unwrap_or("unknown error");
-                out.push(AgentEvent::Error { message: format!("Antigravity: {msg}"), remediation: None, log: None });
+                let (message, remediation) = antigravity_failure(msg);
+                out.push(AgentEvent::Error { message, remediation, log: None });
             }
-            _ => {}
+            _ => {
+                let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+                match s("type").as_str() {
+                    "init" => p.session_id = v.get("session_id").and_then(Value::as_str).map(str::to_string),
+                    "message" if s("role") == "assistant" => out.push(AgentEvent::TextDelta { text: s("content") }),
+                    "tool_use" => {
+                        let id = s("tool_id");
+                        let name = s("tool_name");
+                        out.push(p.started(&id, &name, v.get("parameters").cloned().unwrap_or(Value::Null)));
+                    }
+                    "tool_result" => {
+                        let id = s("tool_id");
+                        let ok = s("status") != "error";
+                        let text = v.get("output").map(content_text).unwrap_or_default();
+                        out.push(p.finished(&id, ok, &text));
+                    }
+                    "error" => {
+                        let (message, remediation) = antigravity_failure(&s("message"));
+                        out.push(AgentEvent::Error { message, remediation, log: None });
+                    }
+                    "result" => {
+                        p.saw_result = true;
+                        if let Some(st) = v.get("stats") {
+                            p.input_tokens = st.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+                            p.output_tokens = st.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
         out
     }
@@ -143,6 +223,8 @@ mod tests {
         assert_eq!(Antigravity.required_flags(), (&["--help"][..], &["--output-format", "stream-json"][..]));
         assert!(AgentAdapters::built_in().for_agent("antigravity").ids().contains(&"antigravity"));
         assert!(AgentAdapters::built_in().for_agent("agy").ids().contains(&"agy"));
+        assert!(AgentAdapters::built_in().for_agent("gemini-cli").ids().contains(&"gemini-cli"));
+        assert!(AgentAdapters::built_in().for_agent("gemini").ids().contains(&"gemini"));
     }
 
     #[test]
@@ -253,8 +335,41 @@ mod tests {
         let evs = p.line(&err.to_string());
         assert_eq!(evs.len(), 1);
         match &evs[0] {
-            AgentEvent::Error { message, .. } => assert!(message.contains("authentication expired")),
+            AgentEvent::Error { message, remediation, .. } => {
+                assert!(message.contains("authentication expired"));
+                assert!(remediation.is_some() && remediation.as_ref().unwrap().contains("Sign in to Antigravity"));
+            }
             other => panic!("expected Error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn antigravity_answers_questions_and_args() {
+        assert!(Antigravity.answers_questions());
+        let mcp = McpCommand { command: "craft-anything-cli".into(), args: vec!["mcp".into()], notes: None };
+        let opts = BackendOptions::default();
+        let q_args = Antigravity.args(&ArgsCx {
+            options: &opts,
+            prompt: "what stack was used?",
+            preamble: "PRE ",
+            mcp: &mcp,
+            resume: Some("conv-99"),
+            builder: false,
+            reads_checked: false,
+            question: true,
+        });
+        assert_eq!(
+            q_args,
+            ["--model", DEFAULT_MODEL, "--conversation", "conv-99", "--mode", "plan", "--output-format", "stream-json", "-p", "PRE what stack was used?"]
+        );
+        assert!(!q_args.contains(&"--dangerously-skip-permissions".to_string()));
+    }
+
+    #[test]
+    fn antigravity_sign_in_hint_and_remediation() {
+        assert!(Antigravity.sign_in_fix().is_some());
+        let (msg, fix) = antigravity_failure("login required to proceed");
+        assert!(msg.contains("Antigravity stopped"));
+        assert!(fix.is_some() && fix.unwrap().contains("Sign in to Antigravity"));
     }
 }

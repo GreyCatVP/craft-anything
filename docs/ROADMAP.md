@@ -305,6 +305,7 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
+
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
 - [ ] A table of what each adapter gets (our tool server, approvals, resume, notes mid-turn, a
@@ -354,7 +355,7 @@ Owner: open · Status: in progress
       writes ask; part of the approval decision above
 
 **ACP:**
-- [ ] Gemini CLI, opencode, goose via ACP or native adapters; each verified live, then turn ACP on
+- [ ] opencode, goose via ACP or native adapters; each verified live, then turn ACP on
       by default for the ones that pass
 - [x] Over ACP, suppress `session/update` notifications until `session/load` answers, keeping
       replayed messages and tool activity out of the current turn

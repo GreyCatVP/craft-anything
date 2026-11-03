@@ -59,7 +59,7 @@ pub enum AiCommand {
     /// Set the program an agent app runs, when it's installed where it isn't found (leave the
     /// path out to find it by its usual name again).
     Program { name: String, path: Option<String> },
-    /// Set the model an AI uses (Claude Code: the model it's asked for); leave it out to list the
+    /// Set the model an AI uses (Claude Code or Antigravity: the model it's asked for); leave it out to list the
     /// ones it can use.
     Model { name: String, model: Option<String> },
     /// Set how hard a Claude backend thinks (the Claude API or Claude Code): low, medium, high,
