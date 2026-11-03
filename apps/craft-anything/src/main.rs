@@ -8,6 +8,13 @@ use craft_anything_ui_egui::CraftApp;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod start_guard;
+
+/// Set when the last start never opened its window (see [`start_guard`]): the software renderer
+/// (WARP) is asked for, as with `CRAFT_ANYTHING_RENDERER=software`, for this start only.
+#[cfg(windows)]
+static RETRY_IN_SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
@@ -20,6 +27,15 @@ fn main() -> eframe::Result {
     // desktop.log beside the settings, so a start that shows nothing leaves a trace.
     log_to_file();
     log::info!("starting {} (pid {})", env!("CARGO_PKG_VERSION"), std::process::id());
+    // A driver that crashes natively leaves nothing behind but this mark (#74): the start after it
+    // draws without the graphics card, and the one after that is back to normal.
+    let config = craft_anything_engine::settings::config_dir();
+    if start_guard::last_start_failed(&config) {
+        log::warn!("the last start never opened its window; drawing without the graphics card this time");
+        #[cfg(windows)]
+        RETRY_IN_SOFTWARE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    start_guard::begin(&config);
 
     let settings = Settings::load();
     let mut session = Session::new(settings);
@@ -61,6 +77,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             log::info!("window open");
+            start_guard::opened(&config);
             CraftApp::setup_context(&cc.egui_ctx);
             let mut app = CraftApp::new(engine, hub);
             app.load_prefs(cc.storage);
@@ -122,7 +139,7 @@ fn graphics_advice(error: &str) -> &'static str {
 /// (#33). `WGPU_BACKEND` still narrows the choice.
 #[cfg(windows)]
 fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgpu::Surface<'_>>) -> Result<eframe::wgpu::Adapter, String> {
-    let software = wants_software(std::env::var("CRAFT_ANYTHING_RENDERER").ok().as_deref());
+    let software = wants_software(std::env::var("CRAFT_ANYTHING_RENDERER").ok().as_deref()) || RETRY_IN_SOFTWARE.load(std::sync::atomic::Ordering::Relaxed);
     let picked = adapters.iter().filter(|a| surface.is_none_or(|s| a.is_surface_supported(s))).min_by_key(|a| {
         let info = a.get_info();
         // Asked for software: WARP first, and the usual order among the rest.

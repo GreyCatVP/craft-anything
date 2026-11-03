@@ -121,6 +121,12 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 - [ ] Sometimes starting the app shows nothing: after the release, see from `desktop.log` whether it
       still happens. DX12-only may have ended it; a GOG Galaxy Vulkan overlay layer was seen loading
       into the app
+- [x] A start that dies before its window (a native driver crash leaves no dialog or log, #74, #104,
+      #33) is remembered: `starting` beside `desktop.log` is written before the window is asked for
+      and removed once it's open, and a start that finds it draws with WARP that once
+      (`apps/craft-anything/src/start_guard.rs`)
+- [ ] Live-check the start fallback on Windows: make a start die before its window (kill the
+      process at launch), start again, and see `desktop.log` say it drew without the graphics card
 - [ ] Add to `docs/releasing.md`: before publishing, a Deep build through Claude Code from the
       finished package, on a Mac and on Windows. Starting the CLI from the package (#91) doesn't
       show whether Claude Code accepts its tools

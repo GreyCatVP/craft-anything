@@ -177,6 +177,12 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**A crash that no code can report.** Three Windows tickets (#33, #104, #74) said the app "does
+nothing": a graphics driver crashed natively as the window opened, so no dialog, panic hook or log
+line ever ran, and each fix only covered the driver already seen. When a failure can't be caught,
+leave a mark before the risky step and clear it after (`start_guard.rs`); a mark found at the next
+start is the report, and that start takes the safer path (WARP). Not run on Windows here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
