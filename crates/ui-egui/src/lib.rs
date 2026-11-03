@@ -888,6 +888,20 @@ impl CraftApp {
             ) => game_files::tool_done(self, tool, r),
             // The Game files screen's look at a picked game.
             ("core_target_triage", r) => game_files::tool_done(self, tool, r),
+            ("project_conversation_use" | "project_conversation_new", r) => {
+                if let Ok(v) = &r {
+                    // The tool wrote the project's session: show the one it chose.
+                    if let Some(ws) = self.workspace.as_mut().filter(|w| v["project"].as_str().is_some_and(|p| w.root == std::path::Path::new(p))) {
+                        let _ = ws.reload();
+                    }
+                    self.refresh_side_panel();
+                }
+                match r {
+                    Ok(_) if tool == "project_conversation_use" => self.toast(tr("This project now continues that conversation."), false),
+                    Ok(_) => self.toast(tr("Starting a new conversation next time the project builds."), false),
+                    Err(e) => self.toast(format!("{} {}", tr("Couldn't change the conversation."), e.for_people()), true),
+                }
+            }
             (_, Ok(_)) => {}
             (_, Err(e)) if clean_room::is_refusal(&e) => self.state.modal = Some(state::Modal::DeepMode),
             (_, Err(e)) => self.toast(e.for_people(), true),
@@ -1495,8 +1509,12 @@ impl CraftApp {
         guard("conversation", || self.poll_conversation());
         guard("rebuild", || self.poll_run());
         guard("pins", || self.poll_pins(ctx));
-        // Back from another window: projects may have been added, moved or removed meanwhile.
+        // Back from another window: projects may have been added, moved or removed meanwhile, and
+        // a build or a conversation may have been continued from the CLI or plain Claude Code.
         if !self.headless && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)))) {
+            if let Some(ws) = self.workspace.as_mut() {
+                let _ = ws.reload();
+            }
             self.refresh_projects();
             self.refresh_side_panel();
         }

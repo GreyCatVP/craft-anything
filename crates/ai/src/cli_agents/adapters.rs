@@ -4,6 +4,9 @@
 //! adapter (prompt in, text out). Add an agent by implementing the trait and registering it.
 
 use super::*;
+// Where Claude Code keeps its sessions, shared with the app's tools (engine, L4), which list and
+// choose them without this crate.
+use craft_anything_engine::agent_sessions::{claude_config_dir, claude_project_folder, claude_session_file};
 
 mod antigravity;
 mod hermes;
@@ -436,41 +439,6 @@ impl AgentAdapter for ClaudeCode {
     }
 }
 
-/// Claude Code's own folder: `CLAUDE_CONFIG_DIR` when it's set (the person's choice, which the
-/// agent we start keeps too), else our own under a Flatpak (see [`flatpak_claude_dir`]), else
-/// `~/.claude`.
-fn claude_config_dir() -> Option<std::path::PathBuf> {
-    let set = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-    set.or_else(flatpak_claude_dir).or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
-}
-
-/// Whether this app runs in a Flatpak sandbox (it sets `FLATPAK_ID` and makes `/.flatpak-info`).
-pub fn in_flatpak() -> bool {
-    static IN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *IN.get_or_init(|| std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists())
-}
-
-/// Where Claude Code keeps its conversations when we start it under a Flatpak and the person
-/// hasn't chosen a folder: its own is `~/.claude`, which the sandbox only lets us read, so a
-/// conversation was never saved and `--resume` found nothing (#506). A folder of ours in the
-/// app's data folder is writable, and kept with the app. `None` outside a Flatpak, or when
-/// `CLAUDE_CONFIG_DIR` is set.
-pub fn flatpak_claude_dir() -> Option<std::path::PathBuf> {
-    let chosen = std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty());
-    flatpak_claude_dir_in(in_flatpak(), chosen, dirs::data_dir())
-}
-
-pub fn flatpak_claude_dir_in(flatpak: bool, chosen: bool, data: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
-    (flatpak && !chosen).then_some(data?.join("craft-anything").join("claude"))
-}
-
-/// Claude Code's name for the folder a session ran in: the path with everything but letters and
-/// digits made `-`. It finds a session by its id in any of these folders (2.1), so a long path
-/// cut short still works.
-fn claude_project_folder(cwd: &std::path::Path) -> String {
-    cwd.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(200).collect()
-}
-
 /// Put a kept Claude Code session back under `config` (see [`AgentAdapter::restore_session`]).
 /// Only a copy of that same session is put back, and never over one that's there.
 pub fn claude_restore(config: &std::path::Path, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
@@ -488,19 +456,6 @@ pub fn claude_restore(config: &std::path::Path, id: &str, saved: &[u8], cwd: &st
     let path = config.join("projects").join(claude_project_folder(cwd)).join(format!("{id}.jsonl"));
     craft_anything_platform::fs::write_atomic_private(&path, saved)?;
     Ok(true)
-}
-
-/// Folders under Claude Code's `projects/` looked through for a session.
-const SESSION_FOLDERS: usize = 10_000;
-
-/// Claude Code keeps each session as `projects/<the folder it ran in>/<id>.jsonl` under its
-/// config folder. An id is a UUID: anything else (a hand-edited manifest) names no file.
-pub fn claude_session_file(config: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
-    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return None;
-    }
-    let name = format!("{id}.jsonl");
-    std::fs::read_dir(config.join("projects")).ok()?.flatten().take(SESSION_FOLDERS).map(|e| e.path().join(&name)).find(|p| p.is_file())
 }
 
 /// Longest single request or reply in a handoff; a first brief runs to many thousands.

@@ -12,6 +12,7 @@ use craft_anything_ai::AgentEvent;
 use craft_anything_ai::rebuild::activity::{Action, ActivityNow, LineKind};
 use craft_anything_ai::rebuild::feed::{self, apply};
 use craft_anything_ai::rebuild::{self, AppKind, KindRegistry, KindWords, Note, RebuildRun, RunEvent, RunOptions, Started, Step, Stopped, TargetKind};
+use craft_anything_engine::agent_sessions::{self, SessionFile};
 use craft_anything_engine::inbox::{Answer, Inbox, Request, RequestKind};
 use craft_anything_engine::workspace::{CheckResult, Status, TargetRef, Workspace, suggest_name};
 use egui::{Color32, Margin, RichText, Ui, Vec2};
@@ -490,6 +491,10 @@ pub struct Facts {
     pub assets: (usize, f64),
     /// The builder's open questions, most important first.
     pub open_questions: Vec<String>,
+    /// The conversations Claude Code saved for this project, newest first.
+    pub sessions: Vec<SessionFile>,
+    /// Whether Claude Code's folder was found at all.
+    pub sessions_available: bool,
 }
 
 impl Facts {
@@ -504,6 +509,8 @@ impl Facts {
             // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00".
             assets: (a.len(), a.iter().fold(0.0, |s, x| s + x.cost_usd)),
             open_questions: craft_anything_ai::rebuild::self_check::open_questions(ws).into_iter().map(|u| u.question).collect(),
+            sessions: agent_sessions::claude_sessions(&ws.root),
+            sessions_available: agent_sessions::claude_config_dir().is_some_and(|config| config.is_dir()),
         }
     }
 }
@@ -595,6 +602,60 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         app.raise_asset_budget();
     }
     ui.add_space(12.0);
+}
+
+/// The conversation the project continues, and the ones Claude Code saved for it: a session begun
+/// in plain Claude Code is picked here, and the app continues it on the next build.
+fn conversation(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
+    let current = ws.manifest.agent_session.as_deref();
+    widgets::caption(ui, "Conversation");
+    ui.add_space(4.0);
+    let chosen = current.map_or_else(|| tr("New: the next build starts fresh").to_string(), short_id);
+    let mut pick: Option<Option<String>> = None;
+    egui::ComboBox::from_id_salt(("project-conversation", &ws.root)).selected_text(chosen).width(ui.available_width().min(220.0)).show_ui(ui, |ui| {
+        if ui.selectable_label(current.is_none(), tr("New: the next build starts fresh")).clicked() {
+            pick = Some(None);
+        }
+        for s in &app.facts.sessions {
+            if ui.selectable_label(current == Some(s.id.as_str()), format!("{} · {}", short_id(&s.id), size_words(s.bytes))).clicked() {
+                pick = Some(Some(s.id.clone()));
+            }
+        }
+        // Kept in the project from another computer: shown, though this one doesn't have it.
+        if let Some(id) = current.filter(|id| !app.facts.sessions.iter().any(|s| s.id == *id)) {
+            let _ = ui.selectable_label(true, short_id(id));
+        }
+        if app.facts.sessions.is_empty() {
+            let note = if app.facts.sessions_available { tr("No conversations saved yet.") } else { tr("Claude Code's folder wasn't found.") };
+            ui.label(RichText::new(note).color(Tokens::get(ui.ctx()).text_dim).size(theme::SMALL));
+        }
+    });
+    ui.add_space(6.0);
+    if widgets::secondary(ui, None, "New conversation").clicked() {
+        app.act("project_conversation_new", serde_json::json!({"project": ws.root}), tr("Start a new conversation"));
+    }
+    match pick {
+        Some(Some(id)) => app.act("project_conversation_use", serde_json::json!({"project": ws.root, "session": id}), tr("Continue in that conversation")),
+        Some(None) if current.is_some() => app.act("project_conversation_new", serde_json::json!({"project": ws.root}), tr("Start a new conversation")),
+        _ => {}
+    }
+    ui.add_space(12.0);
+}
+
+fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+fn size_words(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    let b = bytes as f64;
+    if b >= KB * KB {
+        format!("{:.1} MB", b / (KB * KB))
+    } else if b >= KB {
+        format!("{:.0} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 /// Which step is current, from the feed and the project's status, and whether it's being worked
@@ -700,6 +761,7 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     ui.add_space(14.0);
     open_questions(app, ui);
     asset_line(app, ui, ws);
+    conversation(app, ui, ws);
     if outcome(app).is_some() {
         outcome_button(app, ui, ws, 32.0, 12.5);
         ui.add_space(6.0);

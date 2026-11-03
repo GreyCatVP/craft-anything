@@ -792,6 +792,18 @@ impl Workspace {
         self.save()
     }
 
+    /// Continue a different conversation, or start a new one (`None`). The agent that saved it is
+    /// written with it, so another agent never resumes it. Starting one keeps who builds the
+    /// project.
+    pub fn set_agent_session(&mut self, session: Option<String>, agent: Option<String>) -> Result<(), ToolError> {
+        self.manifest.agent_session = session;
+        if self.manifest.agent_session.is_some() {
+            self.manifest.agent_session_by = agent;
+        }
+        self.manifest.updated_ms = now_ms();
+        self.save()
+    }
+
     pub fn investigation_dir(&self) -> PathBuf {
         self.root.join("investigation.cany")
     }

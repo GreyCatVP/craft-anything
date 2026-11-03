@@ -1378,3 +1378,17 @@ your files there are the app, edited in place	ваши файлы там — э�
 … {} older	… {} старых
 ← Back	← Назад
 ↑↓ to move · Enter to run · Esc to close	↑↓ для перемещения · Enter для запуска · Esc для закрытия
+# Project conversations (R2.9).
+Claude Code's folder wasn't found.	Папка Claude Code не найдена.
+Continue a project in another conversation	Продолжить проект в другом разговоре
+Continue in that conversation	Продолжить в этом разговоре
+Conversation	Разговор
+Couldn't change the conversation.	Не удалось изменить разговор.
+List a project's conversations	Список разговоров проекта
+New conversation	Новый разговор
+New: the next build starts fresh	Новый: следующая сборка начнётся с начала
+No conversations saved yet.	Разговоры ещё не сохранены.
+Start a new conversation	Начать новый разговор
+Start a project's conversation over	Начать разговор проекта заново
+Starting a new conversation next time the project builds.	Следующая сборка начнёт новый разговор.
+This project now continues that conversation.	Проект продолжит этот разговор.

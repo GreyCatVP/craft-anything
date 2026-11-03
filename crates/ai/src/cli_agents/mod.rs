@@ -19,6 +19,7 @@ use crate::config::BackendOptions;
 use crate::model::Stop;
 use crate::{AgentEvent, BackendConfig, Conversation, FailureKind, TurnFailure};
 use craft_anything_engine::CancelToken;
+use craft_anything_engine::agent_sessions::{flatpak_claude_dir, in_flatpak};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use craft_anything_platform::process::Process;
 use craft_anything_platform::sync::Mutex;
@@ -196,7 +197,7 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool 
 /// The fix for a sign-in failure, in plain words. Sign-in always happens in Claude Code itself;
 /// we never see or handle the account.
 pub fn sign_in_hint(message: &str) -> Option<String> {
-    sign_in_hint_in(message, adapters::in_flatpak())
+    sign_in_hint_in(message, in_flatpak())
 }
 
 /// [`sign_in_hint`] for a Flatpak or not. In a Flatpak, Claude Code keeps its sign-in and
@@ -623,7 +624,7 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     // Under a Flatpak, Claude Code gets a folder it can write its conversations to (#506); on
     // another computer over SSH it keeps its own.
     if remote.is_none()
-        && let Some(dir) = adapters::flatpak_claude_dir()
+        && let Some(dir) = flatpak_claude_dir()
     {
         let _ = std::fs::create_dir_all(&dir);
         env.push(("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned()));
@@ -976,11 +977,11 @@ mod tests {
     #[test]
     fn under_a_flatpak_claude_code_keeps_its_conversations_in_a_folder_it_can_write() {
         let data = || Some(std::path::PathBuf::from("/home/u/.var/app/ai.storyteller.craft-anything/data"));
-        let dir = adapters::flatpak_claude_dir_in(true, false, data()).unwrap();
+        let dir = craft_anything_engine::agent_sessions::flatpak_claude_dir_in(true, false, data()).unwrap();
         assert!(dir.ends_with("craft-anything/claude") && dir.starts_with("/home/u/.var/app/ai.storyteller.craft-anything/data"), "{dir:?}");
-        assert_eq!(adapters::flatpak_claude_dir_in(true, true, data()), None, "their own choice stays");
-        assert_eq!(adapters::flatpak_claude_dir_in(false, false, data()), None, "a normal install keeps ~/.claude");
-        assert_eq!(adapters::flatpak_claude_dir_in(true, false, None), None);
+        assert_eq!(craft_anything_engine::agent_sessions::flatpak_claude_dir_in(true, true, data()), None, "their own choice stays");
+        assert_eq!(craft_anything_engine::agent_sessions::flatpak_claude_dir_in(false, false, data()), None, "a normal install keeps ~/.claude");
+        assert_eq!(craft_anything_engine::agent_sessions::flatpak_claude_dir_in(true, false, None), None);
         let hint = sign_in_hint_in("Not logged in", true).unwrap();
         assert!(hint.contains("flatpak run") && hint.contains("CLAUDE_CONFIG_DIR") && hint.contains("auth login"), "{hint}");
         assert!(sign_in_hint_in("Not logged in", false).unwrap().contains("`claude auth login`"));
@@ -1462,13 +1463,13 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("0e4a6b1c-1111-4222-8333-944455556666.jsonl"), "{}\n").unwrap();
         std::fs::write(config.path().join("projects").join("stray.jsonl"), "{}\n").unwrap();
-        let found = adapters::claude_session_file(config.path(), "0e4a6b1c-1111-4222-8333-944455556666");
+        let found = craft_anything_engine::agent_sessions::claude_session_file(config.path(), "0e4a6b1c-1111-4222-8333-944455556666");
         assert_eq!(found, Some(folder.join("0e4a6b1c-1111-4222-8333-944455556666.jsonl")));
-        assert_eq!(adapters::claude_session_file(config.path(), "1b70e5c4-0000-0000-0000-000000000000"), None);
+        assert_eq!(craft_anything_engine::agent_sessions::claude_session_file(config.path(), "1b70e5c4-0000-0000-0000-000000000000"), None);
         for bad in ["", "../stray", "a/b", &"a".repeat(65)] {
-            assert_eq!(adapters::claude_session_file(config.path(), bad), None, "{bad:?}");
+            assert_eq!(craft_anything_engine::agent_sessions::claude_session_file(config.path(), bad), None, "{bad:?}");
         }
-        assert_eq!(adapters::claude_session_file(&config.path().join("nowhere"), "0e4a6b1c-1111-4222-8333-944455556666"), None);
+        assert_eq!(craft_anything_engine::agent_sessions::claude_session_file(&config.path().join("nowhere"), "0e4a6b1c-1111-4222-8333-944455556666"), None);
     }
 
     /// #451: a session kept in the project is put back where Claude Code finds it, once, and
@@ -1482,7 +1483,7 @@ mod tests {
         assert!(adapters::claude_restore(config.path(), id, saved.as_bytes(), cwd).unwrap());
         let put = config.path().join("projects").join("-home-someone-Craft-Anything-notes-app").join(format!("{id}.jsonl"));
         assert_eq!(std::fs::read_to_string(&put).unwrap(), saved);
-        assert_eq!(adapters::claude_session_file(config.path(), id), Some(put.clone()), "Claude Code finds it by its id");
+        assert_eq!(craft_anything_engine::agent_sessions::claude_session_file(config.path(), id), Some(put.clone()), "Claude Code finds it by its id");
         // There already: left as it is (it may have moved on since the copy was kept).
         std::fs::write(&put, "newer").unwrap();
         assert!(!adapters::claude_restore(config.path(), id, saved.as_bytes(), cwd).unwrap());
@@ -1491,7 +1492,7 @@ mod tests {
         let other = "1b70e5c4-0000-0000-0000-000000000000";
         assert!(adapters::claude_restore(config.path(), other, saved.as_bytes(), cwd).unwrap_err().message.contains("another session"));
         assert!(adapters::claude_restore(config.path(), "../../x", saved.as_bytes(), cwd).is_err());
-        assert_eq!(adapters::claude_session_file(config.path(), other), None);
+        assert_eq!(craft_anything_engine::agent_sessions::claude_session_file(config.path(), other), None);
         assert!(!adapter_for("codex").restore_session(id, saved.as_bytes(), cwd).unwrap());
     }
 

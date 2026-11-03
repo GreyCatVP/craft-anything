@@ -46,6 +46,9 @@ pub const TOOLS: &[&str] = &[
     // Projects and the rebuild run.
     "project_list",
     "project_show",
+    "project_conversations_list",
+    "project_conversation_use",
+    "project_conversation_new",
     "project_inbox_answer",
     "project_play",
     "project_preview",

@@ -2,6 +2,7 @@
 //! agent — can list them, read one with its conversation, and answer its questions without the
 //! app. Ids follow docs/tool-ids.md.
 
+use crate::agent_sessions;
 use crate::feed;
 use crate::inbox::{Answer, Inbox};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
@@ -41,6 +42,39 @@ pub fn specs() -> Vec<ToolSpec> {
             requires: Requires::Nothing,
             input_schema: schema_of::<ShowParams>,
             run: project_show,
+        },
+        ToolSpec {
+            id: "project_conversations_list",
+            title: "List a project's conversations",
+            summary: "The conversations the builder has for a project, newest first: each one's id, when it last changed and its size, and which one the project would continue. Covers the sessions Claude Code saved for the project's folder, whether Craft Anything started them or the person did in plain Claude Code.",
+            beginner: "Shows the conversations this project has had.",
+            toolset: Toolset::Projects,
+            effects: Effects::READ_ONLY,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<ProjectParams>,
+            run: project_conversations_list,
+        },
+        ToolSpec {
+            id: "project_conversation_use",
+            title: "Continue a project in another conversation",
+            summary: "Continue an existing conversation the next time this project builds: `session` is an id from project_conversations_list, and it must be one Claude Code saved for this project's folder. The project records which agent saved it, so another agent doesn't resume it. Only one program may write a conversation at a time.",
+            beginner: "Picks which conversation the project goes on with.",
+            toolset: Toolset::Projects,
+            effects: Effects::WRITES_FILESYSTEM,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<UseConversationParams>,
+            run: project_conversation_use,
+        },
+        ToolSpec {
+            id: "project_conversation_new",
+            title: "Start a project's conversation over",
+            summary: "Start a new conversation the next time this project builds: forget the saved session, so the builder begins from the project's brief. Claude Code keeps the old conversation, and the project keeps its copy; who builds the project doesn't change. Takes effect on the next build or message, not on a running one.",
+            beginner: "Starts a fresh conversation for this project.",
+            toolset: Toolset::Projects,
+            effects: Effects::WRITES_FILESYSTEM,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<ProjectParams>,
+            run: project_conversation_new,
         },
         ToolSpec {
             id: "project_inbox_answer",
@@ -391,6 +425,15 @@ pub struct ShowParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct UseConversationParams {
+    /// The project's folder.
+    pub project: PathBuf,
+    /// The conversation's id, from project_conversations_list.
+    pub session: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AnswerParams {
     /// The project's folder.
     pub project: PathBuf,
@@ -465,6 +508,58 @@ fn project_show(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
         o.insert("conversation".into(), json!({"total": items.len(), "offset": offset, "items": page}));
     }
     Ok(ToolOutput::Value(out))
+}
+
+fn project_conversations_list(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: ProjectParams = parse_params(params)?;
+    let ws = open(&p.project)?;
+    let sessions = agent_sessions::claude_sessions(&ws.root);
+    let current = ws.manifest.agent_session.as_deref();
+    let available = agent_sessions::claude_config_dir().is_some_and(|config| config.is_dir());
+    Ok(ToolOutput::Value(json!({
+        "project": ws.root,
+        "agent": agent_sessions::CLAUDE,
+        "available": available,
+        "session": current,
+        "saved_by": ws.manifest.agent_session_by,
+        "sessions": sessions.iter().map(|s| json!({
+            "id": s.id,
+            "modified_ms": s.modified_ms,
+            "bytes": s.bytes,
+            "current": current == Some(s.id.as_str()),
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+fn project_conversation_use(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: UseConversationParams = parse_params(params)?;
+    let mut ws = open(&p.project)?;
+    let id = p.session.trim();
+    if !agent_sessions::valid_session_id(id) {
+        return Err(ToolError::invalid("That isn't an id Claude Code saved a session under.").with_remediation("Pass an id from project_conversations_list."));
+    }
+    let config = agent_sessions::claude_config_dir().ok_or_else(|| {
+        ToolError::new(ErrorCode::BadSettings, "Couldn't find Claude Code's folder on this computer.")
+            .with_remediation("Install Claude Code, or set CLAUDE_CONFIG_DIR to its folder.")
+    })?;
+    if !agent_sessions::claude_sessions_in(&config, &ws.root).iter().any(|s| s.id == id) {
+        return Err(ToolError::new(ErrorCode::NotFound, format!("No session {id} was saved for this project's folder."))
+            .with_remediation("Pick one from project_conversations_list: a session belongs to the folder it ran in."));
+    }
+    ws.set_agent_session(Some(id.to_string()), Some(agent_sessions::CLAUDE.to_string()))?;
+    Ok(ToolOutput::Value(json!({
+        "project": ws.root,
+        "session": ws.manifest.agent_session,
+        "saved_by": ws.manifest.agent_session_by,
+    })))
+}
+
+fn project_conversation_new(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: ProjectParams = parse_params(params)?;
+    let mut ws = open(&p.project)?;
+    let previous = ws.manifest.agent_session.clone();
+    ws.set_agent_session(None, None)?;
+    Ok(ToolOutput::Value(json!({"project": ws.root, "previous": previous, "session": ws.manifest.agent_session})))
 }
 
 fn project_inbox_answer(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
@@ -670,5 +765,36 @@ mod tests {
         assert_eq!(folder_to_open(&ws, false, None).unwrap(), ws.root);
         assert_eq!(folder_to_open(&ws, true, None).unwrap(), ws.app_dir());
         assert!(folder_to_open(&ws, false, Some(8)).is_err(), "no such pin");
+    }
+
+    #[test]
+    fn a_projects_conversation_is_listed_chosen_and_started_over() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "App", "An app", TargetRef::None).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let call = |id: &str, p: Value| e.call(id, p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
+
+        let listed = call("project_conversations_list", json!({"project": ws.root})).unwrap();
+        assert_eq!(listed["agent"], agent_sessions::CLAUDE);
+        assert!(listed["session"].is_null(), "nothing saved yet");
+        assert!(listed["sessions"].is_array());
+
+        // An id that isn't shaped like one, or names no session of this folder, is refused.
+        assert!(call("project_conversation_use", json!({"project": ws.root, "session": "../escape"})).is_err());
+        assert!(call("project_conversation_use", json!({"project": ws.root, "session": "00000000-0000-0000-0000-000000000000"})).is_err());
+
+        // A saved session is the one the project continues, and it records who saved it.
+        ws.set_agent_session(Some("0e4a6b1c-1111-4222-8333-944455556666".into()), Some("claude-code".into())).unwrap();
+        let listed = call("project_conversations_list", json!({"project": ws.root})).unwrap();
+        assert_eq!(listed["session"], "0e4a6b1c-1111-4222-8333-944455556666");
+        assert_eq!(listed["saved_by"], "claude-code");
+
+        // Starting over forgets the session but keeps who builds the project.
+        let started = call("project_conversation_new", json!({"project": ws.root})).unwrap();
+        assert_eq!(started["previous"], "0e4a6b1c-1111-4222-8333-944455556666");
+        assert!(started["session"].is_null());
+        let m = Workspace::open(&ws.root).unwrap().manifest;
+        assert!(m.agent_session.is_none());
+        assert_eq!(m.agent_session_by.as_deref(), Some("claude-code"));
     }
 }

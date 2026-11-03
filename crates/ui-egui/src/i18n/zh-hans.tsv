@@ -1378,3 +1378,17 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 … {} older	… 还有 {} 条较早内容
 ← Back	← 返回
 ↑↓ to move · Enter to run · Esc to close	↑↓ 选择 · Enter 运行 · Esc 关闭
+# Project conversations (R2.9).
+Claude Code's folder wasn't found.	未找到 Claude Code 的文件夹。
+Continue a project in another conversation	在其他对话中继续项目
+Continue in that conversation	在该对话中继续
+Conversation	对话
+Couldn't change the conversation.	无法更改对话。
+List a project's conversations	列出项目的对话
+New conversation	新对话
+New: the next build starts fresh	新对话：下次构建从头开始
+No conversations saved yet.	还没有保存的对话。
+Start a new conversation	开始新对话
+Start a project's conversation over	重新开始项目的对话
+Starting a new conversation next time the project builds.	下次构建时将开始新对话。
+This project now continues that conversation.	此项目现在将继续该对话。

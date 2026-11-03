@@ -5,6 +5,7 @@
 //! records the evidence it returns, and turns any escaped panic into an error.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod agent_sessions;
 pub mod clean_room;
 
 /// Tools an agent app may be told to approve on its own side (Codex's `approval_mode`): each one
