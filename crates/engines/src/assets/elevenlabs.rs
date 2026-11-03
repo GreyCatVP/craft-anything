@@ -158,7 +158,7 @@ const MAX_MODELS: usize = 200;
 const LIST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Said beside a speech list made without a key.
-const NO_KEY: &str = "Add an ElevenLabs key in Settings \u{2192} AI \u{2192} Game assets to list the speech models your account can use and what each \
+const NO_KEY: &str = "Add an ElevenLabs key in Settings \u{2192} Builds \u{2192} Asset provider keys to list the speech models your account can use and what each \
                       costs; sound effects and music need no list.";
 
 impl ElevenLabs {
@@ -256,7 +256,7 @@ impl ElevenLabs {
 /// ElevenLabs would not list its models for this key.
 fn refused() -> ToolError {
     ToolError::new(ErrorCode::BadSettings, "ElevenLabs did not let this key read its list of models.").with_remediation(
-        "Check the key in Settings \u{2192} AI \u{2192} Game assets. A restricted key needs the models_read permission (turn it on for the key at \
+        "Check the key in Settings \u{2192} Builds \u{2192} Asset provider keys. A restricted key needs the models_read permission (turn it on for the key at \
          elevenlabs.io/app/settings/api-keys); without it ElevenLabs answers that the workspace was not found.",
     )
 }

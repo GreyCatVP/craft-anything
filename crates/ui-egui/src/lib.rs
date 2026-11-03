@@ -7,6 +7,7 @@
 //! holding it never freezes a frame; the last snapshot ([`SessionView`]) is shown meanwhile.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod asset_picker;
 pub mod builders;
 pub mod chat;
 pub mod demo;
@@ -199,6 +200,12 @@ pub enum Done {
     },
     /// Which asset providers have a key set up (provider id → stored).
     AssetKeys(std::collections::BTreeMap<String, bool>),
+    /// The models the providers offer for one asset type were listed (see
+    /// `CraftApp::refresh_asset_models`).
+    AssetModels {
+        kind: craft_anything_engines::assets::AssetKind,
+        result: Result<asset_picker::ModelsView, ToolError>,
+    },
     /// A project's asset settings were saved and reloaded on a worker.
     AssetSettings(Result<Box<craft_anything_engine::workspace::Workspace>, ToolError>),
     Wrote {
@@ -431,6 +438,14 @@ pub struct CraftApp {
     /// The asset providers the app lists: the engine session's registry (where a fork registers its
     /// own), read once at startup so screens never lock the session to list them.
     pub asset_providers: craft_anything_engines::assets::AssetProviders,
+    /// What the providers said they offer for each asset type, with their prices (read on a worker
+    /// with `assets_models_list`; the pickers draw from this and never ask).
+    pub asset_models: std::collections::BTreeMap<craft_anything_engines::assets::AssetKind, asset_picker::ModelsView>,
+    /// The latest request for each type's lists; an older answer arriving after it is dropped.
+    pub(crate) asset_model_jobs: std::collections::BTreeMap<craft_anything_engines::assets::AssetKind, u64>,
+    /// Settings was on the Builds page when the last frame was drawn (the lists are asked for again
+    /// when it opens).
+    pub(crate) builds_page_open: bool,
     /// What the open project's files say (built result, pictures, assets, open questions), read
     /// on a worker.
     pub facts: project::Facts,
@@ -520,6 +535,9 @@ impl CraftApp {
             game_engines: None,
             asset_keys: None,
             asset_providers,
+            asset_models: Default::default(),
+            asset_model_jobs: Default::default(),
+            builds_page_open: false,
             facts: Default::default(),
             facts_reader: Default::default(),
             asset_change_job: None,
@@ -1300,6 +1318,14 @@ impl CraftApp {
                 if self.asset_change_job == Some(job) {
                     self.asset_change_job = None;
                 }
+                // A request for model lists that died is over; the lists it would have replaced stay.
+                self.asset_model_jobs.retain(|kind, id| {
+                    let mine = *id == job;
+                    if mine && let Some(view) = self.asset_models.get_mut(kind) {
+                        view.loading = false;
+                    }
+                    !mine
+                });
                 // A failed or cancelled engine download frees the button to try again.
                 if self.engine_flow.job.is_some_and(|(_, id)| id == job) {
                     self.engine_flow.job = None;
@@ -1450,7 +1476,19 @@ impl CraftApp {
             }
             Done::EngineGot { builder, installer } => self.engine_got(builder, installer),
             Done::GhidraGot => self.ghidra_got(),
-            Done::AssetKeys(keys) => self.asset_keys = Some(keys),
+            Done::AssetKeys(keys) => {
+                // A key saved or removed changes which providers have lists to show.
+                let changed = self.asset_keys.as_ref().is_some_and(|before| *before != keys);
+                self.asset_keys = Some(keys);
+                if changed {
+                    for kind in craft_anything_engines::assets::AssetKind::ALL {
+                        if self.asset_models.contains_key(&kind) {
+                            self.refresh_asset_models(kind, false);
+                        }
+                    }
+                }
+            }
+            Done::AssetModels { kind, result } => self.asset_models_listed(job, kind, result),
             Done::Wrote { what, path } => {
                 if let Some(p) = path {
                     self.toast(format!("{} {}", tr("Saved"), p.display()), false);

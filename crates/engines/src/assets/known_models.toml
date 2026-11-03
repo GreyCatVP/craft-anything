@@ -23,7 +23,7 @@
 
 version = 1
 
-# The models the previous fixed table offered (assets.toml), under the provider's own ids. Its
+# The models the previous fixed table offered (the old `assets.toml`, now removed), under the provider's own ids. Its
 # Scenario 3D model, `model_meshy-img23d` (Meshy 6), is deprecated at Scenario, so the entry here is
 # the model that replaces it, `model_meshy-7-1-img23d`.
 [[model]]

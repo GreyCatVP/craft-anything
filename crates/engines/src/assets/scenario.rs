@@ -294,7 +294,7 @@ const AUDIO_TAGS: &[(&str, AssetKind)] = &[
 ];
 
 /// Said beside a list made without a key.
-const NO_KEY: &str = "Add a Scenario key in Settings → AI → Game assets to list every model for this type and what each costs; \
+const NO_KEY: &str = "Add a Scenario key in Settings → Builds → Asset provider keys to list every model for this type and what each costs; \
                       without one only the models this app already knows are listed.";
 
 impl Scenario {

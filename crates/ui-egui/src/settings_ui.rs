@@ -1,6 +1,7 @@
 //! Settings: General (mode, theme, language), Engines (Ghidra, tool paths), AI, Builds (when a
 //! build is good enough, generated art), Plugins (MCP servers), Safety.
 
+use crate::asset_picker::{self, ProviderModels, asset_picker, type_title};
 use crate::i18n::{LANGUAGES, tr, trf};
 use crate::state::SettingsTab;
 use crate::theme::{self, ThemeKind, Tokens};
@@ -8,11 +9,21 @@ use crate::{CraftApp, Pick, icons, widgets};
 use craft_anything_ai::BackendKind;
 use craft_anything_engine::Mode;
 use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{MAX_ASSET_BUDGET_USD, MAX_ASSET_CREDITS, Unit};
 use egui::{RichText, Ui, Vec2};
 use std::path::PathBuf;
 
 /// Draws the Settings modal and the content for its selected tab.
 pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
+    // The model lists are asked for again each time the Builds page opens (those read lately are
+    // kept), in the background: the page shows what is there meanwhile.
+    let on_builds = app.state.settings_open && app.state.settings_tab == SettingsTab::Builds;
+    if on_builds != app.builds_page_open {
+        app.builds_page_open = on_builds;
+        if on_builds {
+            app.refresh_stale_asset_models();
+        }
+    }
     if !app.state.settings_open {
         return;
     }
@@ -598,8 +609,6 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         ui.add_space(6.0);
     }
     server_form(app, ui);
-    ui.add_space(16.0);
-    crate::engine_ui::assets_settings(app, ui);
 }
 
 /// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by
@@ -641,7 +650,7 @@ fn number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::
     ui.add(egui::DragValue::new(value).range(range).prefix(prefix).suffix(suffix)).changed()
 }
 
-/// Edit build limits and asset defaults, persisting changes to budgets and visual-model selections.
+/// Edit build limits and the generated-assets defaults of new projects, persisting what changes.
 fn builds(app: &mut CraftApp, ui: &mut Ui) {
     let mut changed = false;
     let b = &mut app.settings.build;
@@ -668,52 +677,188 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
         changed |= number(ui, &mut b.parallel, 1..=8, "", "");
     });
     ui.add_space(8.0);
-    widgets::caption(ui, "Generated assets");
-    let a = &mut app.settings.assets;
-    let (image_id, model_3d_id) = (a.legacy_table_id(AssetKind::Image), a.legacy_table_id(AssetKind::Model3d));
-    row(
-        ui,
-        "Budget for a new project",
-        "What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.",
-        |ui| {
-            changed |= number(ui, &mut a.usd_limit, 0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD, "$", "");
-        },
-    );
-    let table = craft_anything_engines::assets::Catalogue::built_in();
-    row(ui, "Picture model", "What pictures and textures are made with.", |ui| {
-        let current = table
-            .image_model(image_id.as_deref())
-            .map(|m| m.name.clone())
-            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", image_id.as_deref().unwrap_or_default())]));
-        egui::ComboBox::from_id_salt("image-model").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
-            for m in table.images() {
-                let price = crate::usage::asset_cost_words(m.cost(craft_anything_engines::assets::Shape::Square));
-                let label = format!("{} · {} · {} {}", m.name, m.provider, price, tr("a picture"));
-                let on = image_id.as_deref() == Some(m.id.as_str());
-                if ui.selectable_label(on, label).on_hover_text(&m.licence).clicked() && !on {
-                    changed |= a.set_legacy_table_id(AssetKind::Image, &m.id);
-                }
-            }
-        });
-    });
-    row(ui, "3D model generator", "What pictures are turned into 3D models with.", |ui| {
-        let current = table
-            .model_3d(model_3d_id.as_deref())
-            .map(|m| m.name.clone())
-            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", model_3d_id.as_deref().unwrap_or_default())]));
-        egui::ComboBox::from_id_salt("model-3d").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
-            for m in table.models_3d() {
-                let price = crate::usage::asset_cost_words(m.cost(true));
-                let label = format!("{} · {} · {}", m.name, m.provider, price);
-                let on = model_3d_id.as_deref() == Some(m.id.as_str());
-                if ui.selectable_label(on, label).on_hover_text(&m.licence).clicked() && !on {
-                    changed |= a.set_legacy_table_id(AssetKind::Model3d, &m.id);
-                }
-            }
-        });
-    });
+    changed |= generated_assets(app, ui);
     if changed {
         app.settings_changed();
+    }
+}
+
+/// The generated-assets part of Builds: the providers' keys, then what a new project starts with
+/// (the master "ignore the budget" switch and a provider, model and limit for each type), and when
+/// the providers' model lists were fetched. True when a setting changed.
+fn generated_assets(app: &mut CraftApp, ui: &mut Ui) -> bool {
+    let mut changed = false;
+    crate::engine_ui::assets_settings(app, ui);
+    ui.add_space(14.0);
+    widgets::caption(ui, "Generated assets for new projects");
+    ui.add_space(6.0);
+    row(
+        ui,
+        "New projects ignore the budget",
+        "A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.",
+        |ui| {
+            changed |= widgets::toggle(ui, &mut app.settings.assets.ignore_budget, "Ignore budget").changed();
+        },
+    );
+    changed |= defaults_table(app, ui);
+    fetched_line(app, ui);
+    changed
+}
+
+/// A row for each asset type: the provider and model a new project uses (Off when none is chosen),
+/// its limit in the provider's unit and whether new projects enforce it.
+fn defaults_table(app: &mut CraftApp, ui: &mut Ui) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut changed = false;
+    let ignore_budget = app.settings.assets.ignore_budget;
+    egui::Grid::new("asset-defaults").num_columns(4).spacing([8.0, 8.0]).show(ui, |ui| {
+        for heading in ["Type", "Provider · model", "Default limit", "Limit"] {
+            widgets::caption(ui, heading);
+        }
+        ui.end_row();
+        for kind in AssetKind::ALL {
+            let choice = app.settings.assets.choice(kind);
+            let view = app.asset_models.get(&kind);
+            let title = tr(type_title(kind));
+            ui.label(RichText::new(&title).font(theme::medium(theme::SMALL)));
+            ui.vertical(|ui| {
+                if let Some(picked) = asset_picker(ui, egui::Id::new(("asset-default", kind.id())), kind, &choice, view) {
+                    app.settings.assets.defaults.insert(kind, picked);
+                    changed = true;
+                }
+                let missing_key = choice.provider.as_deref().filter(|p| app.asset_keys.as_ref().and_then(|k| k.get(*p)) == Some(&false));
+                if let Some(provider) = missing_key {
+                    let name = app.asset_providers.get(provider).map_or_else(|| provider.to_string(), |p| p.name().to_string());
+                    ui.label(RichText::new(trf("No {name} key", &[("name", &name)])).color(t.warning).size(theme::CAPTION));
+                } else if choice.provider.is_none() && view.is_some_and(|v| v.is_read() && !v.loading && v.providers.is_empty()) {
+                    ui.label(RichText::new(tr("No provider with a saved key makes this.")).color(t.text_faint).size(theme::CAPTION));
+                } else if choice.provider.is_some() && !choice.pricing.tracked() {
+                    ui.label(RichText::new(tr("usage not tracked")).color(t.text_faint).size(theme::CAPTION));
+                }
+            });
+            match (&choice.provider, choice.pricing.tracked()) {
+                (None, _) => {
+                    ui.label(RichText::new("–").color(t.text_faint));
+                }
+                (Some(_), false) => {
+                    ui.label(RichText::new(tr("price unknown")).color(t.text_faint).size(theme::CAPTION));
+                }
+                (Some(_), true) => {
+                    changed |= limit_field(ui, &mut app.settings.assets, choice.unit, &title);
+                }
+            }
+            match (&choice.provider, choice.pricing.tracked()) {
+                (None, _) => {}
+                (Some(_), false) => {
+                    ui.label(RichText::new("–").color(t.text_faint));
+                }
+                (Some(_), true) if ignore_budget => {
+                    widgets::pill(ui, "Ignored", t.warning, t.raised).on_hover_text(tr("New projects ignore the budget, so this limit starts off."));
+                }
+                (Some(_), true) => {
+                    widgets::pill(ui, "On", t.success, t.raised).on_hover_text(tr("New projects start with this limit on."));
+                }
+            }
+            ui.end_row();
+        }
+    });
+    ui.add(
+        egui::Label::new(
+            RichText::new(tr(
+                "A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.",
+            ))
+            .color(t.text_faint)
+            .size(theme::CAPTION),
+        )
+        .wrap(),
+    );
+    changed
+}
+
+/// The default limit in `unit` (dollars or credits), edited in that unit. True when it changed.
+fn limit_field(ui: &mut Ui, assets: &mut craft_anything_engine::settings::AssetSettings, unit: Unit, title: &str) -> bool {
+    let mut shown = assets.default_limit(unit);
+    let drag = match unit {
+        Unit::Usd => egui::DragValue::new(&mut shown).range(0.0..=MAX_ASSET_BUDGET_USD).prefix("$").fixed_decimals(2).speed(0.05),
+        Unit::Credits => egui::DragValue::new(&mut shown).range(0.0..=MAX_ASSET_CREDITS).suffix(format!(" {}", tr("credits"))).fixed_decimals(0).speed(1.0),
+    };
+    let r = widgets::named(ui.add(drag), &trf("{type} default limit", &[("type", title)]));
+    if !r.changed() {
+        return false;
+    }
+    match unit {
+        Unit::Usd => assets.usd_limit = shown,
+        Unit::Credits => assets.credit_limit = shown,
+    }
+    true
+}
+
+/// "A, B and C".
+fn list_words(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} {} {last}", rest.join(", "), tr("and")),
+    }
+}
+
+/// Under the table: when the model lists were fetched and from whom, a Refresh that asks again, what
+/// is being asked while a request runs, and the providers that could not be asked.
+fn fetched_line(app: &mut CraftApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let now = craft_anything_engine::inbox::now_ms();
+    let loading = app.asset_models.values().any(|v| v.loading);
+    let lists: Vec<&ProviderModels> = app.asset_models.values().flat_map(|v| v.providers.iter()).collect();
+    let mut names: Vec<String> = Vec::new();
+    for p in &lists {
+        if !names.contains(&p.name) {
+            names.push(p.name.clone());
+        }
+    }
+    let fetched = match lists.iter().map(|p| p.fetched_ms).min() {
+        Some(oldest) => trf("Model lists fetched from {names} {ago}", &[("names", &list_words(&names)), ("ago", &asset_picker::ago(now, oldest))]),
+        None if app.asset_models.values().any(|v| v.is_read()) => tr("No model lists yet. Save a provider key above to list its models."),
+        None => tr("The model lists haven't been read yet."),
+    };
+    let mut problems: Vec<String> = Vec::new();
+    for p in &lists {
+        if let Some(e) = &p.error {
+            let line = trf("Couldn't ask {name}: {error}", &[("name", &p.name), ("error", e)]);
+            if !problems.contains(&line) {
+                problems.push(line);
+            }
+        }
+    }
+    // What the running request says it is doing (the tool reports each provider it asks).
+    let doing = app
+        .asset_model_jobs
+        .values()
+        .find_map(|id| app.jobs.list.iter().find(|j| j.id == *id && j.outcome.is_none()).and_then(|j| j.progress()))
+        .map(|p| p.message)
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| tr("Asking the providers for their models…"));
+    ui.add_space(6.0);
+    let mut refresh = false;
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            refresh = ui.add_enabled_ui(!loading, |ui| widgets::secondary(ui, Some("refresh-cw"), "Refresh").clicked()).inner;
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if loading {
+                    ui.add(widgets::Spinner::new().size(14.0).color(t.accent));
+                    ui.add(egui::Label::new(RichText::new(doing).color(t.text_dim).size(theme::CAPTION)).wrap());
+                } else {
+                    ui.add(egui::Label::new(RichText::new(fetched).color(t.text_faint).size(theme::CAPTION)).wrap());
+                }
+            });
+        });
+    });
+    for line in problems {
+        ui.add(egui::Label::new(RichText::new(line).color(t.warning).size(theme::CAPTION)).wrap());
+    }
+    if refresh {
+        for kind in AssetKind::ALL {
+            app.refresh_asset_models(kind, true);
+        }
     }
 }
 

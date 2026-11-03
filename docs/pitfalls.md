@@ -92,6 +92,11 @@ reached `main`. Run with `--no-fail-fast`, and after a fix rerun the whole crate
 CI the banner moved the layout under another test running beside it, and its click missed. It passed
 25 runs on a Mac. Anything a test sets for the whole process goes in a test program of its own.
 
+**A click that closed the window it was meant for.** `egui_kittest`'s `scroll_to_me()` takes three
+frames to scroll a Settings tab, not one; a click after two went to where the widget had been, outside
+the window, and the modal closed with the test still "running". The reported rect lags the scroll too.
+After `scroll_to_me()`, run three steps before the click, and check the widget's rect when a click does nothing.
+
 **Fixtures that leak into each other.** A "nothing here" path sat beside a fake game folder in the
 same temp directory, and game detection walked up and found the game. Give each case its own
 `tempfile::tempdir()`.
@@ -401,6 +406,13 @@ a note, a log line), and test the success path end to end, not just the picking.
 The fix then made the check create `checks/round-N/routes/` first, which made `round-N` exist, and
 `web_site_capture` (which refuses an existing folder) stopped the run. Create a tool's output parent
 right before that tool runs, never a folder that another tool must create itself.
+
+**A popup list that could shrink but not grow.** egui sizes a popup from its last frame, and a
+`ScrollArea` inside it gets only the height that is left. The model picker has a search box above its
+list: a search that matched nothing shrank the popup to one row, and when it matched again the rows were
+laid out below the popup's edge, where they could not be hovered or clicked (no single frame was wrong,
+and the screen looked fine). Give a list in a popup a fixed height (`min_scrolled_height` equal to
+`max_height`, `auto_shrink` off) and test a search that empties the list and then fills it again.
 
 **A size measured after drawing, used a frame late.** The prompt box's height was measured each
 frame and used to size the feed on the next, so every time it grew or shrank one frame showed it

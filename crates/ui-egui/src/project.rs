@@ -94,7 +94,7 @@ impl CraftApp {
                 // Temporary: the asset tools and the project panel still check one dollar budget, so
                 // it starts at Settings' dollar limit as before; Tasks 10 and 14 of the per-type
                 // assets plan drop it.
-                m.assets.legacy_budget_usd = Some(assets.budget());
+                m.assets.legacy_budget_usd = Some(assets.default_limit(craft_anything_engines::assets::model::Unit::Usd));
                 m.generate_assets = generate;
                 // Picked on Make: its later changes are built by it too.
                 m.builder = draft.ai;
@@ -608,7 +608,7 @@ impl CraftApp {
 
     /// What "Raise the budget" adds: the default budget from Settings (or $5 when that is 0).
     pub(crate) fn asset_budget_step(&self) -> f64 {
-        let b = self.settings.assets.budget();
+        let b = self.settings.assets.default_limit(craft_anything_engines::assets::model::Unit::Usd);
         if b > 0.0 { b } else { craft_anything_engine::workspace::ASSET_BUDGET_USD }
     }
 

@@ -199,10 +199,8 @@ fn sent_but_unanswered(e: &ureq::Error) -> bool {
 /// can act on. A remote body is never repeated.
 fn refusal(status: u16) -> Result<(), ToolError> {
     match status {
-        401 | 403 => {
-            Err(ToolError::new(ErrorCode::BadSettings, "fal.ai didn't accept the key.")
-                .with_remediation("Check the fal.ai key in Settings → AI → Game assets."))
-        }
+        401 | 403 => Err(ToolError::new(ErrorCode::BadSettings, "fal.ai didn't accept the key.")
+            .with_remediation("Check the fal.ai key in Settings → Builds → Asset provider keys.")),
         402 => Err(ToolError::new(ErrorCode::OverLimit, "The fal.ai account is out of credit.").with_remediation("Add credit at fal.ai, then try again.")),
         status => http::status(status),
     }

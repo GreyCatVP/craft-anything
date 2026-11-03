@@ -87,6 +87,7 @@ const ACTIONS: &[Action] = &[
     a("check_asset_keys",    "which asset providers have a key set up",        Tool(&["assets_key_status"])),
     a("save_asset_key",      "save an asset provider's key in the keychain",   Tool(&["assets_key_set"])),
     a("remove_asset_key",    "forget an asset provider's key",                 Tool(&["assets_key_remove"])),
+    a("refresh_asset_models","list the models a provider offers for an asset type, with prices", Tool(&["assets_models_list"])),
     a("Engine › Open",       "open Unity Hub or the Epic Games Launcher",      Tool(&["engines_app_open"])),
     a("Download pages",      "open an engine's or fal.ai's download page",     UiOnly("a link; engines_install returns the page for vendor installs")),
 
@@ -99,7 +100,7 @@ const ACTIONS: &[Action] = &[
     a("Settings › Engine paths", "where external engines are",                 Tool(&["settings_set"])),
     a("Settings › Ask before running", "consent before running programs",     Tool(&["settings_set"])),
     a("Settings › Auto mode", "decide routine questions automatically",        Tool(&["settings_set"])),
-    a("Settings › Asset budget", "budget for generated assets",                Tool(&["settings_set"])),
+    a("Settings › Asset defaults", "provider, model and limits new projects start with for each asset type", Tool(&["settings_set"])),
     a("Settings (all)",      "see every setting",                              Tool(&["settings_show"])),
     a("Theme",               "light or dark",                                  UiOnly("a look, not a product action (it is stored in settings, so settings_set theme also works)")),
 
@@ -145,6 +146,7 @@ const PLUMBING: &[(&str, &str)] = &[
     ("ghidra_ready", "a query"), ("ghidra_missing", "a query"),
     ("load_prefs", "startup"), ("after_first_frames", "startup"), ("log", "the log panel"), ("toast", "a message"),
     ("settings_changed", "marks settings dirty; each setting has its row"), ("flush_settings", "saves settings"),
+    ("refresh_stale_asset_models", "part of refresh_asset_models: asks again for the lists that are old, when Builds opens"),
     ("refresh_view", "redraw data"), ("resolve_chat_evidence", "redraw data"), ("mark_dirty", "redraw data"),
     ("poll_conversation", "polling"), ("allow_for_project", "part of answer_consent"),
     ("handle_done", "a job's result"), ("tool_done", "a job's result"),

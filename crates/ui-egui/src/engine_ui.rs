@@ -6,13 +6,15 @@
 //! Hub and the Epic Games Launcher against their vendors' signatures). Sign-in, licences and the
 //! engines themselves stay in the vendors' own apps, with the person.
 
+use crate::asset_picker::ModelsView;
 use crate::i18n::{tr, trf};
 use crate::state::{MakeDraft, Modal, Screen};
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, Done, icons, widgets};
 use craft_anything_ai::rebuild::KindRegistry;
+use craft_anything_engine::evidence::{ErrorCode, ToolError};
 use craft_anything_engine::{CallOptions, Caller};
-use craft_anything_engines::assets::{AssetProvider, AssetProviders};
+use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders};
 use craft_anything_engines::game::{self, Builder, Inventory};
 use craft_anything_engines::ghidra::{self, get};
 use egui::{RichText, Ui, Vec2};
@@ -413,6 +415,64 @@ impl CraftApp {
         });
     }
 
+    /// Ask the providers, in the background, which models they offer for `kind` and what each costs
+    /// (`assets_models_list`). The tool keeps the lists on disk and uses them again while they are
+    /// young; `force` asks every provider again. It can take minutes, holds the engine while it
+    /// does, and is the only way the pickers get their lists: drawing never asks.
+    pub fn refresh_asset_models(&mut self, kind: AssetKind, force: bool) {
+        // An engine without the AI layer's tools (the demo's) has nobody to ask.
+        if self.engine.registry().get("assets_models_list").is_none() {
+            return;
+        }
+        self.asset_models.entry(kind).or_default().loading = true;
+        let engine = self.engine.clone();
+        let job = self.jobs.spawn("Ask the providers for their models", true, move |j| {
+            let progress = j.reporter();
+            let opts = CallOptions::new(Caller::Ui).with_cancel(j.cancel.clone()).with_progress(&progress);
+            let result = engine.call("assets_models_list", serde_json::json!({"kind": kind, "refresh": force}), opts).and_then(|out| {
+                let json = out.to_json();
+                ModelsView::from_result(json.get("result").unwrap_or(&serde_json::Value::Null), craft_anything_engine::inbox::now_ms())
+                    .map_err(ToolError::internal)
+            });
+            Ok(Done::AssetModels { kind, result })
+        });
+        self.asset_model_jobs.insert(kind, job);
+    }
+
+    /// Ask again for the lists of every type that was never read or was read more than ten minutes
+    /// ago (when a page that shows them opens). A request already running is left to finish.
+    pub fn refresh_stale_asset_models(&mut self) {
+        let now = craft_anything_engine::inbox::now_ms();
+        for kind in AssetKind::ALL {
+            if self.asset_models.get(&kind).is_none_or(|v| !v.loading && v.is_stale(now)) {
+                self.refresh_asset_models(kind, false);
+            }
+        }
+    }
+
+    /// A request for `kind`'s lists finished. An answer to a request that a newer one has replaced is
+    /// dropped. A request that failed (or was stopped) leaves the lists shown as they were.
+    pub(crate) fn asset_models_listed(&mut self, job: u64, kind: AssetKind, result: Result<ModelsView, ToolError>) {
+        if self.asset_model_jobs.get(&kind) != Some(&job) {
+            return;
+        }
+        self.asset_model_jobs.remove(&kind);
+        match result {
+            Ok(view) => {
+                self.asset_models.insert(kind, view);
+            }
+            Err(e) => {
+                if let Some(view) = self.asset_models.get_mut(&kind) {
+                    view.loading = false;
+                }
+                if e.code != ErrorCode::Cancelled {
+                    self.log(true, e.message.clone());
+                    self.toast(e.for_people(), true);
+                }
+            }
+        }
+    }
+
     /// Let the builder generate assets, or not: for the open project on its screen
     /// (through the project_assets_allow tool), else for the game being set up on Make. Turning it
     /// on without a provider key asks for one.
@@ -479,11 +539,7 @@ pub fn assets_toggle(app: &mut CraftApp, ui: &mut Ui, mut on: bool) {
     let note = if no_key {
         tr("Needs an asset provider key. Until then the game is built without generated assets.")
     } else {
-        let p = AssetPrices::of(app);
-        trf(
-            "Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.",
-            &[("model", &p.model), ("picture", &p.picture)],
-        )
+        tr("Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.")
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(note).color(if no_key { t.warning } else { t.text_dim }).size(theme::SMALL));
@@ -509,13 +565,9 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
     ui.add_space(12.0);
     ui.add(
         egui::Label::new(
-            RichText::new({
-                let p = AssetPrices::of(app);
-                trf(
-                    "Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.",
-                    &[("model", &p.model), ("picture", &p.picture), ("budget", &p.budget)],
-                )
-            })
+            RichText::new(tr(
+                "Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.",
+            ))
             .size(theme::BODY),
         )
         .wrap(),
@@ -544,37 +596,6 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
     }
 }
 
-/// Prices for the text about generated art, from the asset table and Settings.
-struct AssetPrices {
-    /// A textured 3D model ("about $0.53").
-    model: String,
-    /// A square picture with the chosen picture model.
-    picture: String,
-    /// A new project's budget ("$5.00").
-    budget: String,
-}
-
-impl AssetPrices {
-    /// Format configured visual-model estimates and the default project budget, falling back to catalogue defaults.
-    fn of(app: &CraftApp) -> AssetPrices {
-        use crate::usage::asset_cost_words;
-        use craft_anything_engines::assets::{Catalogue, Shape, usd};
-        let table = Catalogue::built_in();
-        let picture = table
-            .image_model(app.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Image).as_deref())
-            .or_else(|_| table.image_model(None))
-            .map(|m| m.cost(Shape::Square))
-            .unwrap_or(0.0);
-        let model = table
-            .model_3d(app.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Model3d).as_deref())
-            .or_else(|_| table.model_3d(None))
-            .map(|m| m.cost(true))
-            .unwrap_or(0.0)
-            + picture;
-        AssetPrices { model: asset_cost_words(model), picture: asset_cost_words(picture), budget: tr(&usd(app.settings.assets.budget())) }
-    }
-}
-
 /// "Get a key at …" for a provider that says where.
 fn keys_link(ui: &mut Ui, provider: &dyn AssetProvider) {
     if let Some(page) = provider.keys_page()
@@ -584,19 +605,16 @@ fn keys_link(ui: &mut Ui, provider: &dyn AssetProvider) {
     }
 }
 
-/// Settings → AI: each asset provider's key for game assets.
+/// Settings → Builds: each asset provider's key, and whether one is saved. A provider with a saved
+/// key is listed in the pickers; Remove forgets it.
 pub fn assets_settings(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    ui.label(RichText::new(tr("Game assets")).font(theme::medium(theme::SMALL)));
+    widgets::caption(ui, "Asset provider keys");
     ui.add(
         egui::Label::new(
-            RichText::new({
-                let p = AssetPrices::of(app);
-                trf(
-                    "Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.",
-                    &[("model", &p.model), ("budget", &p.budget)],
-                )
-            })
+            RichText::new(tr(
+                "Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.",
+            ))
             .color(t.text_faint)
             .size(theme::CAPTION),
         )
@@ -605,25 +623,45 @@ pub fn assets_settings(app: &mut CraftApp, ui: &mut Ui) {
     let all = app.asset_providers.clone();
     for provider in all.ids().into_iter().filter_map(|id| all.get(id)) {
         ui.add_space(6.0);
-        let stored = app.asset_keys.as_ref().and_then(|k| k.get(provider.id()).copied());
-        egui::CollapsingHeader::new(RichText::new(provider.name()).size(theme::SMALL))
-            .id_salt(("asset-provider", provider.id()))
-            .icon(widgets::disclosure_icon)
-            .show(ui, |ui| {
-                if stored == Some(true) {
-                    ui.horizontal(|ui| {
-                        widgets::pill(ui, "Key saved", t.success, t.raised);
-                        if widgets::secondary(ui, None, "Remove").clicked() {
-                            app.remove_asset_key(provider.id().into());
-                        }
-                    });
-                } else {
-                    if let Some(key) = key_field(app, ui, provider.as_ref(), "Save") {
-                        app.save_asset_key(provider.id().into(), key);
+        // Known once the keys were looked up; a provider the lookup doesn't list has none.
+        let stored = app.asset_keys.as_ref().map(|k| k.get(provider.id()).copied().unwrap_or(false));
+        let open_id = ui.make_persistent_id(("asset-key-open", provider.id()));
+        let open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false) && stored == Some(false);
+        let mut toggle_open = false;
+        ui.horizontal(|ui| {
+            // Room for the buttons, so the name is centred beside them.
+            ui.set_min_height(34.0);
+            ui.label(RichText::new(provider.name()).font(theme::medium(theme::SMALL)));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match stored {
+                Some(true) => {
+                    let remove = widgets::secondary(ui, None, "Remove");
+                    if widgets::named(remove, &trf("Remove the {name} key", &[("name", provider.name())])).clicked() {
+                        app.remove_asset_key(provider.id().into());
                     }
-                    keys_link(ui, provider.as_ref());
+                    widgets::pill(ui, "Key saved", t.success, t.raised);
+                }
+                Some(false) => {
+                    let add = widgets::secondary(ui, None, "Add a key");
+                    toggle_open = widgets::named(add, &trf("Add a key for {name}", &[("name", provider.name())])).clicked();
+                    widgets::pill(ui, "Key needed", t.warning, t.raised);
+                }
+                None => {
+                    ui.label(RichText::new(tr("Checking for a saved key…")).color(t.text_faint).size(theme::CAPTION));
                 }
             });
+        });
+        if toggle_open {
+            ui.data_mut(|d| d.insert_temp(open_id, !open));
+        }
+        if open {
+            ui.push_id(provider.id(), |ui| {
+                if let Some(key) = key_field(app, ui, provider.as_ref(), "Save") {
+                    ui.data_mut(|d| d.insert_temp(open_id, false));
+                    app.save_asset_key(provider.id().into(), key);
+                }
+                keys_link(ui, provider.as_ref());
+            });
+        }
     }
 }
 
@@ -998,5 +1036,58 @@ mod tests {
         let mut d = draft("a racing game in Electron");
         d.builder = Some(Builder::Unreal);
         assert_eq!(chosen(&kinds, &d), Some(Builder::Unreal), "the person's pick on Make wins");
+    }
+
+    /// A view that was read once, so there is a list to keep when a later request fails.
+    fn read_view(loading: bool) -> ModelsView {
+        ModelsView { fetched_ms: 5, providers: Vec::new(), loading }
+    }
+
+    fn app() -> CraftApp {
+        crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true))
+    }
+
+    #[test]
+    fn an_answer_to_a_replaced_request_is_dropped_and_the_newest_is_shown() {
+        let mut app = app();
+        app.asset_models.insert(AssetKind::Music, ModelsView { loading: true, ..read_view(true) });
+        app.asset_model_jobs.insert(AssetKind::Music, 9);
+        // The request before the newest one answers late: nothing changes.
+        app.asset_models_listed(8, AssetKind::Music, Ok(ModelsView { fetched_ms: 100, ..read_view(false) }));
+        assert_eq!((app.asset_models[&AssetKind::Music].fetched_ms, app.asset_models[&AssetKind::Music].loading), (5, true));
+        assert_eq!(app.asset_model_jobs.get(&AssetKind::Music), Some(&9));
+        app.asset_models_listed(9, AssetKind::Music, Ok(ModelsView { fetched_ms: 200, ..read_view(false) }));
+        assert_eq!((app.asset_models[&AssetKind::Music].fetched_ms, app.asset_models[&AssetKind::Music].loading), (200, false));
+        assert!(app.asset_model_jobs.is_empty());
+    }
+
+    #[test]
+    fn a_failed_request_keeps_the_lists_shown_and_says_why_but_a_stopped_one_is_quiet() {
+        let mut app = app();
+        app.asset_models.insert(AssetKind::Image, read_view(true));
+        app.asset_model_jobs.insert(AssetKind::Image, 3);
+        app.asset_models_listed(3, AssetKind::Image, Err(ToolError::new(ErrorCode::EngineMissing, "No answer.")));
+        let view = &app.asset_models[&AssetKind::Image];
+        assert_eq!((view.fetched_ms, view.loading), (5, false), "the lists from before stay, and nothing is loading");
+        assert!(app.state.toasts.iter().any(|(text, error)| *error && text.contains("No answer.")));
+        app.state.toasts.clear();
+        app.asset_models.entry(AssetKind::Image).or_default().loading = true;
+        app.asset_model_jobs.insert(AssetKind::Image, 4);
+        app.asset_models_listed(4, AssetKind::Image, Err(ToolError::cancelled()));
+        assert!(!app.asset_models[&AssetKind::Image].loading && app.state.toasts.is_empty(), "Stop is not an error");
+    }
+
+    #[test]
+    fn a_request_whose_worker_died_stops_loading_and_leaves_the_others() {
+        let mut app = app();
+        for kind in [AssetKind::Image, AssetKind::Speech] {
+            app.asset_models.insert(kind, read_view(true));
+        }
+        app.asset_model_jobs.insert(AssetKind::Image, 11);
+        app.asset_model_jobs.insert(AssetKind::Speech, 12);
+        app.handle_done(crate::jobs::Finished { job: 11, result: Err("Ask the providers for their models hit a bug and stopped safely.".into()) });
+        assert!(!app.asset_models[&AssetKind::Image].loading);
+        assert!(app.asset_models[&AssetKind::Speech].loading, "another type's request is still running");
+        assert_eq!(app.asset_model_jobs.keys().copied().collect::<Vec<_>>(), [AssetKind::Speech]);
     }
 }

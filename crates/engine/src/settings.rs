@@ -2,10 +2,7 @@
 
 use crate::asset_choice::AssetChoice;
 use crate::versioned::{Step, upgrade};
-use craft_anything_engines::assets::{
-    AssetKind,
-    model::{Pricing, Unit},
-};
+use craft_anything_engines::assets::{AssetKind, model::Unit};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -220,43 +217,6 @@ impl AssetSettings {
     pub fn choice(&self, kind: AssetKind) -> AssetChoice {
         self.defaults.get(&kind).filter(|c| c.provider.is_none() || !c.model.is_empty()).cloned().unwrap_or_else(AssetChoice::off)
     }
-
-    /// The dollar limit for a new project.
-    ///
-    /// Temporary: the callers that still think in one budget (a new project's starting budget in
-    /// `ai::rebuild::project`, which only the project panel and `project_assets_budget` still read,
-    /// and the Engines and project screens) use it until Tasks 13 and 14 of the per-type assets plan
-    /// move them to [`Self::default_limit`].
-    pub fn budget(&self) -> f64 {
-        self.default_limit(Unit::Usd)
-    }
-
-    /// The id the old asset table gave the model chosen as the default for `kind`; `None` for Off,
-    /// for a model that table never had, and for any type but pictures and 3D models.
-    ///
-    /// Temporary: only the Settings and Engines screens still read that table, until Task 13 of the
-    /// per-type assets plan replaces them with the provider and model pickers. Generation uses each
-    /// project's chosen model.
-    pub fn legacy_table_id(&self, kind: AssetKind) -> Option<String> {
-        let c = self.defaults.get(&kind)?;
-        let provider = c.provider.as_deref()?;
-        LEGACY_ASSET_MODELS.iter().find(|m| m.kind == kind && m.provider == provider && m.model == c.model).map(|m| m.id.to_string())
-    }
-
-    /// Choose the default for `kind` by its asset table id (see [`Self::legacy_table_id`]); false,
-    /// and nothing changes, when the table never had that id for that type.
-    ///
-    /// Temporary: the Settings pictures and 3D rows use it until Task 13 of the per-type assets plan
-    /// replaces them with the provider and model pickers.
-    pub fn set_legacy_table_id(&mut self, kind: AssetKind, id: &str) -> bool {
-        match LEGACY_ASSET_MODELS.iter().find(|m| m.kind == kind && m.id == id) {
-            Some(m) => {
-                self.defaults.insert(kind, m.choice());
-                true
-            }
-            None => false,
-        }
-    }
 }
 
 /// A model of the asset table that `config.toml` versions 4 and older named by id
@@ -304,17 +264,6 @@ const LEGACY_ASSET_MODELS: [LegacyAssetModel; 6] = [
 ];
 
 impl LegacyAssetModel {
-    /// The choice this model becomes. Its price is learnt at the next refresh of the provider's list.
-    fn choice(&self) -> AssetChoice {
-        AssetChoice {
-            provider: Some(self.provider.into()),
-            model: self.model.into(),
-            model_name: self.name.into(),
-            unit: self.unit,
-            pricing: Pricing::After { unit: self.unit },
-        }
-    }
-
     /// The same choice as the `[assets.defaults.<type>]` table version 5 of `config.toml` has.
     fn v5_table(&self) -> Result<toml::Table, String> {
         let unit = toml::Value::try_from(self.unit).map_err(|e| e.to_string())?;
@@ -653,7 +602,7 @@ auto_mode = true
     }
 
     use super::*;
-    use craft_anything_engines::assets::model::Rate;
+    use craft_anything_engines::assets::model::{Pricing, Rate};
 
     #[test]
     fn only_configured_finds_no_engine_from_this_computer_but_keeps_the_ones_set() {
@@ -851,7 +800,7 @@ default = "Claude Code"
     }
 
     #[test]
-    fn every_old_table_id_maps_to_a_model_and_back() {
+    fn every_old_table_id_maps_to_a_model() {
         let expected = [
             ("nano-banana-pro", AssetKind::Image, "fal", "fal-ai/nano-banana-pro", Unit::Usd),
             ("flux-dev", AssetKind::Image, "fal", "fal-ai/flux/dev", Unit::Usd),
@@ -866,18 +815,9 @@ default = "Claude Code"
             let c = s.assets.choice(kind);
             assert_eq!((c.provider.as_deref(), c.model.as_str(), c.unit), (Some(provider), model, unit), "{id}");
             assert!(!c.model_name.is_empty(), "{id} keeps a name to show");
-            assert_eq!(s.assets.legacy_table_id(kind).as_deref(), Some(id), "{id} maps back");
-            let mut other = AssetSettings::default();
-            assert!(other.set_legacy_table_id(kind, id), "{id}");
-            assert_eq!(other.choice(kind), c, "{id} set the same way");
         }
         let none = read_settings("version = 4\n[assets]\nimage_model = \"made-up\"\nmodel_3d = \"also-made-up\"\n").unwrap();
         assert!(none.assets.defaults.is_empty(), "an id the old table never had is dropped (Off)");
-        assert_eq!(none.assets.legacy_table_id(AssetKind::Image), None);
-        let mut other = AssetSettings::default();
-        assert!(!other.set_legacy_table_id(AssetKind::Speech, "flux-dev"));
-        assert!(!other.set_legacy_table_id(AssetKind::Image, "tripo-p1"));
-        assert!(other.defaults.is_empty(), "a picture model can't be the speech default, nor a 3D one the picture default");
         let wrong = read_settings("version = 4\n[assets]\nimage_model = \"tripo-p1\"\n").unwrap();
         assert!(wrong.assets.defaults.is_empty(), "a 3D model isn't a picture model");
     }
@@ -893,10 +833,10 @@ default = "Claude Code"
         assert!(old.assets.defaults.is_empty() && !old.assets.ignore_budget);
         // Versions 0 to 3 go through the same step; a whole-number budget is read too.
         let v3 = read_settings("version = 3\n[assets]\nbudget_usd = 9\nimage_model = \"flux-dev\"\n").unwrap();
-        assert_eq!((v3.version, v3.assets.usd_limit, v3.assets.legacy_table_id(AssetKind::Model3d)), (SETTINGS_VERSION, 9.0, None));
-        assert_eq!(v3.assets.legacy_table_id(AssetKind::Image).as_deref(), Some("flux-dev"));
+        assert_eq!((v3.version, v3.assets.usd_limit, v3.assets.choice(AssetKind::Model3d).provider), (SETTINGS_VERSION, 9.0, None));
+        assert_eq!(v3.assets.choice(AssetKind::Image).model, "fal-ai/flux/dev");
         let kept = read_settings("version = 3\n[assets]\nmodel_3d = \"tripo-p1\"\n").unwrap();
-        assert_eq!((kept.version, kept.assets.legacy_table_id(AssetKind::Model3d).as_deref()), (SETTINGS_VERSION, Some("tripo-p1")));
+        assert_eq!((kept.version, kept.assets.choice(AssetKind::Model3d).model.as_str()), (SETTINGS_VERSION, "tripo3d/p1/image-to-3d"));
         // Nothing to move: no [assets] table, and an empty one.
         assert_eq!(read_settings("version = 4\n").unwrap().assets, AssetSettings::default());
         assert_eq!(read_settings("version = 4\n[assets]\n").unwrap().assets, AssetSettings::default());
@@ -959,7 +899,6 @@ default = "Claude Code"
         }
         let odd: Settings = toml::from_str("[assets]\nusd_limit = -3.0\ncredit_limit = 40.0\n").unwrap();
         assert_eq!((odd.assets.default_limit(Unit::Usd), odd.assets.default_limit(Unit::Credits)), (5.0, 40.0));
-        assert_eq!(odd.assets.budget(), 5.0, "the temporary dollar budget follows the dollar limit");
     }
 
     /// A default limit above what a limit can be is not believed: it falls back to the built-in one
