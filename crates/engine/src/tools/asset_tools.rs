@@ -237,8 +237,15 @@ fn canonical_future(path: &Path) -> Result<PathBuf, ToolError> {
     }
 }
 
+/// Whether two names may be one entry on a case-insensitive file system (macOS, Windows): equal
+/// by lower- or upper-case mapping, so "Reference" and "attachmentſ" meet their records too.
+fn same_name_ignoring_case(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase() || a.to_uppercase() == b.to_uppercase()
+}
+
 /// Refuse a destination that is one of Craft Anything's records (in a project whose app is the
-/// project folder, they sit beside the person's files), named directly or through a link.
+/// project folder, they sit beside the person's files), named directly, in another case, or
+/// through a link.
 fn not_a_record(ws: &Workspace, path: &Path) -> Result<(), ToolError> {
     let refused = || ToolError::invalid("save_as must not be one of Craft Anything's own records");
     if ws.is_own_record(path) {
@@ -246,6 +253,14 @@ fn not_a_record(ws: &Workspace, path: &Path) -> Result<(), ToolError> {
     }
     let root = canonical_future(&ws.root)?;
     let resolved = canonical_future(path)?;
+    // A folder that doesn't exist yet keeps the case it was given, so compare the first part under
+    // the project ignoring case: on macOS "Reference/x.png" is written into reference/.
+    let first = |p: &Path, base: &Path| p.strip_prefix(base).ok()?.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    for top in [first(path, &ws.root), first(&resolved, &root)].into_iter().flatten() {
+        if OWN_NAMES.iter().filter(|n| **n != "checks").any(|n| same_name_ignoring_case(n, &top)) {
+            return Err(refused());
+        }
+    }
     for name in OWN_NAMES.iter().filter(|n| **n != "checks") {
         if inside(&canonical_future(&root.join(name))?, &resolved) {
             return Err(refused());
@@ -1040,7 +1055,9 @@ mod tests {
         w.manifest.app_in_root = true;
         w.save().unwrap();
         std::fs::create_dir_all(w.root.join("reference")).unwrap();
-        for record in ["reference/picture-1.png", "pinned/old.png", "inbox/x.png", "./capture/shot.png"] {
+        // Other cases too: a case-insensitive file system writes them into the record folders.
+        for record in ["reference/picture-1.png", "pinned/old.png", "inbox/x.png", "./capture/shot.png", "Reference/x.png", "PINNED/x.png", "attachmentſ/x.png"]
+        {
             assert_eq!(save_path(&w, record, "png").unwrap_err().code, ErrorCode::BadInput, "{record}");
         }
         assert_eq!(save_path(&w, "Assets/crate.png", "png").unwrap().1, "Assets/crate.png");
