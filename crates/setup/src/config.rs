@@ -147,6 +147,18 @@ fn toml_set(client: &Client, text: &str, entry: &Value) -> Result<String, String
         doc.insert(table_name, toml_edit::Item::Table(t));
     }
     let servers = doc.get_mut(table_name).and_then(|t| t.as_table_mut()).ok_or_else(|| format!("`{table_name}` exists but is not a table"))?;
+    // Our own entry written inline (`craft-anything = { command = … }`) becomes a table, so the
+    // merge below keeps what the person put in it (`enabled = false`, `disabled_tools`…).
+    if client.shape == Shape::Codex
+        && old.as_ref().is_some_and(is_owned_entry)
+        && let Some(item) = servers.get_mut(SERVER_NAME)
+        && item.is_inline_table()
+    {
+        match std::mem::replace(item, toml_edit::Item::None).into_table() {
+            Ok(table) => *item = toml_edit::Item::Table(table),
+            Err(other) => *item = other,
+        }
+    }
     match servers.get_mut(SERVER_NAME).and_then(|i| i.as_table_mut()) {
         // Only our own entry is merged into; a foreign one (an HTTP `url` Codex would refuse beside
         // a `command`) is replaced, as the plan says it will be.
@@ -245,6 +257,21 @@ mod tests {
         let off = set_entry(&c, "", &e).unwrap().replace("startup_timeout_sec", "enabled = false\nstartup_timeout_sec");
         assert!(entry_turned_off(&c, &off) && !entry_turned_off(&c, &set_entry(&c, "", &e).unwrap()));
         assert!(c.entry_is_current(&read_entry(&c, &off).unwrap().unwrap(), &e), "setup keeps their choice");
+    }
+
+    /// #540: our own entry written inline keeps the person's settings too.
+    #[test]
+    fn an_inline_codex_entry_keeps_the_persons_own_settings() {
+        let c = client("codex");
+        let e = c.desired_entry(&["/b/craft-anything-cli".into(), "mcp".into()]);
+        let text = "[mcp_servers]\ncraft-anything = { command = \"/old/craft-anything-cli\", args = [\"mcp\"], enabled = false, disabled_tools = [\"x\"] }\n";
+        let new = set_entry(&c, text, &e).unwrap();
+        let got = read_entry(&c, &new).unwrap().unwrap();
+        assert_eq!(got["command"], "/b/craft-anything-cli");
+        assert_eq!(got["enabled"], false);
+        assert_eq!(got["disabled_tools"][0], "x");
+        assert_eq!(got["tools"]["rebuild_start"]["approval_mode"], "approve");
+        assert_eq!(set_entry(&c, &new, &e).unwrap(), new, "a second run changes nothing");
     }
 
     #[test]
