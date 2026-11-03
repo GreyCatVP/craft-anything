@@ -587,12 +587,23 @@ impl AgentAdapter for GeminiCli {
         &["gemini-cli", "gemini"]
     }
 
+    /// Gemini CLI reads its message from stdin and appends `-p` to it, so a long one can't pass
+    /// Windows' command-line limit, which is 8,191 characters through npm's `gemini.cmd`.
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
+    }
+
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = cx.options.args.clone();
         if let Some(m) = &cx.options.cli_model {
             a.extend(["-m".into(), m.clone()]);
         }
-        a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), format!("{}{}", cx.preamble, cx.prompt)]);
+        // An empty `-p` keeps it headless and adds nothing to the message on stdin (see `stdin_text`).
+        a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), String::new()]);
         a
     }
 

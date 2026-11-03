@@ -903,6 +903,23 @@ mod tests {
     }
 
     #[test]
+    fn gemini_long_prompt_goes_in_on_stdin() {
+        // npm starts Gemini CLI through `gemini.cmd`, where cmd.exe allows 8,191 characters.
+        let gemini = adapter_for("gemini-cli");
+        let prompt = "x".repeat(40_831);
+        let o = BackendOptions { cli_model: Some("gemini-2.5-pro".into()), ..Default::default() };
+        let a = build_args(gemini.as_ref(), &o, &prompt, "P:", &mcp(), None, Access::Analyse);
+        assert!(gemini.prompt_on_stdin(), "gemini must read its message from stdin");
+        assert_eq!(gemini.stdin_text("P:", &prompt), format!("P:{prompt}"), "the whole message, preamble first");
+        assert!(!a.iter().any(|x| x.contains(&prompt) || x.contains("P:")), "{a:?}");
+        assert!(a.iter().map(|x| x.len() + 1).sum::<usize>() < 4096, "argv stays short");
+        // Gemini CLI appends `-p` to stdin; empty, it adds nothing but keeps the run headless.
+        assert_eq!(&a[a.len() - 2..], &["-p".to_string(), String::new()]);
+        assert!(a.windows(2).any(|w| w[0] == "-m" && w[1] == "gemini-2.5-pro"));
+        assert!(a.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));
+    }
+
+    #[test]
     fn nested_session_variables_are_dropped_but_user_settings_kept() {
         let v = |names: &[&str]| names.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter();
         assert!(host_session_vars(v(&["CLAUDE_CODE_ENTRYPOINT", "PATH"])).is_empty(), "outside a session nothing is touched");
@@ -1341,6 +1358,44 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
             .run();
         assert!(run.is_ok(), "{run:?}");
         assert_eq!(std::fs::read_to_string(&out).unwrap_or_default(), message);
+    }
+
+    /// A stand-in `gemini.cmd`, started the way npm installs Gemini CLI on Windows, gets the whole
+    /// message (preamble first) on stdin and only short options in argv, for a normal message and
+    /// for one longer than cmd.exe's 8,191 characters. Its stdin goes to `stdin_echo_child`.
+    #[cfg(windows)]
+    #[test]
+    fn gemini_cmd_reads_its_message_on_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("gemini.cmd");
+        let exe = std::env::current_exe().unwrap();
+        let script = format!(
+            "@echo off\r\nif \"%~1\"==\"--help\" (echo --output-format stream-json& exit /b 0)\r\necho %*> \"%~dp0argv\"\r\nset {STDIN_ECHO_ENV}=%~dp0stdin\r\n\"{}\" --exact --test-threads=1 cli_agents::tests::stdin_echo_child >nul\r\necho {{\"type\":\"result\",\"stats\":{{\"input_tokens\":1,\"output_tokens\":1}}}}\r\n",
+            exe.display()
+        );
+        std::fs::write(&program, script).unwrap();
+        for prompt in ["q".to_string(), "x".repeat(40_831)] {
+            let _ = std::fs::remove_file(dir.path().join("stdin"));
+            let config =
+                BackendConfig { name: "Gemini".into(), kind: BackendKind::AgentCli, model: "gemini-cli".into(), base_url: None, ssh_host: None, enabled: true };
+            let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, None);
+            spec.preamble = Some("P:".into());
+            let mut c = CliConversation::new(spec);
+            c.send(&prompt);
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            let mut all = Vec::new();
+            while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                all.extend(c.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap_or_default();
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap_or_default();
+            assert_eq!(stdin.len(), prompt.len() + 2, "{all:?}");
+            assert!(stdin == format!("P:{prompt}"), "the whole message, preamble first");
+            assert!(!argv.contains("P:"), "{argv}");
+            assert!(argv.trim_end().ends_with("-p \"\""), "{argv}");
+        }
     }
 
     const STDIN_ECHO_ENV: &str = "CRAFT_ANYTHING_TEST_STDIN_ECHO";
