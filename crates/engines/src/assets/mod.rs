@@ -10,6 +10,7 @@ pub mod fal;
 mod http;
 pub mod model;
 pub mod scenario;
+pub mod tables;
 
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
