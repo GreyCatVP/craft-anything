@@ -260,13 +260,7 @@ impl AgentAdapter for ClaudeCode {
         if let Some(r) = cx.resume {
             a.extend(["--resume".into(), r.to_string()]);
         }
-        let tools = if cx.builder && cx.reads_checked {
-            "TodoWrite"
-        } else if cx.builder {
-            "Read,Write,Edit,Glob,Grep,TodoWrite"
-        } else {
-            ""
-        };
+        let tools = if cx.builder { "Bash,PowerShell,Read,Write,Edit,MultiEdit,Glob,Grep,TodoWrite,NotebookEdit" } else { "" };
         a.extend(["--tools".into(), tools.into()]);
         if cx.builder {
             // Questions go through our core_person_ask tool, which the app shows as buttons.
