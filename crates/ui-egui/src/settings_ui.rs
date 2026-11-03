@@ -1067,6 +1067,29 @@ mod tests {
         app.handle_done(Finished { job: 0, result: other(started) });
         assert_eq!(app.state.backend.as_deref(), Some("Laptop"), "the add that finished last is selected");
     }
+
+    /// A chat started while an AI connects is a choice too: the add doesn't switch AI under it.
+    #[test]
+    fn a_late_add_does_not_stop_a_chat_started_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Experienced, true));
+        // A closed local port: the chat starts, and its request fails without leaving this computer.
+        let config = BackendConfig {
+            name: "Box".into(),
+            kind: BackendKind::OpenaiCompatible,
+            model: "m".into(),
+            base_url: Some("http://127.0.0.1:9/v1".into()),
+            ssh_host: None,
+            enabled: true,
+        };
+        app.hub.add_backend(config, None).unwrap();
+        app.state.backend = Some("Box".into());
+        let started = app.backend_choices;
+        app.send("Hi");
+        assert!(app.conversation.is_some(), "the chat started");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "the chat's AI stays chosen");
+        assert!(app.conversation.is_some(), "the chat keeps going");
+    }
 }
 
 #[cfg(test)]

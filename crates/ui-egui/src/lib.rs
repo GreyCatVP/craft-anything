@@ -1194,6 +1194,9 @@ impl CraftApp {
         }
         self.state.chat.push(ChatItem::User(text.clone()));
         if self.state.backend.is_some() && self.conversation.is_none() {
+            // Chatting with this AI is a choice too: an AI that finishes connecting meanwhile
+            // doesn't take over (and stop) this conversation.
+            self.backend_choices = self.backend_choices.wrapping_add(1);
             match self.hub.start(self.state.backend.as_deref(), self.beginner()) {
                 Ok(c) => self.conversation = Some(c),
                 Err(e) => self.state.chat.push(ChatItem::Error { message: e.message, remediation: e.remediation, log: None }),
