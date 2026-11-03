@@ -76,13 +76,16 @@ pub(crate) fn choose(candidates: &[Candidate], cards: &[DisplayCard], asked: &As
 }
 
 /// Whether `card` is the GPU behind `adapter`: by PCI address when the driver gives one, else by
-/// PCI ids; GL gives only a vendor, which counts only when no other card has that vendor.
+/// PCI ids, which count only when no other card has the same ids (two cards of one model); GL
+/// gives only a vendor, which counts only when no other card has that vendor.
 fn drives(card: &DisplayCard, adapter: &Candidate, all: &[DisplayCard]) -> bool {
     if !adapter.pci_slot.is_empty() && !card.pci_slot.is_empty() {
         return adapter.pci_slot == card.pci_slot;
     }
     if adapter.device != 0 {
-        return adapter.vendor == card.vendor && adapter.device == card.device;
+        return adapter.vendor == card.vendor
+            && adapter.device == card.device
+            && all.iter().filter(|c| c.vendor == card.vendor && c.device == card.device).count() == 1;
     }
     adapter.vendor != 0 && adapter.vendor == card.vendor && all.iter().filter(|c| c.vendor == card.vendor).count() == 1
 }
@@ -250,5 +253,25 @@ mod tests {
             vulkan("AMD Radeon Graphics (RADV RENOIR)", AMD, DeviceType::IntegratedGpu),
         ];
         assert_eq!(choose(&adapters, &[card(AMD, 1, true)], &Asked::default()), Some((1, Why::BuiltInPanel)));
+    }
+
+    /// #571's laptop with the lid closed and a monitor on the NVIDIA card: the switched-off panel
+    /// isn't read as one (`platform::display` skips it), so the card with the monitor draws.
+    #[test]
+    fn a_closed_laptop_draws_on_the_card_with_the_monitor() {
+        let cards = [card(NVIDIA, 1, false), card(AMD, 0, false)];
+        assert_eq!(choose(&laptop_adapters(), &cards, &Asked::default()), Some((1, Why::OnlyGpuWithDisplays)));
+    }
+
+    /// Two cards of one model have the same PCI ids: only the PCI address tells them apart. Without
+    /// one from the driver the display rule gives way to the old choice instead of guessing.
+    #[test]
+    fn identical_cards_are_told_apart_only_by_pci_address() {
+        const SECOND: (u32, u32, &str) = (0x10de, 0x25a2, "0000:02:00.0");
+        let cards = [card(NVIDIA, 0, false), card(SECOND, 1, false)];
+        let with_slots = [vulkan("NVIDIA A", NVIDIA, DeviceType::DiscreteGpu), vulkan("NVIDIA B", SECOND, DeviceType::DiscreteGpu)];
+        assert_eq!(choose(&with_slots, &cards, &Asked::default()), Some((1, Why::OnlyGpuWithDisplays)));
+        let without: Vec<Candidate> = with_slots.iter().cloned().map(|c| Candidate { pci_slot: String::new(), ..c }).collect();
+        assert_eq!(choose(&without, &cards, &Asked::default()), Some((0, Why::Fallback)));
     }
 }

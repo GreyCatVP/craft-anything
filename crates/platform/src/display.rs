@@ -17,9 +17,10 @@ pub struct DisplayCard {
     pub device: u32,
     /// PCI address in the form `0000:05:00.0`, lowercase; empty when the system doesn't give one.
     pub pci_slot: String,
-    /// Connected displays of any kind, built-in panel included.
+    /// Connected displays that are switched on, of any kind, built-in panel included.
     pub displays: u32,
-    /// A connected built-in panel (eDP, LVDS or DSI): this card drives a laptop's own screen.
+    /// A connected, switched-on built-in panel (eDP, LVDS or DSI): this card drives a laptop's
+    /// own screen.
     pub built_in_panel: bool,
 }
 
@@ -47,8 +48,9 @@ pub fn display_cards() -> Vec<DisplayCard> {
 
 /// [`display_cards`] read from a DRM folder laid out like `/sys/class/drm`: a `cardN` entry per
 /// card, with the card's PCI ids in `cardN/device/uevent`, and a `cardN-<kind>-<n>` entry per
-/// connector, with `connected` or `disconnected` in its `status`. Cards without PCI ids (a
-/// firmware framebuffer) are left out.
+/// connector, with `connected` or `disconnected` in its `status` and, where the kernel gives it,
+/// `enabled` or `disabled` in its `enabled`. Cards without PCI ids (a firmware framebuffer) are
+/// left out.
 pub fn display_cards_in(drm: &Path) -> Vec<DisplayCard> {
     let Ok(entries) = std::fs::read_dir(drm) else {
         return Vec::new();
@@ -64,8 +66,12 @@ pub fn display_cards_in(drm: &Path) -> Vec<DisplayCard> {
             let prefix = format!("{card}-");
             let mut out = DisplayCard { vendor, device, pci_slot, displays: 0, built_in_panel: false };
             for connector in names.iter().filter_map(|n| n.strip_prefix(&prefix)) {
-                let status = read_small(&drm.join(format!("{prefix}{connector}")).join("status")).unwrap_or_default();
-                if status.trim() != "connected" {
+                let dir = drm.join(format!("{prefix}{connector}"));
+                let status = read_small(&dir.join("status")).unwrap_or_default();
+                // A panel can be connected but switched off (a closed lid with a monitor in use):
+                // `enabled` then reads `disabled`, and it drives nothing. No `enabled`: as before.
+                let enabled = read_small(&dir.join("enabled")).unwrap_or_default();
+                if status.trim() != "connected" || enabled.trim() == "disabled" {
                     continue;
                 }
                 out.displays = out.displays.saturating_add(1);
@@ -195,5 +201,19 @@ mod tests {
     fn only_connected_counts() {
         let d = drm(&[("card0", "1af4:1050", "0000:00:01.0")], &[("card0-Virtual-1", "unknown")]);
         assert_eq!(display_cards_in(d.path()).first().map(|c| c.displays), Some(0));
+    }
+
+    /// A laptop with its lid closed and a monitor on the discrete card: the panel still reads
+    /// `connected` but is switched off, so it neither counts nor marks its card as the panel's.
+    #[test]
+    fn a_switched_off_panel_does_not_count() {
+        let d = drm(
+            &[("card0", "10de:25a2", "0000:01:00.0"), ("card1", "1002:1638", "0000:05:00.0")],
+            &[("card0-HDMI-A-1", "connected"), ("card1-eDP-1", "connected")],
+        );
+        fs::write(d.path().join("card0-HDMI-A-1").join("enabled"), "enabled\n").expect("enabled");
+        fs::write(d.path().join("card1-eDP-1").join("enabled"), "disabled\n").expect("enabled");
+        let cards = display_cards_in(d.path());
+        assert_eq!(cards.iter().map(|c| (c.vendor, c.displays, c.built_in_panel)).collect::<Vec<_>>(), vec![(0x10de, 1, false), (0x1002, 0, false)]);
     }
 }
