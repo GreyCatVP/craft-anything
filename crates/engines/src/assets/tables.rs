@@ -51,11 +51,14 @@ impl KnownModels {
     /// table; a test keeps it parsing.
     pub fn built_in() -> &'static KnownModels {
         static TABLE: OnceLock<KnownModels> = OnceLock::new();
-        TABLE.get_or_init(|| {
-            KnownModels::parse(KNOWN_MODELS_TOML).unwrap_or_else(|e| {
-                log::warn!("known_models.toml is unreadable ({e}); no models are known in advance");
-                KnownModels::default()
-            })
+        TABLE.get_or_init(|| KnownModels::from_text_or_empty(KNOWN_MODELS_TOML))
+    }
+
+    /// The table in `text`, or an empty one (after a warning) when the text doesn't parse.
+    fn from_text_or_empty(text: &str) -> KnownModels {
+        KnownModels::parse(text).unwrap_or_else(|e| {
+            log::warn!("known_models.toml is unreadable ({e}); no models are known in advance");
+            KnownModels::default()
         })
     }
 
@@ -128,6 +131,13 @@ pub enum Role {
     Voice,
 }
 
+impl Role {
+    /// Every role. A new variant must be added here as well as to the matches on `Role`, which
+    /// the compiler checks; a test requires `input_roles.toml` to give each one a field name.
+    pub const ALL: [Role; 10] =
+        [Role::Prompt, Role::Image, Role::Shape, Role::Width, Role::Height, Role::Faces, Role::Textured, Role::Duration, Role::Instrumental, Role::Voice];
+}
+
 /// The field names of each role, as written in `input_roles.toml`.
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -192,11 +202,14 @@ impl InputRoles {
     /// table, under which no field has a role; a test keeps it parsing.
     pub fn built_in() -> &'static InputRoles {
         static TABLE: OnceLock<InputRoles> = OnceLock::new();
-        TABLE.get_or_init(|| {
-            InputRoles::parse(INPUT_ROLES_TOML).unwrap_or_else(|e| {
-                log::warn!("input_roles.toml is unreadable ({e}); no model input has a known role");
-                InputRoles::default()
-            })
+        TABLE.get_or_init(|| InputRoles::from_text_or_empty(INPUT_ROLES_TOML))
+    }
+
+    /// The table in `text`, or an empty one (after a warning) when the text doesn't parse.
+    fn from_text_or_empty(text: &str) -> InputRoles {
+        InputRoles::parse(text).unwrap_or_else(|e| {
+            log::warn!("input_roles.toml is unreadable ({e}); no model input has a known role");
+            InputRoles::default()
         })
     }
 
@@ -339,13 +352,58 @@ mod tests {
 
     #[test]
     fn a_table_that_does_not_parse_acts_as_empty() {
-        // What `built_in()` falls back to; it must answer, not panic.
-        let roles = InputRoles::default();
-        assert_eq!(roles.role_of("prompt"), None);
-        assert_eq!(roles.shape_value(Shape::Square, &strings(&["square_hd"])), None);
-        let known = KnownModels::default();
-        assert_eq!(known.kinds("fal", "fal-ai/flux/dev"), None);
-        assert!(known.fixed("elevenlabs", AssetKind::Music).is_empty());
+        // What `built_in()` does with a file that doesn't parse: it must answer, not panic.
+        let broken = [
+            "not toml at all [",
+            "version = 2\n",
+            "version = 1\n[[model]]\nprovider = \"fal\"\nid = \"x\"\nname = \"X\"\nkinds = [\"video\"]\n",
+            "version = 1\n[roles]\nprompt = [\"\"]\n",
+            "",
+        ];
+        for text in broken {
+            let roles = InputRoles::from_text_or_empty(text);
+            assert_eq!(roles.role_of("prompt"), None, "{text:?}");
+            assert_eq!(roles.shape_value(Shape::Square, &strings(&["square_hd"])), None, "{text:?}");
+            let known = KnownModels::from_text_or_empty(text);
+            assert_eq!(known, KnownModels::default(), "{text:?}");
+            assert_eq!(known.kinds("fal", "fal-ai/flux/dev"), None);
+            assert!(known.fixed("elevenlabs", AssetKind::Music).is_empty());
+        }
+        // Text that does parse is read as it is, not thrown away.
+        assert_eq!(&KnownModels::from_text_or_empty(KNOWN_MODELS_TOML), KnownModels::built_in());
+        assert_eq!(InputRoles::from_text_or_empty(INPUT_ROLES_TOML).role_of("prompt"), Some(Role::Prompt));
+        // And the default is what `built_in()` would hold.
+        assert_eq!(InputRoles::default().role_of("prompt"), None);
+        assert_eq!(KnownModels::default().kinds("fal", "fal-ai/flux/dev"), None);
+    }
+
+    #[test]
+    fn every_role_has_a_field_name() {
+        // An exhaustive match on purpose: a new `Role` does not compile until it has a name here,
+        // and the table must map that name back to it.
+        fn example_field(role: Role) -> &'static str {
+            match role {
+                Role::Prompt => "prompt",
+                Role::Image => "image_url",
+                Role::Shape => "image_size",
+                Role::Width => "width",
+                Role::Height => "height",
+                Role::Faces => "target_face_count",
+                Role::Textured => "should_texture",
+                Role::Duration => "seconds_total",
+                Role::Instrumental => "force_instrumental",
+                Role::Voice => "voice_id",
+            }
+        }
+        let table = InputRoles::built_in();
+        for role in Role::ALL {
+            assert_eq!(table.role_of(example_field(role)), Some(role), "{role:?} has no field name in input_roles.toml");
+        }
+        // `ALL` lists each role once, and the table parser's own list covers the same ten.
+        let distinct: HashSet<Role> = Role::ALL.into_iter().collect();
+        assert_eq!(distinct.len(), Role::ALL.len());
+        let parsed: HashSet<Role> = RoleNames::default().by_role().into_iter().map(|(role, _)| role).collect();
+        assert_eq!(parsed, distinct, "the roles input_roles.toml can name are not the roles there are");
     }
 
     #[test]

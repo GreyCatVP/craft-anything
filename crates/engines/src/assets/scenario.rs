@@ -1,5 +1,5 @@
 //! Scenario asynchronous image and mesh generation with a mandatory cost preflight.
-use super::{AssetProvider, AssetRequest, Generated, Shape, http};
+use super::{AssetProvider, Generated, LegacyRequest, Shape, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -20,9 +20,9 @@ impl Default for Scenario {
 }
 
 /// Validate an image or mesh request and build its model identifier and Scenario payload.
-fn request<'a>(req: &'a AssetRequest<'_>) -> Result<(&'a str, Value), ToolError> {
+fn request<'a>(req: &'a LegacyRequest<'_>) -> Result<(&'a str, Value), ToolError> {
     let (model, body) = match *req {
-        AssetRequest::Image { model, prompt, shape } => {
+        LegacyRequest::Image { model, prompt, shape } => {
             http::text(prompt, 10_000)?;
             let ratio = match shape {
                 Shape::Square => "1:1",
@@ -31,7 +31,7 @@ fn request<'a>(req: &'a AssetRequest<'_>) -> Result<(&'a str, Value), ToolError>
             };
             (model.endpoint.as_str(), json!({"prompt":prompt,"aspectRatio":ratio,"resolution":"1K","numOutputs":1}))
         }
-        AssetRequest::Model3d { model, image_url, textured, faces } => {
+        LegacyRequest::Model3d { model, image_url, textured, faces } => {
             if !model.faces().contains(&faces) {
                 return Err(http::bad("The requested polygon count is outside this model's range."));
             }
@@ -118,13 +118,13 @@ impl AssetProvider for Scenario {
         Ok(())
     }
     /// Validate the request and return its catalogue spending ceiling without submitting a job.
-    fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
+    fn estimate(&self, req: &LegacyRequest) -> Result<f64, ToolError> {
         request(req)?;
         Ok(req.listed_cost())
     }
     /// Confirm a live quote within the ceiling, submit once, and poll and download within one deadline.
     /// The returned cost converts the quoted creative units to an estimated USD amount.
-    fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+    fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
         let (model, body) = request(req)?;
         self.validate_key(key)?;
         let key = http::key(key)?;
@@ -197,7 +197,7 @@ mod tests {
     fn image(provider: &Scenario) -> Result<Generated, ToolError> {
         provider.generate(
             "test-key:test-secret",
-            &AssetRequest::Image {
+            &LegacyRequest::Image {
                 model: Catalogue::built_in().image_model(Some("scenario-gemini-3-1")).unwrap(),
                 prompt: "a wooden crate",
                 shape: Shape::Wide,
@@ -242,7 +242,7 @@ mod tests {
                 (200, "glTF fake".into()),
             ]
         });
-        let req = AssetRequest::Model3d {
+        let req = LegacyRequest::Model3d {
             model: Catalogue::built_in().model_3d(Some("scenario-meshy")).unwrap(),
             image_url: "https://example.com/input.png",
             textured: true,

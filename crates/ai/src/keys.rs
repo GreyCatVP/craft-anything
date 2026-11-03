@@ -202,7 +202,7 @@ mod tests {
         fn name(&self) -> &'static str {
             "Other"
         }
-        fn generate(&self, _key: &str, _req: &craft_anything_engines::assets::AssetRequest) -> Result<craft_anything_engines::assets::Generated, ToolError> {
+        fn generate(&self, _key: &str, _req: &craft_anything_engines::assets::LegacyRequest) -> Result<craft_anything_engines::assets::Generated, ToolError> {
             Err(ToolError::invalid("not here"))
         }
     }

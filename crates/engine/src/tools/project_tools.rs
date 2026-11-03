@@ -778,7 +778,7 @@ mod tests {
     /// Restricting legacy all-provider permission must retain every other provider, including extensions.
     #[test]
     fn disabling_a_legacy_provider_keeps_other_registered_providers_enabled() {
-        use craft_anything_engines::assets::{AssetProvider, AssetRequest, Generated};
+        use craft_anything_engines::assets::{AssetProvider, Generated, LegacyRequest};
         struct Custom;
         impl AssetProvider for Custom {
             /// Register a provider outside the built-in catalogue to exercise permission preservation.
@@ -790,7 +790,7 @@ mod tests {
                 "Custom"
             }
             /// Fail any generation attempt because this fixture only tests permission changes.
-            fn generate(&self, _: &str, _: &AssetRequest) -> Result<Generated, ToolError> {
+            fn generate(&self, _: &str, _: &LegacyRequest) -> Result<Generated, ToolError> {
                 Err(ToolError::invalid("test provider must not generate"))
             }
         }

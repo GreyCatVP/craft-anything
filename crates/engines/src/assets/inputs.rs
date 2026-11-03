@@ -1,0 +1,591 @@
+//! Puts a request into the input fields of whichever model a provider lists. Every model names its
+//! fields its own way, so nothing here knows a model: a field is filled by what it is for (its
+//! [`Role`], from `input_roles.toml`) and by what it can hold (its [`FieldKind`]).
+//!
+//! A value that no field takes is not an error: the model does its own thing instead, and the
+//! option is reported as ignored so the person is told. What is an error is an input the model
+//! cannot do without (a required field with no default that this request can't fill, or no field
+//! for the prompt at all). The lists a provider hands us are bounded by [`MAX_FIELDS`] and
+//! [`MAX_CHOICES`]; a longer one is refused before anything is read from it.
+
+use super::model::AssetOption;
+use super::tables::{InputRoles, Role};
+use super::{AssetKind, AssetRequest, Shape};
+use craft_anything_evidence::{ErrorCode, ToolError};
+use serde_json::{Map, Number, Value};
+
+/// The most input fields of one model that are read.
+pub const MAX_FIELDS: usize = 200;
+/// The most values of one choice field that are read.
+pub const MAX_CHOICES: usize = 1000;
+
+/// What a model's input field holds.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldKind {
+    Text,
+    Integer {
+        min: Option<i64>,
+        max: Option<i64>,
+    },
+    Number {
+        min: Option<f64>,
+        max: Option<f64>,
+    },
+    Bool,
+    /// One of these values.
+    Choice(Vec<String>),
+    /// A picture, given as a web address or a `data:` URI.
+    Image,
+}
+
+/// One input of a model, as its provider describes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputField {
+    pub name: String,
+    pub kind: FieldKind,
+    /// The model refuses a request without it.
+    pub required: bool,
+    /// The model uses a value of its own when the field is left out.
+    pub has_default: bool,
+}
+
+/// A request laid out in a model's own fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mapped {
+    /// The JSON body to send: field name to value.
+    pub body: Map<String, Value>,
+    /// The options of the request that no field of the model took.
+    pub ignored: Vec<AssetOption>,
+}
+
+/// What a request offers a field with a given role, before a field of some kind takes it.
+#[derive(Clone, Copy)]
+enum Supply<'a> {
+    Text(&'a str),
+    Shape(Shape),
+    Count(u32),
+    Seconds(f64),
+    Flag(bool),
+}
+
+/// The request's value for a role, or `None` when the request has none (or never uses the role).
+fn supply<'a>(req: &AssetRequest<'a>, role: Role) -> Option<Supply<'a>> {
+    use AssetRequest as R;
+    match (*req, role) {
+        (R::Image { prompt, .. } | R::SoundEffect { prompt, .. } | R::Music { prompt, .. }, Role::Prompt) => Some(Supply::Text(prompt)),
+        (R::Model3d { prompt, .. }, Role::Prompt) => prompt.map(Supply::Text),
+        (R::Speech { text, .. }, Role::Prompt) => Some(Supply::Text(text)),
+        (R::Model3d { image_url, .. }, Role::Image) => image_url.map(Supply::Text),
+        (R::Image { shape, .. }, Role::Shape | Role::Width | Role::Height) => Some(Supply::Shape(shape)),
+        (R::Model3d { faces, .. }, Role::Faces) => Some(Supply::Count(faces)),
+        (R::Model3d { textured, .. }, Role::Textured) => Some(Supply::Flag(textured)),
+        (R::SoundEffect { duration_seconds, .. } | R::Music { duration_seconds, .. }, Role::Duration) => Some(Supply::Seconds(duration_seconds)),
+        (R::Music { instrumental, .. }, Role::Instrumental) => Some(Supply::Flag(instrumental)),
+        // No voice asked for is no voice sent.
+        (R::Speech { voice_id, .. }, Role::Voice) => Some(voice_id).filter(|v| !v.trim().is_empty()).map(Supply::Text),
+        _ => None,
+    }
+}
+
+/// A request of this kind with every value present, to ask which roles it ever uses.
+fn sample(kind: AssetKind) -> AssetRequest<'static> {
+    match kind {
+        AssetKind::Image => AssetRequest::Image { prompt: "", shape: Shape::Square },
+        AssetKind::Model3d => AssetRequest::Model3d { image_url: Some(""), prompt: Some(""), textured: true, faces: 0 },
+        AssetKind::Speech => AssetRequest::Speech { text: "", voice_id: "voice" },
+        AssetKind::SoundEffect => AssetRequest::SoundEffect { prompt: "", duration_seconds: 0.0 },
+        AssetKind::Music => AssetRequest::Music { prompt: "", duration_seconds: 0.0, instrumental: true },
+    }
+}
+
+/// Whether a request of this kind ever has something for a field with this role.
+fn used_by(kind: AssetKind, role: Role) -> bool {
+    supply(&sample(kind), role).is_some()
+}
+
+/// The options a request of this kind carries, which a model may not take.
+fn options_of(kind: AssetKind) -> &'static [AssetOption] {
+    match kind {
+        AssetKind::Image => &[AssetOption::Shape],
+        AssetKind::Model3d => &[AssetOption::Faces, AssetOption::Textured],
+        AssetKind::Speech => &[AssetOption::Voice],
+        AssetKind::SoundEffect => &[AssetOption::Duration],
+        AssetKind::Music => &[AssetOption::Duration, AssetOption::Instrumental],
+    }
+}
+
+/// The option a role carries; the prompt and the picture to start from are not options.
+fn option_of(role: Role) -> Option<AssetOption> {
+    match role {
+        Role::Prompt | Role::Image => None,
+        Role::Shape | Role::Width | Role::Height => Some(AssetOption::Shape),
+        Role::Faces => Some(AssetOption::Faces),
+        Role::Textured => Some(AssetOption::Textured),
+        Role::Duration => Some(AssetOption::Duration),
+        Role::Instrumental => Some(AssetOption::Instrumental),
+        Role::Voice => Some(AssetOption::Voice),
+    }
+}
+
+/// Whether a field of this kind can hold what a field with this role is for.
+fn holds(role: Role, kind: &FieldKind) -> bool {
+    match role {
+        Role::Prompt => matches!(kind, FieldKind::Text),
+        Role::Image => matches!(kind, FieldKind::Text | FieldKind::Image),
+        Role::Shape => matches!(kind, FieldKind::Choice(_)),
+        Role::Width | Role::Height | Role::Faces | Role::Duration => matches!(kind, FieldKind::Integer { .. } | FieldKind::Number { .. }),
+        Role::Textured | Role::Instrumental => matches!(kind, FieldKind::Bool),
+        Role::Voice => matches!(kind, FieldKind::Text | FieldKind::Choice(_)),
+    }
+}
+
+/// Whether the field can take some value of its role: a choice must offer one that means something.
+fn takes_some(role: Role, kind: &FieldKind, roles: &InputRoles) -> bool {
+    holds(role, kind)
+        && match (role, kind) {
+            (Role::Shape, FieldKind::Choice(values)) => [Shape::Square, Shape::Wide, Shape::Tall].into_iter().any(|s| roles.shape_value(s, values).is_some()),
+            (Role::Voice, FieldKind::Choice(values)) => !values.is_empty(),
+            _ => true,
+        }
+}
+
+/// A field the model cannot be run without: nothing may leave it unset.
+fn must_be_filled(field: &InputField) -> bool {
+    field.required && !field.has_default
+}
+
+/// `x` held to the field's limits. A limit that is not a number is no limit, and limits that
+/// contradict each other leave the upper one (`clamp` would panic on them).
+fn bounded(x: f64, min: Option<f64>, max: Option<f64>) -> f64 {
+    let x = min.filter(|m| m.is_finite()).map_or(x, |m| x.max(m));
+    max.filter(|m| m.is_finite()).map_or(x, |m| x.min(m))
+}
+
+fn bounded_int(x: i64, min: Option<i64>, max: Option<i64>) -> i64 {
+    let x = min.map_or(x, |m| x.max(m));
+    max.map_or(x, |m| x.min(m))
+}
+
+fn float(x: f64) -> Option<Value> {
+    Number::from_f64(x).map(Value::Number)
+}
+
+/// The width of `shape` for a width field, else its height.
+fn side(shape: Shape, role: Role) -> u32 {
+    let (width, height) = shape.size();
+    if role == Role::Width { width } else { height }
+}
+
+/// The JSON value for `field` out of what the request offers, or `None` when the field can't take
+/// it (the wrong kind of field, or a value the field's choices don't include).
+fn place(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) -> Option<Value> {
+    if !holds(role, &field.kind) {
+        return None;
+    }
+    match (offered, &field.kind) {
+        (Supply::Text(text), FieldKind::Text | FieldKind::Image) => Some(Value::String(text.to_string())),
+        (Supply::Text(text), FieldKind::Choice(values)) => values.iter().any(|v| v == text).then(|| Value::String(text.to_string())),
+        (Supply::Shape(shape), FieldKind::Choice(values)) => roles.shape_value(shape, values).map(Value::String),
+        (Supply::Shape(shape), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(i64::from(side(shape, role)), *min, *max))),
+        (Supply::Shape(shape), FieldKind::Number { min, max }) => float(bounded(f64::from(side(shape, role)), *min, *max)),
+        (Supply::Count(n), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(i64::from(n), *min, *max))),
+        (Supply::Count(n), FieldKind::Number { min, max }) => float(bounded(f64::from(n), *min, *max)),
+        // `as` saturates, and `round` of a finite number is finite: no overflow, no panic.
+        (Supply::Seconds(x), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(x.round() as i64, *min, *max))),
+        (Supply::Seconds(x), FieldKind::Number { min, max }) => float(bounded(x, *min, *max)),
+        (Supply::Flag(on), FieldKind::Bool) => Some(Value::Bool(on)),
+        _ => None,
+    }
+}
+
+const REMEDIATION: &str = "Choose another model for this type of asset in the project's Generated Assets settings.";
+
+/// Why a list of fields is too long to read, if it is.
+fn too_long(fields: &[InputField]) -> Option<String> {
+    if fields.len() > MAX_FIELDS {
+        return Some(format!("The model lists {} inputs; at most {MAX_FIELDS} are read.", fields.len()));
+    }
+    fields.iter().find_map(|f| match &f.kind {
+        FieldKind::Choice(values) if values.len() > MAX_CHOICES => {
+            Some(format!("The input \"{}\" of the model offers {} values; at most {MAX_CHOICES} are read.", f.name, values.len()))
+        }
+        _ => None,
+    })
+}
+
+fn cannot_fill(field: &InputField) -> String {
+    format!("The model needs the input \"{}\", which this app has nothing to put in.", field.name)
+}
+
+fn needs_a_prompt(kind: AssetKind) -> String {
+    match kind {
+        AssetKind::Model3d => "The model has no input for a picture or a description, so it can't make a 3D model.".into(),
+        _ => "The model has no input for a description, so this app can't tell it what to make.".into(),
+    }
+}
+
+/// What is left of a request once fields have taken the roles in `taken`: an error when nothing
+/// tells the model what to make, else the options no field took.
+fn leftovers(kind: AssetKind, taken: &[Role]) -> Result<Vec<AssetOption>, String> {
+    let told = taken.contains(&Role::Prompt) || (kind == AssetKind::Model3d && taken.contains(&Role::Image));
+    if !told {
+        return Err(needs_a_prompt(kind));
+    }
+    // A shape needs a field for it, or a width and a height together.
+    let shaped = taken.contains(&Role::Shape) || (taken.contains(&Role::Width) && taken.contains(&Role::Height));
+    let took = |option| if option == AssetOption::Shape { shaped } else { taken.iter().any(|&role| option_of(role) == Some(option)) };
+    Ok(options_of(kind).iter().copied().filter(|&option| !took(option)).collect())
+}
+
+/// Lay `req` out in `fields`. See the module comment for what is an error.
+pub fn map_request(fields: &[InputField], req: &AssetRequest, roles: &InputRoles) -> Result<Mapped, ToolError> {
+    let refuse = |message: String| ToolError::new(ErrorCode::BadSettings, message).with_remediation(REMEDIATION);
+    if let Some(message) = too_long(fields) {
+        return Err(ToolError::new(ErrorCode::OverLimit, message).with_remediation(REMEDIATION));
+    }
+    if let AssetRequest::SoundEffect { duration_seconds, .. } | AssetRequest::Music { duration_seconds, .. } = req
+        && !duration_seconds.is_finite()
+    {
+        return Err(
+            ToolError::new(ErrorCode::BadInput, "The length must be a number of seconds.").with_remediation("Give the length in seconds, for example 5.")
+        );
+    }
+    let kind = req.kind();
+    let mut body = Map::new();
+    let mut taken: Vec<Role> = Vec::new();
+    for field in fields {
+        let value = roles.role_of(&field.name).and_then(|role| Some((role, place(field, role, supply(req, role)?, roles)?)));
+        match value {
+            Some((role, value)) => {
+                taken.push(role);
+                body.insert(field.name.clone(), value);
+            }
+            None if must_be_filled(field) => return Err(refuse(cannot_fill(field))),
+            None => {}
+        }
+    }
+    let ignored = leftovers(kind, &taken).map_err(refuse)?;
+    Ok(Mapped { body, ignored })
+}
+
+/// Whether a model with these `fields` can make `kind` at all: `Ok` with the options it would
+/// ignore, or `Err` with why it can't run. It looks at the fields only, so a model that offers a
+/// value for some shapes (or voices) but not all is still runnable; [`map_request`] decides per request.
+pub fn runnable(fields: &[InputField], kind: AssetKind, roles: &InputRoles) -> Result<Vec<AssetOption>, String> {
+    if let Some(message) = too_long(fields) {
+        return Err(message);
+    }
+    let mut fit: Vec<Role> = Vec::new();
+    for field in fields {
+        match roles.role_of(&field.name) {
+            Some(role) if used_by(kind, role) && takes_some(role, &field.kind, roles) => fit.push(role),
+            _ if must_be_filled(field) => return Err(cannot_fill(field)),
+            _ => {}
+        }
+    }
+    leftovers(kind, &fit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn field(name: &str, kind: FieldKind) -> InputField {
+        InputField { name: name.into(), kind, required: false, has_default: false }
+    }
+
+    fn required(mut f: InputField) -> InputField {
+        f.required = true;
+        f
+    }
+
+    fn with_default(mut f: InputField) -> InputField {
+        f.has_default = true;
+        f
+    }
+
+    fn choice(values: &[&str]) -> FieldKind {
+        FieldKind::Choice(values.iter().map(|v| v.to_string()).collect())
+    }
+
+    fn int(min: Option<i64>, max: Option<i64>) -> FieldKind {
+        FieldKind::Integer { min, max }
+    }
+
+    fn num(min: Option<f64>, max: Option<f64>) -> FieldKind {
+        FieldKind::Number { min, max }
+    }
+
+    fn map(fields: &[InputField], req: AssetRequest) -> Mapped {
+        map_request(fields, &req, InputRoles::built_in()).unwrap()
+    }
+
+    fn body(mapped: &Mapped) -> Value {
+        Value::Object(mapped.body.clone())
+    }
+
+    fn picture(shape: Shape) -> AssetRequest<'static> {
+        AssetRequest::Image { prompt: "crate", shape }
+    }
+
+    fn solid() -> AssetRequest<'static> {
+        AssetRequest::Model3d { image_url: Some("https://example.invalid/a.png"), prompt: None, textured: true, faces: 100 }
+    }
+
+    #[test]
+    fn the_shipped_roles_are_what_these_tests_assume() {
+        // The tests below use the built-in table; an empty one (a broken file) would hide in them.
+        let roles = InputRoles::built_in();
+        assert_eq!((roles.role_of("prompt"), roles.role_of("image_size")), (Some(Role::Prompt), Some(Role::Shape)));
+    }
+
+    #[test]
+    fn a_picture_request_fills_prompt_and_shape() {
+        let fields = [required(field("prompt", FieldKind::Text)), field("image_size", choice(&["square_hd", "landscape_16_9"]))];
+        let mapped = map(&fields, picture(Shape::Wide));
+        assert_eq!(body(&mapped), json!({"prompt": "crate", "image_size": "landscape_16_9"}));
+        assert_eq!(mapped.ignored, []);
+        let mapped = map(&fields, picture(Shape::Square));
+        assert_eq!(body(&mapped), json!({"prompt": "crate", "image_size": "square_hd"}));
+    }
+
+    #[test]
+    fn width_and_height_stand_in_for_shape() {
+        let fields = [field("prompt", FieldKind::Text), field("width", int(None, None)), field("height", int(Some(64), Some(2048)))];
+        let mapped = map(&fields, picture(Shape::Wide));
+        assert_eq!(body(&mapped), json!({"prompt": "crate", "width": 1024, "height": 576}));
+        assert_eq!(mapped.ignored, []);
+        assert_eq!(body(&map(&fields, picture(Shape::Tall))), json!({"prompt": "crate", "width": 576, "height": 1024}));
+        // The model's own limits win over the shape.
+        let small = [field("prompt", FieldKind::Text), field("width", int(None, Some(512))), field("height", num(Some(600.0), None))];
+        assert_eq!(body(&map(&small, picture(Shape::Square))), json!({"prompt": "crate", "width": 512, "height": 1024.0}));
+        // One side alone says nothing about the shape: it is sent, and the shape reported ignored.
+        let lone = [field("prompt", FieldKind::Text), field("width", int(None, None))];
+        let mapped = map(&lone, picture(Shape::Wide));
+        assert_eq!(body(&mapped), json!({"prompt": "crate", "width": 1024}));
+        assert_eq!(mapped.ignored, [AssetOption::Shape]);
+    }
+
+    #[test]
+    fn faces_are_clamped_to_the_fields_range() {
+        let fields = [field("image_url", FieldKind::Image), field("target_face_count", int(Some(500), Some(20_000)))];
+        let faces = |n| AssetRequest::Model3d { image_url: Some("https://example.invalid/a.png"), prompt: None, textured: false, faces: n };
+        assert_eq!(map(&fields, faces(100)).body.get("target_face_count"), Some(&json!(500)));
+        assert_eq!(map(&fields, faces(7_000)).body.get("target_face_count"), Some(&json!(7_000)));
+        assert_eq!(map(&fields, faces(u32::MAX)).body.get("target_face_count"), Some(&json!(20_000)));
+        // A model that counts faces in fractions, and limits that contradict each other, don't panic.
+        let decimal = [field("image_url", FieldKind::Image), field("polycount", num(Some(10.0), Some(50.0)))];
+        assert_eq!(map(&decimal, faces(100)).body.get("polycount"), Some(&json!(50.0)));
+        let backwards = [field("image_url", FieldKind::Image), field("target_face_count", int(Some(900), Some(100)))];
+        assert_eq!(map(&backwards, faces(300)).body.get("target_face_count"), Some(&json!(100)));
+        let backwards = [field("image_url", FieldKind::Image), field("polycount", num(Some(f64::NAN), Some(f64::NEG_INFINITY)))];
+        assert!(map_request(&backwards, &faces(300), InputRoles::built_in()).is_ok());
+    }
+
+    #[test]
+    fn options_without_a_field_are_reported_ignored() {
+        let fields = [field("image_url", FieldKind::Image)];
+        let mapped = map(&fields, solid());
+        assert_eq!(body(&mapped), json!({"image_url": "https://example.invalid/a.png"}));
+        assert_eq!(mapped.ignored, [AssetOption::Faces, AssetOption::Textured]);
+
+        let fields = [field("image_url", FieldKind::Image), field("should_texture", FieldKind::Bool), field("polycount", int(None, None))];
+        let mapped = map(&fields, solid());
+        assert_eq!(body(&mapped), json!({"image_url": "https://example.invalid/a.png", "should_texture": true, "polycount": 100}));
+        assert_eq!(mapped.ignored, []);
+
+        // Each kind lists its own options.
+        let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_1" };
+        let mapped = map(&[field("text", FieldKind::Text)], speech);
+        assert_eq!((body(&mapped), mapped.ignored), (json!({"text": "hello"}), vec![AssetOption::Voice]));
+        let sound = AssetRequest::SoundEffect { prompt: "wind", duration_seconds: 3.0 };
+        assert_eq!(map(&[field("prompt", FieldKind::Text)], sound).ignored, [AssetOption::Duration]);
+        let music = AssetRequest::Music { prompt: "calm", duration_seconds: 30.0, instrumental: true };
+        assert_eq!(map(&[field("prompt", FieldKind::Text)], music).ignored, [AssetOption::Duration, AssetOption::Instrumental]);
+    }
+
+    #[test]
+    fn a_required_field_without_a_role_or_default_is_not_runnable() {
+        let roles = InputRoles::built_in();
+        let prompt = required(field("prompt", FieldKind::Text));
+        assert_eq!(runnable(std::slice::from_ref(&prompt), AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+
+        let seed = required(field("seed", int(None, None)));
+        let err = runnable(&[prompt.clone(), seed.clone()], AssetKind::Image, roles).unwrap_err();
+        assert!(err.contains("seed"), "{err}");
+        let err = map_request(&[prompt.clone(), seed.clone()], &picture(Shape::Square), roles).unwrap_err();
+        assert!(err.message.contains("seed"), "{}", err.message);
+        assert_eq!(err.code, ErrorCode::BadSettings);
+
+        // A default, or not being required, lets the field stay unset.
+        for ok in [with_default(seed.clone()), field("seed", int(None, None))] {
+            assert_eq!(runnable(&[prompt.clone(), ok.clone()], AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+            assert_eq!(body(&map(&[prompt.clone(), ok], picture(Shape::Square))), json!({"prompt": "crate"}));
+        }
+        // A role the kind never fills is no better than no role: speech has no shape.
+        let size = required(field("image_size", choice(&["square_hd"])));
+        assert!(runnable(&[prompt.clone(), size], AssetKind::Speech, roles).is_err());
+        // Nor is a field that is the wrong type for its role.
+        assert!(runnable(&[required(field("prompt", int(None, None)))], AssetKind::Image, roles).is_err());
+    }
+
+    #[test]
+    fn three_d_from_text_needs_a_prompt_field() {
+        let roles = InputRoles::built_in();
+        let from_text = AssetRequest::Model3d { image_url: None, prompt: Some("a barrel"), textured: false, faces: 1000 };
+        let picture_only = [field("image_url", FieldKind::Image)];
+        let err = map_request(&picture_only, &from_text, roles).unwrap_err();
+        assert_eq!(err.code, ErrorCode::BadSettings);
+        let both = [field("image_url", FieldKind::Image), field("prompt", FieldKind::Text)];
+        assert_eq!(body(&map(&both, from_text)), json!({"prompt": "a barrel"}));
+        // A text-only model can't use a picture alone either.
+        assert!(map_request(&[field("prompt", FieldKind::Text)], &solid(), roles).is_err());
+
+        // What can run at all: a picture or a prompt field.
+        assert!(runnable(&picture_only, AssetKind::Model3d, roles).is_ok());
+        assert!(runnable(&[field("prompt", FieldKind::Text)], AssetKind::Model3d, roles).is_ok());
+        assert!(runnable(&[field("polycount", int(None, None))], AssetKind::Model3d, roles).is_err());
+        // The other kinds can only be told what to make in words.
+        assert!(runnable(&picture_only, AssetKind::Image, roles).is_err());
+        assert!(runnable(&picture_only, AssetKind::Speech, roles).is_err());
+    }
+
+    #[test]
+    fn oversized_field_lists_are_refused() {
+        let roles = InputRoles::built_in();
+        let many = |n: usize| (0..n).map(|i| field(&format!("extra_{i}"), FieldKind::Text)).collect::<Vec<_>>();
+        let mut fields = vec![field("prompt", FieldKind::Text)];
+        fields.extend(many(MAX_FIELDS - 1));
+        assert_eq!(fields.len(), MAX_FIELDS);
+        assert!(runnable(&fields, AssetKind::Image, roles).is_ok(), "the limit itself is fine");
+        assert!(map_request(&fields, &picture(Shape::Square), roles).is_ok());
+        fields.push(field("one_more", FieldKind::Text));
+        let err = runnable(&fields, AssetKind::Image, roles).unwrap_err();
+        assert!(err.contains(&MAX_FIELDS.to_string()), "{err}");
+        assert_eq!(map_request(&fields, &picture(Shape::Square), roles).unwrap_err().code, ErrorCode::OverLimit);
+
+        let values = |n: usize| FieldKind::Choice((0..n).map(|i| format!("v{i}")).collect());
+        let ok = [field("prompt", FieldKind::Text), field("image_size", values(MAX_CHOICES))];
+        assert!(runnable(&ok, AssetKind::Image, roles).is_ok());
+        let too_many = [field("prompt", FieldKind::Text), field("image_size", values(MAX_CHOICES + 1))];
+        assert!(runnable(&too_many, AssetKind::Image, roles).is_err());
+        assert_eq!(map_request(&too_many, &picture(Shape::Square), roles).unwrap_err().code, ErrorCode::OverLimit);
+        // Any field's choices count, not only those of a field with a role.
+        let unrelated = [field("prompt", FieldKind::Text), field("style", values(MAX_CHOICES + 1))];
+        assert!(runnable(&unrelated, AssetKind::Image, roles).is_err());
+    }
+
+    #[test]
+    fn a_value_outside_a_choice_means_the_option_is_ignored() {
+        let roles = InputRoles::built_in();
+        let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_9" };
+        let voices = |required_voice: bool| {
+            let voice = field("voice_id", choice(&["voice_1", "voice_2"]));
+            [field("text", FieldKind::Text), if required_voice { required(voice) } else { voice }]
+        };
+        let mapped = map(&voices(false), speech);
+        assert_eq!((body(&mapped), mapped.ignored), (json!({"text": "hello"}), vec![AssetOption::Voice]));
+        let chosen = map(&voices(false), AssetRequest::Speech { text: "hello", voice_id: "voice_2" });
+        assert_eq!((body(&chosen), chosen.ignored), (json!({"text": "hello", "voice_id": "voice_2"}), vec![]));
+        // Unless the model can't run without one: no other voice is put in its place.
+        assert!(map_request(&voices(true), &speech, roles).is_err());
+        // No voice asked for is no voice sent.
+        let none = AssetRequest::Speech { text: "hello", voice_id: " " };
+        assert_eq!(body(&map(&voices(false), none)), json!({"text": "hello"}));
+        assert!(map_request(&voices(true), &none, roles).is_err());
+        // A free-text voice field takes any id.
+        let free = map(&[field("text", FieldKind::Text), field("voice", FieldKind::Text)], speech);
+        assert_eq!(body(&free), json!({"text": "hello", "voice": "voice_9"}));
+
+        // The same for a shape the field has no value for (`1:1` and `16:9` only: no tall).
+        let fields = [field("prompt", FieldKind::Text), field("aspect_ratio", choice(&["1:1", "16:9"]))];
+        let mapped = map(&fields, picture(Shape::Tall));
+        assert_eq!((body(&mapped), mapped.ignored), (json!({"prompt": "crate"}), vec![AssetOption::Shape]));
+        assert_eq!(body(&map(&fields, picture(Shape::Wide))), json!({"prompt": "crate", "aspect_ratio": "16:9"}));
+        let fields = [field("prompt", FieldKind::Text), required(field("aspect_ratio", choice(&["1:1", "16:9"])))];
+        assert!(map_request(&fields, &picture(Shape::Tall), roles).is_err());
+        assert!(map_request(&fields, &picture(Shape::Wide), roles).is_ok());
+        // What a model could do with some shape is not what it can do with all of them.
+        assert_eq!(runnable(&fields, AssetKind::Image, roles), Ok(vec![]));
+        let nothing = [field("prompt", FieldKind::Text), field("aspect_ratio", choice(&["3:2"]))];
+        assert_eq!(runnable(&nothing, AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+    }
+
+    #[test]
+    fn sounds_and_music_take_their_length_in_the_fields_own_terms() {
+        let roles = InputRoles::built_in();
+        let sound = |seconds: f64| AssetRequest::SoundEffect { prompt: "wind", duration_seconds: seconds };
+        let seconds = [field("text", FieldKind::Text), field("duration", num(Some(0.5), Some(22.0)))];
+        assert_eq!(body(&map(&seconds, sound(2.5))), json!({"text": "wind", "duration": 2.5}));
+        assert_eq!(body(&map(&seconds, sound(60.0))), json!({"text": "wind", "duration": 22.0}));
+        assert_eq!(body(&map(&seconds, sound(0.1))), json!({"text": "wind", "duration": 0.5}));
+        let whole = [field("text", FieldKind::Text), field("seconds_total", int(Some(1), Some(47)))];
+        assert_eq!(body(&map(&whole, sound(2.5))), json!({"text": "wind", "seconds_total": 3}));
+        assert_eq!(body(&map(&whole, sound(1e300))), json!({"text": "wind", "seconds_total": 47}));
+        // Not a length at all: refused whether or not a field would have taken it.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for fields in [&seconds[..], &[field("text", FieldKind::Text)][..]] {
+                let err = map_request(fields, &sound(bad), roles).unwrap_err();
+                assert_eq!(err.code, ErrorCode::BadInput);
+            }
+        }
+        // Instrumental is a switch.
+        let music = AssetRequest::Music { prompt: "calm", duration_seconds: 30.0, instrumental: true };
+        let fields = [field("prompt", FieldKind::Text), field("force_instrumental", FieldKind::Bool), field("instrumental", FieldKind::Text)];
+        let mapped = map(&fields, music);
+        assert_eq!(body(&mapped), json!({"prompt": "calm", "force_instrumental": true}));
+        assert_eq!(mapped.ignored, [AssetOption::Duration]);
+    }
+
+    #[test]
+    fn what_can_run_says_which_options_it_would_ignore() {
+        let roles = InputRoles::built_in();
+        let prompt = field("prompt", FieldKind::Text);
+        for (kind, ignored) in [
+            (AssetKind::Image, vec![AssetOption::Shape]),
+            (AssetKind::Model3d, vec![AssetOption::Faces, AssetOption::Textured]),
+            (AssetKind::Speech, vec![AssetOption::Voice]),
+            (AssetKind::SoundEffect, vec![AssetOption::Duration]),
+            (AssetKind::Music, vec![AssetOption::Duration, AssetOption::Instrumental]),
+        ] {
+            assert_eq!(runnable(std::slice::from_ref(&prompt), kind, roles), Ok(ignored), "{kind:?}");
+            assert!(runnable(&[], kind, roles).is_err(), "{kind:?} with no field at all");
+        }
+        let all = [
+            prompt,
+            field("aspect_ratio", choice(&["1:1"])),
+            field("voice_id", choice(&["a"])),
+            field("duration", int(None, None)),
+            field("instrumental", FieldKind::Bool),
+        ];
+        assert_eq!(runnable(&all, AssetKind::Image, roles), Ok(vec![]));
+        assert_eq!(runnable(&all, AssetKind::Speech, roles), Ok(vec![]));
+        assert_eq!(runnable(&all, AssetKind::Music, roles), Ok(vec![]));
+        // Width and height are a pair; a voice with no values to pick from can't be set.
+        let size = [field("prompt", FieldKind::Text), field("width", int(None, None)), field("height", int(None, None))];
+        assert_eq!(runnable(&size, AssetKind::Image, roles), Ok(vec![]));
+        assert_eq!(runnable(&size[..2], AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
+        let empty = [field("text", FieldKind::Text), field("voice_id", choice(&[]))];
+        assert_eq!(runnable(&empty, AssetKind::Speech, roles), Ok(vec![AssetOption::Voice]));
+    }
+
+    #[test]
+    fn each_kinds_options_are_the_ones_its_roles_carry() {
+        use std::collections::HashSet;
+        for kind in AssetKind::ALL {
+            let carried: HashSet<AssetOption> = Role::ALL.into_iter().filter(|&role| used_by(kind, role)).filter_map(option_of).collect();
+            let listed: HashSet<AssetOption> = options_of(kind).iter().copied().collect();
+            assert_eq!(carried, listed, "{kind:?}");
+            assert_eq!(listed.len(), options_of(kind).len(), "{kind:?} lists an option twice");
+        }
+    }
+
+    #[test]
+    fn a_table_with_no_roles_runs_nothing() {
+        // What a broken `input_roles.toml` leaves: no field has a role, so none can be filled.
+        let none = InputRoles::default();
+        assert!(runnable(&[field("prompt", FieldKind::Text)], AssetKind::Image, &none).is_err());
+        assert!(map_request(&[field("prompt", FieldKind::Text)], &picture(Shape::Square), &none).is_err());
+    }
+}

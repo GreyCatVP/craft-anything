@@ -8,6 +8,7 @@
 pub mod elevenlabs;
 pub mod fal;
 mod http;
+pub mod inputs;
 pub mod model;
 pub mod scenario;
 pub mod tables;
@@ -99,6 +100,15 @@ impl Shape {
         match self {
             Shape::Square => 1024.0 * 1024.0 / 1e6,
             Shape::Wide | Shape::Tall => 1024.0 * 576.0 / 1e6,
+        }
+    }
+
+    /// The picture's width and height in pixels.
+    pub fn size(self) -> (u32, u32) {
+        match self {
+            Shape::Square => (1024, 1024),
+            Shape::Wide => (1024, 576),
+            Shape::Tall => (576, 1024),
         }
     }
 }
@@ -314,10 +324,57 @@ fn missing(what: &str, id: &str, known: &[&str]) -> ToolError {
     ToolError::new(ErrorCode::BadSettings, format!("There is no {what} called \"{id}\" in the asset table.")).with_remediation(remediation)
 }
 
-/// One thing to generate, with the table entry that says where and at what price.
-#[derive(Debug, Clone, Copy)]
+/// One thing to generate, with the model it asks for. It names no model: the project's chosen
+/// model's own input fields say where each value goes ([`inputs::map_request`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum AssetRequest<'a> {
+    /// A picture (PNG) from a description.
+    Image {
+        prompt: &'a str,
+        shape: Shape,
+    },
+    /// A 3D model (GLB) of at most `faces` faces, from a picture (a web address, or a `data:` URI),
+    /// a description, or both, as far as the model takes them.
+    Model3d {
+        image_url: Option<&'a str>,
+        prompt: Option<&'a str>,
+        textured: bool,
+        faces: u32,
+    },
+    Speech {
+        text: &'a str,
+        voice_id: &'a str,
+    },
+    SoundEffect {
+        prompt: &'a str,
+        duration_seconds: f64,
+    },
+    Music {
+        prompt: &'a str,
+        duration_seconds: f64,
+        instrumental: bool,
+    },
+}
+
+impl AssetRequest<'_> {
+    /// The kind of asset requested.
+    pub fn kind(&self) -> AssetKind {
+        match self {
+            AssetRequest::Image { .. } => AssetKind::Image,
+            AssetRequest::Model3d { .. } => AssetKind::Model3d,
+            AssetRequest::Speech { .. } => AssetKind::Speech,
+            AssetRequest::SoundEffect { .. } => AssetKind::SoundEffect,
+            AssetRequest::Music { .. } => AssetKind::Music,
+        }
+    }
+}
+
+/// One thing to generate, with the table entry that says where and at what price. The providers
+/// still take this until the asset tools use [`AssetRequest`] and the providers' live models.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub enum LegacyRequest<'a> {
     /// A picture (PNG) from a description.
     Image {
         model: &'a ImageModel,
@@ -349,35 +406,35 @@ pub enum AssetRequest<'a> {
     },
 }
 
-impl AssetRequest<'_> {
+impl LegacyRequest<'_> {
     /// Identify the requested asset modality independently of its selected model.
     pub fn kind(&self) -> AssetKind {
         match self {
-            AssetRequest::Image { .. } => AssetKind::Image,
-            AssetRequest::Model3d { .. } => AssetKind::Model3d,
-            AssetRequest::Speech { .. } => AssetKind::Speech,
-            AssetRequest::SoundEffect { .. } => AssetKind::SoundEffect,
-            AssetRequest::Music { .. } => AssetKind::Music,
+            LegacyRequest::Image { .. } => AssetKind::Image,
+            LegacyRequest::Model3d { .. } => AssetKind::Model3d,
+            LegacyRequest::Speech { .. } => AssetKind::Speech,
+            LegacyRequest::SoundEffect { .. } => AssetKind::SoundEffect,
+            LegacyRequest::Music { .. } => AssetKind::Music,
         }
     }
 
     /// The provider the table entry names.
     pub fn provider(&self) -> &str {
         match self {
-            AssetRequest::Image { model, .. } => &model.provider,
-            AssetRequest::Model3d { model, .. } => &model.provider,
-            AssetRequest::Speech { model, .. } | AssetRequest::SoundEffect { model, .. } | AssetRequest::Music { model, .. } => &model.provider,
+            LegacyRequest::Image { model, .. } => &model.provider,
+            LegacyRequest::Model3d { model, .. } => &model.provider,
+            LegacyRequest::Speech { model, .. } | LegacyRequest::SoundEffect { model, .. } | LegacyRequest::Music { model, .. } => &model.provider,
         }
     }
 
     /// The table's price for it.
     pub fn listed_cost(&self) -> f64 {
         match self {
-            AssetRequest::Image { model, shape, .. } => model.cost(*shape),
-            AssetRequest::Model3d { model, textured, .. } => model.cost(*textured),
-            AssetRequest::Speech { model, text, .. } => text.chars().count() as f64 * model.usd_per_unit,
-            AssetRequest::SoundEffect { model, duration_seconds, .. } => duration_seconds * model.usd_per_unit,
-            AssetRequest::Music { model, duration_seconds, .. } => (duration_seconds * 1000.0).ceil() / 1000.0 * model.usd_per_unit,
+            LegacyRequest::Image { model, shape, .. } => model.cost(*shape),
+            LegacyRequest::Model3d { model, textured, .. } => model.cost(*textured),
+            LegacyRequest::Speech { model, text, .. } => text.chars().count() as f64 * model.usd_per_unit,
+            LegacyRequest::SoundEffect { model, duration_seconds, .. } => duration_seconds * model.usd_per_unit,
+            LegacyRequest::Music { model, duration_seconds, .. } => (duration_seconds * 1000.0).ceil() / 1000.0 * model.usd_per_unit,
         }
     }
 }
@@ -418,13 +475,13 @@ pub trait AssetProvider: Send + Sync {
         http::key(key).map(|_| ())
     }
     /// What `req` will cost, before anything is spent (the budget is checked against it).
-    fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
+    fn estimate(&self, req: &LegacyRequest) -> Result<f64, ToolError> {
         Ok(req.listed_cost())
     }
     /// Make it with the person's `key`; the result carries the provider's estimated USD cost.
     /// A failure after the provider accepted the paid work is returned through [`charged`], so the
     /// caller records the charge even though no output arrived.
-    fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError>;
+    fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError>;
 }
 
 /// The [`ToolError::details`] field that carries a charge a failed generation already incurred.
@@ -488,7 +545,7 @@ impl AssetProviders {
     }
 
     /// The provider that makes `req`.
-    pub fn for_request(&self, req: &AssetRequest) -> Result<Arc<dyn AssetProvider>, ToolError> {
+    pub fn for_request(&self, req: &LegacyRequest) -> Result<Arc<dyn AssetProvider>, ToolError> {
         let id = req.provider();
         self.get(id).ok_or_else(|| {
             ToolError::new(ErrorCode::FeatureMissing, format!("No asset provider called \"{id}\" is available."))
@@ -555,7 +612,7 @@ mod tests {
             let model = catalogue.image_model(Some(id)).unwrap();
             for (shape, units) in [(Shape::Square, 2.0), (Shape::Wide, 1.0), (Shape::Tall, 1.0)] {
                 assert_eq!(model.cost(shape), rate * units);
-                let request = AssetRequest::Image { model, prompt: "a crate", shape };
+                let request = LegacyRequest::Image { model, prompt: "a crate", shape };
                 assert_eq!(request.listed_cost(), rate * units);
                 assert!(model.cost(shape) >= rate * shape.megapixels());
             }
@@ -641,7 +698,7 @@ mod tests {
             fn name(&self) -> &'static str {
                 "Stub"
             }
-            fn generate(&self, _key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+            fn generate(&self, _key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
                 Ok(Generated { url: String::new(), bytes: Vec::new(), cost_usd: req.listed_cost() })
             }
         }
@@ -649,7 +706,7 @@ mod tests {
         assert_eq!(r.ids(), vec!["fal", "scenario", "elevenlabs"]);
         let mut m = Catalogue::fallback().image_model(None).unwrap().clone();
         m.provider = "stub".into();
-        let req = AssetRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };
+        let req = LegacyRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };
         assert_eq!(r.for_request(&req).err().map(|e| e.code), Some(ErrorCode::FeatureMissing));
         r.register(Arc::new(Stub));
         let p = r.for_request(&req).unwrap();

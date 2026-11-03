@@ -480,7 +480,7 @@ fn pausing_generated_assets_keeps_the_provider_choices() {
 #[test]
 fn a_registered_asset_provider_is_listed_and_switchable() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
-    use craft_anything_engines::assets::{AssetProvider, AssetProviders, AssetRequest, Generated};
+    use craft_anything_engines::assets::{AssetProvider, AssetProviders, Generated, LegacyRequest};
     struct Custom;
     impl AssetProvider for Custom {
         fn id(&self) -> &'static str {
@@ -489,7 +489,7 @@ fn a_registered_asset_provider_is_listed_and_switchable() {
         fn name(&self) -> &'static str {
             "Custom Art"
         }
-        fn generate(&self, _key: &str, _req: &AssetRequest) -> Result<Generated, craft_anything_engine::evidence::ToolError> {
+        fn generate(&self, _key: &str, _req: &LegacyRequest) -> Result<Generated, craft_anything_engine::evidence::ToolError> {
             Err(craft_anything_engine::evidence::ToolError::invalid("not used in this test"))
         }
     }

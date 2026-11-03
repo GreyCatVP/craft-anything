@@ -11,7 +11,7 @@ use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_p
 use crate::tools::interaction_tools::{Verdict, ask_approval, inbox, inside, resolve, workspace_of};
 use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, Workspace};
 use craft_anything_engines::assets::model::Unit;
-use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Catalogue, Generated, Shape, about_usd, charged_usd, fal, usd};
+use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, Catalogue, Generated, LegacyRequest, Shape, about_usd, charged_usd, fal, usd};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -318,7 +318,7 @@ fn assets_speech_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         return Err(ToolError::invalid("voice_id must contain 1 to 128 letters, digits, underscores or hyphens"));
     }
     let model = Catalogue::built_in().audio_model(AssetKind::Speech, p.model.as_deref())?;
-    generate_audio(ctx, &p.save_as, "speech", text, &model.id, AssetRequest::Speech { model, text, voice_id: voice })
+    generate_audio(ctx, &p.save_as, "speech", text, &model.id, LegacyRequest::Speech { model, text, voice_id: voice })
 }
 
 /// Validate the prompt and sound duration before generating an MP3 with the chosen sound model.
@@ -327,7 +327,7 @@ fn assets_sound_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let prompt = prompt_ok(&p.prompt)?;
     duration_ok(p.duration_seconds, 0.5, 30.0)?;
     let model = Catalogue::built_in().audio_model(AssetKind::SoundEffect, p.model.as_deref())?;
-    generate_audio(ctx, &p.save_as, "sound", prompt, &model.id, AssetRequest::SoundEffect { model, prompt, duration_seconds: p.duration_seconds })
+    generate_audio(ctx, &p.save_as, "sound", prompt, &model.id, LegacyRequest::SoundEffect { model, prompt, duration_seconds: p.duration_seconds })
 }
 
 /// Validate music length and prompt, defaulting to instrumental audio before paid generation.
@@ -342,12 +342,12 @@ fn assets_music_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         "music",
         prompt,
         &model.id,
-        AssetRequest::Music { model, prompt, duration_seconds: p.duration_seconds, instrumental: p.instrumental.unwrap_or(true) },
+        LegacyRequest::Music { model, prompt, duration_seconds: p.duration_seconds, instrumental: p.instrumental.unwrap_or(true) },
     )
 }
 
 /// Check destination, provider permission, credentials and budget before generating and recording an MP3.
-fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, model: &str, req: AssetRequest<'_>) -> Result<ToolOutput, ToolError> {
+fn generate_audio(ctx: &mut Ctx<'_>, save_as: &str, kind: &str, prompt: &str, model: &str, req: LegacyRequest<'_>) -> Result<ToolOutput, ToolError> {
     let mut j = job(ctx)?;
     let (path, rel) = save_path(&j.ws, save_as, "mp3")?;
     let provider = j.providers.for_request(&req)?;
@@ -511,7 +511,7 @@ impl Made<'_> {
 
 /// Run one paid stage. When it fails after the provider accepted the work and reports a charge, that
 /// charge is recorded as spending first, so a retry is checked against the budget it already used.
-fn generate_paid(ws: &Workspace, provider: &dyn AssetProvider, key: &str, req: &AssetRequest<'_>, rel: &str, made: &Made<'_>) -> Result<Generated, ToolError> {
+fn generate_paid(ws: &Workspace, provider: &dyn AssetProvider, key: &str, req: &LegacyRequest<'_>, rel: &str, made: &Made<'_>) -> Result<Generated, ToolError> {
     provider.generate(key, req).map_err(|e| record_charge(ws, rel, made, e))
 }
 
@@ -622,7 +622,7 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let mut j = job(ctx)?;
     let (path, rel) = save_path(&j.ws, &p.save_as, "png")?;
     let model = Catalogue::built_in().image_model(selected(p.model.as_deref(), ctx.session.settings.assets.legacy_table_id(AssetKind::Image).as_deref()))?;
-    let req = AssetRequest::Image { model, prompt, shape };
+    let req = LegacyRequest::Image { model, prompt, shape };
     let provider = j.providers.for_request(&req)?;
     let key = j.key(provider.as_ref())?;
     j.ws.try_assets_spent()?;
@@ -657,7 +657,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let described =
         format!("{prompt}. One whole object, centred and fully in view, on a plain light-grey background, soft even lighting, three-quarter view, no text.");
     // The picture's address isn't known yet; the estimate doesn't depend on it.
-    let model_req = AssetRequest::Model3d { model, image_url: "https://example.invalid/preflight.png", textured, faces };
+    let model_req = LegacyRequest::Model3d { model, image_url: "https://example.invalid/preflight.png", textured, faces };
     let provider = j.providers.for_request(&model_req)?;
     let key = j.key(provider.as_ref())?;
     // From a prompt, a picture is made first: with the picture model chosen in Settings.
@@ -665,7 +665,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     if from_prompt {
         let image_model =
             catalogue.image_model(selected(p.image_model.as_deref(), ctx.session.settings.assets.legacy_table_id(AssetKind::Image).as_deref()))?;
-        let picture_req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
+        let picture_req = LegacyRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
         let picture_provider = j.providers.for_request(&picture_req)?;
         let picture_key = j.key(picture_provider.as_ref())?;
         let (pic_path, pic_rel) = save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?;
@@ -676,7 +676,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let model_estimate = provider.estimate(&model_req)?;
     valid_cost(model_estimate)?;
     let picture_estimate = if let Some((image_model, picture_provider, ..)) = &picture_maker {
-        let req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
+        let req = LegacyRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
         let picture_cost = picture_provider.estimate(&req)?;
         valid_cost(picture_cost)?;
         picture_cost
@@ -693,7 +693,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
             let (image_model, picture_provider, picture_key, pic_path, pic_rel) =
                 picture_maker.ok_or_else(|| ToolError::internal("no picture model was chosen"))?;
             ctx.report(None, "Making a picture of it first…");
-            let picture_req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
+            let picture_req = LegacyRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
             let picture_made = Made { kind: "image", from: prompt, provider: picture_provider.id(), model: &image_model.id };
             let g = generate_paid(&j.ws, picture_provider.as_ref(), &picture_key, &picture_req, &pic_rel, &picture_made)?;
             keep(&j.ws, &pic_path, &pic_rel, &picture_made, &g)?;
@@ -704,7 +704,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         }
     };
     ctx.report(None, "Turning it into a 3D model (a minute or two)…");
-    let model_job = AssetRequest::Model3d { model, image_url: &url, textured, faces };
+    let model_job = LegacyRequest::Model3d { model, image_url: &url, textured, faces };
     let made = Made { kind: "model", from: &made_from, provider: provider.id(), model: &model.id };
     let g = generate_paid(&j.ws, provider.as_ref(), &key, &model_job, &rel, &made)?;
     keep(&j.ws, &path, &rel, &made, &g)?;
@@ -811,11 +811,11 @@ mod tests {
         fn name(&self) -> &'static str {
             "stand-in"
         }
-        fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+        fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
             assert_eq!(key, "k-1");
             let (endpoint, bytes) = match req {
-                AssetRequest::Image { model, .. } => (model.endpoint.clone(), b"png".to_vec()),
-                AssetRequest::Model3d { model, image_url, .. } => {
+                LegacyRequest::Image { model, .. } => (model.endpoint.clone(), b"png".to_vec()),
+                LegacyRequest::Model3d { model, image_url, .. } => {
                     assert_eq!(*image_url, "https://stand-in/picture.png", "the model is made from the picture");
                     (model.endpoint.clone(), b"glb".to_vec())
                 }
@@ -848,7 +848,7 @@ mod tests {
         let spent = w.try_assets_spent().unwrap();
         let catalogue = Catalogue::built_in();
         let image = catalogue.image_model(Some("flux-schnell")).unwrap();
-        let expected = 0.50 + AssetRequest::Image { model: image, prompt: "a crate", shape: Shape::Square }.listed_cost();
+        let expected = 0.50 + LegacyRequest::Image { model: image, prompt: "a crate", shape: Shape::Square }.listed_cost();
         assert!((spent - expected).abs() < 1e-9, "{spent}");
         assert_eq!(w.assets().len(), 2);
     }
@@ -883,7 +883,7 @@ mod tests {
         fn name(&self) -> &'static str {
             self.0
         }
-        fn generate(&self, _key: &str, _req: &AssetRequest) -> Result<Generated, ToolError> {
+        fn generate(&self, _key: &str, _req: &LegacyRequest) -> Result<Generated, ToolError> {
             Err(ToolError::invalid("not here"))
         }
     }
@@ -980,12 +980,12 @@ mod tests {
             self.id
         }
         /// Record quote requests and return the injected amount or the request's catalogue price.
-        fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
+        fn estimate(&self, req: &LegacyRequest) -> Result<f64, ToolError> {
             self.estimates.lock().unwrap().push(req.kind());
             Ok(self.estimate.unwrap_or_else(|| req.listed_cost()))
         }
         /// Require the test key, record the request kind and return fixed bytes without network access.
-        fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+        fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
             assert_eq!(key, "sk-test");
             self.calls.lock().unwrap().push(req.kind());
             Ok(Generated { url: "https://stand-in/picture.png".into(), bytes: b"generated".to_vec(), cost_usd: req.listed_cost() })
@@ -1002,7 +1002,7 @@ mod tests {
         fn name(&self) -> &'static str {
             self.0
         }
-        fn generate(&self, key: &str, _req: &AssetRequest) -> Result<Generated, ToolError> {
+        fn generate(&self, key: &str, _req: &LegacyRequest) -> Result<Generated, ToolError> {
             assert_eq!(key, "sk-test");
             let failed = ToolError::new(ErrorCode::ProgramFailed, "The job failed.").with_remediation("Check the job.");
             Err(craft_anything_engines::assets::charged(failed, self.1))
@@ -1082,7 +1082,7 @@ mod tests {
         fn name(&self) -> &'static str {
             "lock probe"
         }
-        fn generate(&self, _key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+        fn generate(&self, _key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
             // A second handle stands for another process sharing the project.
             let held = Workspace::open(&self.0).unwrap().lock_spending(Duration::ZERO).is_err();
             *self.1.lock().unwrap() = Some(held);
@@ -1535,9 +1535,9 @@ mod tests {
 
     impl PromptPriced {
         /// Price every image character; charge a fixed amount for the downstream model.
-        fn price(req: &AssetRequest) -> f64 {
+        fn price(req: &LegacyRequest) -> f64 {
             match req {
-                AssetRequest::Image { prompt, .. } => prompt.chars().count() as f64 / 1000.0,
+                LegacyRequest::Image { prompt, .. } => prompt.chars().count() as f64 / 1000.0,
                 _ => 0.5,
             }
         }
@@ -1553,16 +1553,16 @@ mod tests {
             "prompt-priced stand-in"
         }
         /// Capture exactly what was quoted.
-        fn estimate(&self, req: &AssetRequest) -> Result<f64, ToolError> {
-            if let AssetRequest::Image { prompt, .. } = req {
+        fn estimate(&self, req: &LegacyRequest) -> Result<f64, ToolError> {
+            if let LegacyRequest::Image { prompt, .. } = req {
                 self.quoted.lock().unwrap().push(prompt.to_string());
             }
             Ok(Self::price(req))
         }
         /// Capture exactly what was generated and return the matching charge.
-        fn generate(&self, _key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+        fn generate(&self, _key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
             match req {
-                AssetRequest::Image { prompt, .. } => self.generated.lock().unwrap().push(prompt.to_string()),
+                LegacyRequest::Image { prompt, .. } => self.generated.lock().unwrap().push(prompt.to_string()),
                 _ => *self.model_calls.lock().unwrap() += 1,
             }
             Ok(Generated { url: "https://example.invalid/source.png".into(), bytes: b"generated".to_vec(), cost_usd: Self::price(req) })

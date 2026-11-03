@@ -3,7 +3,7 @@
 //! capped). One key (`Authorization: Key …`), paid per generation; every call reports what it cost.
 //! Which models and what they cost come from the asset table (`assets.toml`).
 
-use super::{AssetProvider, AssetRequest, Generated, Shape, SizeBy, charged};
+use super::{AssetProvider, Generated, LegacyRequest, Shape, SizeBy, charged};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Value, json};
 use std::io::Read;
@@ -56,13 +56,13 @@ impl AssetProvider for Fal {
     }
 
     /// Validate credentials, generate a supported image or mesh, and download it with its catalogue cost.
-    fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
+    fn generate(&self, key: &str, req: &LegacyRequest) -> Result<Generated, ToolError> {
         self.validate_key(key)?;
         let key = key.trim();
         let cost = req.listed_cost();
         // fal answers once the paid generation is done: any failure after that still reports its charge.
         match *req {
-            AssetRequest::Image { model, prompt, shape } => {
+            LegacyRequest::Image { model, prompt, shape } => {
                 let (field, size) = fal_size(model.size_by, shape);
                 let body = json!({"prompt": prompt, field: size, "num_images": 1, "output_format": "png"});
                 let v = self.post(key, &model.endpoint, &body, cost)?;
@@ -76,7 +76,7 @@ impl AssetProvider for Fal {
                 };
                 made().map_err(|e| charged(e, cost))
             }
-            AssetRequest::Model3d { model, image_url, textured, faces } => {
+            LegacyRequest::Model3d { model, image_url, textured, faces } => {
                 let range = model.faces();
                 let faces = faces.clamp(*range.start(), *range.end());
                 let v = self.post(key, &model.endpoint, &json!({"image_url": image_url, "texture": textured, "face_limit": faces}), cost)?;
@@ -232,12 +232,12 @@ mod tests {
     /// A picture with FLUX.1 [dev].
     fn image(fal: &Fal, key: &str, prompt: &str, shape: Shape) -> Result<Generated, ToolError> {
         let c = Catalogue::built_in();
-        fal.generate(key, &AssetRequest::Image { model: c.image_model(Some("flux-dev"))?, prompt, shape })
+        fal.generate(key, &LegacyRequest::Image { model: c.image_model(Some("flux-dev"))?, prompt, shape })
     }
 
     fn model_3d(fal: &Fal, key: &str, image_url: &str, textured: bool, faces: u32) -> Result<Generated, ToolError> {
         let c = Catalogue::fallback();
-        fal.generate(key, &AssetRequest::Model3d { model: c.model_3d(None)?, image_url, textured, faces })
+        fal.generate(key, &LegacyRequest::Model3d { model: c.model_3d(None)?, image_url, textured, faces })
     }
 
     #[test]
@@ -273,7 +273,7 @@ mod tests {
         let png = base64_encode(b"PNG fake");
         let (base, seen) = serve(vec![(200, json!({"images": [{"url": format!("data:image/png;base64,{png}")}], "description": ""}).to_string())]);
         let c = Catalogue::built_in();
-        let req = AssetRequest::Image { model: c.image_model(None).unwrap(), prompt: "a night sky", shape: Shape::Wide };
+        let req = LegacyRequest::Image { model: c.image_model(None).unwrap(), prompt: "a night sky", shape: Shape::Wide };
         let pic = Fal { base }.generate("k", &req).unwrap();
         assert_eq!((pic.bytes.as_slice(), pic.cost_usd), (&b"PNG fake"[..], 0.15));
         let seen = seen.lock().unwrap();
