@@ -440,6 +440,16 @@ Gaps found while using the app for real projects.
 - [x] A prompt brought back with Up keeps its pictures (their paths are absolute, so they don't
       come back after the project is moved)
 - [ ] Change a project's builder from its page (a tool, so the CLI and MCP can too) — in PR #245
+- [ ] A project's conversations: list the builder's sessions for the project's folder, adopt one
+      (the newest shown first, and adopted only when chosen) and start a new one, so a session
+      begun in plain Claude Code appears in the app and the other way round (a tool, so the CLI
+      and MCP can too)
+      — claimed: frankyef, branch feature/r2.9-project-conversations
+- [ ] A new session starts knowing where the project stands: its status, the checks so far, the
+      last reply, open questions and the files in `app/`, which the brief carries today only as
+      `last_reply` when the saved session is lost
+- [ ] One writer at a time: refuse to build or adopt a conversation while another program writes
+      the same session (two writers are a documented warning only)
 - [ ] When the builder decides a question, show the question and its choice as an answered card
       in the feed (the run sees only the tool call today; the builder's words say what it chose)
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
