@@ -253,9 +253,9 @@ impl StreamState {
                     "authentication_error" | "permission_error" => ErrorCode::NoPermission,
                     _ => ErrorCode::ProgramFailed,
                 };
-                return Err(
-                    ToolError::new(code, format!("Anthropic stream error ({et}): {msg}")).with_remediation("Try again; if it keeps happening, switch backend.")
-                );
+                return Err(ToolError::new(code, format!("Anthropic stream error ({et}): {msg}"))
+                    .with_remediation("Try again; if it keeps happening, switch backend.")
+                    .with_details(json!({"provider_error": et})));
             }
             _ => {}
         }

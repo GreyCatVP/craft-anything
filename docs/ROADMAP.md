@@ -170,18 +170,18 @@ Every round spends the person's money or quota. One that can't do anything shoul
       across runs: a run ends at 7 checks (`max_rounds`) but check numbers carry on, so #44's check
       28 and #417's 35+ look like several runs (a guess: Try again is the only restart found, and
       Auto mode doesn't start runs)
-- [ ] A builder whose tools didn't start isn't resumed. `turn` (`rebuild/mod.rs`) tries 3 more times
+- [x] A builder whose tools didn't start isn't resumed. `turn` (`rebuild/mod.rs`) tries 3 more times
       ("Picking up where it left off", #377) because `worth_retrying` doesn't know this error. Give
       it a typed signal, as `Conversation::session_lost` does, not one more word in that function's
-      list. Say what failed and stop (pitfalls: never retry what can't succeed)
-- [ ] `worth_retrying` decides on English words in a message (AGENTS.md: structured results). Move
-      its other cases (sign-in, credit, a missing install) to the same typed signal
+      list. Say what failed and stop (pitfalls: never retry what can't succeed) — commit `f80a16a66834`
+- [x] `worth_retrying` decides on English words in a message (AGENTS.md: structured results). Move
+      its other cases (sign-in, credit, a missing install) to the same typed signal — commit `f80a16a66834`
 - [ ] Find what repeated #64's attempts and stop it: it logged 41, about 38 s apart, on 0.2.0, but
       `turn` allows 3 retries 30, 60 and 90 s apart, there too, so something else starts them
-- [ ] A rate limit is waited for only on agents with a session: `turn` retries only when
+- [x] A rate limit is waited for only on agents with a session: `turn` retries only when
       `agent.session_id()` is set, which API backends and OpenCode's plain adapter never set (read
       in the code, not run). So #148 didn't reach #142, which was OpenCode. Wait and send the turn
-      again for them too, then close #142
+      again for them too, then close #142 — commit `f80a16a66834`
 - [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds: #399 used
       9.4M tokens in 19 minutes of the first stage, then failed to compile
 
@@ -194,13 +194,14 @@ been run live.
       STATUS.md which models it worked with. Do this first: it shows which of the lines below matter
 - [ ] An assistant turn with no text sends `content: null` (`openai.rs`), which likely causes #403's
       `invalid message content type: <nil>`: send an empty string
-- [ ] Understand a tool call a model writes as JSON in its text (#417). The fallback protocol reads
+- [x] Understand a tool call a model writes as JSON in its text (#417; implementation `dfe9a4db2dcb3e27edbd67311cbb4202584e7af6`). The fallback protocol reads
       only `Action:` and `Action Input:` lines, so anything else ends the turn with nothing done
 - [x] Preserve `length` and `content_filter` stop reasons on native tool-call streams; a parsed
       call must not override truncation or refusal and execute tools. Pair other retained
       unexecuted calls with results before the conversation continues — PR #544
-- [ ] Accept a tool argument of a near type, such as a list for a string, or answer so the model
-      can correct it (#498)
+- [x] Return a rejected tool argument's JSON Pointer when known and guidance to correct the call
+      (#498), keeping schema types strict
+      — commit `0c3ae5cca569`
 - [ ] Find how each local server is told its context size and set it, or stop with a plain message
       when the prompt won't fit. We assume 24k and send no `num_ctx`, which an OpenAI-style endpoint
       may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73)
@@ -408,7 +409,8 @@ Owner: maintainers · Status: in progress
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
 Gaps found while using the app for real projects.
-- [ ] A prompt brought back with Up keeps its pictures (only the text comes back now) — in PR #216
+- [x] A prompt brought back with Up keeps its pictures (their paths are absolute, so they don't
+      come back after the project is moved)
 - [ ] Change a project's builder from its page (a tool, so the CLI and MCP can too) — in PR #245
 - [ ] When the builder decides a question, show the question and its choice as an answered card
       in the feed (the run sees only the tool call today; the builder's words say what it chose)

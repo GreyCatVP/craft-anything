@@ -16,7 +16,7 @@ pub use adapters::{AgentAdapter, AgentAdapters, ArgsCx};
 
 use crate::config::BackendOptions;
 use crate::model::Stop;
-use crate::{AgentEvent, BackendConfig, Conversation};
+use crate::{AgentEvent, BackendConfig, Conversation, FailureKind, TurnFailure};
 use craft_anything_engine::CancelToken;
 use craft_anything_evidence::{ErrorCode, ToolError};
 use craft_anything_platform::process::Process;
@@ -258,10 +258,14 @@ pub struct StreamParser {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost_usd: Option<f64>,
+    /// A missing or invalid per-step cost cannot become a complete turn total later.
+    cost_incomplete: bool,
     pub saw_result: bool,
     /// The run was asked to continue a saved session the agent doesn't have (it lives on another
     /// computer, or under another folder), so it did nothing.
     pub session_missing: bool,
+    /// A protocol fact about the failed turn, independent of the text shown to the person.
+    pub failure: Option<TurnFailure>,
 }
 
 fn short_tool(name: &str) -> String {
@@ -303,8 +307,10 @@ impl StreamParser {
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: None,
+            cost_incomplete: false,
             saw_result: false,
             session_missing: false,
+            failure: None,
         }
     }
 
@@ -452,6 +458,7 @@ pub struct CliConversation {
     verified: Arc<Mutex<Option<bool>>>,
     /// The last run's saved session wasn't there (see [`Conversation::session_lost`]).
     lost: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<TurnFailure>>>,
 }
 
 impl CliConversation {
@@ -460,7 +467,17 @@ impl CliConversation {
     pub fn new(spec: CliSpec) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let session = Arc::new(Mutex::new(spec.resume.clone()));
-        CliConversation { spec, tx, rx, busy: Arc::default(), stop: Stop::default(), session, verified: Arc::default(), lost: Arc::default() }
+        CliConversation {
+            spec,
+            tx,
+            rx,
+            busy: Arc::default(),
+            stop: Stop::default(),
+            session,
+            verified: Arc::default(),
+            lost: Arc::default(),
+            failure: Arc::default(),
+        }
     }
 
     /// The agent's session id once a run has reported it (to continue later).
@@ -504,6 +521,7 @@ struct RunState {
     session: Arc<Mutex<Option<String>>>,
     verified: Arc<Mutex<Option<bool>>>,
     lost: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<TurnFailure>>>,
 }
 
 /// End a turn: take the next message first, then say the turn is done (`send(done)`), since
@@ -525,7 +543,7 @@ fn nothing_done(backend: &str) -> AgentEvent {
 /// next message; one it was asked to continue but doesn't have is forgotten and flagged in
 /// `state.lost` before the error that says so is sent.
 fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, state: &RunState) -> AgentEvent {
-    let RunState { session, verified, lost } = state;
+    let RunState { session, verified, lost, failure } = state;
     let name = spec.config.name.clone();
     let agent = spec.config.model.clone();
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
@@ -592,7 +610,9 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     let _ =
         tx.send(AgentEvent::Status { text: format!("Asking {}{}…", display_for(&agent), remote.as_ref().map(|h| format!(" on {h}")).unwrap_or_default()) });
     let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
-    let (p2, tx2, tx_err, lost2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone());
+    let (p2, tx2, tx_err, lost2, failure2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone(), failure.clone());
+    let failed_tools = Arc::new(AtomicBool::new(false));
+    let (failed_tools2, failed_tools3) = (failed_tools.clone(), failed_tools.clone());
     let stop2 = stop.clone();
     let mut proc = (if remote.is_none() { adapter.process(&prog) } else { Process::new(&prog) })
         .args(&argv)
@@ -603,13 +623,22 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     }
     let mut proc = proc
         .stdout_cap(4 * 1024 * 1024)
-        .cancel_when(move || stop2.is_stopped())
+        .cancel_when(move || stop2.is_stopped() || failed_tools2.load(Ordering::SeqCst))
         .on_stdout_line(move |l| {
+            if failed_tools3.load(Ordering::SeqCst) {
+                return;
+            }
             let mut p = p2.lock().unwrap_or_else(PoisonError::into_inner);
             let events = p.line(l);
             // Said before the error that follows it, so whoever reads the error can tell.
             if p.session_missing {
                 lost2.store(true, Ordering::SeqCst);
+            }
+            if let Some(failed) = p.failure {
+                *failure2.lock().unwrap_or_else(PoisonError::into_inner) = Some(failed);
+                if failed.kind == FailureKind::ToolsUnavailable {
+                    failed_tools3.store(true, Ordering::SeqCst);
+                }
             }
             for e in events {
                 let _ = tx2.send(e);
@@ -635,7 +664,26 @@ fn run_cli(spec: &CliSpec, text: &str, tx: &Sender<AgentEvent>, stop: &Stop, sta
     } else if let Some(id) = &p.session_id {
         *session.lock().unwrap_or_else(PoisonError::into_inner) = Some(id.clone());
     }
+    if p.failure.is_none() {
+        let failed = match &result {
+            Ok(out) if !out.success => Some(TurnFailure::process_exit(out.code)),
+            Err(e) if e.code != ErrorCode::Cancelled => Some(TurnFailure::from_process(e)),
+            _ => None,
+        };
+        *failure.lock().unwrap_or_else(PoisonError::into_inner) = failed;
+    }
     match result {
+        // The protocol already named the required tool server. Stop the owned process without
+        // replacing that useful error with the cancellation used to stop it.
+        result if failed_tools.load(Ordering::SeqCst) => {
+            let (out, error) = match &result {
+                Ok(out) => (Some(out), None),
+                Err(e) => (None, Some(e.message.as_str())),
+            };
+            if let Some(path) = shown.save_with(&agent, out, Some("Craft Anything's tools did not start."), error).0 {
+                let _ = tx.send(AgentEvent::Status { text: format!("The details are in {}", path.display()) });
+            }
+        }
         // It said why already, and there's nothing more in its output to keep.
         Ok(_) if p.session_missing => {}
         Ok(out) if !out.success && !p.saw_result => {
@@ -775,6 +823,15 @@ impl FailureContext {
 }
 
 impl Conversation for CliConversation {
+    fn retry(&mut self, text: &str) {
+        let resumable = self.spec.adapters.for_agent(&self.spec.config.model).resumes() && self.session_id().is_some();
+        self.send(if resumable { crate::failure::CONTINUE_TURN } else { text });
+    }
+
+    fn last_failure(&self) -> Option<TurnFailure> {
+        *self.failure.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn session_id(&self) -> Option<String> {
         CliConversation::session_id(self)
     }
@@ -799,8 +856,9 @@ impl Conversation for CliConversation {
         }
         self.stop.reset();
         self.lost.store(false, Ordering::SeqCst);
+        *self.failure.lock().unwrap_or_else(PoisonError::into_inner) = None;
         let (spec, tx, stop, busy) = (self.spec.clone(), self.tx.clone(), self.stop.clone(), self.busy.clone());
-        let state = RunState { session: self.session.clone(), verified: self.verified.clone(), lost: self.lost.clone() };
+        let state = RunState { session: self.session.clone(), verified: self.verified.clone(), lost: self.lost.clone(), failure: self.failure.clone() };
         let text = text.to_string();
         let spawned = std::thread::Builder::new().name("ai-cli".into()).spawn(move || {
             let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_cli(&spec, &text, &tx, &stop, &state))).unwrap_or_else(|_| {
@@ -845,6 +903,47 @@ impl Drop for CliConversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_craft_tool_server_is_reported_from_its_init_status() {
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        let events = p.line(r#"{"type":"system","subtype":"init","session_id":"cannot-build","mcp_servers":[{"name":"craft-anything","status":"failed"}]}"#);
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::Error { message, .. } if message.contains("tools") && message.contains("start"))),
+            "a failed required tool server must end the turn with an actionable error: {events:?}"
+        );
+        assert_eq!(p.failure, Some(TurnFailure::new(FailureKind::ToolsUnavailable)));
+    }
+
+    #[test]
+    fn optional_or_pending_mcp_servers_do_not_block_the_builder() {
+        for status in ["connected", "pending"] {
+            let mut p = StreamParser::new(adapter_for("claude-code"));
+            let init = json!({"type":"system","subtype":"init","mcp_servers":[{"name":"craft-anything","status":status},{"name":"optional-service","status":"failed"}]});
+            assert!(p.line(&init.to_string()).is_empty());
+            assert!(p.failure.is_none());
+        }
+        let mut p = StreamParser::new(adapter_for("claude-code"));
+        assert!(!p.line(r#"{"type":"system","subtype":"init","mcp_servers":[{"name":"craft-anything","status":"needs-auth"}]}"#).is_empty());
+        assert_eq!(p.failure, Some(TurnFailure::new(FailureKind::ToolsUnavailable)));
+    }
+
+    #[test]
+    fn claude_assistant_error_codes_survive_localized_display_messages() {
+        for (code, kind) in [
+            ("authentication_failed", FailureKind::Authentication),
+            ("billing_error", FailureKind::Billing),
+            ("rate_limit", FailureKind::RateLimited),
+            ("server_error", FailureKind::Transient),
+        ] {
+            let mut p = StreamParser::new(adapter_for("claude-code"));
+            let events = p.line(&json!({"type":"assistant","error":code,"message":{"content":[{"type":"text","text":"服务暂时不可用"}]}}).to_string());
+            assert!(matches!(events.as_slice(), [AgentEvent::Error { .. }]));
+            assert_eq!(p.failure, Some(TurnFailure::new(kind)));
+            p.line(r#"{"type":"result","is_error":true,"result":"the turn ended"}"#);
+            assert_eq!(p.failure, Some(TurnFailure::new(kind)), "result must keep the more specific code");
+        }
+    }
 
     /// #506: under a Flatpak `~/.claude` is read-only, so Claude Code gets a folder of ours to save
     /// its conversations in (so `--resume` finds them); the person's own `CLAUDE_CONFIG_DIR` and a

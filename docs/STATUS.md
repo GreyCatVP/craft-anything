@@ -14,6 +14,7 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | Apple app graphs | Selecting a macOS bundle recognises its root-relative `Contents/Info.plist` and retains its service/extension type; nested XPC bundles appear in `services` and as `xpc-service` graph nodes, including their executables when hosted in frameworks | Synthetic inventory tests, including parent-directory and flat bundle layouts, selected services/extensions, framework-hosted service executables, and bare-program controls. Ordinary selected directories with `Contents/Info.plist` need an Apple bundle suffix; archives retain layout-based recognition. Framework libraries and dylibs stay excluded from executables. Real app bundles were not checked for this correction |
 | Chinese UI | Simplified (`zh-hans`) and Traditional (`zh-hant`) Chinese in Settings → General → Language; System chooses a supported OS language, otherwise English. Both catalogs cover UI controls and tool titles; translated titles are searchable. Raw tool data, AI text, logs, CLI/MCP and the separate browser viewer keep their original text. See [localisation](localization.md). | Catalog integrity and locale-resolution tests; `cargo xtask i18n-coverage`; isolated UI language-switch test. Platform visual checks are recorded separately. |
 | Engine | 302 engine tools (318 with the AI and setup layers') across native, managed, Java, Android, Apple, JS/Electron, web, firmware, packets, databases, game archives and assets; see [tools.md](tools.md) and [tool-status.md](tool-status.md). A saved result can be narrowed without running again (`core_evidence_browse` keeps the rows matching given field values, cut to chosen fields) | A functional audit of the original tools on real inputs on Windows, plus unit and integration tests; later additions have their own verification notes below |
+| Tool argument correction | Shared parameter parsing keeps schema types strict and reports the rejected value's JSON Pointer when known, the original type error and guidance to correct the call. Unknown locations are null; a root failure uses the empty pointer | Parser regressions cover string/array mismatches, nested indices, escaped keys, oversized paths, enum locations, defaults and strict fields. Shared engine dispatch is checked for Agent, MCP and CLI callers: rejected arrays create no record, and corrected input creates one. No live Qwen or Ollama build was run for this correction |
 | Java class usage | `java_class_users_find` includes the component class of multidimensional object arrays; primitive-array descriptors do not match an unrelated class with the same descriptor letter | Synthetic class files parsed by the built-in reader: one- and two-dimensional allocations, class names beginning with `L`, primitive arrays, hit limits and method filters; formats tests. This correction was not checked with javac output or a JVM |
 | Single-file apps and game files | `core_packed_files_list` and `core_packed_files_unpack` read Bun and Node.js single-file programs, .NET single-file apps, PyInstaller and Godot packs through one seam (`formats::packed`); `formats_bytecode_show` reads Python bytecode, `game_unity_code_names_show` Unity IL2CPP metadata, `formats_ai_weights_show` GGUF and safetensors headers. `app_folder_explain` says what an install folder is made with and what to run next | Unit tests with damaged files. Real files: a 279 MB Bun program, Node blobs, PyInstaller programs (Python 3.9, 3.14), .NET 8 single-file apps (macOS, Linux, Windows, compressed), Godot 3.6, 4.3 and 4.5 packs, 214 Python modules against CPython's own reader, a GGUF and a safetensors file, about 25 installed Mac apps. IL2CPP on synthetic files only |
 | esbuild module dependencies | Recognised CommonJS and ESM wrappers keep their dependency edges after identifier minification; semantic bindings distinguish shadowed and reused names, and repeated calls produce one edge | 44 JS unit tests pass. New synthetic regressions cover short names, forward declarations, both wrapper kinds, shadowed parameters, reused names, unrelated calls and duplicates. No real minified application was run for this correction; sources above the existing semantic-analysis size limit retain name-based resolution |
@@ -40,6 +41,39 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | SQLite database files (`db_sqlite_show`) | A rowid alias column (`INTEGER PRIMARY KEY`, including the table-constraint form) shows the rowid; `DESC`, non-`INTEGER` and composite keys keep their stored values | Hand-built fixtures; generated files compared with the official SQLite library |
 | SQLite WITHOUT ROWID tables | Read from the index b-tree, interior records and overflow included; rows in primary-key order, values in declaration order, `rowid` null | Hand-built fixtures; generated files compared with the official SQLite library |
 
+### Builder retry policy
+
+Builder failures carry a typed reason through `Conversation::last_failure`. Typed authentication,
+billing, missing programs, unavailable tools, configuration and unknown protocol failures stop
+for attention. Transport interruptions, rate limits and nonzero process exits without a typed
+error get at most three retries; the decision no longer searches English error messages.
+Structured provider waits win; the earlier numeric “retry in”
+hint is only a delay fallback after a failure has already been classified as retryable. All waits
+remain cancellable and bounded to fifteen minutes.
+Local inbox and workspace write failures are not retried using a concurrent backend failure's
+retry advice; the original local error is returned.
+A missing saved session starts afresh only when a fresh request is available; otherwise the run
+stops without retrying the unavailable session.
+
+Claude Code's failed or unauthenticated `craft-anything` MCP server in its init event stops the
+owned CLI process. Pending servers and failures in unrelated optional servers do not stop it.
+Claude assistant error codes, HTTP status/provider errors and ACP authentication errors retain
+their typed meanings. A later generic result does not erase a more specific error.
+
+API retries continue the existing history without inserting the user's message again or replaying
+completed tools. Stateless CLI retries receive the whole original request. OpenCode now uses
+`run --format json`: its API error status and retry flag decide retryability while text, tools and
+usage still reach the feed. Missing or invalid step costs keep the turn's cost unknown; explicit
+zero remains a known cost. A CLI that fails with only a numeric exit also uses bounded retries;
+its display error remains available if recovery fails. The process wrapper sends one final turn
+event and becomes available for the next request.
+
+Protocol fixtures, a loopback HTTP server, scripted API turns and executable CLI stand-ins cover
+these paths, including cancellation and the retry cap. An executable that exits 1 without a
+structured error resumes its saved session, while typed setup errors retain priority over the
+same exit status. No live provider or paid-model run was performed. The separate source of #64's
+41 attempts remains unverified.
+
 ### Bun stored-text encoding
 
 Packed Bun members with encoding value 2 are labelled `utf16le`, matching their stored UTF-16LE
@@ -65,7 +99,9 @@ tests cover independent provider switches, exact/lowered budgets, existing spend
 migration and disabled-provider no-spend cases. No new live generation was needed for these controls.
 
 Builder prompts refresh provider permissions and live key availability before every turn, including
-retries and session recovery. A key counts only when its provider is enabled for the project, and a
+fresh starts after a lost session and retries that resend the whole turn. A retry that continues
+the agent's own history sends no new prompt, so it keeps the policy its turn started with; the
+asset tools still check the current choices before any paid call. A key counts only when its provider is enabled for the project, and a
 modality (pictures, 3D, each audio kind) is offered and priced only through a provider that is both
 enabled and keyed. Isolated tests cover a disabled provider's saved key, keys added or removed during
 a run, and two enabled providers where only one has a key.
@@ -159,6 +195,24 @@ asynchronous cleanup. The intermittent Windows report and Windows/macOS sleep in
 not been rechecked for this change; Windows runtime validation remains on the roadmap.
 
 The full workspace gates (`cargo xtask ci`) passed in [hosted CI for #541](https://github.com/storytold/craft-anything/actions/runs/41584228995).
+
+### Tool calls written as JSON
+
+The text fallback accepts complete bare or fenced JSON calls with `name` and `arguments`
+(`parameters` also accepted), including a `function` wrapper and JSON-encoded arguments.
+Automatic recovery also handles these responses when native tool calling was offered. A call
+must name a tool offered in that turn; ordinary JSON answers and JSON examples surrounded by
+prose are left as text. Native calls are kept once; text-call recovery skips truncated or refused replies.
+Complete backtick-fenced legacy ReAct steps remain supported when their body begins with an explicit
+protocol marker. Both parsers use the same fence boundaries: at least three opening backticks and a
+standalone closing line of at least that length, with no earlier matching closing fence. Shorter
+backtick lines inside a longer fence remain content. Ordinary fenced code, malformed fences and non-call
+JSON objects or examples containing protocol markers remain text; valid call arguments may contain those markers.
+The parser regressions failed on the previous guards and passed with their corrections.
+Fenced JSON calls also use these boundaries during automatic recovery and accept only an empty or `json` info string.
+Checked with parser fixtures, HTTP/SSE stand-ins exercising real engine tool execution in both
+protocols, and non-action, stop-reason and duplicate-call controls. No live local-model build
+was run; other text-call formats remain unsupported.
 
 ## Known limits
 

@@ -60,9 +60,9 @@ pub fn apply(feed: &mut Vec<FeedItem>, e: &RunEvent) {
             feed.push(FeedItem::Error { message: message.clone(), remediation: remediation.clone(), log: log.clone() });
         }
         RunEvent::Agent(_) => end_stream(feed),
-        RunEvent::Note(shown) => {
+        RunEvent::Note { shown, pictures } => {
             end_stream(feed);
-            feed.push(FeedItem::User(shown.clone()));
+            feed.push(FeedItem::User(UserItem::new(shown.clone(), pictures.clone())));
         }
         RunEvent::Ask(r) => feed.push(FeedItem::Ask { request: r.clone(), answer: None }),
         RunEvent::Checked(c) => feed.push(FeedItem::Check(c.clone())),
@@ -186,7 +186,7 @@ mod tests {
             ]})
         };
         let call = |status: &str| RunEvent::Agent(AgentEvent::ToolStarted { call_id: "t".into(), tool: "TodoWrite".into(), input: todo(status) });
-        let mut feed = vec![FeedItem::User("A snake game".into())];
+        let mut feed = vec![FeedItem::User(UserItem::Text("A snake game".into()))];
         apply(&mut feed, &call("in_progress"));
         apply(&mut feed, &RunEvent::Agent(AgentEvent::TextDelta { text: "Working.".into() }));
         apply(&mut feed, &call("completed"));
@@ -207,11 +207,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let ws = Workspace::create(d.path(), "x", "Clone it", TargetRef::None).unwrap();
         let mut log = FeedLog::open(&ws);
-        log.push(FeedItem::User("Make it blue".into()));
+        log.push(FeedItem::User(UserItem::Text("Make it blue".into())));
         log.record(&RunEvent::Agent(AgentEvent::TextDelta { text: "Done.".into() }));
         log.record(&RunEvent::Finished { ok: true, message: "Ready.".into(), paused: false });
         assert!(matches!(load(&ws).as_slice(), [FeedItem::User(a), FeedItem::User(b), FeedItem::Agent { text, streaming: false }]
-            if a == "Clone it" && b == "Make it blue" && text == "Done."));
+            if a.text() == "Clone it" && b.text() == "Make it blue" && text == "Done."));
         // An answer written to the file by someone else while it runs survives the run's saves.
         let inbox = Inbox::new(ws.inbox_dir());
         let id = inbox.post(craft_anything_engine::inbox::RequestKind::Question, "Blue?", "", vec![], true, None).unwrap();

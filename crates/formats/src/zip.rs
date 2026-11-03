@@ -40,9 +40,24 @@ pub struct ZipEntry {
     pub local_header_offset: u64,
     pub is_dir: bool,
     pub encrypted: bool,
+    /// Unix mode from the external attributes (only when the entry was made on a Unix host).
+    #[serde(skip)]
+    pub unix_mode: Option<u32>,
 }
 
 impl ZipEntry {
+    /// Why this entry is not a regular file or directory (symlink, device, FIFO, socket), if so.
+    pub fn special_kind(&self) -> Option<&'static str> {
+        match self.unix_mode? & 0o170000 {
+            0o120000 => Some("symlink"),
+            0o020000 => Some("character device"),
+            0o060000 => Some("block device"),
+            0o010000 => Some("FIFO"),
+            0o140000 => Some("socket"),
+            _ => None,
+        }
+    }
+
     /// Human name of the compression method.
     pub fn method_name(&self) -> &'static str {
         match self.method {
@@ -130,6 +145,8 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         let name_len = usize::from(r.u16_le(pos + 28).ok_or(ZipError::Truncated("directory entry"))?);
         let extra_len = usize::from(r.u16_le(pos + 30).ok_or(ZipError::Truncated("directory entry"))?);
         let comment_len = usize::from(r.u16_le(pos + 32).ok_or(ZipError::Truncated("directory entry"))?);
+        let host = r.slice(pos + 5, 1).and_then(|b| b.first().copied()).unwrap_or(0);
+        let unix_mode = if host == 3 { r.u32_le(pos + 38).map(|a| a >> 16) } else { None };
         let mut local = u64::from(r.u32_le(pos + 42).ok_or(ZipError::Truncated("directory entry"))?);
         let name_bytes = r.slice(pos + 46, name_len).ok_or(ZipError::Truncated("entry name"))?;
         let extra = r.slice(pos + 46 + name_len, extra_len).unwrap_or(&[]);
@@ -172,6 +189,7 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
             uncompressed_size: usize_,
             local_header_offset: local.saturating_add(prefix),
             encrypted: flags & 1 != 0,
+            unix_mode,
         });
         seen += 1;
         pos = pos.checked_add(46 + name_len + extra_len + comment_len).ok_or_else(|| ZipError::Corrupt("directory overflow".into()))?;
@@ -386,6 +404,7 @@ mod tests {
             local_header_offset: 0,
             is_dir: false,
             encrypted: false,
+            unix_mode: None,
         };
         assert_eq!(read_entry(&file, &e, 100).unwrap(), body);
         assert!(matches!(read_entry(&file, &e, 3), Err(ZipError::TooLarge(3))));
@@ -407,6 +426,7 @@ mod tests {
             local_header_offset: 0,
             is_dir: false,
             encrypted: false,
+            unix_mode: None,
         };
         let mut z = b"PK\x03\x04".to_vec();
         z.extend_from_slice(&[0; 26]);

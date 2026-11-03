@@ -509,3 +509,10 @@ naming a tool.
 branch; `git stash` keeps only tracked files, so a new file stayed in the tree and `git add -A`
 put it into the other PR. Use `git stash -u` (or commit the work in progress on its own branch),
 and read `git status` before `git add -A`.
+
+**Fence checks that disagreed about tool calls.** Suffix checks accepted malformed closing text,
+while requiring exactly three closing backticks rejected valid longer fences. Share one boundary
+parser between JSON recovery and ReAct: count the opener, require a standalone closing line at
+least that long, and reject an earlier matching close followed by more text. Shorter backtick
+lines inside a longer fence are content. Test both paths and the next HTTP request, including
+malformed suffixes and non-call JSON examples whose strings contain protocol markers.

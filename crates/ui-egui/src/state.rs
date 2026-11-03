@@ -96,7 +96,7 @@ impl Default for MakeDraft {
     }
 }
 
-pub use craft_anything_ai::rebuild::feed::{FeedItem, PlanStatus, PlanStep};
+pub use craft_anything_ai::rebuild::feed::{FeedItem, PlanStatus, PlanStep, UserItem};
 
 /// The first-run steps. Never more than four.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

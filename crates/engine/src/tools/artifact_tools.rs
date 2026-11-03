@@ -686,6 +686,10 @@ fn core_archive_extract(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         "zip" | "apk" | "ipa" | "jar" | "hap" | "msix" => {
             let z = zip::parse(&bytes, p.max_files.saturating_mul(2)).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, e.to_string()))?;
             for e in z.entries.iter().filter(|e| !e.is_dir) {
+                if let Some(kind) = e.special_kind() {
+                    members.push((e.name.clone(), Member::Skip(format!("{kind} member is not a regular file"))));
+                    continue;
+                }
                 match zip::read_entry(&bytes, e, p.max_bytes) {
                     Ok(d) => members.push((e.name.clone(), Member::Owned(d))),
                     Err(err @ zip::ZipError::CrcMismatch { .. }) => {
@@ -907,6 +911,28 @@ mod tests {
         assert!(skipped.iter().any(|s| s["path"] == "ads.txt:hidden"));
         assert!(!ads_exists);
         assert_eq!(x["result"]["files_written"], 1);
+    }
+
+    #[test]
+    fn zip_symlink_member_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let z = dir.path().join("link.zip");
+        let mut b = fx::zip_stored(&[("good.txt", b"regular\n"), ("link_out", b"../../target.txt")]);
+        let at = (0..b.len().saturating_sub(54)).find(|&i| b.get(i..i + 4) == Some(b"PK\x01\x02") && b.get(i + 46..i + 54) == Some(b"link_out")).unwrap();
+        b[at + 5] = 3;
+        b[at + 38..at + 42].copy_from_slice(&((0o120777u32) << 16).to_le_bytes());
+        std::fs::write(&z, b).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let x = call(&e, "core_archive_extract", json!({"path": z})).unwrap();
+        assert_eq!(x["result"]["files_written"], 1);
+        let sk = x["result"]["skipped"].as_array().unwrap();
+        assert_eq!(sk.len(), 1);
+        assert_eq!(sk[0]["path"], "link_out");
+        assert!(sk[0]["reason"].as_str().unwrap().contains("symlink"));
+        let out = PathBuf::from(x["result"]["output_directory"].as_str().unwrap());
+        assert!(out.join("good.txt").exists());
+        assert!(!out.join("link_out").exists());
+        std::fs::remove_dir_all(out).unwrap();
     }
 
     #[test]

@@ -11,6 +11,13 @@ use crate::{icons, widgets};
 use egui::{Margin, RichText, Ui};
 use std::path::PathBuf;
 
+/// An earlier prompt: what was typed, and the pictures attached to it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Prompt {
+    pub text: String,
+    pub pictures: Vec<PathBuf>,
+}
+
 /// How one prompt box looks and behaves.
 pub struct PromptBox<'a> {
     /// The accessible name, and the id of the text field.
@@ -29,38 +36,50 @@ pub struct PromptBox<'a> {
     /// A sent message is still waiting and can be taken back: Up at the start of the box asks for it.
     pub recall: bool,
     /// Earlier prompts, oldest first, for Up and Down; read only when a key asks for them.
-    pub history: Option<&'a dyn Fn() -> Vec<String>>,
+    pub history: Option<&'a dyn Fn() -> Vec<Prompt>>,
     pub font_size: f32,
 }
 
-/// Going through earlier prompts: how far back, and what the box holds for it to still count.
+/// Going through earlier prompts: how far back (0 is what was being typed), and what the box
+/// holds for it to still count.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct Browsing {
     back: usize,
     shown: String,
     /// What was being typed, for Down past the newest.
     draft: String,
+    /// The pictures attached to what was being typed.
+    draft_pictures: Vec<PathBuf>,
+    /// The pictures of the prompt showing.
+    shown_pictures: Vec<PathBuf>,
 }
 
 /// The prompt before the one showing; none when there's no earlier one.
-fn older(history: &[String], now: Option<&Browsing>, text: &str) -> Option<Browsing> {
+fn older(history: &[Prompt], now: Option<&Browsing>, text: &str, pictures: &[PathBuf]) -> Option<Browsing> {
     let back = now.map_or(1, |b| b.back + 1);
-    let shown = history.get(history.len().checked_sub(back)?)?.clone();
-    Some(Browsing { back, shown, draft: now.map_or_else(|| text.to_string(), |b| b.draft.clone()) })
+    let p = history.get(history.len().checked_sub(back)?)?;
+    Some(Browsing {
+        back,
+        shown: p.text.clone(),
+        draft: now.map_or_else(|| text.to_string(), |b| b.draft.clone()),
+        draft_pictures: now.map_or_else(|| pictures.to_vec(), |b| b.draft_pictures.clone()),
+        shown_pictures: p.pictures.clone(),
+    })
 }
 
 /// The prompt after the one showing, or what was being typed once past the newest.
-fn newer(history: &[String], now: &Browsing) -> Result<Browsing, String> {
+fn newer(history: &[Prompt], now: &Browsing) -> Browsing {
     let back = now.back.saturating_sub(1);
     match history.len().checked_sub(back).and_then(|i| history.get(i)) {
-        Some(shown) if back > 0 => Ok(Browsing { back, shown: shown.clone(), draft: now.draft.clone() }),
-        _ => Err(now.draft.clone()),
+        Some(p) if back > 0 => Browsing { back, shown: p.text.clone(), shown_pictures: p.pictures.clone(), ..now.clone() },
+        _ => Browsing { back: 0, shown: now.draft.clone(), shown_pictures: now.draft_pictures.clone(), ..now.clone() },
     }
 }
 
 /// Up at the start or Down at the end went through earlier prompts: consumed before the field
 /// sees them. Up leaves the cursor at the start and Down at the end, so pressing it again goes on.
-fn browse(ui: &mut Ui, id: egui::Id, text: &mut String, history: &dyn Fn() -> Vec<String>) {
+/// Returns the pictures the box should hold now, when it moved to another prompt.
+fn browse(ui: &mut Ui, id: egui::Id, text: &mut String, attachments: &[PathBuf], history: &dyn Fn() -> Vec<Prompt>) -> Option<Vec<PathBuf>> {
     let key = id.with("history");
     // Editing what came back, or sending it, ends going through them.
     let now = ui.data_mut(|d| d.get_temp::<Browsing>(key)).filter(|b| b.shown == *text);
@@ -72,26 +91,23 @@ fn browse(ui: &mut Ui, id: egui::Id, text: &mut String, history: &dyn Fn() -> Ve
     let plain = egui::Modifiers::NONE;
     let up = at_start(ui.ctx(), id, text) && ui.input_mut(|i| i.consume_key(plain, egui::Key::ArrowUp));
     let next = if up {
-        older(&list(), now.as_ref(), text).map(Ok)
+        older(&list(), now.as_ref(), text, attachments)
     } else {
         now.as_ref().filter(|_| at_end(ui.ctx(), id, text) && ui.input_mut(|i| i.consume_key(plain, egui::Key::ArrowDown))).map(|b| newer(&list(), b))
     };
-    match next {
-        Some(Ok(b)) => {
-            text.clone_from(&b.shown);
-            ui.data_mut(|d| d.insert_temp(key, b));
-        }
-        Some(Err(draft)) => {
-            *text = draft;
-            ui.data_mut(|d| d.remove_temp::<Browsing>(key));
-        }
-        None => return,
+    let b = next?;
+    text.clone_from(&b.shown);
+    if b.back == 0 {
+        ui.data_mut(|d| d.remove_temp::<Browsing>(key));
+    } else {
+        ui.data_mut(|d| d.insert_temp(key, b.clone()));
     }
     if up {
         cursor_to(ui.ctx(), id, 0);
     } else {
         cursor_to_end(ui.ctx(), id, text);
     }
+    Some(b.shown_pictures)
 }
 
 /// What the person did with it this frame.
@@ -105,6 +121,9 @@ pub struct PromptOut {
     pub recall: bool,
     /// The attachment to remove.
     pub remove: Option<usize>,
+    /// Up or Down moved to another prompt: the pictures the box should hold now (the draft's own
+    /// when it came back to what was being typed). `None` leaves them as they are.
+    pub restore: Option<Vec<PathBuf>>,
 }
 
 pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBox) -> PromptOut {
@@ -157,7 +176,7 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                 out.recall = true;
                 ui.data_mut(|d| d.insert_temp(to_end, true));
             } else if let Some(history) = b.history.filter(|_| focused && !b.recall) {
-                browse(ui, id, text, history);
+                out.restore = browse(ui, id, text, attachments, history);
             }
             // What Tab would complete to, when the box starts with a partial command name. egui
             // decides keyboard navigation at the start of the pass, so the field keeps Tab only
@@ -314,15 +333,34 @@ mod tests {
 
     #[test]
     fn up_goes_back_through_prompts_and_down_returns_to_what_was_being_typed() {
-        let list = ["one".to_string(), "two".to_string()];
-        let first = older(&list, None, "half a thou").unwrap();
+        let list = [Prompt { text: "one".into(), ..Default::default() }, Prompt { text: "two".into(), ..Default::default() }];
+        let first = older(&list, None, "half a thou", &[]).unwrap();
         assert_eq!((first.shown.as_str(), first.draft.as_str()), ("two", "half a thou"));
-        let second = older(&list, Some(&first), &first.shown).unwrap();
+        let second = older(&list, Some(&first), &first.shown, &[]).unwrap();
         assert_eq!((second.shown.as_str(), second.draft.as_str()), ("one", "half a thou"));
-        assert_eq!(older(&list, Some(&second), &second.shown), None, "the oldest stays");
-        assert_eq!(newer(&list, &second).unwrap().shown, "two");
-        assert_eq!(newer(&list, &first), Err("half a thou".to_string()));
-        assert_eq!(older(&[], None, ""), None);
+        assert_eq!(older(&list, Some(&second), &second.shown, &[]), None, "the oldest stays");
+        assert_eq!(newer(&list, &second).shown, "two");
+        let draft = newer(&list, &first);
+        assert_eq!((draft.back, draft.shown.as_str()), (0, "half a thou"), "past the newest is the draft");
+        assert_eq!(older(&[], None, "", &[]), None);
+    }
+
+    #[test]
+    fn each_prompt_brings_back_its_own_pictures_and_the_draft_its_own() {
+        let one = Prompt { text: "one".into(), pictures: vec![PathBuf::from("a.png")] };
+        let two = Prompt { text: "two".into(), pictures: vec![PathBuf::from("b.png"), PathBuf::from("c.png")] };
+        let list = [one.clone(), two.clone()];
+        let draft_pictures = vec![PathBuf::from("draft.png")];
+        let first = older(&list, None, "half a thou", &draft_pictures).unwrap();
+        assert_eq!(first.shown_pictures, two.pictures, "the newest prompt's pictures");
+        assert_eq!(first.draft_pictures, draft_pictures, "the draft's are kept for Down");
+        let second = older(&list, Some(&first), &first.shown, &draft_pictures).unwrap();
+        assert_eq!(second.shown_pictures, one.pictures, "the earlier prompt's own pictures");
+        let back = newer(&list, &second);
+        assert_eq!((back.shown.as_str(), back.shown_pictures.clone()), ("two", two.pictures.clone()));
+        let draft = newer(&list, &back);
+        assert_eq!((draft.back, draft.shown.as_str()), (0, "half a thou"));
+        assert_eq!(draft.shown_pictures, draft_pictures, "the draft's own pictures come back");
     }
 
     #[test]
