@@ -260,6 +260,14 @@ impl AgentAdapter for ClaudeCode {
         if let Some(r) = cx.resume {
             a.extend(["--resume".into(), r.to_string()]);
         }
+        let tools = if cx.builder && cx.reads_checked {
+            "TodoWrite"
+        } else if cx.builder {
+            "Read,Write,Edit,Glob,Grep,TodoWrite"
+        } else {
+            ""
+        };
+        a.extend(["--tools".into(), tools.into()]);
         if cx.builder {
             // Questions go through our core_person_ask tool, which the app shows as buttons.
             a.extend(["--permission-prompt-tool".into(), format!("mcp__{MCP_NAME}__{APPROVAL_TOOL}"), "--disallowedTools".into(), "AskUserQuestion".into()]);

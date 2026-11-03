@@ -508,7 +508,7 @@ pub fn never_unasked(ws: Option<&Workspace>, tool: &str, input: &Value) -> Optio
             }
             None
         }
-        _ => None,
+        _ => refuse("uses a tool that has no automatic approval rule"),
     }
 }
 
@@ -823,6 +823,14 @@ mod tests {
         assert_eq!(ask()["answered"], false);
         let back = call("project_questions_set", json!({"project": w.root, "mode": "default"}));
         assert_eq!((back["questions"].as_str(), back["chosen"].is_null(), back["app_default"].as_str()), (Some("ask"), true, Some("ask")));
+    }
+
+    #[test]
+    fn auto_mode_refuses_unknown_tools_that_may_publish_or_schedule() {
+        for tool in ["Artifact", "CronCreate", "ListAgents"] {
+            let result = never_unasked(None, tool, &json!({}));
+            assert!(result.is_some(), "{tool} must require the person's approval");
+        }
     }
 
     #[test]

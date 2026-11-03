@@ -992,6 +992,10 @@ mod tests {
         let pos = |f: &str| a.iter().position(|x| x == f).unwrap();
         assert_eq!(a[pos("--output-format") + 1], "stream-json");
         assert!(a.contains(&"--verbose".to_string()));
+        assert_eq!(a[pos("--tools") + 1], "", "built-in tools are opt-in");
+        let builder = build_args(adapter_for("claude-code").as_ref(), &BackendOptions::default(), "build it", "PRE", &mcp(), None, Access::Build);
+        let builder_pos = builder.iter().position(|x| x == "--tools").unwrap();
+        assert_eq!(builder[builder_pos + 1], "Read,Write,Edit,Glob,Grep,TodoWrite");
         assert_eq!(a[pos("--resume") + 1], "sess-1");
         assert_eq!(a[pos("--allowedTools") + 1], "mcp__craft-anything__*");
         assert_eq!(a[pos("--model") + 1], "claude-opus-5-5", "Opus 5.5 unless configured otherwise");
