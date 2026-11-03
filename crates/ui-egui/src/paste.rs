@@ -83,19 +83,32 @@ pub fn picture_wanted(ctx: &egui::Context) -> bool {
 
 /// The pictures on the clipboard, as files: copied picture files as they are, or a copied image
 /// saved as a PNG in `dir` (clearing out old pastes not in `keep`). Empty when it holds neither.
-/// Blocking: run it on a worker.
+/// A copied picture a message can't take (over 20 MB) refuses the paste, rather than showing as
+/// attached and being left out when the message goes. Blocking: run it on a worker.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_pictures(dir: &Path, keep: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("{} {e}", crate::i18n::tr("The clipboard can't be read:")))?;
     let files: Vec<PathBuf> = clipboard.get().file_list().unwrap_or_default().into_iter().filter(|p| craft_anything_engine::workspace::is_picture(p)).collect();
     if !files.is_empty() {
-        return Ok(files);
+        return attachable(files);
     }
     let Ok(image) = clipboard.get().image() else { return Ok(Vec::new()) };
     let (Ok(width), Ok(height)) = (u32::try_from(image.width), u32::try_from(image.height)) else {
         return Err(crate::i18n::tr("The picture on the clipboard is too large."));
     };
     craft_anything_engine::workspace::save_pasted_picture(dir, width, height, image.bytes.into_owned(), keep).map(|p| vec![p]).map_err(|e| e.message)
+}
+
+/// Copied picture files, if a message can take every one; else which one it can't.
+#[cfg(not(target_arch = "wasm32"))]
+fn attachable(files: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+    match files.iter().find(|f| !craft_anything_engine::workspace::attachable_picture(f)) {
+        Some(f) => {
+            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            Err(crate::i18n::trf("{name} can't be attached: a message takes pictures up to 20 MB.", &[("name", name.as_str())]))
+        }
+        None => Ok(files),
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +120,18 @@ mod tests {
 
     fn key_with(key: egui::Key, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers }
+    }
+
+    #[test]
+    fn copied_picture_files_a_message_cant_take_refuse_the_paste() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = dir.path().join("small.png");
+        std::fs::write(&small, b"png").unwrap();
+        let big = dir.path().join("huge screenshot.png");
+        std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(attachable(vec![small.clone()]).unwrap(), vec![small.clone()]);
+        let refused = attachable(vec![small, big]).unwrap_err();
+        assert!(refused.contains("huge screenshot.png") && refused.contains("20 MB"), "{refused}");
     }
 
     /// V with Ctrl (Cmd) held.

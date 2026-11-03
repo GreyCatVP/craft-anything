@@ -413,6 +413,9 @@ Gaps found while using the app for real projects.
 - [x] Ctrl+V (Shift+Insert, Cmd+V) in a prompt box that takes pictures pastes a copied image (saved
       as a PNG) or copied picture files; attachments show as square picture tiles, the whole
       picture on hover, decoded on a worker
+- [ ] A picture over 20 MB dropped on a prompt box or picked in its dialog still shows as
+      attached, and the message then goes without it (`copy_pictures` skips it); refuse it when
+      it's added, as a paste does (`workspace::attachable_picture`)
 - [ ] When the builder decides a question, show the question and its choice as an answered card
       in the feed (the run sees only the tool call today; the builder's words say what it chose)
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running

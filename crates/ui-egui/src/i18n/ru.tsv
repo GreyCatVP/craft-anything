@@ -1324,6 +1324,7 @@ your files there are the app, edited in place	ваши файлы там — э�
 {mb} MB	{mb} МБ
 {name} builds what you make.	{name} собирает то, что вы создаёте.
 {name} builds what you make; answers come from {brain}.	{name} собирает то, что вы создаёте; ответы поступают от {brain}.
+{name} can't be attached: a message takes pictures up to 20 MB.	Не удалось прикрепить {name}: сообщение принимает изображения не больше 20 МБ.
 {name} is ready	{name} готов
 {name} is ready.	{name} готов.
 {name} isn't available yet in this build.	{name} пока недоступен в этой сборке.

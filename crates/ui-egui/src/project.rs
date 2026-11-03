@@ -1723,11 +1723,12 @@ impl CraftApp {
         });
     }
 
-    /// Pasted pictures were read: attached to the project they were pasted in while it's still
-    /// open, or added to Make's pictures while Make is still showing.
+    /// Pasted pictures were read: attached to the project they were pasted in while its screen is
+    /// still showing, or added to Make's pictures while Make is still showing.
     pub(crate) fn pasted(&mut self, project: Option<PathBuf>, files: Vec<PathBuf>) {
+        let showing = |root: &PathBuf| self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| &w.root == root);
         match project {
-            Some(root) if self.workspace.as_ref().is_some_and(|w| w.root == root) => self.attach(files),
+            Some(root) if showing(&root) => self.attach(files),
             None if self.state.screen == Screen::Home => self.add_pictures(files),
             _ => self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true),
         }
@@ -1828,6 +1829,25 @@ mod tests {
         busy.join().unwrap();
         assert!(app.settings.deep_mode, "a busy engine at startup must not mean default settings");
         drop(release.0);
+    }
+
+    /// A paste read while the person went Home goes nowhere, though the project is still the
+    /// open one: it would land in a prompt box nobody can see.
+    #[test]
+    fn a_paste_reaches_a_project_only_while_its_screen_shows() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let root = ws.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        let shot = vec![PathBuf::from("pasted-1.png")];
+        app.state.screen = Screen::Home;
+        app.pasted(Some(root.clone()), shot.clone());
+        assert!(app.state.project_attachments.is_empty());
+        assert!(app.state.toasts.iter().any(|(t, error)| *error && t.contains("another screen")), "{:?}", app.state.toasts);
+        app.state.screen = Screen::Project;
+        app.pasted(Some(root), shot.clone());
+        assert_eq!(app.state.project_attachments, shot);
     }
 
     #[test]

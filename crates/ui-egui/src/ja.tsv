@@ -824,6 +824,7 @@ your files there are the app, edited in place	そこにあるファイルがア�
 {line}, and {n} more	{line}、ほか {n} 件
 {name} builds what you make.	{name} が作るものをビルドします。
 {name} builds what you make; answers come from {brain}.	{name} がビルドし、回答は {brain} から得ます。
+{name} can't be attached: a message takes pictures up to 20 MB.	{name} は添付できません: メッセージに添付できる画像は 20 MB までです。
 {name} is ready	{name} の準備ができました
 {name} is ready.	{name} の準備ができました。
 {name} isn't on this computer yet.	{name} はまだこのコンピュータにありません。

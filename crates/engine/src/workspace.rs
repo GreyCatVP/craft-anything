@@ -1025,12 +1025,11 @@ fn pictures_in(dir: &Path) -> Vec<PathBuf> {
 /// Copy pictures into `dir` as picture-N.ext, numbering on from what's there. Files that aren't
 /// PNG, JPEG, WebP or GIF, or are over 20 MB, are skipped.
 fn copy_pictures(dir: &Path, files: &[PathBuf]) -> Result<Vec<PathBuf>, ToolError> {
-    const MAX: u64 = 20 * 1024 * 1024;
     std::fs::create_dir_all(dir).map_err(|e| ToolError::io(dir.display(), e))?;
     let mut next = pictures_in(dir).iter().map(|p| picture_number(p)).max().unwrap_or(0);
     let mut added = Vec::new();
     for f in files {
-        if !is_picture(f) || f.metadata().map_or(true, |m| m.len() > MAX) {
+        if !attachable_picture(f) {
             continue;
         }
         next += 1;
@@ -1053,6 +1052,12 @@ const MAX_PASTED_PIXELS: u64 = 15360 * 8640;
 /// The largest picture a message sends ([`copy_pictures`] skips bigger files).
 const MAX_PICTURE_BYTES: u64 = 20 * 1024 * 1024;
 
+/// A picture file a message can take: a picture ([`is_picture`]) of at most 20 MB. Reads its
+/// size, so not while drawing.
+pub fn attachable_picture(p: &Path) -> bool {
+    is_picture(p) && p.metadata().is_ok_and(|m| m.is_file() && m.len() <= MAX_PICTURE_BYTES)
+}
+
 /// Where pictures pasted from the clipboard wait until their message is sent: this person's own
 /// cache folder (never a temp folder other users can read).
 pub fn pasted_dir() -> PathBuf {
@@ -1071,12 +1076,13 @@ pub fn save_pasted_picture(dir: &Path, width: u32, height: u32, rgba: Vec<u8>, k
     if pixels.checked_mul(4) != Some(rgba.len() as u64) {
         return Err(ToolError::invalid("the pasted picture's pixels don't match its size"));
     }
-    let png = crate::tools::web_common::encode_png(&crate::tools::web_common::Image { width, height, rgba })?;
-    if png.len() as u64 > MAX_PICTURE_BYTES {
-        let mb = png.len() / (1024 * 1024);
-        return Err(ToolError::new(ErrorCode::OverLimit, format!("the pasted picture is {mb} MB as a PNG; a message takes pictures up to 20 MB"))
+    // Encoded against the limit, so a picture that won't fit never takes a second copy's memory.
+    let image = crate::tools::web_common::Image { width, height, rgba };
+    let max = usize::try_from(MAX_PICTURE_BYTES).unwrap_or(usize::MAX);
+    let Some(png) = crate::tools::web_common::encode_png_within(&image, max)? else {
+        return Err(ToolError::new(ErrorCode::OverLimit, "the pasted picture is over 20 MB as a PNG; a message takes pictures up to 20 MB")
             .with_remediation("Paste a smaller part of the screen, or save it as a JPEG and attach the file."));
-    }
+    };
     std::fs::create_dir_all(dir).map_err(|e| ToolError::io(dir.display(), e))?;
     #[cfg(unix)]
     {
@@ -1120,6 +1126,25 @@ pub fn default_projects_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_takes_picture_files_up_to_20_mb() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = dir.path().join("small.png");
+        std::fs::write(&small, b"png").unwrap();
+        let big = dir.path().join("big.PNG");
+        std::fs::File::create(&big).unwrap().set_len(MAX_PICTURE_BYTES + 1).unwrap();
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"hi").unwrap();
+        let folder = dir.path().join("folder.png");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(attachable_picture(&small));
+        for no in [&big, &text, &folder, &dir.path().join("gone.png")] {
+            assert!(!attachable_picture(no), "{}", no.display());
+        }
+        let copied = copy_pictures(&dir.path().join("attachments"), &[small, big]).unwrap();
+        assert_eq!(copied.len(), 1, "the big one is left out: {copied:?}");
+    }
 
     #[test]
     fn a_pasted_picture_is_saved_as_a_png_and_bad_sizes_are_refused() {

@@ -1324,6 +1324,7 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 {mb} MB	{mb} MB
 {name} builds what you make.	由 {name} 构建你的作品。
 {name} builds what you make; answers come from {brain}.	由 {name} 负责构建，{brain} 负责回答。
+{name} can't be attached: a message takes pictures up to 20 MB.	无法附加 {name}:消息中的图片最大为 20 MB。
 {name} is ready	{name} 已就绪
 {name} is ready.	{name} 已就绪。
 {name} isn't available yet in this build.	此版本尚未提供{name}。
