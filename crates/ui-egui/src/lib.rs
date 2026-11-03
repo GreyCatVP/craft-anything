@@ -417,6 +417,8 @@ pub struct CraftApp {
     next_consent: u64,
     /// Projects whose build is waiting for the person's answer (a question or approval).
     pub asking: std::collections::HashSet<PathBuf>,
+    /// Projects whose Pause was pressed and whose build hasn't stopped yet (#551).
+    pub pausing: std::collections::HashSet<PathBuf>,
     /// A build asked something since the last frame: the taskbar flashes if the window is behind.
     attention: bool,
     /// Jobs whose result goes into the conversation (a first look, an answer without an AI):
@@ -481,6 +483,7 @@ impl CraftApp {
             creating: None,
             chat_jobs: Vec::new(),
             asking: Default::default(),
+            pausing: Default::default(),
             pending_consent: Default::default(),
             next_consent: 1,
             attention: false,

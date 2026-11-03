@@ -331,6 +331,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, dense: bool) {
                 rows: (1, if dense { 4 } else { 8 }),
                 attach: None,
                 stop_button: answering.then_some("Stop"),
+                stopping: false,
                 send: !answering,
                 recall: false,
                 history: Some(&history),

@@ -211,8 +211,12 @@ impl CraftApp {
 
     pub fn pause(&mut self) {
         let Some(root) = self.workspace.as_ref().map(|w| w.root.clone()) else { return };
-        if self.runs.stop(&root) == Stopped::Unqueued {
-            apply(&mut self.state.feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
+        match self.runs.stop(&root) {
+            Stopped::Unqueued => apply(&mut self.state.feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true }),
+            Stopped::Stopping => {
+                self.pausing.insert(root);
+            }
+            Stopped::Nothing => {}
         }
     }
 
@@ -1505,6 +1509,12 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
     if let Some(id) = take_back {
         app.unsend(id);
     }
+    // Pause was pressed and the build hasn't stopped yet: the button says so until it does.
+    let open_root = app.workspace.as_ref().map(|w| w.root.clone());
+    if !running && let Some(root) = &open_root {
+        app.pausing.remove(root);
+    }
+    let pausing = running && open_root.is_some_and(|r| app.pausing.contains(&r));
     let hint = if app.state.just_ask {
         tr("Ask about the build, e.g. \"where are the latest files?\" Nothing changes and no build starts.")
     } else if running {
@@ -1532,6 +1542,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
                 attach: Some("Attach pictures (or drop them here)"),
                 // The one way to pause (Continue picks up where it stopped).
                 stop_button: running.then_some("Pause"),
+                stopping: pausing,
                 send: true,
                 recall: !waiting.is_empty(),
                 history: Some(&history),
