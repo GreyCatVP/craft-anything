@@ -1,8 +1,14 @@
 //! User settings (`config.toml`). No environment variables are required for anything.
 
+use crate::asset_choice::AssetChoice;
 use crate::versioned::{Step, upgrade};
+use craft_anything_engines::assets::{
+    AssetKind,
+    model::{Pricing, Unit},
+};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -126,7 +132,7 @@ pub struct Settings {
     /// What the files already in a folder picked for a new project are: `None` asks each time;
     /// the person's "don't ask again" answer otherwise.
     pub existing_files: Option<crate::workspace::ExistingFiles>,
-    /// Generated game assets: the budget a new project starts with and the picture model.
+    /// Generated game assets: what a new project starts with for each asset type.
     pub assets: AssetSettings,
     /// External MCP servers whose tools are offered as Craft Anything tools (`[[plugins.mcp]]`).
     pub plugins: crate::plugins::PluginSettings,
@@ -168,30 +174,157 @@ impl BuildSettings {
     }
 }
 
+/// What a new project starts with for generated assets. Each project keeps its own choices and
+/// limits once created.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AssetSettings {
-    /// What a new project may spend on generated pictures and 3D models before the person is
-    /// asked (US dollars). Each project keeps its own budget once created.
-    pub budget_usd: f64,
-    /// The picture model, by its id in the asset table (`nano-banana-pro`, `flux-dev`…); `None` = the
-    /// table's default.
-    pub image_model: Option<String>,
-    /// The 3D model generator's table id; `None` uses the table's default.
-    pub model_3d: Option<String>,
+    /// The provider and model a new project uses for each asset type. A type that isn't here is Off.
+    pub defaults: BTreeMap<AssetKind, AssetChoice>,
+    /// What a new project may spend on each asset type billed in US dollars (fal.ai) before the
+    /// person is asked.
+    pub usd_limit: f64,
+    /// What a new project may use of each asset type billed in credits (Scenario, ElevenLabs).
+    /// Credits are never converted to dollars.
+    pub credit_limit: f64,
+    /// Whether a new project starts with "Ignore budget" on: its limits are not enforced.
+    pub ignore_budget: bool,
 }
 
 impl Default for AssetSettings {
-    /// Use the built-in budget and defer both model selections to the asset catalogue.
+    /// No defaults chosen, and the built-in limits.
     fn default() -> Self {
-        AssetSettings { budget_usd: crate::workspace::ASSET_BUDGET_USD, image_model: None, model_3d: None }
+        AssetSettings {
+            defaults: BTreeMap::new(),
+            usd_limit: crate::workspace::ASSET_BUDGET_USD,
+            credit_limit: crate::workspace::ASSET_CREDIT_LIMIT,
+            ignore_budget: false,
+        }
     }
 }
 
 impl AssetSettings {
-    /// The budget for a new project; a negative or non-number value gives the built-in default.
+    /// The limit a new project starts with for an asset type billed in `unit`; a negative or
+    /// non-number value gives the built-in default.
+    pub fn default_limit(&self, unit: Unit) -> f64 {
+        let (set, built_in) = match unit {
+            Unit::Usd => (self.usd_limit, crate::workspace::ASSET_BUDGET_USD),
+            Unit::Credits => (self.credit_limit, crate::workspace::ASSET_CREDIT_LIMIT),
+        };
+        if set.is_finite() && set >= 0.0 { set } else { built_in }
+    }
+
+    /// What a new project uses for an asset type; Off when no default is chosen.
+    pub fn choice(&self, kind: AssetKind) -> AssetChoice {
+        self.defaults.get(&kind).cloned().unwrap_or_else(AssetChoice::off)
+    }
+
+    /// The dollar limit for a new project.
+    ///
+    /// Temporary: the callers that still think in one budget (a new project's starting budget in
+    /// `ai::rebuild::project`, the price words of the Engines screen) use it until Task 10 and
+    /// Task 13 of the per-type assets plan move them to [`Self::default_limit`].
     pub fn budget(&self) -> f64 {
-        if self.budget_usd.is_finite() && self.budget_usd >= 0.0 { self.budget_usd } else { crate::workspace::ASSET_BUDGET_USD }
+        self.default_limit(Unit::Usd)
+    }
+
+    /// The id the asset table (removed in Task 10 of the per-type assets plan) gave the model
+    /// chosen as the default for `kind`; `None` for Off, for a model that table never had, and for
+    /// any type but pictures and 3D models.
+    ///
+    /// Temporary: the callers still reading that table (`asset_tools`, the rebuild brief, the
+    /// settings screens) use it until Task 10 and Task 13 replace the table with the chosen model.
+    pub fn legacy_table_id(&self, kind: AssetKind) -> Option<String> {
+        let c = self.defaults.get(&kind)?;
+        let provider = c.provider.as_deref()?;
+        LEGACY_ASSET_MODELS.iter().find(|m| m.kind == kind && m.provider == provider && m.model == c.model).map(|m| m.id.to_string())
+    }
+
+    /// Choose the default for `kind` by its asset table id (see [`Self::legacy_table_id`]); false,
+    /// and nothing changes, when the table never had that id for that type.
+    ///
+    /// Temporary: the Settings pictures and 3D rows use it until Task 13 of the per-type assets plan
+    /// replaces them with the provider and model pickers.
+    pub fn set_legacy_table_id(&mut self, kind: AssetKind, id: &str) -> bool {
+        match LEGACY_ASSET_MODELS.iter().find(|m| m.kind == kind && m.id == id) {
+            Some(m) => {
+                self.defaults.insert(kind, m.choice());
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// A model of the asset table that `config.toml` versions 4 and older named by id
+/// (`[assets] image_model` and `model_3d`).
+struct LegacyAssetModel {
+    id: &'static str,
+    kind: AssetKind,
+    provider: &'static str,
+    /// The model's address at its provider.
+    model: &'static str,
+    name: &'static str,
+    unit: Unit,
+}
+
+/// The ids of that table and the model each stands for. `scenario-meshy` pointed at an endpoint
+/// Scenario has deprecated, so it stands for its replacement.
+const LEGACY_ASSET_MODELS: [LegacyAssetModel; 6] = [
+    LegacyAssetModel {
+        id: "nano-banana-pro",
+        kind: AssetKind::Image,
+        provider: "fal",
+        model: "fal-ai/nano-banana-pro",
+        name: "Nano Banana Pro",
+        unit: Unit::Usd,
+    },
+    LegacyAssetModel { id: "flux-dev", kind: AssetKind::Image, provider: "fal", model: "fal-ai/flux/dev", name: "FLUX.1 [dev]", unit: Unit::Usd },
+    LegacyAssetModel { id: "flux-schnell", kind: AssetKind::Image, provider: "fal", model: "fal-ai/flux/schnell", name: "FLUX.1 [schnell]", unit: Unit::Usd },
+    LegacyAssetModel {
+        id: "scenario-gemini-3-1",
+        kind: AssetKind::Image,
+        provider: "scenario",
+        model: "model_google-gemini-3-1-flash",
+        name: "Scenario Gemini 3.1",
+        unit: Unit::Credits,
+    },
+    LegacyAssetModel { id: "tripo-p1", kind: AssetKind::Model3d, provider: "fal", model: "tripo3d/p1/image-to-3d", name: "Tripo P1", unit: Unit::Usd },
+    LegacyAssetModel {
+        id: "scenario-meshy",
+        kind: AssetKind::Model3d,
+        provider: "scenario",
+        model: "model_meshy-7-1-img23d",
+        name: "Scenario Meshy 7.1",
+        unit: Unit::Credits,
+    },
+];
+
+impl LegacyAssetModel {
+    /// The choice this model becomes. Its price is learnt at the next refresh of the provider's list.
+    fn choice(&self) -> AssetChoice {
+        AssetChoice {
+            provider: Some(self.provider.into()),
+            model: self.model.into(),
+            model_name: self.name.into(),
+            unit: self.unit,
+            pricing: Pricing::After { unit: self.unit },
+        }
+    }
+
+    /// The same choice as the `[assets.defaults.<type>]` table version 5 of `config.toml` has.
+    fn v5_table(&self) -> Result<toml::Table, String> {
+        let unit = toml::Value::try_from(self.unit).map_err(|e| e.to_string())?;
+        let mut pricing = toml::Table::new();
+        pricing.insert("when".into(), "after".into());
+        pricing.insert("unit".into(), unit.clone());
+        let mut choice = toml::Table::new();
+        choice.insert("provider".into(), self.provider.into());
+        choice.insert("model".into(), self.model.into());
+        choice.insert("model_name".into(), self.name.into());
+        choice.insert("unit".into(), unit);
+        choice.insert("pricing".into(), toml::Value::Table(pricing));
+        Ok(choice)
     }
 }
 
@@ -222,10 +355,10 @@ impl Default for Settings {
 }
 
 /// The current `config.toml` format version. Bumping it means appending a step to [`SETTINGS_STEPS`].
-pub const SETTINGS_VERSION: u32 = 4;
+pub const SETTINGS_VERSION: u32 = 5;
 
 /// The steps that bring an older `config.toml` forward; step `i` goes from version `i` to `i + 1`.
-const SETTINGS_STEPS: &[Step<toml::Table>] = &[settings_v0_to_v1, settings_v1_to_v2, settings_v2_to_v3, settings_v3_to_v4];
+const SETTINGS_STEPS: &[Step<toml::Table>] = &[settings_v0_to_v1, settings_v1_to_v2, settings_v2_to_v3, settings_v3_to_v4, settings_v4_to_v5];
 const _: () = assert!(SETTINGS_STEPS.len() == SETTINGS_VERSION as usize, "one step per config.toml version");
 
 /// Version 0 (no `version` key) has the same shape as version 1; only the number is new.
@@ -258,6 +391,36 @@ fn settings_v2_to_v3(_: &mut toml::Table) -> Result<(), String> {
 /// Version 4 adds `[assets] model_3d`, the 3D generator's id in the asset table; missing keeps the
 /// table's default. The number is new so an older build doesn't save over the choice (and lose it).
 fn settings_v3_to_v4(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
+/// Version 5: generated assets are chosen per type. `[assets] budget_usd` becomes `usd_limit`, and
+/// `image_model` and `model_3d` (ids of the old asset table) become `[assets.defaults.image]` and
+/// `[assets.defaults.model_3d]`, a provider, a model and the unit it bills in. An id the old table
+/// never had is dropped: that type is Off. The price is unknown until the provider's list is fetched.
+fn settings_v4_to_v5(table: &mut toml::Table) -> Result<(), String> {
+    let Some(assets) = table.get_mut("assets").and_then(toml::Value::as_table_mut) else {
+        return Ok(());
+    };
+    if let Some(old) = assets.remove("budget_usd") {
+        let usd = match old {
+            toml::Value::Float(f) => f,
+            toml::Value::Integer(n) => n as f64,
+            other => return Err(format!("assets.budget_usd ({other}) isn't a number")),
+        };
+        assets.entry("usd_limit").or_insert(toml::Value::Float(usd));
+    }
+    let mut defaults = toml::Table::new();
+    for (old_key, kind, new_key) in [("image_model", AssetKind::Image, "image"), ("model_3d", AssetKind::Model3d, "model_3d")] {
+        let Some(old) = assets.remove(old_key) else { continue };
+        let id = old.as_str().ok_or_else(|| format!("assets.{old_key} ({old}) isn't a model id"))?;
+        if let Some(model) = LEGACY_ASSET_MODELS.iter().find(|m| m.kind == kind && m.id == id) {
+            defaults.insert(new_key.into(), toml::Value::Table(model.v5_table()?));
+        }
+    }
+    if !defaults.is_empty() {
+        assets.entry("defaults").or_insert(toml::Value::Table(defaults));
+    }
     Ok(())
 }
 
@@ -487,6 +650,7 @@ auto_mode = true
     }
 
     use super::*;
+    use craft_anything_engines::assets::model::Rate;
 
     #[test]
     fn only_configured_finds_no_engine_from_this_computer_but_keeps_the_ones_set() {
@@ -664,30 +828,135 @@ default = "Claude Code"
         assert!(!pending_path.exists());
     }
 
-    /// Older settings receive safe asset defaults, while budget and model choices round-trip through disk
-    /// and survive the version 3 to 4 step.
     #[test]
-    fn the_asset_budget_is_a_setting_and_old_configs_load() {
+    fn version_4_asset_settings_become_per_type_defaults() {
+        let s = read_settings("version = 4\n[assets]\nbudget_usd = 9.0\nimage_model = \"flux-dev\"\nmodel_3d = \"scenario-meshy\"\n").unwrap();
+        assert_eq!(s.version, SETTINGS_VERSION);
+        assert_eq!(s.assets.usd_limit, 9.0);
+        assert_eq!(s.assets.credit_limit, 500.0);
+        let img = s.assets.choice(AssetKind::Image);
+        assert_eq!((img.provider.as_deref(), img.model.as_str(), img.unit), (Some("fal"), "fal-ai/flux/dev", Unit::Usd));
+        assert_eq!(img.model_name, "FLUX.1 [dev]");
+        assert_eq!(img.pricing, Pricing::After { unit: Unit::Usd }, "the price is learnt from the next refresh");
+        let m3d = s.assets.choice(AssetKind::Model3d);
+        assert_eq!((m3d.provider.as_deref(), m3d.model.as_str(), m3d.unit), (Some("scenario"), "model_meshy-7-1-img23d", Unit::Credits));
+        assert_eq!(m3d.pricing, Pricing::After { unit: Unit::Credits });
+        assert_eq!(s.assets.choice(AssetKind::Music).provider, None, "no old choice: Off");
+        assert!(!s.assets.ignore_budget);
+        let saved = toml::to_string(&s).unwrap();
+        assert!(!saved.contains("budget_usd") && !saved.contains("image_model"), "the old keys are gone: {saved}");
+    }
+
+    #[test]
+    fn every_old_table_id_maps_to_a_model_and_back() {
+        let expected = [
+            ("nano-banana-pro", AssetKind::Image, "fal", "fal-ai/nano-banana-pro", Unit::Usd),
+            ("flux-dev", AssetKind::Image, "fal", "fal-ai/flux/dev", Unit::Usd),
+            ("flux-schnell", AssetKind::Image, "fal", "fal-ai/flux/schnell", Unit::Usd),
+            ("scenario-gemini-3-1", AssetKind::Image, "scenario", "model_google-gemini-3-1-flash", Unit::Credits),
+            ("tripo-p1", AssetKind::Model3d, "fal", "tripo3d/p1/image-to-3d", Unit::Usd),
+            ("scenario-meshy", AssetKind::Model3d, "scenario", "model_meshy-7-1-img23d", Unit::Credits),
+        ];
+        for (id, kind, provider, model, unit) in expected {
+            let key = if kind == AssetKind::Image { "image_model" } else { "model_3d" };
+            let s = read_settings(&format!("version = 4\n[assets]\n{key} = \"{id}\"\n")).unwrap();
+            let c = s.assets.choice(kind);
+            assert_eq!((c.provider.as_deref(), c.model.as_str(), c.unit), (Some(provider), model, unit), "{id}");
+            assert!(!c.model_name.is_empty(), "{id} keeps a name to show");
+            assert_eq!(s.assets.legacy_table_id(kind).as_deref(), Some(id), "{id} maps back");
+            let mut other = AssetSettings::default();
+            assert!(other.set_legacy_table_id(kind, id), "{id}");
+            assert_eq!(other.choice(kind), c, "{id} set the same way");
+        }
+        let none = read_settings("version = 4\n[assets]\nimage_model = \"made-up\"\nmodel_3d = \"also-made-up\"\n").unwrap();
+        assert!(none.assets.defaults.is_empty(), "an id the old table never had is dropped (Off)");
+        assert_eq!(none.assets.legacy_table_id(AssetKind::Image), None);
+        let mut other = AssetSettings::default();
+        assert!(!other.set_legacy_table_id(AssetKind::Speech, "flux-dev"));
+        assert!(!other.set_legacy_table_id(AssetKind::Image, "tripo-p1"));
+        assert!(other.defaults.is_empty(), "a picture model can't be the speech default, nor a 3D one the picture default");
+        let wrong = read_settings("version = 4\n[assets]\nimage_model = \"tripo-p1\"\n").unwrap();
+        assert!(wrong.assets.defaults.is_empty(), "a 3D model isn't a picture model");
+    }
+
+    #[test]
+    fn old_asset_settings_edge_cases_still_load() {
         let old: Settings = toml::from_str("mode = \"experienced\"\nauto_mode = false\n").unwrap();
-        assert_eq!(old.assets.budget(), 5.0, "a config without [assets] gets the built-in budget");
-        assert_eq!(old.assets.image_model, None);
-        assert_eq!(old.assets.model_3d, None);
+        assert_eq!(
+            (old.assets.default_limit(Unit::Usd), old.assets.default_limit(Unit::Credits)),
+            (5.0, 500.0),
+            "a config without [assets] gets the built-in limits"
+        );
+        assert!(old.assets.defaults.is_empty() && !old.assets.ignore_budget);
+        // Versions 0 to 3 go through the same step; a whole-number budget is read too.
+        let v3 = read_settings("version = 3\n[assets]\nbudget_usd = 9\nimage_model = \"flux-dev\"\n").unwrap();
+        assert_eq!((v3.version, v3.assets.usd_limit, v3.assets.legacy_table_id(AssetKind::Model3d)), (SETTINGS_VERSION, 9.0, None));
+        assert_eq!(v3.assets.legacy_table_id(AssetKind::Image).as_deref(), Some("flux-dev"));
+        let kept = read_settings("version = 3\n[assets]\nmodel_3d = \"tripo-p1\"\n").unwrap();
+        assert_eq!((kept.version, kept.assets.legacy_table_id(AssetKind::Model3d).as_deref()), (SETTINGS_VERSION, Some("tripo-p1")));
+        // Nothing to move: no [assets] table, and an empty one.
+        assert!(read_settings("version = 4\n").unwrap().assets == AssetSettings::default());
+        assert!(read_settings("version = 4\n[assets]\n").unwrap().assets == AssetSettings::default());
+        // A key of the wrong type is an error the person is told about, as before.
+        assert!(read_settings("version = 4\n[assets]\nbudget_usd = \"lots\"\n").is_err());
+        assert!(read_settings("version = 4\n[assets]\nimage_model = 3\n").is_err());
+        // A version 5 file isn't touched again by the step.
+        let v5 = read_settings("version = 5\n[assets]\nusd_limit = 7.5\ncredit_limit = 20.0\nignore_budget = true\n").unwrap();
+        assert_eq!((v5.assets.usd_limit, v5.assets.credit_limit, v5.assets.ignore_budget), (7.5, 20.0, true));
+        // A build older than version 5 won't save over a version 5 file.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
+        let text = "version = 6\n[assets]\nusd_limit = 7.5\n";
+        std::fs::write(&path, text).unwrap();
+        let newer = Settings::load_from(&path);
+        assert!(newer.save_to(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn per_type_defaults_round_trip_and_bad_limits_fall_back() {
+        let choice = |provider: &str, model: &str, unit: Unit, pricing: Pricing| AssetChoice {
+            provider: Some(provider.into()),
+            model: model.into(),
+            model_name: format!("Name of {model}"),
+            unit,
+            pricing,
+        };
         let mut s = Settings::default();
-        s.assets.budget_usd = 12.5;
-        s.assets.image_model = Some("flux-schnell".into());
-        s.assets.model_3d = Some("scenario-meshy".into());
+        s.assets.credit_limit = 750.0;
+        s.assets.usd_limit = 12.5;
+        s.assets.ignore_budget = true;
+        let a = &mut s.assets.defaults;
+        a.insert(AssetKind::Image, choice("fal", "fal-ai/flux/dev", Unit::Usd, Pricing::Before { unit: Unit::Usd, rate: Rate::PerMegapixel(0.025) }));
+        a.insert(AssetKind::Model3d, choice("scenario", "model_x", Unit::Credits, Pricing::After { unit: Unit::Credits }));
+        a.insert(AssetKind::Speech, choice("elevenlabs", "eleven_v3", Unit::Credits, Pricing::Before { unit: Unit::Credits, rate: Rate::PerCharacter(0.5) }));
+        a.insert(AssetKind::SoundEffect, choice("elevenlabs", "eleven_sfx", Unit::Credits, Pricing::Unknown));
+        a.insert(
+            AssetKind::Music,
+            choice("elevenlabs", "music_v1", Unit::Credits, Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: None } }),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
         s.save_to(&path).unwrap();
-        assert_eq!(Settings::load_from(&path), s);
-        // Version 4 added `model_3d`: a version 3 config is brought forward with or without it,
-        // and a version 4 config is newer than a version 3 build, which won't save over it.
-        let v3 = read_settings("version = 3\n[assets]\nbudget_usd = 9.0\nimage_model = \"flux-dev\"\n").unwrap();
-        assert_eq!((v3.version, v3.assets.budget(), v3.assets.model_3d.as_deref()), (SETTINGS_VERSION, 9.0, None));
-        let kept = read_settings("version = 3\n[assets]\nmodel_3d = \"tripo-p1\"\n").unwrap();
-        assert_eq!((kept.version, kept.assets.model_3d.as_deref()), (4, Some("tripo-p1")));
-        let odd: Settings = toml::from_str("[assets]\nbudget_usd = -3.0\n").unwrap();
-        assert_eq!(odd.assets.budget(), 5.0, "a negative budget isn't used");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[assets.defaults.music]") && text.contains("[assets.defaults.model_3d]"), "{text}");
+        assert_eq!(Settings::load_from(&path), s, "{text}");
+        assert_eq!(s.assets.choice(AssetKind::Music).model, "music_v1");
+        assert_eq!(s.assets.default_limit(Unit::Credits), 750.0);
+        // An explicit Off choice and a missing one both mean Off.
+        s.assets.defaults.insert(AssetKind::Music, AssetChoice::off());
+        let again = read_settings(&toml::to_string(&s).unwrap()).unwrap();
+        assert_eq!(again.assets.choice(AssetKind::Music), AssetChoice::off());
+        assert_eq!(AssetSettings::default().choice(AssetKind::Speech), AssetChoice::off());
+        assert_eq!(AssetChoice::off().provider, None);
+        // A limit that isn't a usable amount falls back to the built-in one; the other unit is untouched.
+        for bad in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let odd = AssetSettings { usd_limit: bad, credit_limit: bad, ..AssetSettings::default() };
+            assert_eq!((odd.default_limit(Unit::Usd), odd.default_limit(Unit::Credits)), (5.0, 500.0), "{bad}");
+        }
+        let odd: Settings = toml::from_str("[assets]\nusd_limit = -3.0\ncredit_limit = 40.0\n").unwrap();
+        assert_eq!((odd.assets.default_limit(Unit::Usd), odd.assets.default_limit(Unit::Credits)), (5.0, 40.0));
+        assert_eq!(odd.assets.budget(), 5.0, "the temporary dollar budget follows the dollar limit");
     }
 
     #[test]

@@ -560,9 +560,17 @@ impl AssetPrices {
         use crate::usage::asset_cost_words;
         use craft_anything_engines::assets::{Catalogue, Shape, usd};
         let table = Catalogue::built_in();
-        let picture =
-            table.image_model(app.settings.assets.image_model.as_deref()).or_else(|_| table.image_model(None)).map(|m| m.cost(Shape::Square)).unwrap_or(0.0);
-        let model = table.model_3d(app.settings.assets.model_3d.as_deref()).or_else(|_| table.model_3d(None)).map(|m| m.cost(true)).unwrap_or(0.0) + picture;
+        let picture = table
+            .image_model(app.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Image).as_deref())
+            .or_else(|_| table.image_model(None))
+            .map(|m| m.cost(Shape::Square))
+            .unwrap_or(0.0);
+        let model = table
+            .model_3d(app.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Model3d).as_deref())
+            .or_else(|_| table.model_3d(None))
+            .map(|m| m.cost(true))
+            .unwrap_or(0.0)
+            + picture;
         AssetPrices { model: asset_cost_words(model), picture: asset_cost_words(picture), budget: tr(&usd(app.settings.assets.budget())) }
     }
 }

@@ -491,6 +491,8 @@ impl Manifest {
 
 /// The starting budget for generated assets.
 pub const ASSET_BUDGET_USD: f64 = 5.0;
+/// The starting limit for an asset type billed in credits (Scenario, ElevenLabs).
+pub const ASSET_CREDIT_LIMIT: f64 = 500.0;
 /// The largest budget a project or Settings accepts for generated assets.
 pub const MAX_ASSET_BUDGET_USD: f64 = 10_000.0;
 

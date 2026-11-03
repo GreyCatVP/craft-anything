@@ -7,6 +7,7 @@ use crate::theme::{self, ThemeKind, Tokens};
 use crate::{CraftApp, Pick, icons, widgets};
 use craft_anything_ai::BackendKind;
 use craft_anything_engine::Mode;
+use craft_anything_engines::assets::AssetKind;
 use egui::{RichText, Ui, Vec2};
 use std::path::PathBuf;
 
@@ -669,45 +670,44 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
     ui.add_space(8.0);
     widgets::caption(ui, "Generated assets");
     let a = &mut app.settings.assets;
+    let (image_id, model_3d_id) = (a.legacy_table_id(AssetKind::Image), a.legacy_table_id(AssetKind::Model3d));
     row(
         ui,
         "Budget for a new project",
         "What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.",
         |ui| {
-            changed |= number(ui, &mut a.budget_usd, 0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD, "$", "");
+            changed |= number(ui, &mut a.usd_limit, 0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD, "$", "");
         },
     );
     let table = craft_anything_engines::assets::Catalogue::built_in();
     row(ui, "Picture model", "What pictures and textures are made with.", |ui| {
         let current = table
-            .image_model(a.image_model.as_deref())
+            .image_model(image_id.as_deref())
             .map(|m| m.name.clone())
-            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", a.image_model.as_deref().unwrap_or_default())]));
+            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", image_id.as_deref().unwrap_or_default())]));
         egui::ComboBox::from_id_salt("image-model").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
             for m in table.images() {
                 let price = crate::usage::asset_cost_words(m.cost(craft_anything_engines::assets::Shape::Square));
                 let label = format!("{} · {} · {} {}", m.name, m.provider, price, tr("a picture"));
-                let on = a.image_model.as_deref() == Some(m.id.as_str());
+                let on = image_id.as_deref() == Some(m.id.as_str());
                 if ui.selectable_label(on, label).on_hover_text(&m.licence).clicked() && !on {
-                    a.image_model = Some(m.id.clone());
-                    changed = true;
+                    changed |= a.set_legacy_table_id(AssetKind::Image, &m.id);
                 }
             }
         });
     });
     row(ui, "3D model generator", "What pictures are turned into 3D models with.", |ui| {
         let current = table
-            .model_3d(a.model_3d.as_deref())
+            .model_3d(model_3d_id.as_deref())
             .map(|m| m.name.clone())
-            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", a.model_3d.as_deref().unwrap_or_default())]));
+            .unwrap_or_else(|_| trf("Unavailable model: {id}", &[("id", model_3d_id.as_deref().unwrap_or_default())]));
         egui::ComboBox::from_id_salt("model-3d").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
             for m in table.models_3d() {
                 let price = crate::usage::asset_cost_words(m.cost(true));
                 let label = format!("{} · {} · {}", m.name, m.provider, price);
-                let on = a.model_3d.as_deref() == Some(m.id.as_str());
+                let on = model_3d_id.as_deref() == Some(m.id.as_str());
                 if ui.selectable_label(on, label).on_hover_text(&m.licence).clicked() && !on {
-                    a.model_3d = Some(m.id.clone());
-                    changed = true;
+                    changed |= a.set_legacy_table_id(AssetKind::Model3d, &m.id);
                 }
             }
         });

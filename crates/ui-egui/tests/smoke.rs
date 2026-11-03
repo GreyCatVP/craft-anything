@@ -522,68 +522,76 @@ fn a_project_with_assets_off_and_none_recorded_still_shows_the_budget() {
     h.get_by_label("Save budget");
 }
 
-/// Unknown saved model IDs stay visible and unchanged until a valid catalogue choice is clicked.
+/// The Settings rows show the model chosen for pictures and for 3D models, and a click on another
+/// one replaces only that choice. (Temporary: Task 13 of the per-type assets plan replaces the rows.)
 #[test]
-fn unavailable_asset_models_are_preserved_until_explicitly_replaced() {
-    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), || {
+fn the_asset_model_rows_show_the_chosen_models_and_replace_one_at_a_time() {
+    use craft_anything_engines::assets::AssetKind;
+    let table = craft_anything_engines::assets::Catalogue::built_in();
+    let (picture, model) = (table.image_model(None).unwrap(), table.model_3d(None).unwrap());
+    let (other_picture, other_model) = ("flux-dev", "scenario-meshy");
+    assert_ne!((other_picture, other_model), (picture.id.as_str(), model.id.as_str()));
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
         let mut a = demo::app(demo::engine(Mode::Beginner, true));
         a.state.settings_open = true;
         a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
-        a.settings.assets.image_model = Some("missing-picture-model".into());
-        a.settings.assets.model_3d = Some("missing-3d-model".into());
+        assert!(a.settings.assets.set_legacy_table_id(AssetKind::Image, other_picture));
+        assert!(a.settings.assets.set_legacy_table_id(AssetKind::Model3d, other_model));
         a
     });
     h.run_steps(3);
-    h.get_by_value("Unavailable model: missing-picture-model");
-    h.get_by_value("Unavailable model: missing-3d-model");
-    assert_eq!(h.state().settings.assets.image_model.as_deref(), Some("missing-picture-model"));
-    assert_eq!(h.state().settings.assets.model_3d.as_deref(), Some("missing-3d-model"));
+    let shown = |id: &str| table.image_model(Some(id)).map(|m| m.name.clone()).or_else(|_| table.model_3d(Some(id)).map(|m| m.name.clone())).unwrap();
+    h.get_by_value(&shown(other_picture));
+    h.get_by_value(&shown(other_model));
+    assert_eq!(h.state().settings.assets.legacy_table_id(AssetKind::Image).as_deref(), Some(other_picture));
 
-    let table = craft_anything_engines::assets::Catalogue::built_in();
-    let image = table.image_model(None).unwrap();
-    h.get_by_value("Unavailable model: missing-picture-model").scroll_to_me();
+    h.get_by_value(&shown(other_picture)).scroll_to_me();
     h.run();
-    h.get_by_value("Unavailable model: missing-picture-model").click();
+    h.get_by_value(&shown(other_picture)).click();
     h.run();
-    h.get_by_label_contains(&format!("{} · {} ·", image.name, image.provider)).click();
+    h.get_by_label_contains(&format!("{} · {} ·", picture.name, picture.provider)).click();
     h.run_steps(3);
-    h.get_by_value(&image.name);
-    assert!(h.query_by_value("Unavailable model: missing-picture-model").is_none());
-    assert_eq!(h.state().settings.assets.image_model.as_deref(), Some(image.id.as_str()));
-    assert_eq!(h.state().settings.assets.model_3d.as_deref(), Some("missing-3d-model"));
+    h.get_by_value(&picture.name);
+    assert_eq!(h.state().settings.assets.legacy_table_id(AssetKind::Image).as_deref(), Some(picture.id.as_str()));
+    assert_eq!(h.state().settings.assets.legacy_table_id(AssetKind::Model3d).as_deref(), Some(other_model));
 
-    let model = table.model_3d(None).unwrap();
-    h.get_by_value("Unavailable model: missing-3d-model").scroll_to_me();
+    h.get_by_value(&shown(other_model)).scroll_to_me();
     h.run();
-    h.get_by_value("Unavailable model: missing-3d-model").click();
+    h.get_by_value(&shown(other_model)).click();
     h.run();
     h.get_by_label_contains(&format!("{} · {} ·", model.name, model.provider)).click();
     h.run_steps(3);
     h.get_by_value(&model.name);
-    assert!(h.query_by_value("Unavailable model: missing-3d-model").is_none());
-    assert_eq!(h.state().settings.assets.model_3d.as_deref(), Some(model.id.as_str()));
-    assert_eq!(h.state().settings.assets.image_model.as_deref(), Some(image.id.as_str()));
+    assert_eq!(h.state().settings.assets.legacy_table_id(AssetKind::Model3d).as_deref(), Some(model.id.as_str()));
+    assert_eq!(h.state().settings.assets.legacy_table_id(AssetKind::Image).as_deref(), Some(picture.id.as_str()));
 }
 
-/// Unset and blank model IDs still display the catalogue defaults without rewriting settings.
+/// Without a default, with Off, or with a model the catalogue doesn't list, the rows display the
+/// catalogue defaults without rewriting the settings.
 #[test]
 fn unspecified_asset_models_display_defaults_without_changing_settings() {
+    use craft_anything_engine::asset_choice::AssetChoice;
+    use craft_anything_engines::assets::AssetKind;
     let table = craft_anything_engines::assets::Catalogue::built_in();
-    for saved in [None, Some(String::new()), Some("  ".into())] {
+    let unlisted = AssetChoice { provider: Some("fal".into()), model: "fal-ai/unlisted".into(), ..AssetChoice::off() };
+    for saved in [None, Some(AssetChoice::off()), Some(unlisted)] {
         let original = saved.clone();
         let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
             let mut a = demo::app(demo::engine(Mode::Beginner, true));
             a.state.settings_open = true;
             a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
-            a.settings.assets.image_model = saved.clone();
-            a.settings.assets.model_3d = saved;
+            if let Some(choice) = &saved {
+                a.settings.assets.defaults.insert(AssetKind::Image, choice.clone());
+                a.settings.assets.defaults.insert(AssetKind::Model3d, choice.clone());
+            }
             a
         });
         h.run_steps(3);
         h.get_by_value(&table.image_model(None).unwrap().name);
         h.get_by_value(&table.model_3d(None).unwrap().name);
-        assert_eq!(h.state().settings.assets.image_model, original);
-        assert_eq!(h.state().settings.assets.model_3d, original);
+        let defaults = &h.state().settings.assets.defaults;
+        assert_eq!(defaults.get(&AssetKind::Image), original.as_ref());
+        assert_eq!(defaults.get(&AssetKind::Model3d), original.as_ref());
     }
 }
 

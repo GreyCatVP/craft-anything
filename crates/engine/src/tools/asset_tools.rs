@@ -609,7 +609,7 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     };
     let mut j = job(ctx)?;
     let (path, rel) = save_path(&j.ws, &p.save_as, "png")?;
-    let model = Catalogue::built_in().image_model(selected(p.model.as_deref(), ctx.session.settings.assets.image_model.as_deref()))?;
+    let model = Catalogue::built_in().image_model(selected(p.model.as_deref(), ctx.session.settings.assets.legacy_table_id(AssetKind::Image).as_deref()))?;
     let req = AssetRequest::Image { model, prompt, shape };
     let provider = j.providers.for_request(&req)?;
     let key = j.key(provider.as_ref())?;
@@ -630,7 +630,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let textured = p.textured.unwrap_or(true);
     let faces = p.faces.unwrap_or(DEFAULT_FACES);
     let catalogue = Catalogue::built_in();
-    let model = catalogue.model_3d(selected(p.model.as_deref(), ctx.session.settings.assets.model_3d.as_deref()))?;
+    let model = catalogue.model_3d(selected(p.model.as_deref(), ctx.session.settings.assets.legacy_table_id(AssetKind::Model3d).as_deref()))?;
     let range = model.faces();
     if !range.contains(&faces) {
         return Err(ToolError::invalid(format!("faces must be {} to {}", range.start(), range.end())));
@@ -650,7 +650,8 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     // From a prompt, a picture is made first: with the picture model chosen in Settings.
     let mut picture_maker = None;
     if from_prompt {
-        let image_model = catalogue.image_model(selected(p.image_model.as_deref(), ctx.session.settings.assets.image_model.as_deref()))?;
+        let image_model =
+            catalogue.image_model(selected(p.image_model.as_deref(), ctx.session.settings.assets.legacy_table_id(AssetKind::Image).as_deref()))?;
         let picture_req = AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square };
         let picture_provider = j.providers.for_request(&picture_req)?;
         let picture_key = j.key(picture_provider.as_ref())?;
@@ -792,7 +793,7 @@ mod tests {
         let mut providers = AssetProviders::built_in();
         providers.register(stand_in.clone());
         let mut session = crate::testing::session();
-        session.settings.assets.image_model = Some("flux-schnell".into());
+        assert!(session.settings.assets.set_legacy_table_id(AssetKind::Image, "flux-schnell"));
         let e = crate::Engine::new(session);
         e.session().ext.insert(std::sync::Arc::new(InboxDir(w.inbox_dir())));
         e.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".to_string(), "k-1".to_string())].into())));
@@ -1254,12 +1255,12 @@ mod tests {
         let (_d, mut w) = ws();
         let (engine, stub) = recording_engine(&w, "scenario", None);
         let options = || crate::CallOptions::new(crate::Caller::Mcp);
-        engine.session().settings.assets.model_3d = Some("scenario-meshy".into());
+        assert!(engine.session().settings.assets.set_legacy_table_id(AssetKind::Model3d, "scenario-meshy"));
         // The default image is fal: a Scenario key cannot pay for that first stage.
         let params = json!({"prompt":"a crate","save_as":"crate.glb"});
         assert_eq!(engine.call("assets_model_generate", params.clone(), options()).unwrap_err().code, ErrorCode::BadSettings);
         assert!(stub.calls.lock().unwrap().is_empty());
-        engine.session().settings.assets.image_model = Some("scenario-gemini-3-1".into());
+        assert!(engine.session().settings.assets.set_legacy_table_id(AssetKind::Image, "scenario-gemini-3-1"));
         w.set_person(|m| m.asset_budget_usd = 0.0).unwrap();
         assert_eq!(engine.call("assets_model_generate", params.clone(), options()).unwrap_err().code, ErrorCode::OverLimit);
         assert!(stub.calls.lock().unwrap().is_empty());
@@ -1267,7 +1268,10 @@ mod tests {
         engine.call("assets_model_generate", params, options()).unwrap();
         assert_eq!(*stub.calls.lock().unwrap(), vec![AssetKind::Image, AssetKind::Model3d]);
         assert_eq!(w.assets().len(), 2);
-        engine.session().settings.assets.image_model = Some("not-a-model".into());
+        engine.session().settings.assets.defaults.insert(
+            AssetKind::Image,
+            crate::asset_choice::AssetChoice { provider: Some("fal".into()), model: "not-a-model".into(), ..crate::asset_choice::AssetChoice::off() },
+        );
         engine.call("assets_image_generate", json!({"prompt":"a sky","save_as":"sky.png","model":"scenario-gemini-3-1"}), options()).unwrap();
         assert_eq!(w.assets().len(), 3);
         // Explicit fal 3D selection requires its key before generating a Scenario picture.

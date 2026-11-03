@@ -972,8 +972,8 @@ impl Worker {
             (
                 !session.clean_room(),
                 session.settings.ghidra_launcher().is_some(),
-                session.settings.assets.image_model.clone(),
-                session.settings.assets.model_3d.clone(),
+                session.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Image),
+                session.settings.assets.legacy_table_id(craft_anything_engines::assets::AssetKind::Model3d),
                 // The session's registry, so providers a fork registers are offered and checked too.
                 session.ext.get::<craft_anything_engines::assets::AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default(),
             )

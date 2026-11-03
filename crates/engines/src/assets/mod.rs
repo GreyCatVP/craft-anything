@@ -23,6 +23,8 @@ use std::sync::{Arc, OnceLock};
 #[non_exhaustive]
 pub enum AssetKind {
     Image,
+    /// Named `model_3d` in files and tool parameters (`snake_case` alone would give `model3d`).
+    #[serde(rename = "model_3d")]
     Model3d,
     Speech,
     SoundEffect,

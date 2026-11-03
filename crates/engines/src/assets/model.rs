@@ -168,6 +168,9 @@ mod tests {
     #[test]
     fn kinds_and_units_keep_their_names() {
         assert_eq!(serde_json::to_string(&AssetKind::SoundEffect).unwrap(), "\"sound_effect\"");
+        assert_eq!(serde_json::to_string(&AssetKind::Model3d).unwrap(), "\"model_3d\"", "not `model3d`");
+        assert_eq!(serde_json::from_str::<AssetKind>("\"model_3d\"").unwrap(), AssetKind::Model3d);
+        assert!(serde_json::from_str::<AssetKind>("\"model3d\"").is_err());
         assert_eq!(serde_json::to_string(&Unit::Credits).unwrap(), "\"credits\"");
         for k in AssetKind::ALL {
             assert_eq!(AssetKind::from_ledger_name(k.ledger_name()), Some(k));
