@@ -182,8 +182,12 @@ Every round spends the person's money or quota. One that can't do anything shoul
       `agent.session_id()` is set, which API backends and OpenCode's plain adapter never set (read
       in the code, not run). So #148 didn't reach #142, which was OpenCode. Wait and send the turn
       again for them too, then close #142 — commit `f80a16a66834`
-- [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds: #399 used
-      9.4M tokens in 19 minutes of the first stage, then failed to compile
+- [x] A builder step on an API backend stops after 25 failed build commands in a row (none
+      succeeding between), says so and keeps the project (`MAX_FAILED_BUILDS` in `agent.rs`, #399:
+      9.4M tokens in 19 minutes of the first stage, never compiled). Try again carries on
+- [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds and that
+      stop (#399): a model that changes code without ever running a build isn't caught by it
+- [ ] Check live that the stop fires on a real API-backend build and the message reads well
 
 ### R5.4 Local models can build
 Owner: open · Status: todo

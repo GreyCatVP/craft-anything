@@ -177,6 +177,12 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**A loop that only ends at its step cap.** A builder on an API backend may take 400 steps in one
+step of the run, and each step sends the whole conversation again: one stage spent 9.4M tokens on
+code that never compiled (#399). A failed build command is an `Ok` tool result (`succeeded: false`),
+so counting tool errors misses it. Cap a loop on what it is stuck on (build commands failing in a
+row, read from the typed `succeeded` field), not only on its total steps.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias

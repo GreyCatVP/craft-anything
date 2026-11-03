@@ -26,6 +26,14 @@ pub const DEFAULT_MAX_TURNS: u32 = 40;
 /// Steps one builder message may take (writing, building and fixing a project takes many).
 pub const BUILDER_MAX_TURNS: u32 = 400;
 
+/// The build tool whose result says whether the command succeeded (`succeeded`, typed).
+const BUILD_COMMAND_TOOL: &str = "build_command_run";
+
+/// Build commands that fail one after another, with none succeeding in between, before a step
+/// stops (#399: a model wrote code against APIs that don't exist, never got it to compile, and
+/// spent 9.4M tokens in one stage). Each failed build sends the whole conversation again.
+pub const MAX_FAILED_BUILDS: u32 = 25;
+
 /// What the loop needs from the engine (a trait so tests can inject behaviour).
 pub trait ToolHost: Send + Sync {
     /// Tool definitions for the enabled toolsets (without the meta-tools).
@@ -277,6 +285,8 @@ pub struct AgentLoop {
     /// Estimated history size sent with that turn, before its reply and tool results were added.
     last_history_estimate: u64,
     failure: Arc<Mutex<Option<TurnFailure>>>,
+    /// Build commands that failed in a row in this step (see [`MAX_FAILED_BUILDS`]).
+    failed_builds: u32,
 }
 
 impl AgentLoop {
@@ -327,6 +337,7 @@ impl AgentLoop {
         let mut msg_usage = Usage::default();
         let mut msg_cost: Option<f64> = Some(0.0);
         let mut turns = 0u32;
+        self.failed_builds = 0;
         loop {
             if self.stop.is_stopped() {
                 self.emit(AgentEvent::Status { text: "Stopped.".into() });
@@ -388,6 +399,16 @@ impl AgentLoop {
                     let results = self.run_tools(&uses);
                     self.history.push(Msg { role: Speaker::User, blocks: results });
                     self.save_transcript();
+                    if self.failed_builds >= MAX_FAILED_BUILDS {
+                        self.emit(AgentEvent::Error {
+                            message: format!("The build command failed {} times in a row, so this step stopped before spending more.", self.failed_builds),
+                            remediation: Some(
+                                "Ask for a fix (say what to change), or try a stronger model. Try again carries on from the project as it is.".into(),
+                            ),
+                            log: None,
+                        });
+                        break;
+                    }
                 }
                 StopReason::MaxTokens if !uses.is_empty() => {
                     // Tool input may be cut off: don't run anything, tell the model.
@@ -657,6 +678,16 @@ impl AgentLoop {
         }
         match r {
             Ok(out) => {
+                // A build that ran and failed is still an Ok result: `succeeded` says which.
+                if name == BUILD_COMMAND_TOOL
+                    && let ToolOutput::Value(v) = &out
+                {
+                    match v.get("succeeded").and_then(Value::as_bool) {
+                        Some(true) => self.failed_builds = 0,
+                        Some(false) => self.failed_builds = self.failed_builds.saturating_add(1),
+                        None => {}
+                    }
+                }
                 let (text, summary, ev) = compact(&out);
                 (text, true, summary, ev)
             }
@@ -744,6 +775,7 @@ impl ApiConversation {
             last_input: 0,
             last_history_estimate: 0,
             failure: failure.clone(),
+            failed_builds: 0,
         };
         let busy2 = busy.clone();
         std::thread::Builder::new()
@@ -931,6 +963,7 @@ pub(crate) mod tests {
         fn toolset_of(&self, id: &str) -> Option<Toolset> {
             match id {
                 "look" => Some(Toolset::Core),
+                "build_command_run" => Some(Toolset::Core),
                 "danger" => Some(Toolset::Runtime),
                 _ => None,
             }
@@ -939,6 +972,11 @@ pub(crate) mod tests {
             self.calls.lock().unwrap().push((id.to_string(), consent));
             if id == "danger" && !consent {
                 return Err(ToolError::new(ErrorCode::ConsentRequired, "needs your OK"));
+            }
+            if id == "build_command_run" {
+                return Ok(ToolOutput::Value(
+                    json!({"command": "cargo build", "exit_code": 0, "succeeded": input.get("ok").and_then(Value::as_bool) == Some(true)}),
+                ));
             }
             if id == "look" && input.get("large").and_then(Value::as_bool) == Some(true) {
                 return Ok(ToolOutput::Value(json!({"content": "n".repeat(8000)})));
@@ -1031,6 +1069,47 @@ pub(crate) mod tests {
         assert!(matches!(events.last(), Some(AgentEvent::TurnDone { input_tokens: 50, .. })));
         // cost known for the priced model id
         assert!(matches!(events.last(), Some(AgentEvent::TurnDone { cost_usd: Some(_), .. })));
+    }
+
+    /// #399: a model that never gets its code to compile kept going for 400 steps and 9.4M tokens.
+    /// A step stops after [`MAX_FAILED_BUILDS`] failed build commands in a row, says why, and keeps
+    /// what was done; a build that succeeds starts the count again.
+    #[test]
+    fn a_step_stops_after_many_failed_builds_in_a_row() {
+        let build = |ok: bool, n: usize| {
+            turn(vec![Block::ToolUse { id: format!("b{n}"), name: BUILD_COMMAND_TOOL.into(), input: json!({"ok": ok}) }], StopReason::ToolUse)
+        };
+        let run = |turns: Vec<Result<TurnResult, ToolError>>| {
+            let host = Arc::new(FakeHost { calls: Mutex::default(), journal: Mutex::default() });
+            let script = Scripted { turns: VecDeque::from(turns), seen: Arc::default() };
+            let slot = ModelSlot { name: "Fake".into(), model: Box::new(script), local: false, effort: None, max_turns: 400, context_tokens: 0 };
+            let mut c = ApiConversation::start(host, vec![slot], LoopConfig { beginner: true, ..LoopConfig::default() }).unwrap();
+            c.send("build it");
+            drain_until_done(&mut c, |_, _| {})
+        };
+        let n = MAX_FAILED_BUILDS as usize;
+        // All failing: stopped at the limit with a reason, not by running out of script.
+        let events = run((0..n + 5).map(|i| build(false, i)).collect());
+        let stopped = events.iter().find_map(|e| match e {
+            AgentEvent::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        });
+        assert!(stopped.as_deref().is_some_and(|m| m.contains(&format!("failed {n} times in a row"))), "{stopped:?}");
+        assert_eq!(events.iter().filter(|e| matches!(e, AgentEvent::ToolFinished { .. })).count(), n, "no more builds after the limit");
+        // A success in between starts the count again: the same number of failures, split, goes on.
+        let mut turns: Vec<_> = (0..n - 1).map(|i| build(false, i)).collect();
+        turns.push(build(true, 99));
+        turns.extend((0..n - 1).map(|i| build(false, 100 + i)));
+        turns.push(turn(vec![Block::Text { text: "done".into() }], StopReason::EndTurn));
+        let events = run(turns);
+        assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "done")));
+    }
+
+    #[test]
+    fn the_build_tool_the_limit_counts_exists() {
+        let e = craft_anything_engine::Engine::new(craft_anything_engine::testing::session());
+        assert!(e.registry().get(BUILD_COMMAND_TOOL).is_some_and(|s| !s.effects.is_empty()));
     }
 
     #[test]
