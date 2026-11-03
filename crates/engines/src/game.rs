@@ -737,10 +737,34 @@ fn cpp_tools(p: &Places, unreal: Option<&Installed>) -> bool {
     if p.program_files.iter().flat_map(|pf| subdirs(&pf.join("Microsoft Visual Studio"))).flat_map(|y| subdirs(&y)).any(|e| e.join("VC/Tools/MSVC").is_dir()) {
         return true;
     }
+    // Installed elsewhere (another drive, a folder of the person's choosing, #669): the Visual
+    // Studio installer records each install's folder in its instance's state.json.
+    if visual_studio_installs(p).iter().any(|dir| dir.join("VC/Tools/MSVC").is_dir()) {
+        return true;
+    }
     // A system clang can have the wrong version or sysroot. Look inside the selected Linux engine.
     let Some(unreal) = unreal.filter(|i| i.program.ends_with("Engine/Binaries/Linux/UnrealEditor")) else { return false };
     let Some(root) = unreal.program.ancestors().nth(4) else { return false };
     subdirs(&root.join("Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64")).iter().any(|sdk| sdk.join("x86_64-unknown-linux-gnu/bin/clang++").is_file())
+}
+
+/// The folders the Visual Studio installer says it installed to
+/// (`ProgramData/Microsoft/VisualStudio/Packages/_Instances/<id>/state.json`, `installationPath`).
+fn visual_studio_installs(p: &Places) -> Vec<PathBuf> {
+    // A record is about 20 KB; anything far larger isn't one.
+    const MAX_STATE: u64 = 4 << 20;
+    let Some(data) = &p.program_data else { return Vec::new() };
+    subdirs(&data.join("Microsoft/VisualStudio/Packages/_Instances"))
+        .into_iter()
+        .take(64)
+        .filter_map(|instance| {
+            let state = instance.join("state.json");
+            std::fs::metadata(&state).ok().filter(|m| m.len() <= MAX_STATE)?;
+            let text = std::fs::read_to_string(&state).ok()?;
+            let v: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+            v.get("installationPath").and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).map(PathBuf::from)
+        })
+        .collect()
 }
 
 // ---- getting one ---------------------------------------------------------------------------------
@@ -1080,6 +1104,24 @@ mod tests {
         assert_eq!(installed.version, "5.8.4", "the engine build file supplies the version, not its directory name");
         assert_eq!(inv.engines.iter().filter(|i| i.builder == Builder::Unreal).count(), 1);
         assert!(!inv.ready(Builder::Unreal), "an editor alone does not prove its C++ toolchain is installed");
+    }
+
+    /// #669: Visual Studio 2026 installed on another drive, in a folder of the person's choosing,
+    /// wasn't found; the installer's own record says where it is.
+    #[test]
+    fn visual_studio_installed_elsewhere_is_found_from_the_installers_record() {
+        let d = tempfile::tempdir().unwrap();
+        let pf = d.path().join("pf");
+        touch(&pf, "Epic Games/UE_5.8/Engine/Binaries/Win64/UnrealEditor.exe", b"");
+        let vs = d.path().join("E/Development C++");
+        let data = d.path().join("ProgramData");
+        let record = serde_json::json!({"installationPath": vs.display().to_string(), "installationVersion": "18.11.3"}).to_string();
+        touch(&data, "Microsoft/VisualStudio/Packages/_Instances/0a1b2c3d/state.json", format!("\u{feff}{record}").as_bytes());
+        touch(&data, "Microsoft/VisualStudio/Packages/_Instances/broken/state.json", b"not json");
+        let p = Places { program_files: vec![pf], program_data: Some(data), ..Default::default() };
+        assert!(!inventory(&p).ready(Builder::Unreal), "the install has no C++ tools yet");
+        touch(&vs, "VC/Tools/MSVC/14.51.36231/x", b"");
+        assert!(inventory(&p).ready(Builder::Unreal));
     }
 
     #[test]
