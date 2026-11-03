@@ -38,7 +38,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "settings_show",
             title: "Show settings",
-            summary: "The current settings as JSON (mode, Auto mode, Deep mode/Ghidra, engine paths, projects folder, asset budget and picture model, AI backends). API keys are never in settings.",
+            summary: "The current settings as JSON (mode, Auto mode, Deep mode/Ghidra, engine paths, projects folder, generated-asset defaults and limits per type, AI backends). API keys are never in settings.",
             beginner: "Shows your settings.",
             toolset: Toolset::Setup,
             effects: Effects::READ_ONLY,
@@ -49,7 +49,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "settings_set",
             title: "Change a setting",
-            summary: "Set one setting by its dotted key from settings_show (`auto_mode`, `deep_mode`, `projects_dir`, `assets.budget_usd`…) to a JSON value, then save. Unknown keys and values of the wrong type are refused, and nothing is written.",
+            summary: "Set one setting by its dotted key from settings_show (`auto_mode`, `deep_mode`, `projects_dir`, `assets.usd_limit`…) to a JSON value, then save. Unknown keys and values of the wrong type are refused, and nothing is written.",
             beginner: "Changes one of your settings.",
             toolset: Toolset::Setup,
             effects: Effects::WRITES_FILESYSTEM.union(Effects::MUTATES_SESSION),

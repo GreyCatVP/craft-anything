@@ -214,9 +214,10 @@ impl AssetSettings {
         if set.is_finite() && set >= 0.0 { set } else { built_in }
     }
 
-    /// What a new project uses for an asset type; Off when no default is chosen.
+    /// What a new project uses for an asset type; Off when no default is chosen, and when the one
+    /// chosen names a provider but no model (a hand-edited file): that can't generate anything.
     pub fn choice(&self, kind: AssetKind) -> AssetChoice {
-        self.defaults.get(&kind).cloned().unwrap_or_else(AssetChoice::off)
+        self.defaults.get(&kind).filter(|c| c.provider.is_none() || !c.model.is_empty()).cloned().unwrap_or_else(AssetChoice::off)
     }
 
     /// The dollar limit for a new project.
@@ -895,8 +896,8 @@ default = "Claude Code"
         let kept = read_settings("version = 3\n[assets]\nmodel_3d = \"tripo-p1\"\n").unwrap();
         assert_eq!((kept.version, kept.assets.legacy_table_id(AssetKind::Model3d).as_deref()), (SETTINGS_VERSION, Some("tripo-p1")));
         // Nothing to move: no [assets] table, and an empty one.
-        assert!(read_settings("version = 4\n").unwrap().assets == AssetSettings::default());
-        assert!(read_settings("version = 4\n[assets]\n").unwrap().assets == AssetSettings::default());
+        assert_eq!(read_settings("version = 4\n").unwrap().assets, AssetSettings::default());
+        assert_eq!(read_settings("version = 4\n[assets]\n").unwrap().assets, AssetSettings::default());
         // A key of the wrong type is an error the person is told about, as before.
         assert!(read_settings("version = 4\n[assets]\nbudget_usd = \"lots\"\n").is_err());
         assert!(read_settings("version = 4\n[assets]\nimage_model = 3\n").is_err());
@@ -957,6 +958,19 @@ default = "Claude Code"
         let odd: Settings = toml::from_str("[assets]\nusd_limit = -3.0\ncredit_limit = 40.0\n").unwrap();
         assert_eq!((odd.assets.default_limit(Unit::Usd), odd.assets.default_limit(Unit::Credits)), (5.0, 40.0));
         assert_eq!(odd.assets.budget(), 5.0, "the temporary dollar budget follows the dollar limit");
+    }
+
+    #[test]
+    fn a_default_with_a_provider_but_no_model_is_off() {
+        let mut s = AssetSettings::default();
+        s.defaults.insert(AssetKind::Image, AssetChoice { provider: Some("fal".into()), ..AssetChoice::off() });
+        assert_eq!(s.choice(AssetKind::Image), AssetChoice::off());
+        // The same read from a file that names the provider only.
+        let from_file = read_settings("version = 5\n[assets.defaults.image]\nprovider = \"fal\"\n").unwrap();
+        assert_eq!(from_file.assets.choice(AssetKind::Image), AssetChoice::off());
+        // A model makes it a choice.
+        s.defaults.insert(AssetKind::Image, AssetChoice { provider: Some("fal".into()), model: "fal-ai/flux/dev".into(), ..AssetChoice::off() });
+        assert_eq!(s.choice(AssetKind::Image).provider.as_deref(), Some("fal"));
     }
 
     #[test]

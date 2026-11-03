@@ -44,7 +44,7 @@ fn an_enabled_provider_without_a_key_is_not_offered() {
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     ws.set_person(|m| {
         m.generate_assets = true;
-        m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+        m.assets.legacy_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
     })
     .unwrap();
     let cx = |keys| BriefCx {
@@ -438,7 +438,7 @@ impl Conversation for RecordedTurns {
                 .unwrap()
                 .set_person(|m| {
                     m.generate_assets = false;
-                    m.asset_budget_usd = 0.75;
+                    m.assets.legacy_budget_usd = Some(0.75);
                 })
                 .unwrap();
             events.push(AgentEvent::Error { message: "Please retry in 0s".into(), remediation: None, log: None });
@@ -497,8 +497,8 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     sidebar
         .set_person(|m| {
             m.generate_assets = true;
-            m.asset_providers = Some(vec!["scenario".into()]);
-            m.asset_budget_usd = 7.25;
+            m.assets.legacy_providers = Some(vec!["scenario".into()]);
+            m.assets.legacy_budget_usd = Some(7.25);
         })
         .unwrap();
     worker.notes.lock().unwrap().push(Note { id: 1, text: "Use generated textures".into(), shown: "Use generated textures".into(), pictures: Vec::new() });
@@ -510,8 +510,8 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
 
     sidebar
         .set_person(|m| {
-            m.asset_providers = Some(vec!["elevenlabs".into()]);
-            m.asset_budget_usd = 0.75;
+            m.assets.legacy_providers = Some(vec!["elevenlabs".into()]);
+            m.assets.legacy_budget_usd = Some(0.75);
         })
         .unwrap();
     sidebar
@@ -538,12 +538,12 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
     std::fs::write(ws.root.join("reference/picture.png"), b"fixture").unwrap();
     for (stale_enabled, current_enabled, current_budget, stale_budget) in [(true, false, 0.75, 5.0), (false, true, 5.0, 0.75)] {
         ws.manifest.generate_assets = stale_enabled;
-        ws.manifest.asset_budget_usd = stale_budget;
+        ws.manifest.assets.legacy_budget_usd = Some(stale_budget);
         sidebar
             .set_person(|m| {
                 m.generate_assets = current_enabled;
-                m.asset_providers = Some(vec!["scenario".into()]);
-                m.asset_budget_usd = current_budget;
+                m.assets.legacy_providers = Some(vec!["scenario".into()]);
+                m.assets.legacy_budget_usd = Some(current_budget);
             })
             .unwrap();
         let game = kind("game");
@@ -574,7 +574,7 @@ fn every_active_builder_turn_refreshes_asset_choices_without_replacing_run_progr
         sidebar
             .set_person(|m| {
                 m.generate_assets = true;
-                m.asset_providers = Some(providers.iter().map(|id| (*id).into()).collect());
+                m.assets.legacy_providers = Some(providers.iter().map(|id| (*id).into()).collect());
             })
             .unwrap();
         // A local target also exercises game_steps' permission-sensitive instructions.
@@ -646,7 +646,7 @@ fn every_builder_prompt_refreshes_live_asset_key_availability() {
     let mut ws = Workspace::create(d.path(), "Game", "Make a game", TargetRef::None).unwrap();
     ws.set_person(|m| {
         m.generate_assets = true;
-        m.asset_providers = Some(vec!["scenario".into()]);
+        m.assets.legacy_providers = Some(vec!["scenario".into()]);
     })
     .unwrap();
     let mut worker = check_worker(&ws, false);
@@ -711,7 +711,7 @@ fn a_disabled_providers_key_does_not_enable_builder_asset_guidance() {
     for (enabled, has_key) in [("scenario", false), ("fal", true)] {
         ws.set_person(|m| {
             m.generate_assets = true;
-            m.asset_providers = Some(vec![enabled.into()]);
+            m.assets.legacy_providers = Some(vec![enabled.into()]);
         })
         .unwrap();
         for prompt in [
@@ -2574,7 +2574,7 @@ fn every_builder_hears_the_asset_choice_as_it_is_now() {
     let on = project_assets_note(&cx(&ws, true));
     assert!(on.contains("scenario: enabled") && on.contains("$5.00"), "{on:?}");
     assert!(project_assets_note(&cx(&ws, false)).contains("No asset provider key"));
-    ws.set_person(|m| m.asset_providers = Some(vec!["scenario".into()])).unwrap();
+    ws.set_person(|m| m.assets.legacy_providers = Some(vec!["scenario".into()])).unwrap();
     let explicit = project_assets_note(&cx(&ws, true));
     assert!(explicit.contains("scenario: enabled") && explicit.contains("fal: disabled") && explicit.contains("elevenlabs: disabled"));
     for kind in ["game", "app", "website"] {
@@ -2990,6 +2990,41 @@ fn design_notes_pair_renamed_sections_and_leave_nav_links_alone() {
     let notes = design_notes(&original, &tighter);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains("\"Why people switch\" section: padding 24 0 24 0 vs the original's 48 0 48 0"), "{notes:?}");
+}
+
+/// A new project copies Settings' asset defaults for every type, and "Ignore budget", and keeps them
+/// when Settings change afterwards.
+#[test]
+fn a_new_project_starts_with_the_asset_defaults_from_settings() {
+    use craft_anything_engine::asset_choice::AssetChoice;
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{Pricing, Unit};
+    let d = tempfile::tempdir().unwrap();
+    let mut settings = craft_anything_engine::Settings::default();
+    settings.assets.ignore_budget = true;
+    settings.assets.usd_limit = 8.0;
+    settings.assets.defaults.insert(
+        AssetKind::Music,
+        AssetChoice {
+            provider: Some("elevenlabs".into()),
+            model: "music_v1".into(),
+            model_name: "Music".into(),
+            unit: Unit::Credits,
+            pricing: Pricing::After { unit: Unit::Credits },
+        },
+    );
+    let ws = project::new_project(&settings, "-", "A game", project::Place::In(d.path()), None, true, None).unwrap();
+    let saved = Workspace::open(&ws.root).unwrap().manifest;
+    assert!(saved.assets.ignore_budget && saved.generate_assets);
+    let music = saved.assets.effective(AssetKind::Music, &settings.assets);
+    assert_eq!((music.choice.provider.as_deref(), music.limit, music.limit_on), (Some("elevenlabs"), 500.0, true));
+    assert!(music.since_ms > 0, "usage counts from when the project was made");
+    assert_eq!(saved.assets.effective(AssetKind::Image, &settings.assets).choice.provider, None, "no default: Off");
+    assert_eq!(saved.assets.types.len(), 5, "every type is stored, so later changes to Settings leave the project alone");
+    settings.assets.defaults.clear();
+    assert_eq!(saved.assets.effective(AssetKind::Music, &settings.assets).choice.provider.as_deref(), Some("elevenlabs"));
+    // Until the asset tools check each type's limit, they still check one dollar budget.
+    assert_eq!(saved.legacy_budget_usd(), 8.0);
 }
 
 #[test]

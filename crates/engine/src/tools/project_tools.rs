@@ -234,6 +234,9 @@ pub struct BudgetParams {
 }
 
 /// Read or persist a bounded asset budget and report spending with a nonnegative remaining balance.
+///
+/// Temporary: it keeps the one budget a project had (`assets.legacy_budget_usd`) until Task 14 of the
+/// per-type assets plan replaces it with `project_assets_limit` and the panel's limit fields.
 fn project_assets_budget(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: BudgetParams = parse_params(params)?;
     let mut ws = open(&p.project)?;
@@ -242,10 +245,10 @@ fn project_assets_budget(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         if !b.is_finite() || !(0.0..=crate::workspace::MAX_ASSET_BUDGET_USD).contains(&b) {
             return Err(ToolError::invalid(format!("budget_usd must be between 0 and {:.0}.", crate::workspace::MAX_ASSET_BUDGET_USD)));
         }
-        ws.set_person(|m| m.asset_budget_usd = b)?;
+        ws.set_person(|m| m.assets.legacy_budget_usd = Some(b))?;
     }
-    Ok(ToolOutput::Value(json!({"budget_usd": ws.manifest.asset_budget_usd, "spent_usd": spent,
-        "remaining_usd": (ws.manifest.asset_budget_usd - spent).max(0.0)})))
+    Ok(ToolOutput::Value(json!({"budget_usd": ws.manifest.legacy_budget_usd(), "spent_usd": spent,
+        "remaining_usd": (ws.manifest.legacy_budget_usd() - spent).max(0.0)})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -264,6 +267,10 @@ pub struct AllowAssetsParams {
 
 /// Read or update asset permissions using the latest manifest and registered provider ids.
 /// Individual changes preserve other enabled providers; the master switch retains stored choices.
+///
+/// Temporary: the provider list is the project's old one (`assets.legacy_providers`) until Task 11 of
+/// the per-type assets plan lets the master switch and "Ignore budget" stand alone and moves the
+/// providers to each type's choice.
 fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: AllowAssetsParams = parse_params(params)?;
     let providers = ctx.session.ext.get::<AssetProviders>().unwrap_or_default();
@@ -279,7 +286,7 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
                 // Work from the freshly merged manifest, including changes made during a build.
                 let was_enabled = m.generate_assets;
                 let mut enabled = if was_enabled || !allow {
-                    m.asset_providers.clone().unwrap_or_else(|| providers.ids().into_iter().map(str::to_owned).collect())
+                    m.assets.legacy_providers.clone().unwrap_or_else(|| providers.ids().into_iter().map(str::to_owned).collect())
                 } else {
                     Vec::new()
                 };
@@ -288,7 +295,7 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
                     enabled.push(id.clone());
                 }
                 m.generate_assets = (was_enabled || allow) && !enabled.is_empty();
-                m.asset_providers = Some(enabled);
+                m.assets.legacy_providers = Some(enabled);
             } else {
                 m.generate_assets = allow;
             }
@@ -296,7 +303,7 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
     }
     let statuses: Vec<_> = providers.ids().into_iter().map(|id| json!({"id": id, "enabled": ws.manifest.asset_provider_allowed(id)})).collect();
     Ok(ToolOutput::Value(json!({"generate_assets": ws.manifest.generate_assets,
-        "asset_providers": ws.manifest.asset_providers, "providers": statuses})))
+        "asset_providers": ws.manifest.assets.legacy_providers, "providers": statuses})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -658,7 +665,7 @@ mod tests {
         let call = |p: Value| e.call("project_assets_budget", p, CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"].clone());
         assert_eq!(call(json!({"project": ws.root})).unwrap()["budget_usd"], 5.0);
         assert_eq!(call(json!({"project": ws.root, "budget_usd": 12.5})).unwrap()["budget_usd"], 12.5);
-        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 12.5);
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.legacy_budget_usd(), 12.5);
         assert!(call(json!({"project": ws.root, "budget_usd": -1})).is_err());
         assert!(call(json!({"project": ws.root, "budget_usd": 10001})).unwrap_err().message.contains("between 0 and 10000"));
         ws.record_asset(crate::workspace::AssetRecord { file: "sound.mp3".into(), kind: "sound".into(), prompt: "chime".into(), cost_usd: 2.25, at_ms: 1 })
@@ -698,14 +705,14 @@ mod tests {
         assert_eq!(on["providers"].as_array().unwrap().iter().filter(|p| p["enabled"] == true).count(), 1);
         call(json!({"project": ws.root, "provider": "elevenlabs", "allow": true})).unwrap();
         call(json!({"project": ws.root, "allow": false})).unwrap();
-        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_providers, Some(vec!["scenario".into(), "elevenlabs".into()]));
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.assets.legacy_providers, Some(vec!["scenario".into(), "elevenlabs".into()]));
         call(json!({"project": ws.root, "allow": true})).unwrap();
         let manifest = Workspace::open(&ws.root).unwrap().manifest;
         assert!(manifest.asset_provider_allowed("scenario") && manifest.asset_provider_allowed("elevenlabs"));
         assert!(!manifest.asset_provider_allowed("fal"));
         call(json!({"project": ws.root, "provider": "scenario", "allow": false})).unwrap();
         assert_eq!(call(json!({"project": ws.root, "provider": "elevenlabs", "allow": false})).unwrap()["generate_assets"], false);
-        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_providers, Some(Vec::new()));
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.assets.legacy_providers, Some(Vec::new()));
         assert_eq!(call(json!({"project": ws.root, "provider": "fal"})).unwrap()["generate_assets"], false, "query does not mutate");
     }
 
@@ -719,7 +726,7 @@ mod tests {
         for (disabled, remaining) in [("scenario", vec!["elevenlabs"]), ("fal", vec!["scenario", "elevenlabs"])] {
             ws.set_person(|m| {
                 m.generate_assets = false;
-                m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+                m.assets.legacy_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
             })
             .unwrap();
             let paused = call(json!({"project": ws.root, "provider": disabled, "allow": false})).unwrap();
@@ -749,13 +756,13 @@ mod tests {
             std::fs::write(&ledger, contents).unwrap();
             assert!(call(json!({"project": ws.root})).is_err());
             assert!(call(json!({"project": ws.root, "budget_usd": 1.0})).is_err());
-            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 5.0);
+            assert_eq!(Workspace::open(&ws.root).unwrap().manifest.legacy_budget_usd(), 5.0);
             assert_eq!(std::fs::read_to_string(&ledger).unwrap(), contents);
         }
         std::fs::remove_file(&ledger).unwrap();
         std::fs::create_dir(&ledger).unwrap();
         assert!(call(json!({"project": ws.root, "budget_usd": 1.0})).is_err());
-        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 5.0);
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.legacy_budget_usd(), 5.0);
     }
 
     /// Restricting legacy all-provider permission must retain every other provider, including extensions.

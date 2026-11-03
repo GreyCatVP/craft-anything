@@ -13,7 +13,7 @@ use craft_anything_ai::rebuild::activity::{Action, ActivityNow, LineKind};
 use craft_anything_ai::rebuild::feed::{self, apply};
 use craft_anything_ai::rebuild::{self, AppKind, KindRegistry, KindWords, Note, RebuildRun, RunEvent, RunOptions, Started, Step, Stopped, TargetKind};
 use craft_anything_engine::inbox::{Answer, Inbox, Request, RequestKind};
-use craft_anything_engine::workspace::{CheckResult, Status, TargetRef, Workspace, suggest_name};
+use craft_anything_engine::workspace::{CheckResult, ProjectAssets, Status, TargetRef, Workspace, suggest_name};
 use egui::{Color32, Margin, RichText, Ui, Vec2};
 use std::path::{Path, PathBuf};
 
@@ -74,7 +74,7 @@ impl CraftApp {
             return;
         }
         let name = suggest_name(&request, &target);
-        let (projects_dir, budget, generate) = (self.settings.projects_dir(), self.settings.assets.budget(), game && draft.generate_assets);
+        let (projects_dir, assets, generate) = (self.settings.projects_dir(), self.settings.assets.clone(), game && draft.generate_assets);
         // The folder, its records and copies of the pictures are written on a worker (a slow or
         // network drive must not freeze the window); `created` starts the build.
         self.creating = Some(self.jobs.spawn(tr("Create the project"), false, move |_| {
@@ -83,13 +83,18 @@ impl CraftApp {
                 None => Workspace::create(&projects_dir, &name, &request, target),
             };
             let mut ws = created.map_err(|e| e.for_people())?;
-            // A new project starts with the asset budget from Settings and the person's choice of
-            // generated assets.
+            // A new project starts with the asset choices and limits from Settings and the person's
+            // choice of generated assets.
             if let Some(b) = engine {
                 ws.manifest.stack = b.stack().to_string();
             }
+            let now = craft_anything_engine::inbox::now_ms();
             ws.set_person(|m| {
-                m.asset_budget_usd = budget;
+                m.assets = ProjectAssets::from_defaults(&assets, now);
+                // Temporary: the asset tools and the project panel still check one dollar budget, so
+                // it starts at Settings' dollar limit as before; Tasks 10 and 14 of the per-type
+                // assets plan drop it.
+                m.assets.legacy_budget_usd = Some(assets.budget());
                 m.generate_assets = generate;
                 // Picked on Make: its later changes are built by it too.
                 m.builder = draft.ai;
@@ -629,7 +634,8 @@ impl CraftApp {
                     // A CLI or another app can change this budget while the sidebar is open.
                     // Raising starts from disk; an explicit Save still sets the typed amount.
                     let ws = Workspace::open(root)?;
-                    params["budget_usd"] = serde_json::json!((ws.manifest.asset_budget_usd + step).min(craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD));
+                    params["budget_usd"] =
+                        serde_json::json!((ws.manifest.legacy_budget_usd() + step).min(craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD));
                 }
                 engine.call(
                     tool,
@@ -708,7 +714,7 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
             .on_hover_text(error);
     }
     ui.add_space(6.0);
-    let budget = ws.manifest.asset_budget_usd;
+    let budget = ws.manifest.legacy_budget_usd();
     let (count, spent, remaining) = assets.map_or_else(
         || ("…".to_string(), "…".to_string(), "…".to_string()),
         |(count, spent)| (count.to_string(), format!("{spent:.2}"), format!("{:.2}", (budget - spent).max(0.0))),

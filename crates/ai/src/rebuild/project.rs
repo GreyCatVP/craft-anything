@@ -1,9 +1,9 @@
 //! Starting a project from a request: the target, the folder, the stack the person asked for, the
-//! asset budget from settings and whether assets may be generated. Shared by the CLI's `rebuild` and the `rebuild_start` tool.
+//! asset choices and limits from settings and whether assets may be generated. Shared by the CLI's `rebuild` and the `rebuild_start` tool.
 
 use super::*;
 use craft_anything_engine::Settings;
-use craft_anything_engine::workspace::{ExistingFiles, suggest_name};
+use craft_anything_engine::workspace::{ExistingFiles, ProjectAssets, suggest_name};
 
 /// Where a new project goes.
 #[derive(Debug, Clone, Copy, Default)]
@@ -27,7 +27,7 @@ pub fn build_with(name: &str) -> Result<&'static stacks::Stack, ToolError> {
 
 /// A new project for `request` about `target` (a web address, an absolute path, or `-` for none),
 /// at `place`, with the stack the person
-/// picked (`build_with`), the asset budget from settings, and `generate_assets`: the person lets the
+/// picked (`build_with`), the asset choices and limits from settings, and `generate_assets`: the person lets the
 /// builder generate pictures and 3D models.
 pub fn new_project(
     settings: &Settings,
@@ -53,9 +53,12 @@ pub fn new_project(
     if let Some(s) = stack {
         ws.manifest.stack = s.name.clone();
     }
-    let budget = settings.assets.budget();
+    let now = craft_anything_engine::inbox::now_ms();
     ws.set_person(|m| {
-        m.asset_budget_usd = budget;
+        m.assets = ProjectAssets::from_defaults(&settings.assets, now);
+        // Temporary: the asset tools and the brief still check one dollar budget, so it starts at
+        // Settings' dollar limit as before; Tasks 10 and 12 of the per-type assets plan drop it.
+        m.assets.legacy_budget_usd = Some(settings.assets.budget());
         m.generate_assets = generate_assets;
         m.builder = builder.map(str::to_string);
     })?;

@@ -452,7 +452,9 @@ fn save_path(ws: &Workspace, save_as: &str, ext: &str) -> Result<(PathBuf, Strin
 fn within_budget(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, cost: f64) -> Result<(), ToolError> {
     valid_cost(cost)?;
     let spent = ws.try_assets_spent()?;
-    let budget = ws.manifest.asset_budget_usd;
+    // Temporary: one budget for every type, until Task 10 of the per-type assets plan checks each
+    // type's own limit.
+    let budget = ws.manifest.legacy_budget_usd();
     valid_cost(spent)?;
     valid_cost(budget)?;
     valid_cost(spent + cost)?;
@@ -579,8 +581,7 @@ fn summary(ws: &Workspace, saved: &str, cost: f64, extra: Value) -> Result<ToolO
         ToolError::new(e.code, format!("Saved {saved} and recorded ${cost:.6}, but the spending total could not be read: {}", e.message))
             .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and check the asset ledger before continuing.")
     })?;
-    let mut v =
-        json!({"saved": saved, "cost_usd": round(cost), "spent_usd": round(spent), "budget_left_usd": round((ws.manifest.asset_budget_usd - spent).max(0.0))});
+    let mut v = json!({"saved": saved, "cost_usd": round(cost), "spent_usd": round(spent), "budget_left_usd": round((ws.manifest.legacy_budget_usd() - spent).max(0.0))});
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
         o.extend(e.clone());
     }
@@ -1004,11 +1005,11 @@ mod tests {
         assert_eq!((records[0].file.as_str(), records[0].kind.as_str(), records[0].cost_usd), ("audio/chime.mp3", "sound", 0.03));
         assert!(!w.app_dir().join("audio/chime.mp3").exists(), "no output was saved");
         // With the budget at what was already charged, the next attempt is refused before spending.
-        w.set_person(|m| m.asset_budget_usd = 0.03).unwrap();
+        w.set_person(|m| m.assets.legacy_budget_usd = Some(0.03)).unwrap();
         assert_eq!(call(&engine).code, ErrorCode::OverLimit);
         assert_eq!(w.try_assets().unwrap().len(), 1);
         // An invalid charge is reported as unrecorded, and the ledger is left as it was.
-        w.set_person(|m| m.asset_budget_usd = 5.0).unwrap();
+        w.set_person(|m| m.assets.legacy_budget_usd = Some(5.0)).unwrap();
         let invalid = call(&engine_with(&w, vec![std::sync::Arc::new(ChargedFailure("elevenlabs", f64::NAN))]));
         assert!(invalid.message.contains("could not be recorded"), "{}", invalid.message);
         assert_eq!(w.try_assets().unwrap().len(), 1);
@@ -1019,7 +1020,7 @@ mod tests {
     fn a_charged_model_failure_after_its_picture_records_both() {
         let (_d, mut w) = ws();
         // Scenario's mesh ceiling is above the default budget.
-        w.set_person(|m| m.asset_budget_usd = 20.0).unwrap();
+        w.set_person(|m| m.assets.legacy_budget_usd = Some(20.0)).unwrap();
         let picture = std::sync::Arc::new(Recording { id: "fal", calls: Default::default(), estimates: Default::default(), estimate: None });
         let engine = engine_with(&w, vec![picture.clone(), std::sync::Arc::new(ChargedFailure("scenario", 0.4))]);
         let params = json!({"prompt":"a crate", "model":"scenario-meshy", "image_model":"flux-schnell", "save_as":"crate.glb"});
@@ -1143,7 +1144,7 @@ mod tests {
     fn disabled_providers_cannot_spend_through_audio_or_model_overrides_or_precursors() {
         let (_d, mut w) = ws();
         let (engine, audio) = recording_engine(&w, "elevenlabs", None);
-        w.set_person(|m| m.asset_providers = Some(vec!["scenario".into()])).unwrap();
+        w.set_person(|m| m.assets.legacy_providers = Some(vec!["scenario".into()])).unwrap();
         for (tool, params, _) in audio_calls() {
             assert_eq!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::NoPermission);
         }
@@ -1217,7 +1218,7 @@ mod tests {
             assert_eq!(engine.call(tool, params.clone(), crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::NoPermission);
             w.set_person(|m| {
                 m.generate_assets = true;
-                m.asset_budget_usd = 0.0;
+                m.assets.legacy_budget_usd = Some(0.0);
             })
             .unwrap();
             assert_eq!(engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp)).unwrap_err().code, ErrorCode::OverLimit);
@@ -1261,10 +1262,10 @@ mod tests {
         assert_eq!(engine.call("assets_model_generate", params.clone(), options()).unwrap_err().code, ErrorCode::BadSettings);
         assert!(stub.calls.lock().unwrap().is_empty());
         assert!(engine.session().settings.assets.set_legacy_table_id(AssetKind::Image, "scenario-gemini-3-1"));
-        w.set_person(|m| m.asset_budget_usd = 0.0).unwrap();
+        w.set_person(|m| m.assets.legacy_budget_usd = Some(0.0)).unwrap();
         assert_eq!(engine.call("assets_model_generate", params.clone(), options()).unwrap_err().code, ErrorCode::OverLimit);
         assert!(stub.calls.lock().unwrap().is_empty());
-        w.set_person(|m| m.asset_budget_usd = 20.0).unwrap();
+        w.set_person(|m| m.assets.legacy_budget_usd = Some(20.0)).unwrap();
         engine.call("assets_model_generate", params, options()).unwrap();
         assert_eq!(*stub.calls.lock().unwrap(), vec![AssetKind::Image, AssetKind::Model3d]);
         assert_eq!(w.assets().len(), 2);
@@ -1534,7 +1535,7 @@ mod tests {
     fn precursor_quotes_and_generation_use_identical_expanded_prompts() {
         for budget in [0.507, 5.0] {
             let (_d, mut w) = ws();
-            w.set_person(|m| m.asset_budget_usd = budget).unwrap();
+            w.set_person(|m| m.assets.legacy_budget_usd = Some(budget)).unwrap();
             let (engine, _) = recording_engine(&w, "fal", None);
             let stub = std::sync::Arc::new(PromptPriced::default());
             let mut providers = AssetProviders::built_in();
@@ -1563,7 +1564,7 @@ mod tests {
     #[test]
     fn malformed_model_credentials_stop_before_spending_on_the_source_picture() {
         let (_d, mut w) = ws();
-        w.set_person(|m| m.asset_budget_usd = 20.0).unwrap();
+        w.set_person(|m| m.assets.legacy_budget_usd = Some(20.0)).unwrap();
         let (engine, pictures) = recording_engine(&w, "fal", None);
         engine.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".into(), "sk-test".into()), ("scenario".into(), "sk-test".into())].into())));
         let result = engine.call(

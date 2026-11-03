@@ -19,7 +19,9 @@
 
 use crate::inbox::now_ms;
 use crate::project::write_atomic;
+use crate::settings::AssetSettings;
 use crate::versioned::{self, upgrade};
+use craft_anything_engines::assets::AssetKind;
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,7 +29,10 @@ use serde_json::Value;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+pub mod assets;
 pub mod progress;
+
+pub use assets::{ProjectAssets, TypeAssets};
 
 pub const MANIFEST: &str = "craft.json";
 
@@ -79,10 +84,10 @@ fn copy_tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool, depth: usize)
 }
 
 /// The current `craft.json` format version. Bumping it means appending a step to [`MANIFEST_STEPS`].
-pub const MANIFEST_VERSION: u32 = 3;
+pub const MANIFEST_VERSION: u32 = 4;
 
 /// The steps that bring an older `craft.json` forward; step `i` goes from version `i` to `i + 1`.
-const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2, manifest_v2_to_v3];
+const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2, manifest_v2_to_v3, manifest_v3_to_v4];
 const _: () = assert!(MANIFEST_STEPS.len() == MANIFEST_VERSION as usize, "one step per craft.json version");
 
 /// Version 0 (no `version` field) has the same shape as version 1; only the number is new.
@@ -101,6 +106,25 @@ fn manifest_v1_to_v2(doc: &mut Value) -> Result<(), String> {
 /// Older builds open this version read-only so they cannot overwrite those choices.
 fn manifest_v2_to_v3(doc: &mut Value) -> Result<(), String> {
     if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
+}
+
+/// Version 4 keeps the asset choices of each asset type in `assets`. The single dollar budget and
+/// the provider list of version 3 move there as `legacy_budget_usd` and `legacy_providers`, so the
+/// project keeps its budget and its provider choices until the person chooses again. Older builds
+/// open this version read-only so they cannot overwrite the new choices.
+fn manifest_v3_to_v4(doc: &mut Value) -> Result<(), String> {
+    let obj = doc.as_object_mut().ok_or("the manifest isn't a JSON object")?;
+    let moved: Vec<(&str, Value)> = [("asset_budget_usd", "legacy_budget_usd"), ("asset_providers", "legacy_providers")]
+        .into_iter()
+        .filter_map(|(old, new)| obj.remove(old).filter(|v| !v.is_null()).map(|v| (new, v)))
+        .collect();
+    if moved.is_empty() {
+        return Ok(());
+    }
+    let assets = obj.entry("assets").or_insert_with(|| Value::Object(Default::default()));
+    let assets = assets.as_object_mut().ok_or("assets isn't a JSON object")?;
+    assets.extend(moved.into_iter().map(|(new, v)| (new.to_string(), v)));
+    Ok(())
 }
 
 /// Read a `craft.json` document of any version this build understands. A newer manifest is read
@@ -397,17 +421,14 @@ pub struct Manifest {
     /// The agent's last plain-words summary, shown when the project is reopened.
     #[serde(default)]
     pub last_reply: String,
-    /// What generated pictures and 3D models may cost before the person is asked (US dollars).
-    #[serde(default = "default_asset_budget")]
-    pub asset_budget_usd: f64,
     /// The person lets the builder generate pictures and 3D models (paid, so off until they turn
     /// it on; it also needs a key for an asset provider).
     #[serde(default)]
     pub generate_assets: bool,
-    /// Explicit provider ids allowed for this project. None preserves the legacy all-provider
-    /// choice; an empty list allows none. The master generate_assets switch still applies.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asset_providers: Option<Vec<String>>,
+    /// The provider and model, limit and usage start for each asset type, and "Ignore budget".
+    /// The person's, like the master switch above.
+    #[serde(default)]
+    pub assets: ProjectAssets,
     /// The app is the project folder itself: the person's own files, which the builder edits in
     /// place, instead of app/.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -449,9 +470,8 @@ impl Manifest {
             agent_session_by: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
-            asset_budget_usd: ASSET_BUDGET_USD,
             generate_assets: false,
-            asset_providers: None,
+            assets: ProjectAssets::default(),
             app_in_root: false,
             start_files: Vec::new(),
             builder: None,
@@ -466,22 +486,48 @@ impl Manifest {
         self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
     }
 
-    /// Whether the person allows this provider to generate paid assets in this project.
+    /// What the project has for `kind` when generated assets are on and a provider is chosen for
+    /// it; `None` when the master switch is off or the type is Off.
+    pub fn asset_type_on(&self, kind: AssetKind, s: &AssetSettings) -> Option<TypeAssets> {
+        if !self.generate_assets {
+            return None;
+        }
+        let t = self.assets.effective(kind, s);
+        t.choice.provider.is_some().then_some(t)
+    }
+
+    /// The one dollar budget the project had before limits were kept per type: the old budget it
+    /// carries, else the built-in one.
+    ///
+    /// Temporary: the callers still thinking in one budget (the asset tools, the rebuild brief,
+    /// the project's asset tools and panel) use it until Tasks 10, 11, 12 and 14 of the per-type
+    /// assets plan move them to [`ProjectAssets::effective`].
+    pub fn legacy_budget_usd(&self) -> f64 {
+        self.assets.legacy_budget_usd.unwrap_or(ASSET_BUDGET_USD)
+    }
+
+    /// Whether the person allows this provider to generate paid assets in this project: the master
+    /// switch is on and the provider is among the old provider list's (see [`Self::asset_provider_chosen`]).
+    ///
+    /// Temporary, until Tasks 10 and 12 of the per-type assets plan decide by the type's chosen
+    /// provider instead.
     pub fn asset_provider_allowed(&self, provider: &str) -> bool {
         self.generate_assets && self.asset_provider_chosen(provider)
     }
 
-    /// Whether this provider is among the person's stored choices, whatever the master switch says:
-    /// what turning generated assets back on would allow.
+    /// Whether this provider is among the project's old provider list, whatever the master switch
+    /// says: what turning generated assets back on would allow. No list: every provider.
+    ///
+    /// Temporary, until Tasks 10, 11 and 14 of the per-type assets plan decide by the type's chosen
+    /// provider instead.
     pub fn asset_provider_chosen(&self, provider: &str) -> bool {
-        self.asset_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
+        self.assets.legacy_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
     }
 
     /// Take the fields the person owns from `other` (what's on disk).
     fn take_person_fields(&mut self, other: &Manifest) {
-        self.asset_budget_usd = other.asset_budget_usd;
         self.generate_assets = other.generate_assets;
-        self.asset_providers.clone_from(&other.asset_providers);
+        self.assets.clone_from(&other.assets);
         self.allowed_actions = other.allowed_actions.clone();
         self.builder.clone_from(&other.builder);
         self.questions = other.questions;
@@ -495,10 +541,6 @@ pub const ASSET_BUDGET_USD: f64 = 5.0;
 pub const ASSET_CREDIT_LIMIT: f64 = 500.0;
 /// The largest budget a project or Settings accepts for generated assets.
 pub const MAX_ASSET_BUDGET_USD: f64 = 10_000.0;
-
-fn default_asset_budget() -> f64 {
-    ASSET_BUDGET_USD
-}
 
 /// One paid generation and what it cost, including generations whose output could not be saved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -708,12 +750,10 @@ impl Workspace {
         // Ready stays ready; anything else can carry on (with a new conversation).
         copy.manifest.status = if m.status == Status::Ready { Status::Ready } else { Status::Stopped };
         copy.save()?;
-        let (budget, generate, builder, allowed, questions) =
-            (m.asset_budget_usd, m.generate_assets, m.builder.clone(), m.allowed_actions.clone(), m.questions);
+        let (generate, builder, allowed, questions) = (m.generate_assets, m.builder.clone(), m.allowed_actions.clone(), m.questions);
         copy.set_person(|c| {
-            c.asset_budget_usd = budget;
             c.generate_assets = generate;
-            c.asset_providers.clone_from(&m.asset_providers);
+            c.assets.clone_from(&m.assets);
             c.builder = builder;
             c.allowed_actions = allowed;
             c.questions = questions;
@@ -817,9 +857,9 @@ impl Workspace {
         self.write_manifest(&m)
     }
 
-    /// Change the fields the person owns (the asset budget, whether assets are generated, the
-    /// actions always allowed): start from what's on disk, apply `f` and save. This is the only
-    /// way they change.
+    /// Change the fields the person owns (the asset choices and limits, whether assets are
+    /// generated, the actions always allowed): start from what's on disk, apply `f` and save. This
+    /// is the only way they change.
     pub fn set_person(&mut self, f: impl FnOnce(&mut Manifest)) -> Result<(), ToolError> {
         if let Ok(disk) = Workspace::open(&self.root) {
             self.manifest.take_person_fields(&disk.manifest);
@@ -1513,9 +1553,9 @@ mod tests {
         let mut person = Workspace::open(&run.root).unwrap();
         person
             .set_person(|m| {
-                m.asset_budget_usd = 20.0;
+                m.assets.legacy_budget_usd = Some(20.0);
                 m.generate_assets = true;
-                m.asset_providers = Some(vec!["scenario".into()]);
+                m.assets.legacy_providers = Some(vec!["scenario".into()]);
                 m.allowed_actions.push("bash:npm".into());
             })
             .unwrap();
@@ -1524,15 +1564,15 @@ mod tests {
         run.manifest.note = "Building".into();
         run.save().unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
-        assert_eq!((disk.asset_budget_usd, disk.generate_assets), (20.0, true));
+        assert_eq!((disk.legacy_budget_usd(), disk.generate_assets), (20.0, true));
         assert_eq!(disk.allowed_actions, ["bash:npm"]);
-        assert_eq!(disk.asset_providers, Some(vec!["scenario".into()]));
+        assert_eq!(disk.assets.legacy_providers, Some(vec!["scenario".into()]));
         assert_eq!((disk.status, disk.note.as_str()), (Status::Building, "Building"), "the run's own fields are saved");
         // A setter on the old copy starts from what's on disk too.
-        run.set_person(|m| m.asset_budget_usd = 25.0).unwrap();
+        run.set_person(|m| m.assets.legacy_budget_usd = Some(25.0)).unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
-        assert_eq!((disk.asset_budget_usd, disk.generate_assets), (25.0, true));
-        assert_eq!(disk.asset_providers, Some(vec!["scenario".into()]));
+        assert_eq!((disk.legacy_budget_usd(), disk.generate_assets), (25.0, true));
+        assert_eq!(disk.assets.legacy_providers, Some(vec!["scenario".into()]));
     }
 
     /// Legacy opt-in permits every provider; explicit choices obey the master switch and survive copying.
@@ -1541,29 +1581,29 @@ mod tests {
         let old = br#"{"version":2,"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true}"#;
         let mut m = read_manifest(old).unwrap();
         assert_eq!(m.version, MANIFEST_VERSION);
-        assert!(m.asset_providers.is_none());
+        assert!(m.assets.legacy_providers.is_none());
         assert!(m.asset_provider_allowed("scenario") && m.asset_provider_allowed("custom"));
-        m.asset_providers = Some(vec!["scenario".into()]);
+        m.assets.legacy_providers = Some(vec!["scenario".into()]);
         assert!(m.asset_provider_allowed("scenario"));
         assert!(!m.asset_provider_allowed("fal"));
         m.generate_assets = false;
         assert!(!m.asset_provider_allowed("scenario"));
         m.generate_assets = true;
-        m.asset_providers = Some(Vec::new());
+        m.assets.legacy_providers = Some(Vec::new());
         assert!(!m.asset_provider_allowed("scenario"));
 
         let d = tempfile::tempdir().unwrap();
         let mut ws = Workspace::create(d.path(), "Original", "x", TargetRef::None).unwrap();
         ws.set_person(|m| {
             m.generate_assets = true;
-            m.asset_providers = Some(vec!["scenario".into()]);
+            m.assets.legacy_providers = Some(vec!["scenario".into()]);
         })
         .unwrap();
         let copy = ws.duplicate("Copy").unwrap();
         let saved = Workspace::open(&copy.root).unwrap().manifest;
         assert!(saved.asset_provider_allowed("scenario"));
         assert!(!saved.asset_provider_allowed("fal"));
-        assert_eq!(saved.asset_providers, ws.manifest.asset_providers);
+        assert_eq!(saved.assets.legacy_providers, ws.manifest.assets.legacy_providers);
     }
 
     #[test]
@@ -1680,7 +1720,7 @@ mod tests {
         let ws = Workspace::open(dir.path()).unwrap();
         assert_eq!(ws.manifest.version, MANIFEST_VERSION);
         assert_eq!(ws.manifest.status, Status::Ready);
-        assert_eq!(ws.manifest.asset_budget_usd, ASSET_BUDGET_USD);
+        assert_eq!(ws.manifest.legacy_budget_usd(), ASSET_BUDGET_USD);
         assert!(!ws.manifest.generate_assets, "assets are generated only once the person turns it on");
         assert!(ws.manifest.checks[0].passed && !ws.is_read_only());
         ws.save().unwrap();

@@ -958,8 +958,7 @@ impl Worker {
         let spent = match Workspace::open(&ws.root) {
             Ok(current) if !current.is_read_only() => {
                 snapshot.manifest.generate_assets = current.manifest.generate_assets;
-                snapshot.manifest.asset_providers = current.manifest.asset_providers.clone();
-                snapshot.manifest.asset_budget_usd = current.manifest.asset_budget_usd;
+                snapshot.manifest.assets.clone_from(&current.manifest.assets);
                 current.try_assets_spent().ok()
             }
             _ => None,

@@ -387,12 +387,12 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.asset_provider_allowed("scenario"))));
     assert!(Workspace::open(&root).unwrap().manifest.asset_provider_allowed("elevenlabs"));
     // A CLI edit while this page is open must not make Raise lower the saved budget.
-    Workspace::open(&root).unwrap().set_person(|m| m.asset_budget_usd = 20.0).unwrap();
-    assert_eq!(h.state().workspace.as_ref().unwrap().manifest.asset_budget_usd, 5.0);
+    Workspace::open(&root).unwrap().set_person(|m| m.assets.legacy_budget_usd = Some(20.0)).unwrap();
+    assert_eq!(h.state().workspace.as_ref().unwrap().manifest.legacy_budget_usd(), 5.0);
     // Through the project_assets_budget tool, by the default budget from Settings.
     h.get_by_label("Raise the budget by $5.00").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == 25.0)));
-    assert_eq!(Workspace::open(&root).unwrap().manifest.asset_budget_usd, 25.0);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.legacy_budget_usd() == 25.0)));
+    assert_eq!(Workspace::open(&root).unwrap().manifest.legacy_budget_usd(), 25.0);
     h.run_steps(2);
     h.get_by_label("Budget $25.00 · remaining $24.49");
     // The explicit Save supports an exact amount and lowering it below the previous budget.
@@ -403,7 +403,7 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
         h.run_steps(2);
         h.get_by_label("Save budget").click();
         let expected = amount.parse::<f64>().unwrap();
-        assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == expected)));
+        assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.legacy_budget_usd() == expected)));
         h.run_steps(2);
         h.get_by_label(&format!("Budget ${amount} · remaining ${remaining}"));
     }
@@ -412,7 +412,7 @@ fn every_project_can_control_providers_and_save_an_exact_shared_asset_budget() {
     h.run_steps(2);
     h.get_by_label("Assets: 1 · estimated spent $0.51");
     let reopened = Workspace::open(&root).unwrap();
-    assert_eq!(reopened.manifest.asset_budget_usd, 0.25);
+    assert_eq!(reopened.manifest.legacy_budget_usd(), 0.25);
     assert!(!reopened.manifest.asset_provider_allowed("scenario"));
     assert!(!reopened.manifest.asset_provider_allowed("elevenlabs"));
     drop(h);
@@ -437,7 +437,7 @@ fn pausing_generated_assets_keeps_the_provider_choices() {
     let mut ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
     ws.set_person(|m| {
         m.generate_assets = true;
-        m.asset_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
+        m.assets.legacy_providers = Some(vec!["scenario".into(), "elevenlabs".into()]);
     })
     .unwrap();
     let root = ws.root.clone();
@@ -449,7 +449,7 @@ fn pausing_generated_assets_keeps_the_provider_choices() {
     h.run_steps(3);
     h.get_by_label("Generate pictures, models and audio").click();
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.generate_assets)));
-    let chosen = || Workspace::open(&root).unwrap().manifest.asset_providers;
+    let chosen = || Workspace::open(&root).unwrap().manifest.assets.legacy_providers;
     assert_eq!(chosen(), Some(vec!["scenario".into(), "elevenlabs".into()]), "pausing keeps the choices");
     h.run_steps(2);
     h.get_by_label("Off. Turning this on uses the providers chosen below.");
@@ -500,7 +500,7 @@ fn a_registered_asset_provider_is_listed_and_switchable() {
     h.get_by_label("Custom Art").click();
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.asset_provider_allowed("custom-art"))));
     let saved = Workspace::open(&root).unwrap().manifest;
-    assert!(["fal", "scenario", "elevenlabs"].iter().all(|id| saved.asset_provider_allowed(id)), "{:?}", saved.asset_providers);
+    assert!(["fal", "scenario", "elevenlabs"].iter().all(|id| saved.asset_provider_allowed(id)), "{:?}", saved.assets.legacy_providers);
 }
 
 /// Projects retain provider and budget controls even before generation is enabled or any assets exist.

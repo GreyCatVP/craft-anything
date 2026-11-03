@@ -31,20 +31,12 @@
       "description": "The app is the project folder itself: the person's own files, which the builder edits in\nplace, instead of app/.",
       "type": "boolean"
     },
-    "asset_budget_usd": {
-      "description": "What generated pictures and 3D models may cost before the person is asked (US dollars).",
-      "type": "number",
-      "format": "double",
-      "default": 5.0
-    },
-    "asset_providers": {
-      "description": "Explicit provider ids allowed for this project. None preserves the legacy all-provider\nchoice; an empty list allows none. The master generate_assets switch still applies.",
-      "type": [
-        "array",
-        "null"
-      ],
-      "items": {
-        "type": "string"
+    "assets": {
+      "description": "The provider and model, limit and usage start for each asset type, and \"Ignore budget\".\nThe person's, like the master switch above.",
+      "$ref": "#/$defs/ProjectAssets",
+      "default": {
+        "ignore_budget": false,
+        "types": {}
       }
     },
     "awaiting_check": {
@@ -143,6 +135,42 @@
     "updated_ms"
   ],
   "$defs": {
+    "AssetChoice": {
+      "description": "The provider and model chosen for one asset type.",
+      "type": "object",
+      "properties": {
+        "model": {
+          "description": "The model's id at the provider.",
+          "type": "string",
+          "default": ""
+        },
+        "model_name": {
+          "description": "The model's name as shown to the person.",
+          "type": "string",
+          "default": ""
+        },
+        "pricing": {
+          "description": "What the model cost when it was chosen or last listed.",
+          "$ref": "#/$defs/Pricing",
+          "default": {
+            "when": "unknown"
+          }
+        },
+        "provider": {
+          "description": "The provider's id (`fal`, `scenario`, `elevenlabs`); `None` is Off: nothing is generated.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "unit": {
+          "description": "What the provider bills in; limits and usage for this type are counted in it.",
+          "$ref": "#/$defs/Unit",
+          "default": "usd"
+        }
+      }
+    },
     "CheckResult": {
       "description": "One check of the build: whether it works and, when it could be compared with the original,\nhow alike it is. Decisions read `passed` and `similarity`, never `note` (which is for people).",
       "type": "object",
@@ -268,6 +296,99 @@
         "similarity"
       ]
     },
+    "Pricing": {
+      "description": "What a model costs, and when that is known.",
+      "oneOf": [
+        {
+          "description": "The price is known before a run, so a limit can be checked first.",
+          "type": "object",
+          "properties": {
+            "rate": {
+              "$ref": "#/$defs/Rate"
+            },
+            "unit": {
+              "$ref": "#/$defs/Unit"
+            },
+            "when": {
+              "type": "string",
+              "const": "before"
+            }
+          },
+          "required": [
+            "when",
+            "unit",
+            "rate"
+          ]
+        },
+        {
+          "description": "Only the finished run reports its cost, so a limit is checked against what is already spent.",
+          "type": "object",
+          "properties": {
+            "unit": {
+              "$ref": "#/$defs/Unit"
+            },
+            "when": {
+              "type": "string",
+              "const": "after"
+            }
+          },
+          "required": [
+            "when",
+            "unit"
+          ]
+        },
+        {
+          "description": "The provider gives no usable price: runs are counted but have no amount.",
+          "type": "object",
+          "properties": {
+            "when": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "when"
+          ]
+        }
+      ]
+    },
+    "ProjectAssets": {
+      "description": "A project's choices for generated assets (the `assets` object of `craft.json`).",
+      "type": "object",
+      "properties": {
+        "ignore_budget": {
+          "description": "Every limit in the project is off at once; usage is still counted.",
+          "type": "boolean",
+          "default": false
+        },
+        "legacy_budget_usd": {
+          "description": "The one dollar budget a project of `craft.json` version 3 had. It stands in as the limit of\nthe dollar-billed types that have not been chosen since.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "legacy_providers": {
+          "description": "The provider ids a project of `craft.json` version 3 allowed; none: all of them. A type\nthat has not been chosen since is Off when its default provider isn't listed.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "types": {
+          "description": "What the person chose for each type. A type that isn't here has not been chosen in this\nproject yet (a project from before version 4): it follows Settings' default for the type.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/TypeAssets"
+          },
+          "default": {}
+        }
+      }
+    },
     "Questions": {
       "description": "What the builder's questions (`core_person_ask`) get.",
       "oneOf": [
@@ -280,6 +401,89 @@
           "description": "Answered at once with \"decide yourself and say what you chose\".",
           "type": "string",
           "const": "decide"
+        }
+      ]
+    },
+    "Rate": {
+      "description": "How a price is measured.",
+      "oneOf": [
+        {
+          "description": "One price for each generation.",
+          "type": "object",
+          "properties": {
+            "per_request": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "per_request"
+          ]
+        },
+        {
+          "description": "By the size of the picture.",
+          "type": "object",
+          "properties": {
+            "per_megapixel": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "per_megapixel"
+          ]
+        },
+        {
+          "description": "By the length of the sound.",
+          "type": "object",
+          "properties": {
+            "per_second": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "per_second"
+          ]
+        },
+        {
+          "description": "By the length of the text spoken.",
+          "type": "object",
+          "properties": {
+            "per_character": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "per_character"
+          ]
+        },
+        {
+          "description": "The provider quotes each run before it starts; `typical` is a usual quote, if it gives one.",
+          "type": "object",
+          "properties": {
+            "quoted": {
+              "type": "object",
+              "properties": {
+                "typical": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "format": "double"
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "quoted"
+          ]
         }
       ]
     },
@@ -352,6 +556,58 @@
           "required": [
             "kind"
           ]
+        }
+      ]
+    },
+    "TypeAssets": {
+      "description": "One asset type in a project.",
+      "type": "object",
+      "properties": {
+        "choice": {
+          "description": "The provider and model this type is generated with (Off: nothing is generated).",
+          "$ref": "#/$defs/AssetChoice",
+          "default": {
+            "model": "",
+            "model_name": "",
+            "pricing": {
+              "when": "unknown"
+            },
+            "provider": null,
+            "unit": "usd"
+          }
+        },
+        "limit": {
+          "description": "What the project may use of this type before the person is asked, in the choice's unit.",
+          "type": "number",
+          "format": "double",
+          "default": 5.0
+        },
+        "limit_on": {
+          "description": "Whether the limit is enforced. Off: usage is still counted, but nothing stops it.",
+          "type": "boolean",
+          "default": true
+        },
+        "since_ms": {
+          "description": "When this provider was chosen for the type (milliseconds since 1970): usage is counted\nfrom then, in this provider's unit. 0: from the start of the project.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        }
+      }
+    },
+    "Unit": {
+      "description": "What a provider bills in. Credits are never converted to dollars.",
+      "oneOf": [
+        {
+          "description": "US dollars (fal.ai).",
+          "type": "string",
+          "const": "usd"
+        },
+        {
+          "description": "The provider's own credits (Scenario, ElevenLabs).",
+          "type": "string",
+          "const": "credits"
         }
       ]
     }

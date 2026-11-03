@@ -128,16 +128,20 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
 }
 
 /// Current provider choices and shared spending limits, for every first brief and follow-up.
+///
+/// Temporary: it still reads the project's old provider list and single budget
+/// (`assets.legacy_providers`, `legacy_budget_usd`) until Task 12 of the per-type assets plan
+/// rewrites the brief by each type's choice and limit.
 pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
     let mut ids: Vec<String> = cx.asset_providers.iter().map(|(id, _)| (*id).to_owned()).collect();
-    for id in cx.ws.manifest.asset_providers.iter().flatten() {
+    for id in cx.ws.manifest.assets.legacy_providers.iter().flatten() {
         if !ids.contains(id) {
             ids.push(id.clone());
         }
     }
     let states =
         ids.iter().map(|id| format!("{id}: {}", if cx.ws.manifest.asset_provider_allowed(id) { "enabled" } else { "disabled" })).collect::<Vec<_>>().join(", ");
-    let budget = cx.ws.manifest.asset_budget_usd;
+    let budget = cx.ws.manifest.legacy_budget_usd();
     let Some(spent) = cx.asset_spent else { return ASSET_POLICY_UNAVAILABLE.into() };
     let remaining = (budget - spent).max(0.0);
     let status = format!(
@@ -197,7 +201,7 @@ pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
         Some(game::Builder::Unreal) => "save them under Content/Generated/ and import them with an editor Python script run through UnrealEditor-Cmd",
         _ => "e.g. assets/generated/",
     };
-    let budget = ws.manifest.asset_budget_usd;
+    let budget = ws.manifest.legacy_budget_usd();
     let mut note = if images || models { "Realistic assets:" } else { "Generated audio:" }.to_string();
     note.push_str(" Use enabled asset providers and choose models they supply. Each operation requires its own provider key; a key for one provider does not unlock the others.");
     if images || models {

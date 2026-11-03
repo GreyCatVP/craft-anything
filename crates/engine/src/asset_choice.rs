@@ -3,10 +3,11 @@
 //! projects, and each project keeps its own.
 
 use craft_anything_engines::assets::model::{Pricing, Unit};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The provider and model chosen for one asset type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct AssetChoice {
     /// The provider's id (`fal`, `scenario`, `elevenlabs`); `None` is Off: nothing is generated.
