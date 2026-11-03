@@ -398,8 +398,10 @@ fn d_state_width() -> u32 {
     1440
 }
 
-/// Marks the visible toggles (`data-craft-state="<n>"`) and lists them. `__MAX__` is replaced.
+/// Marks the visible toggles (`data-craft-state="<n>"`) and lists them, after dropping the marks
+/// an earlier call left (they'd name a control hidden at this width, #339). `__MAX__` is replaced.
 const FIND_STATES_JS: &str = r#"(() => {
+  for (const old of document.querySelectorAll('[data-craft-state]')) old.removeAttribute('data-craft-state');
   const cap = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
   const shown = el => { const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return false; const s = getComputedStyle(el); return s.visibility !== 'hidden' && s.display !== 'none'; };
   const sel = '[aria-expanded="false"], [aria-haspopup]:not([aria-haspopup="false"]), [role="tab"][aria-selected="false"], details:not([open]) > summary';
@@ -425,6 +427,19 @@ const STATE_JS: &str = r#"(() => {
 })()"#;
 
 const CLICK_STATE_JS: &str = r#"(() => { const el = document.querySelector('[data-craft-state="__I__"]'); if (!el) return false; el.scrollIntoView({block: 'center'}); el.click(); return true; })()"#;
+
+/// Before tab `__I__` is clicked: mark the tab its list has selected now, to select it again after (#335).
+const REMEMBER_TAB_JS: &str = r#"(() => {
+  const el = document.querySelector('[data-craft-state="__I__"]');
+  if (!el || el.getAttribute('role') !== 'tab') return false;
+  const list = el.closest('[role="tablist"]') || el.parentElement;
+  const was = list && Array.from(list.querySelectorAll('[role="tab"][aria-selected="true"]')).find(t => t !== el);
+  if (!was) return false;
+  was.setAttribute('data-craft-tab-was', '__I__');
+  return true;
+})()"#;
+
+const RESELECT_TAB_JS: &str = r#"(() => { const el = document.querySelector('[data-craft-tab-was="__I__"]'); if (!el) return false; el.removeAttribute('data-craft-tab-was'); el.click(); return true; })()"#;
 
 fn press_escape(client: &mut CdpClient, dl: &Deadline) {
     for kind in ["keyDown", "keyUp"] {
@@ -487,6 +502,7 @@ fn web_page_states_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutpu
             let i = c.get("index").and_then(Value::as_u64).unwrap_or(n as u64).to_string();
             ctx.report(Some(n as f32 / found.len().max(1) as f32), format!("Opening {}…", c.get("label").and_then(Value::as_str).unwrap_or("a control")));
             let before = eval(&mut client, &STATE_JS.replace("__I__", &i), &dl)?;
+            let _ = eval(&mut client, &REMEMBER_TAB_JS.replace("__I__", &i), &dl);
             if eval(&mut client, &CLICK_STATE_JS.replace("__I__", &i), &dl)? != true {
                 continue;
             }
@@ -512,6 +528,8 @@ fn web_page_states_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutpu
                 let _ = eval(&mut client, &FIND_STATES_JS.replace("__MAX__", &p.max_states.to_string()), &dl);
             } else if after["expanded"] == "true" || after["open"] == true {
                 let _ = eval(&mut client, &CLICK_STATE_JS.replace("__I__", &i), &dl);
+            } else if changed.contains(&"tab selected") {
+                let _ = eval(&mut client, &RESELECT_TAB_JS.replace("__I__", &i), &dl);
             }
             settle(&mut client, 300)?;
             states.push(row);
@@ -802,7 +820,8 @@ fn web_site_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         let _ = set_viewport(&mut client, *w, 900, &dl);
     }
     cleanup(&mut client, &dl);
-    let (mut blueprint, shots, html_bytes) = r?;
+    let (mut blueprint, shots, html) = r?;
+    let html_bytes = html.0;
     if visitor {
         visitor_view(&mut blueprint);
     } else if let (Value::Object(b), Ok(h)) = (&mut blueprint, site.health.lock()) {
@@ -813,7 +832,7 @@ fn web_site_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
     let shown = shown_url(&url);
     let n = |k: &str| blueprint.get(k).and_then(Value::as_array).map_or(0, Vec::len);
     let images = blueprint.pointer("/assets/images").and_then(Value::as_array).map_or(0, Vec::len);
-    let readme = readme(&blueprint, &shots, html_bytes, visitor);
+    let readme = readme(&blueprint, &shots, html, visitor);
     write_new_file(&out, &["README.md".into()], readme.as_bytes()).map_err(ToolError::invalid)?;
     let capture_json = serde_json::to_vec_pretty(&blueprint).map_err(|e| ToolError::internal(e.to_string()))?;
     write_new_file(&out, &["capture.json".into()], &capture_json).map_err(ToolError::invalid)?;
@@ -849,6 +868,7 @@ fn web_site_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         } else {
             Limitation::new("cross_origin_css", "CSS custom properties and breakpoints from cross-origin stylesheets can't be read.")
         })
+        .limitations(html_cut(html))
         .coverage(Coverage::complete(p.widths.len() as u64))
         .location(Location::new("url", shown))
         .location(Location::new("path", out.display().to_string()))
@@ -856,7 +876,18 @@ fn web_site_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
     Ok(ToolOutput::evidence(ev))
 }
 
-type Captured = (Value, Vec<Value>, usize);
+/// The blueprint, the screenshots, and the HTML's bytes as (saved, the page's).
+type Captured = (Value, Vec<Value>, (usize, usize));
+
+/// When page.html holds only the first part of the page's HTML (#336).
+fn html_cut((kept, total): (usize, usize)) -> Option<Limitation> {
+    (kept < total).then(|| {
+        Limitation::new(
+            "html_cut",
+            format!("page.html holds the first {kept} of the page's {total} bytes of HTML: it was cut at the {} MiB limit.", MAX_HTML_BYTES >> 20),
+        )
+    })
+}
 
 fn capture_into(ctx: &Ctx<'_>, client: &mut CdpClient, out: &Path, p: &CaptureParams, dl: &Deadline) -> Result<Captured, ToolError> {
     client.call("Page.enable", json!({}), None, dl)?;
@@ -916,12 +947,12 @@ fn capture_into(ctx: &Ctx<'_>, client: &mut CdpClient, out: &Path, p: &CapturePa
     if let Value::Object(b) = &mut blueprint {
         b.insert("layouts".into(), Value::Array(layouts));
     }
-    let mut html_bytes = 0;
+    let mut html_bytes = (0, 0);
     if p.include_html {
         let html = eval(client, "document.documentElement.outerHTML", dl)?;
         let html = html.as_str().unwrap_or_default();
         let kept = truncate_utf8(html, MAX_HTML_BYTES);
-        html_bytes = kept.len();
+        html_bytes = (kept.len(), html.len());
         write_new_file(out, &["page.html".into()], kept.as_bytes()).map_err(ToolError::invalid)?;
     }
     Ok((blueprint, shots, html_bytes))
@@ -984,7 +1015,7 @@ fn visitor_view(blueprint: &mut Value) {
 }
 
 /// A short human/agent-readable summary of the capture folder.
-fn readme(b: &Value, shots: &[Value], html_bytes: usize, visitor: bool) -> String {
+fn readme(b: &Value, shots: &[Value], (html_bytes, html_total): (usize, usize), visitor: bool) -> String {
     let s = |p: &str| b.pointer(p).and_then(Value::as_str).unwrap_or_default().to_string();
     let top = |p: &str, n: usize| {
         b.pointer(p)
@@ -1018,7 +1049,8 @@ fn readme(b: &Value, shots: &[Value], html_bytes: usize, visitor: bool) -> Strin
         }
     }
     if html_bytes > 0 {
-        md.push_str(&format!("- `page.html` — rendered HTML ({html_bytes} bytes)\n"));
+        let cut = if html_bytes < html_total { format!(": the first part of {html_total}, cut at the size limit") } else { String::new() };
+        md.push_str(&format!("- `page.html` — rendered HTML ({html_bytes} bytes{cut})\n"));
     }
     if visitor {
         md.push_str("- `capture.json` — design tokens, the layout at each width (`layouts`), layout outline (positions in CSS px), headings, links, forms, picture sizes and visible text\n\n");
@@ -1175,6 +1207,7 @@ mod tests {
         assert!(state_change(&before, &before).is_empty());
         // The page scripts carry their placeholders.
         assert!(FIND_STATES_JS.contains("__MAX__") && STATE_JS.contains("__I__") && CLICK_STATE_JS.contains("__I__"));
+        assert!(REMEMBER_TAB_JS.contains("__I__") && RESELECT_TAB_JS.contains("__I__"));
     }
 
     #[test]
@@ -1197,10 +1230,22 @@ mod tests {
         let b = json!({"url": "https://ex.com/a?secret=1", "title": "Ex", "page": {"w": 1440, "h": 3000},
             "design": {"fonts": [{"value": "Inter", "count": 9}], "font_sizes": [], "text_colors": [], "backgrounds": [], "radii": []},
             "headings": [{"level": 1, "text": "Hello"}, {"level": 2, "text": "World"}]});
-        let md = readme(&b, &[json!({"file": "screenshot-1440.png", "width": 1440, "height": 3000, "cut": false})], 10, false);
+        let md = readme(&b, &[json!({"file": "screenshot-1440.png", "width": 1440, "height": 3000, "cut": false})], (10, 10), false);
         assert!(md.contains("screenshot-1440.png") && md.contains("`Inter`") && md.contains("  - World") && md.contains("page.html"));
         assert!(!md.contains("secret=1"), "query strings are not echoed");
         assert!(md.contains("no width breakpoints"), "{md}");
+        assert!(!md.contains("cut at the size limit") && html_cut((10, 10)).is_none());
+    }
+
+    /// #336: HTML cut at the size limit is said in the evidence and the README.
+    #[test]
+    fn html_cut_at_the_limit_is_said() {
+        let md = readme(&json!({}), &[], (MAX_HTML_BYTES, MAX_HTML_BYTES + 1174), false);
+        assert!(md.contains(&format!("rendered HTML ({MAX_HTML_BYTES} bytes: the first part of {}, cut at the size limit)", MAX_HTML_BYTES + 1174)), "{md}");
+        let l = html_cut((MAX_HTML_BYTES, MAX_HTML_BYTES + 1174)).unwrap();
+        assert_eq!(l.code, "html_cut");
+        assert!(l.message.contains("4 MiB"), "{}", l.message);
+        assert!(html_cut((0, 0)).is_none());
     }
 
     #[test]
@@ -1238,10 +1283,10 @@ mod tests {
         assert_eq!(failed[1]["url"], "https://ex.com/font.woff2");
         assert!(!h.to_string().contains("token") && !h.to_string().contains("sig="), "no query strings");
         assert_eq!(page_health(&[]), json!({"errors": [], "failed_requests": []}));
-        let md = readme(&json!({"health": h, "a11y": {"lang": "en", "unnamed_controls": 2, "images_without_alt": 1}}), &[], 0, false);
+        let md = readme(&json!({"health": h, "a11y": {"lang": "en", "unnamed_controls": 2, "images_without_alt": 1}}), &[], (0, 0), false);
         assert!(md.contains("- script error: TypeError: x is undefined") && md.contains("- failed request (404): https://ex.com/logo.png"), "{md}");
         assert!(md.contains("Language: en. Controls without a name: 2. Pictures without alt text: 1."), "{md}");
-        assert!(readme(&json!({"health": page_health(&[])}), &[], 0, false).contains("loaded without script errors"));
+        assert!(readme(&json!({"health": page_health(&[])}), &[], (0, 0), false).contains("loaded without script errors"));
     }
 
     #[test]
@@ -1254,12 +1299,12 @@ mod tests {
              "blocks": [{"tag": "section", "heading": "Plans", "pad": [96, 32, 96, 32], "gap": 24, "per_row": 3, "column": {"max_w": 1280, "x": 80}, "background": "#12181f"}]},
             {"width": 390, "page_w": 512, "type": {"h1": 40}, "blocks": [{"tag": "header", "pad": [16, 16, 16, 16], "per_row": 1}]}
         ]});
-        let md = readme(&b, &[], 0, false);
+        let md = readme(&b, &[], (0, 0), false);
         assert!(md.contains("switches layout at: min-width 768px") && md.contains("`96px`") && md.contains("`1280px`") && md.contains("Font files: 1"), "{md}");
         assert!(md.contains("### 1440 px (no sideways scroll)") && md.contains("Headings 64/40/24 px, text 16 px"), "{md}");
         assert!(md.contains("- section \"Plans\": padding 96 32 96 32, gap 24, 3 per row, column 1280 px at x 80, background #12181f"), "{md}");
         assert!(md.contains("### 390 px (page 512 px wide, so it scrolls sideways)") && md.contains("- header: padding 16 16 16 16\n"), "{md}");
-        let cross = readme(&json!({"unreadable_stylesheets": 2}), &[], 0, false);
+        let cross = readme(&json!({"unreadable_stylesheets": 2}), &[], (0, 0), false);
         assert!(cross.contains("2 stylesheet(s) from other sites"), "{cross}");
     }
 
@@ -1296,7 +1341,7 @@ mod tests {
             assert!(b.pointer(gone).is_none(), "{gone} isn't something a visitor sees");
         }
         assert_eq!((b["assets"]["images"][0]["w"].as_u64(), b["text"].as_str()), (Some(40), Some("Plans Pricing")));
-        let md = readme(&b, &[], 0, true);
+        let md = readme(&b, &[], (0, 0), true);
         assert!(
             md.contains("Clean room: only what a visitor sees") && !md.contains("Breakpoints") && !md.contains("Page health") && !md.contains("page.html"),
             "{md}"
@@ -1382,7 +1427,7 @@ mod tests {
             }
         });
         // In Clean room, a visitor's view: its evidence says so (#157).
-        let mut s = crate::testing::session();
+        let mut s = crate::testing::live_session();
         s.settings.deep_mode = false;
         let e = crate::Engine::new(s);
         let cli = || crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted);
@@ -1402,7 +1447,7 @@ mod tests {
     #[test]
     #[ignore]
     fn the_browsers_error_page_is_not_captured() {
-        let e = crate::Engine::new(crate::testing::session());
+        let e = crate::Engine::new(crate::testing::live_session());
         let cli = || crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted);
         // Nothing listens on port 1, so the browser shows its own error page.
         let _ = e.call("web_site_open", json!({"url": "http://127.0.0.1:1/"}), cli());
@@ -1414,9 +1459,9 @@ mod tests {
         assert!(!out.exists(), "no folder is made for a capture that can't happen");
     }
 
-    /// `capture.json` of `page`, served from a local port and captured at 1440 px. Live: it needs a
-    /// Chromium-based browser.
-    fn capture_of(page: &'static str) -> Value {
+    /// An engine with `page` open in a real browser, served from a local port. Live: it needs a
+    /// Chromium-based browser, so it looks for one the way the app does.
+    fn serve_and_open(page: &'static str) -> crate::Engine {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
@@ -1427,9 +1472,75 @@ mod tests {
                 let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len());
             }
         });
-        let e = crate::Engine::new(crate::testing::session());
+        let e = crate::Engine::new(crate::testing::live_session());
+        e.call("web_site_open", json!({"url": url}), crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted)).unwrap();
+        e
+    }
+
+    /// #339: states captured at a phone width after a desktop width open the phone's own button,
+    /// not the desktop one the earlier capture marked. Live (`--ignored`).
+    #[test]
+    #[ignore]
+    fn states_at_a_second_width_open_that_widths_controls() {
+        let e = serve_and_open(
+            r#"<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>
+body{margin:0} .d{display:none} @media (min-width:800px){.d{display:block} .p{display:none}}
+.panel{display:none;position:fixed;top:0;left:0;width:100%;height:200px}
+</style></head><body style="padding-top:300px">
+<button class="d" aria-expanded="false" data-panel="dp">Desktop options</button>
+<button class="p" aria-expanded="false" data-panel="pp">Phone options</button>
+<div id="dp" class="panel" style="background:#0000ff"></div><div id="pp" class="panel" style="background:#ff0000"></div>
+<script>for (const b of document.querySelectorAll('button')) b.onclick = () => {
+  const open = b.getAttribute('aria-expanded') !== 'true';
+  b.setAttribute('aria-expanded', String(open));
+  document.getElementById(b.dataset.panel).style.display = open ? 'block' : 'none';
+};</script></body></html>"#,
+        );
         let cli = || crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted);
-        e.call("web_site_open", json!({"url": url}), cli()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let top_colour = |out: &Path| {
+            let rows: Value = serde_json::from_str(&std::fs::read_to_string(out.join("states.json")).unwrap()).unwrap();
+            let shot = web_common::decode_png(&std::fs::read(out.join("state-1.png")).unwrap()).unwrap();
+            let at = shot.rgba.get(((10 * shot.width + 10) * 4) as usize..((10 * shot.width + 10) * 4 + 3) as usize).unwrap().to_vec();
+            (rows["states"][0]["label"].as_str().unwrap().to_string(), at)
+        };
+        for (width, label, colour) in [(1440, "Desktop options", [0, 0, 255]), (390, "Phone options", [255, 0, 0])] {
+            let out = dir.path().join(format!("states-{width}"));
+            e.call("web_page_states_capture", json!({"output_directory": out.display().to_string(), "width": width, "max_states": 1}), cli()).unwrap();
+            assert_eq!(top_colour(&out), (label.to_string(), colour.to_vec()), "at {width} px");
+        }
+        let _ = e.call("web_site_close", json!({}), cli());
+    }
+
+    /// #335: after photographing another tab, the tab that was selected is selected again, so the
+    /// next capture finds the page as it was. Live (`--ignored`).
+    #[test]
+    #[ignore]
+    fn the_tab_that_was_selected_is_selected_again() {
+        let e = serve_and_open(
+            r#"<!doctype html><html><body><div role="tablist">
+<button role="tab" aria-selected="true">One</button><button role="tab" aria-selected="false">Two</button></div>
+<script>const tabs = document.querySelectorAll('[role="tab"]');
+for (const t of tabs) t.onclick = () => tabs.forEach(o => o.setAttribute('aria-selected', String(o === t)));</script></body></html>"#,
+        );
+        let cli = || crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted);
+        let dir = tempfile::tempdir().unwrap();
+        // Each capture opens the unselected tab: Two both times when One is selected again.
+        for n in 1..=2 {
+            let out = dir.path().join(format!("states-{n}"));
+            e.call("web_page_states_capture", json!({"output_directory": out.display().to_string(), "max_states": 1}), cli()).unwrap();
+            let rows: Value = serde_json::from_str(&std::fs::read_to_string(out.join("states.json")).unwrap()).unwrap();
+            assert_eq!(rows["states"][0]["label"], "Two", "capture {n}: {rows}");
+            assert_eq!(rows["states"][0]["changed"], json!(["tab selected"]), "capture {n}: {rows}");
+        }
+        let _ = e.call("web_site_close", json!({}), cli());
+    }
+
+    /// `capture.json` of `page`, served from a local port and captured at 1440 px. Live: it needs a
+    /// Chromium-based browser.
+    fn capture_of(page: &'static str) -> Value {
+        let e = serve_and_open(page);
+        let cli = || crate::CallOptions::new(crate::Caller::Cli).with_consent(crate::Consent::Granted);
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("capture");
         e.call("web_site_capture", json!({"output_directory": out.display().to_string(), "widths": [1440]}), cli()).unwrap();

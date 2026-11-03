@@ -490,6 +490,24 @@ fn native_function_instructions_list(ctx: &mut Ctx<'_>, params: Value) -> Result
     })
 }
 
+/// How far `a` is from a function's entry. A function's blocks can lie below its entry (a cold
+/// part, or code reached by a jump back), so the offset can be negative.
+fn signed_offset(a: u64, entry: u64) -> i128 {
+    i128::from(a) - i128::from(entry)
+}
+
+/// An offset as a JSON number. JSON numbers here are 64-bit, and an offset can be anything from
+/// -(2^64 - 1) to 2^64 - 1, so one more than 2^63 below the entry is given as signed hex text.
+fn offset_json(off: i128) -> Value {
+    if let Ok(n) = i64::try_from(off) {
+        Value::from(n)
+    } else if let Ok(n) = u64::try_from(off) {
+        Value::from(n)
+    } else {
+        Value::from(format!("-{:#x}", off.unsigned_abs()))
+    }
+}
+
 fn native_function_find(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: AddrParams = parse_params(params)?;
     select_document(ctx, &p.document)?;
@@ -498,7 +516,9 @@ fn native_function_find(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
     let t = ctx.session.active()?;
     let f = st.prog.function_containing(a);
     let result = match f {
-        Some(f) => json!({"address": hex(a), "function": name_of(t, &st.prog, f.entry), "entry": hex(f.entry), "offset": a - f.entry}),
+        Some(f) => {
+            json!({"address": hex(a), "function": name_of(t, &st.prog, f.entry), "entry": hex(f.entry), "offset": offset_json(signed_offset(a, f.entry))})
+        }
         None => {
             json!({"address": hex(a), "function": null, "reason": if st.img.is_exec(a) { "not inside any discovered function" } else { "not in executable code" }})
         }
@@ -506,7 +526,9 @@ fn native_function_find(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
     let summary = match f {
         Some(f) => {
             let name = name_of(t, &st.prog, f.entry).unwrap_or_else(|| f.name.clone());
-            format!("{a:#x} is inside {name} (+{:#x}).", a - f.entry)
+            let off = signed_offset(a, f.entry);
+            let sign = if off < 0 { "-" } else { "+" };
+            format!("{a:#x} is inside {name} ({sign}{:#x}).", off.unsigned_abs())
         }
         None => format!("{a:#x} isn't inside a known function."),
     };
@@ -722,6 +744,34 @@ mod tests {
     use super::super::native_common::test_support::*;
     use craft_anything_testkit as tk;
     use serde_json::json;
+
+    #[test]
+    fn every_offset_fits_its_json() {
+        use super::{offset_json, signed_offset};
+        assert_eq!(offset_json(signed_offset(0x1010, 0x1020)), json!(-16));
+        assert_eq!(offset_json(signed_offset(u64::MAX, 0)), json!(u64::MAX));
+        assert_eq!(offset_json(signed_offset(1 << 63, 0)), json!(1u64 << 63));
+        assert_eq!(offset_json(signed_offset(0, 1 << 63)), json!(i64::MIN));
+        assert_eq!(offset_json(signed_offset(0, u64::MAX)), json!("-0xffffffffffffffff"));
+    }
+
+    #[test]
+    fn function_find_gives_a_negative_offset_for_a_block_below_the_entry() {
+        // `hot` at 0x1020 branches back to an unnamed block at 0x1010 (`mov eax, 1; ret`), which
+        // becomes part of `hot`: the address is inside it, 0x10 bytes before its entry. `start`
+        // is only there to be the program's entry point.
+        let below = vec![0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3];
+        let hot = vec![0x55, 0x48, 0x89, 0xe5, 0x85, 0xff, 0x0f, 0x84, 0xe4, 0xff, 0xff, 0xff, 0x5d, 0xc3];
+        let elf = tk::program_facts::elf_with_functions(&[("start", vec![0xc3]), ("", below), ("hot", hot)]);
+        let e = engine_with("prog", &elf);
+        let r = call(&e, "native_function_find", json!({"address": "0x1010"}));
+        assert_eq!(r["result"]["function"], "hot", "{r}");
+        assert_eq!(r["result"]["offset"], -0x10, "{r}");
+        assert_eq!(r["summary"], "0x1010 is inside hot (-0x10).");
+        let r = call(&e, "native_function_find", json!({"address": "0x1024"}));
+        assert_eq!(r["result"]["offset"], 4);
+        assert_eq!(r["summary"], "0x1024 is inside hot (+0x4).");
+    }
 
     #[test]
     fn function_tools() {

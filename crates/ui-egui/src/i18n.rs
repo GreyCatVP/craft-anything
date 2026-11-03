@@ -25,6 +25,7 @@ pub static LANGUAGES: &[LangInfo] = &[
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv") },
     LangInfo { code: "zh-hans", name: "简体中文", source: include_str!("i18n/zh-hans.tsv") },
     LangInfo { code: "zh-hant", name: "繁體中文", source: include_str!("i18n/zh-hant.tsv") },
+    LangInfo { code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv") },
 ];
 
 /// Match a locale to a registered UI language. An explicit script wins over the region.
@@ -149,14 +150,14 @@ mod tests {
     }
 
     #[test]
-    fn chinese_catalogs_are_valid_and_have_matching_keys() {
+    fn catalogs_are_valid_and_have_matching_keys() {
         fn placeholders(s: &str) -> Vec<&str> {
             let mut out: Vec<_> = s.split('{').skip(1).filter_map(|s| s.split_once('}').map(|(p, _)| p)).collect();
             out.sort_unstable();
             out
         }
         let mut catalogs = Vec::new();
-        for lang in LANGUAGES.iter().filter(|l| matches!(l.code, "zh-hans" | "zh-hant")) {
+        for lang in LANGUAGES.iter().filter(|l| matches!(l.code, "zh-hans" | "zh-hant" | "ru" | "de")) {
             let mut keys = std::collections::BTreeSet::new();
             for (i, line) in lang.source.lines().enumerate() {
                 if line.trim().is_empty() || line.starts_with('#') {
@@ -174,27 +175,10 @@ mod tests {
             assert!(keys.len() > 500, "{}: incomplete catalog", lang.code);
             catalogs.push(keys);
         }
-        assert_eq!(catalogs.len(), 2);
-        assert_eq!(catalogs.first(), catalogs.last());
-    }
-
-    #[test]
-    fn german_catalog_covers_the_chinese_keys() {
-        let keys = |code: &str| {
-            let lang = LANGUAGES.iter().find(|l| l.code == code).expect("language is registered");
-            let mut seen = std::collections::BTreeSet::new();
-            for (i, line) in lang.source.lines().enumerate() {
-                if line.trim().is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                let (key, value) = line.split_once('\t').unwrap_or_else(|| panic!("{code}:{}: missing tab", i + 1));
-                assert!(!value.trim().is_empty() && !value.contains('\t'), "{code}:{}: bad value", i + 1);
-                assert!(seen.insert(key.to_string()), "{code}:{}: duplicate {key}", i + 1);
-                assert_eq!(key.ends_with('…'), value.ends_with('…'), "{code}: {key}");
-            }
-            seen
-        };
-        assert_eq!(keys("de"), keys("zh-hans"));
+        assert!(catalogs.len() >= 2);
+        for c in catalogs.iter().skip(1) {
+            assert_eq!(catalogs.first(), Some(c));
+        }
     }
 
     /// Every translation keeps its key's `{placeholders}`, or `trf` would leave them unfilled.

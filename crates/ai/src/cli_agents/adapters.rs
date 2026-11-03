@@ -71,6 +71,11 @@ pub trait AgentAdapter: Send + Sync {
     fn prompt_on_stdin(&self) -> bool {
         false
     }
+    /// What goes in on stdin when [`prompt_on_stdin`](AgentAdapter::prompt_on_stdin) says so:
+    /// the message, with the preamble in front for an agent that takes no separate one.
+    fn stdin_text(&self, _preamble: &str, prompt: &str) -> String {
+        prompt.to_string()
+    }
     /// The process for a local run of `program` (an adapter may clean its environment).
     fn process(&self, program: &str) -> Process {
         Process::new(program)
@@ -89,6 +94,23 @@ pub trait AgentAdapter: Send + Sync {
     /// `stop` ends the check when the person stops the build.
     fn check_tool_server(&self, _stop: &CancelToken) -> Result<(), ToolError> {
         Ok(())
+    }
+    /// The file in which this computer keeps the agent's saved session `id`, so the project can
+    /// keep a copy that travels with it. `None`: it keeps none we can copy, or not here.
+    fn session_file(&self, _id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+    /// What a new session needs to know of an earlier one, read from a kept copy of its
+    /// [`session_file`](AgentAdapter::session_file): what it was asked and what it said, the
+    /// newest kept, within `max` characters. `None`: nothing to tell.
+    fn handoff(&self, _saved: &str, _max: usize) -> Option<String> {
+        None
+    }
+    /// Put a kept copy of session `id` back where the agent looks for it, for a run in `cwd`,
+    /// when this computer doesn't have it, so the same session carries on. `Ok(true)`: put
+    /// back; `Ok(false)`: nothing to do (it's here already, or this agent keeps none).
+    fn restore_session(&self, _id: &str, _saved: &[u8], _cwd: &std::path::Path) -> Result<bool, ToolError> {
+        Ok(false)
     }
 }
 
@@ -193,6 +215,18 @@ fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
     a
 }
 
+/// How Claude Code's result names a `--resume` session it doesn't have (2.1: `errors`, with no
+/// turn taken). Its sessions are kept per computer and per folder, so a project copied elsewhere
+/// has an id it can't find.
+const NO_SUCH_SESSION: &str = "No conversation found with session ID";
+
+/// A failed result that only says the session to resume isn't there.
+fn no_such_session(v: &Value) -> bool {
+    let named = |e: &Value| e.as_str().is_some_and(|e| e.contains(NO_SUCH_SESSION));
+    let turns = v.get("num_turns").and_then(Value::as_u64).unwrap_or(0);
+    turns == 0 && (v.get("errors").and_then(Value::as_array).is_some_and(|a| a.iter().any(named)) || v.get("result").is_some_and(named))
+}
+
 /// Claude Code in headless mode (flags checked against `claude --help`).
 pub struct ClaudeCode;
 
@@ -243,6 +277,9 @@ impl AgentAdapter for ClaudeCode {
         a
     }
 
+    /// Claude Code's stream-json: text and tool calls as they come, the session id from any line,
+    /// and from the final `result` its usage and cost, a failure in plain words, or a session to
+    /// resume that isn't on this computer (`session_missing`, with its own message).
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
         let mut out = Vec::new();
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -284,7 +321,17 @@ impl AgentAdapter for ClaudeCode {
                         .saturating_add(u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0));
                     p.output_tokens = u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
                 }
-                if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+                if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) && no_such_session(v) {
+                    p.session_missing = true;
+                    out.push(AgentEvent::Error {
+                        message: "Claude Code's earlier conversation about this project isn't on this computer.".into(),
+                        remediation: Some(
+                            "It was started on another computer or in another folder. Ask again: a new conversation starts from what the project already has."
+                                .into(),
+                        ),
+                        log: None,
+                    });
+                } else if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
                     let (message, remediation) = claude_code_failure(&why);
                     out.push(AgentEvent::Error { message, remediation, log: None });
@@ -313,6 +360,143 @@ impl AgentAdapter for ClaudeCode {
     fn sign_in_fix(&self) -> Option<String> {
         sign_in_hint("login")
     }
+
+    /// The session under Claude Code's own folder (see [`claude_session_file`]).
+    fn session_file(&self, id: &str) -> Option<std::path::PathBuf> {
+        claude_session_file(&claude_config_dir()?, id)
+    }
+
+    /// The kept session's requests and replies (see [`claude_handoff`]).
+    fn handoff(&self, saved: &str, max: usize) -> Option<String> {
+        claude_handoff(saved, max)
+    }
+
+    /// Back under Claude Code's own folder (see [`claude_restore`]); without one there's nowhere
+    /// to put it, which is said.
+    fn restore_session(&self, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
+        let config = claude_config_dir().ok_or_else(|| ToolError::new(ErrorCode::BadSettings, "Couldn't find Claude Code's folder on this computer."))?;
+        claude_restore(&config, id, saved, cwd)
+    }
+}
+
+/// Claude Code's own folder: `CLAUDE_CONFIG_DIR` when it's set (the person's choice, which the
+/// agent we start keeps too), else our own under a Flatpak (see [`flatpak_claude_dir`]), else
+/// `~/.claude`.
+fn claude_config_dir() -> Option<std::path::PathBuf> {
+    let set = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    set.or_else(flatpak_claude_dir).or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+}
+
+/// Whether this app runs in a Flatpak sandbox (it sets `FLATPAK_ID` and makes `/.flatpak-info`).
+pub fn in_flatpak() -> bool {
+    static IN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IN.get_or_init(|| std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists())
+}
+
+/// Where Claude Code keeps its conversations when we start it under a Flatpak and the person
+/// hasn't chosen a folder: its own is `~/.claude`, which the sandbox only lets us read, so a
+/// conversation was never saved and `--resume` found nothing (#506). A folder of ours in the
+/// app's data folder is writable, and kept with the app. `None` outside a Flatpak, or when
+/// `CLAUDE_CONFIG_DIR` is set.
+pub fn flatpak_claude_dir() -> Option<std::path::PathBuf> {
+    let chosen = std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty());
+    flatpak_claude_dir_in(in_flatpak(), chosen, dirs::data_dir())
+}
+
+pub fn flatpak_claude_dir_in(flatpak: bool, chosen: bool, data: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    (flatpak && !chosen).then_some(data?.join("craft-anything").join("claude"))
+}
+
+/// Claude Code's name for the folder a session ran in: the path with everything but letters and
+/// digits made `-`. It finds a session by its id in any of these folders (2.1), so a long path
+/// cut short still works.
+fn claude_project_folder(cwd: &std::path::Path) -> String {
+    cwd.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(200).collect()
+}
+
+/// Put a kept Claude Code session back under `config` (see [`AgentAdapter::restore_session`]).
+/// Only a copy of that same session is put back, and never over one that's there.
+pub fn claude_restore(config: &std::path::Path, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
+    let valid = !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !valid {
+        return Err(ToolError::invalid("The project names its builder's session with an id Claude Code doesn't use."));
+    }
+    if claude_session_file(config, id).is_some() {
+        return Ok(false);
+    }
+    let named = format!("\"sessionId\":\"{id}\"");
+    if !saved.windows(named.len()).any(|w| w == named.as_bytes()) {
+        return Err(ToolError::invalid("The conversation kept in the project is of another session."));
+    }
+    let path = config.join("projects").join(claude_project_folder(cwd)).join(format!("{id}.jsonl"));
+    craft_anything_platform::fs::write_atomic_private(&path, saved)?;
+    Ok(true)
+}
+
+/// Folders under Claude Code's `projects/` looked through for a session.
+const SESSION_FOLDERS: usize = 10_000;
+
+/// Claude Code keeps each session as `projects/<the folder it ran in>/<id>.jsonl` under its
+/// config folder. An id is a UUID: anything else (a hand-edited manifest) names no file.
+pub fn claude_session_file(config: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    let name = format!("{id}.jsonl");
+    std::fs::read_dir(config.join("projects")).ok()?.flatten().take(SESSION_FOLDERS).map(|e| e.path().join(&name)).find(|p| p.is_file())
+}
+
+/// Longest single request or reply in a handoff; a first brief runs to many thousands.
+const HANDOFF_ENTRY: usize = 1500;
+
+/// A Claude Code session read back as a handoff: the messages Craft Anything sent and the text
+/// the builder answered with, oldest first, leaving out tool calls, their results, thinking and
+/// side tasks. The newest are kept when it's longer than `max` characters.
+pub fn claude_handoff(saved: &str, max: usize) -> Option<String> {
+    let clip = |t: &str| {
+        let t = t.trim();
+        if t.chars().count() > HANDOFF_ENTRY { format!("{}…", t.chars().take(HANDOFF_ENTRY).collect::<String>()) } else { t.to_string() }
+    };
+    let mut entries = Vec::new();
+    for v in saved.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let content = v.pointer("/message/content");
+        match v.get("type").and_then(Value::as_str) {
+            Some("user") => {
+                if let Some(t) = content.and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
+                    entries.push(format!("Craft Anything asked you: {}", clip(t)));
+                }
+            }
+            Some("assistant") => {
+                let text: String = content
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !text.trim().is_empty() && text.trim() != "No response requested." {
+                    entries.push(format!("You answered: {}", clip(&text)));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut kept = Vec::new();
+    let mut used = 0usize;
+    for e in entries.iter().rev() {
+        let n = e.chars().count().saturating_add(2);
+        if used.saturating_add(n) > max {
+            break;
+        }
+        used = used.saturating_add(n);
+        kept.push(e.as_str());
+    }
+    kept.reverse();
+    (!kept.is_empty()).then(|| kept.join("\n\n"))
 }
 
 /// Codex (`codex exec --json`). Flags are checked against `codex exec --help` before use.
@@ -321,6 +505,16 @@ pub struct Codex;
 impl AgentAdapter for Codex {
     fn ids(&self) -> &'static [&'static str] {
         &["codex"]
+    }
+
+    /// `codex exec -` reads the message from stdin, so a long one can't pass Windows'
+    /// command-line limit (os error 206, #528).
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
     }
 
     fn check_tool_server(&self, stop: &CancelToken) -> Result<(), ToolError> {
@@ -345,7 +539,8 @@ impl AgentAdapter for Codex {
             v.extend(["-m".into(), m.clone()]);
         }
         v.extend(cx.options.args.iter().cloned());
-        v.push(format!("{}{}", cx.preamble, cx.prompt));
+        // The message itself goes in on stdin (see `stdin_text`).
+        v.push("-".into());
         v
     }
 

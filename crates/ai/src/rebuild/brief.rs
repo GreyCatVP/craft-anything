@@ -292,6 +292,28 @@ pub(super) fn continue_prompt(kind: &dyn TargetKind) -> String {
     )
 }
 
+/// For an agent whose saved session isn't on this computer (the project was copied from another
+/// one, or moved): the whole brief, then what was made so far and where to find it, and the
+/// earlier conversation as the project kept it (`handoff`), else its last summary, so it carries
+/// on from the project rather than starting over.
+pub(super) fn resumed_elsewhere(brief: &str, last_reply: &str, handoff: Option<&str>) -> String {
+    let mut s = format!(
+        "{brief}\n\nThis project is already under way: an earlier conversation built it, but that conversation isn't on this computer (the project was started on another computer or in another folder). Everything made so far is in app/. Before changing anything, look through app/ and the open questions (core_unknowns_show) to see what's done, then carry on from there instead of starting again."
+    );
+    if let Some(h) = handoff.map(str::trim).filter(|h| !h.is_empty()) {
+        s.push_str(&format!(
+            "\n\nThe earlier conversation, as the project kept it (oldest first; when it was long, the newest part is kept and long messages are cut short):\n\n{h}"
+        ));
+        return s;
+    }
+    let last = last_reply.trim();
+    if !last.is_empty() {
+        let last: String = last.chars().take(2000).collect();
+        s.push_str(&format!("\n\nWhat the earlier conversation last told the person:\n\"{last}\""));
+    }
+    s
+}
+
 pub(super) fn follow_up(message: &str, kind: &dyn TargetKind) -> String {
     let build = kind.rebuild_words();
     format!(

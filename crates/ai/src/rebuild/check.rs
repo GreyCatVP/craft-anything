@@ -1,4 +1,5 @@
 //! Building a project with its own tools (cargo, npm, or the game engine's), for [`BuildCheck`].
+//! A plain static site has no build, and passes as it is.
 
 use super::*;
 
@@ -83,6 +84,7 @@ pub(super) fn build_check(app: &Path, place: &str, stack: &str, editor: Option<&
         }
         _ if app.join("Cargo.toml").is_file() => run(Path::new("cargo"), &["build".into(), "--quiet".into()], 2 * 60),
         _ if app.join("package.json").is_file() => run(Path::new(if cfg!(windows) { "npm.cmd" } else { "npm" }), &["run".into(), "build".into()], 2 * 60),
+        (None, _) if static_site(app) => return (true, "Nothing to build: a static site.".into()),
         _ => return (false, format!("No project to build found in {place} yet.")),
     };
     match result {
@@ -96,8 +98,20 @@ pub(super) fn build_check(app: &Path, place: &str, stack: &str, editor: Option<&
 /// rather than the engine's. What was built decides, since the person may have asked for
 /// something other than the engine picked at the start.
 fn engine_for(stack: &str, app: &Path) -> Option<game::Builder> {
+    if static_site(app) {
+        return None;
+    }
     let own_project = app.join("Cargo.toml").is_file() || app.join("package.json").is_file();
     game::Builder::from_stack(stack).filter(|b| !own_project || engine_project(*b, app))
+}
+
+/// Whether `app` is a static site with nothing to build: a page with something in it, as the
+/// preview finds it, and no game engine's project beside it. A site's `assets/` folder is no sign
+/// of Unity (file names ignore case on Windows and macOS), so Unity needs its settings folder too.
+fn static_site(app: &Path) -> bool {
+    let engine = app.join("project.godot").is_file() || uproject(app).is_some() || (app.join("Assets").is_dir() && app.join("ProjectSettings").is_dir());
+    let page = |site: PathBuf| std::fs::read(site.join("index.html")).is_ok_and(|html| html.iter().any(|b| !b.is_ascii_whitespace()));
+    !engine && site_dir(app).is_some_and(page)
 }
 
 /// The Unreal project file in `app`, if there is one.
@@ -148,5 +162,51 @@ mod tests {
         assert_eq!(engine_for("Electron", app), None);
         std::fs::write(app.join("Cargo.toml"), "").unwrap();
         assert_eq!(engine_for("Rust + macroquad", app), None);
+    }
+
+    #[test]
+    fn a_static_site_has_nothing_to_build() {
+        let d = tempfile::tempdir().unwrap();
+        let app = d.path();
+        let stop = CancelToken::default();
+        let passed = (true, "Nothing to build: a static site.".to_string());
+        let check = |stack, editor| build_check(app, "app/", stack, editor, &stop);
+        assert!(!check("Plain HTML and CSS", None).0, "nothing there yet");
+
+        // #496: the page itself, with no manifest.
+        std::fs::write(app.join("index.html"), "<!doctype html><h1>Hello</h1>").unwrap();
+        assert_eq!(check("Plain HTML and CSS", None), passed);
+        // What was built decides: a page made under a game engine's stack isn't a missing project.
+        let unity = Path::new("C:/Engines/Unity/Editor/Unity.exe");
+        assert_eq!(check("Unity", Some(unity)), passed);
+
+        // A site's own assets folder doesn't make it a Unity project.
+        std::fs::create_dir(app.join("Assets")).unwrap();
+        assert_eq!(check("Plain HTML and CSS", None), passed);
+        assert_eq!(check("Unity", Some(unity)), passed);
+
+        // A real engine project doesn't pass for the page beside it, with or without the editor,
+        // and whichever engine the stack named.
+        std::fs::create_dir(app.join("ProjectSettings")).unwrap();
+        assert!(!check("Unity", None).0);
+        assert!(!check("Plain HTML and CSS", None).0);
+        std::fs::remove_dir(app.join("ProjectSettings")).unwrap();
+        for project in ["project.godot", "Game.uproject"] {
+            std::fs::write(app.join(project), "").unwrap();
+            assert!(!check("Unity", None).0, "{project}");
+            std::fs::remove_file(app.join(project)).unwrap();
+        }
+
+        // A blank page isn't a site, and doesn't pass for one under an engine's stack either.
+        std::fs::write(app.join("index.html"), " \n").unwrap();
+        assert!(!check("Plain HTML and CSS", None).0);
+        std::fs::remove_dir(app.join("Assets")).unwrap();
+        assert_eq!(check("Unity", Some(unity)), (false, "No Unity project found in app/ yet.".into()));
+
+        // Already-built pages count too, as they do for the preview.
+        let built = tempfile::tempdir().unwrap();
+        std::fs::create_dir(built.path().join("dist")).unwrap();
+        std::fs::write(built.path().join("dist").join("index.html"), "<h1>Hello</h1>").unwrap();
+        assert_eq!(build_check(built.path(), "app/", "Builder's choice", None, &stop), passed);
     }
 }

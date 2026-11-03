@@ -206,7 +206,15 @@ pub struct CsScan {
 #[derive(Debug, Clone)]
 enum Scope {
     Namespace(String),
-    Type { full: String, simple: String, is_enum: bool },
+    /// `positional` holds a record's positional properties, added when the body closes unless the body
+    /// declares a member of the same name; `start` is the member count when the body opened.
+    Type {
+        full: String,
+        simple: String,
+        is_enum: bool,
+        positional: Vec<CsMember>,
+        start: usize,
+    },
     Block,
 }
 
@@ -234,7 +242,7 @@ const MODIFIERS: &[&str] = &[
     "implicit",
     "explicit",
 ];
-const TYPE_KW: &[&str] = &["class", "struct", "interface", "enum", "record"];
+const TYPE_KW: &[&str] = &["class", "struct", "interface", "enum", "record", "delegate"];
 
 fn ident(t: &T) -> Option<&str> {
     match &t.tok {
@@ -265,6 +273,45 @@ fn join(ts: &[T]) -> String {
         }
     }
     s
+}
+
+/// The CLR name of a C# operator, from the symbol after `operator`. Checked `++`, `--`, `*` and
+/// `/` have their own names; `+` and `-` depend on how many parameters they take, so the caller
+/// names those, and `implicit`/`explicit` conversions are named from the modifiers.
+fn operator_name(symbol: &str) -> &'static str {
+    if let Some(base) = symbol.strip_prefix("checked").map(str::trim_start) {
+        return match base {
+            "++" => "op_CheckedIncrement",
+            "--" => "op_CheckedDecrement",
+            "*" => "op_CheckedMultiply",
+            "/" => "op_CheckedDivision",
+            _ => "operator",
+        };
+    }
+    match symbol {
+        "==" => "op_Equality",
+        "!=" => "op_Inequality",
+        "*" => "op_Multiply",
+        "/" => "op_Division",
+        "%" => "op_Modulus",
+        "&" => "op_BitwiseAnd",
+        "|" => "op_BitwiseOr",
+        "^" => "op_ExclusiveOr",
+        "!" => "op_LogicalNot",
+        "~" => "op_OnesComplement",
+        "++" => "op_Increment",
+        "--" => "op_Decrement",
+        "<<" => "op_LeftShift",
+        ">>" => "op_RightShift",
+        ">>>" => "op_UnsignedRightShift",
+        "<" => "op_LessThan",
+        ">" => "op_GreaterThan",
+        "<=" => "op_LessThanOrEqual",
+        ">=" => "op_GreaterThanOrEqual",
+        "true" => "op_True",
+        "false" => "op_False",
+        _ => "operator",
+    }
 }
 
 /// Split at top-level commas.
@@ -351,6 +398,33 @@ fn param_type(p: &[T]) -> String {
     if byref { format!("ref {s}") } else { s }
 }
 
+/// Properties a positional record declares through its parameter list `params`.
+fn positional_properties(kind: &str, params: &[T], type_name: &str, line: u32) -> Vec<CsMember> {
+    if !kind.starts_with("record") {
+        return Vec::new();
+    }
+    split_commas(params)
+        .into_iter()
+        .filter_map(|p| {
+            let (p, _) = strip_prefix(p);
+            let p = p.get(..p.iter().position(|t| is_p(t, '=')).unwrap_or(p.len())).unwrap_or(&[]);
+            let name = p.last().and_then(ident)?;
+            if p.len() < 2 {
+                return None;
+            }
+            Some(CsMember {
+                kind: "property",
+                type_name: type_name.to_string(),
+                name: name.to_string(),
+                generic_arity: 0,
+                params: vec![],
+                ty: param_type(p),
+                line,
+            })
+        })
+        .collect()
+}
+
 struct Scanner {
     scopes: Vec<Scope>,
     file_ns: String,
@@ -375,16 +449,68 @@ impl Scanner {
 
     fn current_type(&self) -> Option<(&str, &str, bool)> {
         match self.scopes.last()? {
-            Scope::Type { full, simple, is_enum } => Some((full, simple, *is_enum)),
+            Scope::Type { full, simple, is_enum, .. } => Some((full, simple, *is_enum)),
             _ => None,
         }
     }
 
+    /// Parse a type declaration header into its name, kind, generic arity, and line number.
     fn type_decl(&self, h: &[T]) -> Option<(String, String, usize, u32)> {
         let paren = h.iter().position(|t| is_p(t, '(')).unwrap_or(h.len());
         let kw = h.iter().take(paren).position(|t| ident(t).is_some_and(|w| TYPE_KW.contains(&w)))?;
+        // A declaration keyword cannot follow an assignment or arrow operator.
+        if h.iter().take(kw).any(|t| is_p(t, '=') || t.tok == Tok::Arrow) {
+            return None;
+        }
+        let kind = ident(h.get(kw)?)?;
+        if kind == "delegate" {
+            if h.get(kw + 1).is_some_and(|t| is_p(t, '*')) {
+                return None;
+            }
+            let is_reserved = |w: &str| w == "delegate" || w == "ref" || w == "void" || MODIFIERS.contains(&w) || TYPE_KW.contains(&w);
+            let mut target = None;
+            for p in (kw + 1)..h.len() {
+                if !is_p(&h[p], '(') {
+                    continue;
+                }
+                if p > kw + 1 && is_p(&h[p - 1], '>') {
+                    let mut depth = 0i32;
+                    let mut open_lt = None;
+                    for i in (kw + 1..p).rev() {
+                        let t = &h[i];
+                        if is_p(t, '>') {
+                            depth += 1;
+                        } else if is_p(t, '<') {
+                            depth -= 1;
+                            if depth == 0 {
+                                open_lt = Some(i);
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(lt) = open_lt
+                        && lt > kw + 1
+                        && let Some(name_tok) = h.get(lt - 1)
+                        && let Some(name) = ident(name_tok)
+                        && !is_reserved(name)
+                    {
+                        let arity = split_commas(h.get(lt + 1..p - 1).unwrap_or(&[])).len();
+                        target = Some((name.to_string(), arity, name_tok.line));
+                        break;
+                    }
+                } else if let Some(name_tok) = h.get(p - 1)
+                    && let Some(name) = ident(name_tok)
+                    && !is_reserved(name)
+                {
+                    target = Some((name.to_string(), 0, name_tok.line));
+                    break;
+                }
+            }
+            let (name, arity, line) = target?;
+            return Some((name, "delegate".into(), arity, line));
+        }
         let mut k = kw + 1;
-        let mut kind = ident(h.get(kw)?)?.to_string();
+        let mut kind = kind.to_string();
         if kind == "record" && h.get(k).and_then(ident).is_some_and(|w| w == "struct" || w == "class") {
             kind = format!("record {}", ident(h.get(k)?)?);
             k += 1;
@@ -438,12 +564,34 @@ impl Scanner {
         let op_at = rest.iter().position(|t| ident(t) == Some("operator"));
         if let Some(op) = op_at {
             let p = rest.iter().skip(op).position(|t| is_p(t, '(')).map(|x| x + op);
-            let params = p
+            let params: Vec<String> = p
                 .and_then(|p| matching(rest, p, '(', ')').map(|c| (p, c)))
                 .map(|(p, c)| split_commas(rest.get(p + 1..c).unwrap_or(&[])).into_iter().map(param_type).collect())
                 .unwrap_or_default();
             let ret = join(rest.get(..op).unwrap_or(&[]));
-            self.push(CsMember { kind: "method", type_name: full, name: "operator".into(), generic_arity: 0, params, ty: ret, line });
+            let symbol = p.and_then(|p| rest.get(op + 1..p)).map(join).unwrap_or_default();
+            let checked = symbol.strip_prefix("checked").map(str::trim_start);
+            let conversion = mods.iter().any(|m| matches!(m.as_str(), "implicit" | "explicit"));
+            let name = if mods.iter().any(|m| m.as_str() == "implicit") {
+                "op_Implicit".to_string()
+            } else if mods.iter().any(|m| m.as_str() == "explicit") {
+                if checked.is_some() { "op_CheckedExplicit".to_string() } else { "op_Explicit".to_string() }
+            } else {
+                match (checked.unwrap_or(&symbol), checked.is_some(), params.len()) {
+                    ("+", false, 1) => "op_UnaryPlus".to_string(),
+                    ("+", false, _) => "op_Addition".to_string(),
+                    // Checked unary `+` isn't a C# operator: only the binary form is checked.
+                    ("+", true, 1) => "operator".to_string(),
+                    ("+", true, _) => "op_CheckedAddition".to_string(),
+                    ("-", false, 1) => "op_UnaryNegation".to_string(),
+                    ("-", false, _) => "op_Subtraction".to_string(),
+                    ("-", true, 1) => "op_CheckedUnaryNegation".to_string(),
+                    ("-", true, _) => "op_CheckedSubtraction".to_string(),
+                    _ => operator_name(&symbol).to_string(),
+                }
+            };
+            let ty = if conversion { checked.unwrap_or(&symbol).to_string() } else { ret };
+            self.push(CsMember { kind: "method", type_name: full, name, generic_arity: 0, params, ty, line });
             return;
         }
         if let Some(p) = paren.filter(|&p| p < eq) {
@@ -541,6 +689,7 @@ impl Scanner {
         }
     }
 
+    /// Scan token stream into types, members, and namespace scopes.
     fn run(mut self, toks: &[T]) -> CsScan {
         let mut cur: Vec<T> = Vec::new();
         let mut expr_depth = 0i32;
@@ -604,9 +753,13 @@ impl Scanner {
                             self.out.types.push(CsType { full_name: full.clone(), kind: kind.clone(), generic_arity: arity, line });
                         }
                         // Positional records declare a constructor and properties.
-                        if let Some(p) = h.iter().position(|x| is_p(x, '(')) {
+                        let mut positional = Vec::new();
+                        if kind != "delegate"
+                            && let Some(p) = h.iter().position(|x| is_p(x, '('))
+                        {
                             let close = matching(&h, p, '(', ')').unwrap_or(h.len());
-                            let params: Vec<String> = split_commas(h.get(p + 1..close).unwrap_or(&[])).into_iter().map(param_type).collect();
+                            let list = h.get(p + 1..close).unwrap_or(&[]);
+                            let params: Vec<String> = split_commas(list).into_iter().map(param_type).collect();
                             self.push(CsMember {
                                 kind: "constructor",
                                 type_name: full.clone(),
@@ -616,8 +769,10 @@ impl Scanner {
                                 ty: "void".into(),
                                 line,
                             });
+                            positional = positional_properties(&kind, list, &full, line);
                         }
-                        self.scopes.push(Scope::Type { full, simple: name, is_enum: kind == "enum" });
+                        let start = self.out.members.len();
+                        self.scopes.push(Scope::Type { full, simple: name, is_enum: kind == "enum", positional, start });
                     } else if self.current_type().is_some() {
                         self.member(&h, true);
                         self.scopes.push(Scope::Block);
@@ -632,7 +787,15 @@ impl Scanner {
                     }
                     cur.clear();
                     expr_depth = 0;
-                    self.scopes.pop();
+                    if let Some(Scope::Type { full, positional, start, .. }) = self.scopes.pop() {
+                        // A member of the same name replaces the synthesized property.
+                        for m in positional {
+                            let declared = self.out.members.get(start..).unwrap_or(&[]).iter().any(|d| d.type_name == full && d.name == m.name);
+                            if !declared {
+                                self.push(m);
+                            }
+                        }
+                    }
                 }
                 Tok::Punct(';') => {
                     let h = std::mem::take(&mut cur);
@@ -644,9 +807,12 @@ impl Scanner {
                     } else if let Some((name, kind, arity, line)) = self.type_decl(&h) {
                         let prefix = self.prefix();
                         let full = if prefix.is_empty() { name } else { format!("{prefix}.{name}") };
-                        if let Some(p) = h.iter().position(|x| is_p(x, '(')) {
+                        if kind != "delegate"
+                            && let Some(p) = h.iter().position(|x| is_p(x, '('))
+                        {
                             let close = matching(&h, p, '(', ')').unwrap_or(h.len());
-                            let params: Vec<String> = split_commas(h.get(p + 1..close).unwrap_or(&[])).into_iter().map(param_type).collect();
+                            let list = h.get(p + 1..close).unwrap_or(&[]);
+                            let params: Vec<String> = split_commas(list).into_iter().map(param_type).collect();
                             self.push(CsMember {
                                 kind: "constructor",
                                 type_name: full.clone(),
@@ -656,6 +822,9 @@ impl Scanner {
                                 ty: "void".into(),
                                 line,
                             });
+                            for m in positional_properties(&kind, list, &full, line) {
+                                self.push(m);
+                            }
                         }
                         if self.out.types.len() < 200_000 {
                             self.out.types.push(CsType { full_name: full, kind, generic_arity: arity, line });
@@ -684,35 +853,27 @@ pub fn scan(src: &str) -> CsScan {
 /// Simplify a type for comparison: drop namespaces, map system type names to C# keywords, remove
 /// spaces.
 pub fn norm_type(s: &str) -> String {
+    norm_type_impl(s, false)
+}
+
+/// Simplify a type for comparison but keep namespaces, so `A.Result` and `B.Result` stay distinct.
+/// `global::` is dropped and metadata's nested-type separator becomes a dot, so a qualified source
+/// name matches the metadata name.
+fn norm_type_qualified(s: &str) -> String {
+    norm_type_impl(&s.replace("global::", "").replace('/', "."), true)
+}
+
+fn norm_type_impl(s: &str, keep_namespace: bool) -> String {
     let mut out = String::new();
     let mut word = String::new();
     let flush = |word: &mut String, out: &mut String| {
         if !word.is_empty() {
-            let last = word.rsplit('.').next().unwrap_or(word).to_string();
-            let last = last.split('`').next().unwrap_or("").to_string();
-            let mapped = match last.as_str() {
-                "Void" => "void",
-                "Boolean" => "bool",
-                "Char" => "char",
-                "SByte" => "sbyte",
-                "Byte" => "byte",
-                "Int16" => "short",
-                "UInt16" => "ushort",
-                "Int32" => "int",
-                "UInt32" => "uint",
-                "Int64" => "long",
-                "UInt64" => "ulong",
-                "Single" => "float",
-                "Double" => "double",
-                "String" => "string",
-                "Object" => "object",
-                "IntPtr" => "nint",
-                "UIntPtr" => "nuint",
-                "Decimal" => "decimal",
-                "dynamic" => "object",
-                other => other,
-            };
-            out.push_str(mapped);
+            let name = strip_arity(word);
+            let simple = name.rsplit('.').next().unwrap_or(&name);
+            let alias = cs_alias(simple);
+            // A built-in keeps its C# keyword in both modes; other names keep the namespace only
+            // when asked, so `A.Result` and `B.Result` stay distinct.
+            out.push_str(alias.unwrap_or(if keep_namespace { name.as_str() } else { simple }));
             word.clear();
         }
     };
@@ -732,6 +893,101 @@ pub fn norm_type(s: &str) -> String {
     flush(&mut word, &mut out);
     // `ref` and `out` both decode to a by-reference type.
     out.replace("ref", "ref ").replace("ref  ", "ref ")
+}
+
+/// The C# keyword for a CLR built-in type name, if it has one.
+fn cs_alias(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Void" => "void",
+        "Boolean" => "bool",
+        "Char" => "char",
+        "SByte" => "sbyte",
+        "Byte" => "byte",
+        "Int16" => "short",
+        "UInt16" => "ushort",
+        "Int32" => "int",
+        "UInt32" => "uint",
+        "Int64" => "long",
+        "UInt64" => "ulong",
+        "Single" => "float",
+        "Double" => "double",
+        "String" => "string",
+        "Object" => "object",
+        "IntPtr" => "nint",
+        "UIntPtr" => "nuint",
+        "Decimal" => "decimal",
+        "dynamic" => "object",
+        _ => return None,
+    })
+}
+
+/// Remove generic-arity markers (`` `1 ``) from a metadata type name.
+fn strip_arity(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut skip_digits = false;
+    for c in s.chars() {
+        if c == '`' {
+            skip_digits = true;
+        } else if skip_digits && c.is_ascii_digit() {
+            // Part of the arity marker.
+        } else {
+            skip_digits = false;
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The outermost type name of a normalized type, ignoring generic arguments and suffixes.
+fn terminal_name(s: &str) -> &str {
+    let head = s.split(['<', '[', '?', '*']).next().unwrap_or(s);
+    head.rsplit('.').next().unwrap_or(head)
+}
+
+/// True when the outermost type is written with a namespace, so that namespace is part of its
+/// identity. Generic arguments and suffixes don't count.
+fn is_qualified_type(s: &str) -> bool {
+    s.split(['<', '[', '?', '*']).next().unwrap_or(s).contains('.')
+}
+
+/// Compare conversion targets. A source name is resolved against the declaring type, its enclosing
+/// types and its namespace, so `Outer.Inner` in `N.C` matches metadata `N.Outer/Inner`. A qualified
+/// source name that does not resolve is never equated by its last segment. The fallback for a short
+/// name is best-effort: the scanner does not track `using` directives, so a unique same-kind,
+/// same-arity target with the same terminal name is accepted; distinct targets are never conflated.
+fn conversion_targets_match(want: &str, got: &str, declaring: &str, targets: &[(&str, &str, usize)], op_name: &str, arity: usize) -> bool {
+    let want_qualified = norm_type_qualified(want);
+    let got_qualified = norm_type_qualified(got);
+    if want_qualified == got_qualified {
+        return true;
+    }
+    // `global::` is absolute: never expand it against the declaring scope or its terminal name.
+    if got.trim_start().starts_with("global::") {
+        return false;
+    }
+    let mut scope = declaring;
+    loop {
+        if format!("{scope}.{got_qualified}") == want_qualified {
+            return true;
+        }
+        match scope.rsplit_once('.') {
+            Some((parent, _)) => scope = parent,
+            None => break,
+        }
+    }
+    if is_qualified_type(&got_qualified) {
+        return false;
+    }
+    let want_terminal = terminal_name(&want_qualified);
+    let mut same_terminal: Vec<String> = targets
+        .iter()
+        .filter(|(name, _, params)| *name == op_name && *params == arity)
+        .map(|(_, target, _)| norm_type_qualified(target))
+        .filter(|target| terminal_name(target) == want_terminal)
+        .collect();
+    same_terminal.sort();
+    same_terminal.dedup();
+    same_terminal.len() == 1 && norm_type(&got.replace("global::", "").replace('/', ".")) == norm_type(&want.replace("global::", "").replace('/', "."))
 }
 
 /// Normalise a metadata type name (`Ns.Outer/Inner`1`) to the dotted form without arity.
@@ -828,7 +1084,13 @@ pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
             r.missing_types.push(ty.full_name.clone());
         }
         let props: BTreeSet<&str> = ty.properties.iter().map(|p| p.name.as_str()).chain(ty.events.iter().map(|e| e.name.as_str())).collect();
-        let mut check = |kind: &'static str, name: &str, params: Vec<String>, meta_text: String, token: String, r: &mut Reconciliation| {
+        let conversion_targets: Vec<(&str, &str, usize)> = ty
+            .methods
+            .iter()
+            .filter(|m| matches!(m.name.as_str(), "op_Implicit" | "op_Explicit" | "op_CheckedExplicit"))
+            .map(|m| (m.name.as_str(), m.return_type.as_str(), m.params.len()))
+            .collect();
+        let mut check = |kind: &'static str, name: &str, params: Vec<String>, ret: &str, meta_text: String, token: String, r: &mut Reconciliation| {
             let mm = |source: Option<&CsMember>, reason: Option<String>| MemberMatch {
                 kind,
                 type_name: ty.full_name.clone(),
@@ -840,11 +1102,18 @@ pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
                 reason,
             };
             let cands = src.get(&(tname.clone(), key_name(name).to_string())).cloned().unwrap_or_default();
+            let arity = params.len();
             let want: Vec<String> = params.iter().map(|p| norm_type(p)).collect();
-            if let Some((i, s)) = cands.iter().find(|(i, s)| !used.contains(i) && s.params.iter().map(|p| norm_type(p)).collect::<Vec<_>>() == want) {
+            // A conversion's target type is part of its identity: two op_Implicit methods can
+            // share their parameters and differ only in the type they convert to.
+            let want_ret = matches!(name, "op_Implicit" | "op_Explicit" | "op_CheckedExplicit").then_some(ret);
+            let same_ret = |s: &CsMember| want_ret.is_none_or(|want| conversion_targets_match(want, &s.ty, &tname, &conversion_targets, name, arity));
+            if let Some((i, s)) =
+                cands.iter().find(|(i, s)| !used.contains(i) && same_ret(s) && s.params.iter().map(|p| norm_type(p)).collect::<Vec<_>>() == want)
+            {
                 used.insert(*i);
                 r.matched.push(mm(Some(s), None));
-            } else if let Some((i, s)) = cands.iter().find(|(i, s)| !used.contains(i) && s.params.len() == want.len()) {
+            } else if let Some((i, s)) = cands.iter().find(|(i, s)| !used.contains(i) && same_ret(s) && s.params.len() == want.len()) {
                 used.insert(*i);
                 let got: Vec<String> = s.params.iter().map(|p| norm_type(p)).collect();
                 r.signature_mismatch.push(mm(Some(s), Some(format!("parameters ({}) vs ({})", want.join(", "), got.join(", ")))));
@@ -862,16 +1131,16 @@ pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
         };
         for m in &ty.methods {
             let params: Vec<String> = m.params.iter().map(|p| p.ty.clone()).collect();
-            check("method", &m.name, params, m.signature.clone(), m.token.clone(), &mut r);
+            check("method", &m.name, params, &m.return_type, m.signature.clone(), m.token.clone(), &mut r);
         }
         for f in &ty.fields {
-            check("field", &f.name, vec![], format!("{} {}", f.ty, f.name), f.token.clone(), &mut r);
+            check("field", &f.name, vec![], "", format!("{} {}", f.ty, f.name), f.token.clone(), &mut r);
         }
         for p in &ty.properties {
-            check("property", &p.name, vec![], format!("{} {}", p.ty, p.name), String::new(), &mut r);
+            check("property", &p.name, vec![], "", format!("{} {}", p.ty, p.name), String::new(), &mut r);
         }
         for e in &ty.events {
-            check("event", &e.name, vec![], format!("event {} {}", e.ty, e.name), String::new(), &mut r);
+            check("event", &e.name, vec![], "", format!("event {} {}", e.ty, e.name), String::new(), &mut r);
         }
     }
     for t in &scan.types {
@@ -899,7 +1168,7 @@ pub fn reconcile(members: &Members, scan: &CsScan) -> Reconciliation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dotnet::model::{MethodInfo, PropertyInfo, TypeInfo};
+    use crate::dotnet::model::{MethodInfo, Param, PropertyInfo, TypeInfo};
 
     #[test]
     fn scans_declarations() {
@@ -920,6 +1189,7 @@ public sealed class Box<T> : IDisposable where T : class
     public static Box<T> Create<U, V>(ref int x, out string y, params object[] rest) where U : struct { return null; }
     void IDisposable.Dispose() { }
     public static bool operator ==(Box<T> a, Box<T> b) => true;
+    public static bool operator !=(Box<T> a, Box<T> b) => false;
     public enum Mode { A, B = 2, C }
     public record Point(int X, int Y);
 }
@@ -936,7 +1206,8 @@ public sealed class Box<T> : IDisposable where T : class
         assert!(names.contains(&("constructor", ".cctor")));
         assert!(names.contains(&("method", "Finalize")));
         assert!(names.contains(&("method", "IDisposable.Dispose")));
-        assert!(names.contains(&("method", "operator")));
+        assert!(names.contains(&("method", "op_Equality")), "{names:?}");
+        assert!(names.contains(&("method", "op_Inequality")), "{names:?}");
         assert!(names.contains(&("field", "C")));
         let create = s.members.iter().find(|m| m.name == "Create").unwrap();
         assert_eq!(create.generic_arity, 2);
@@ -1020,6 +1291,273 @@ public sealed class Box<T> : IDisposable where T : class
     }
 
     #[test]
+    fn scans_and_reconciles_delegate_declarations() {
+        let s = scan(
+            r#"
+namespace Newtonsoft.Json.Serialization;
+
+public delegate void ExtensionDataSetter(object o, string key, object value);
+public delegate TResult Func<out TResult>();
+public delegate (int, int) Pair();
+public delegate (string Name, int Age) GetUser<T>(T id);
+
+public class Container {
+    public delegate bool Filter(int item);
+    public Action callback = delegate { };
+    public Action<int> onCount = delegate(int x) { };
+    public unsafe delegate*<int, void> fp;
+}
+"#,
+        );
+        let types: Vec<(&str, &str, usize)> = s.types.iter().map(|t| (t.full_name.as_str(), t.kind.as_str(), t.generic_arity)).collect();
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.ExtensionDataSetter", "delegate", 0)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.Func", "delegate", 1)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.Pair", "delegate", 0)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.GetUser", "delegate", 1)), "{types:?}");
+        assert!(types.contains(&("Newtonsoft.Json.Serialization.Container.Filter", "delegate", 0)), "{types:?}");
+        assert!(!types.iter().any(|(name, _, _)| name.ends_with(".delegate")), "anonymous delegates must not register as types: {types:?}");
+
+        let fields: Vec<(&str, &str)> = s.members.iter().filter(|m| m.kind == "field").map(|m| (m.name.as_str(), m.ty.as_str())).collect();
+        assert!(fields.contains(&("callback", "Action")), "{fields:?}");
+        assert!(fields.contains(&("onCount", "Action<int>")), "{fields:?}");
+        assert!(fields.iter().any(|(name, _)| *name == "fp"), "{fields:?}");
+
+        let members = Members {
+            types: vec![ty("Newtonsoft.Json.Serialization.ExtensionDataSetter", "delegate", &[".ctor", "Invoke", "BeginInvoke", "EndInvoke"], &[])],
+            total_types: 1,
+            total_methods: 4,
+            total_fields: 0,
+            truncated: false,
+            warnings: vec![],
+        };
+        let r = reconcile(&members, &s);
+        assert_eq!(r.matched_types, 1);
+        assert!(r.missing_types.is_empty(), "delegate is not missing: {:?}", r.missing_types);
+        assert!(r.missing.is_empty(), "synthetic delegate methods are not missing: {:?}", r.missing);
+    }
+
+    #[test]
+    fn equality_operators_match_their_clr_names() {
+        let mut c = ty("C", "class", &["op_Equality", "op_Inequality"], &[]);
+        for m in &mut c.methods {
+            m.params = vec![Param { name: "a".into(), ty: "C".into() }, Param { name: "b".into(), ty: "C".into() }];
+        }
+        let members = Members { types: vec![c], total_types: 1, total_methods: 2, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("class C { public static bool operator ==(C a, C b) => true; public static bool operator !=(C a, C b) => false; }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.iter().filter(|m| m.kind == "method").count(), 2, "{:?}", r.matched);
+    }
+
+    #[test]
+    fn other_operators_get_their_clr_names() {
+        let s = scan(
+            "class C {
+                public static C operator +(C a, C b) => a;
+                public static C operator -(C a) => a;
+                public static implicit operator int(C c) => 0;
+                public static explicit operator C(int i) => null;
+                public static bool operator true(C c) => true;
+                public static C operator checked *(C a, C b) => a;
+                public static C operator checked +(C a, C b) => a;
+                public static C operator checked -(C a) => a;
+                public static C operator >>>(C a, int b) => a;
+                public static explicit operator checked int(C c) => 0;
+            }",
+        );
+        let names: Vec<&str> = s.members.iter().map(|m| m.name.as_str()).collect();
+        for want in [
+            "op_Addition",
+            "op_UnaryNegation",
+            "op_Implicit",
+            "op_Explicit",
+            "op_True",
+            "op_CheckedMultiply",
+            "op_CheckedAddition",
+            "op_CheckedUnaryNegation",
+            "op_UnsignedRightShift",
+            "op_CheckedExplicit",
+        ] {
+            assert!(names.contains(&want), "{want} missing: {names:?}");
+        }
+    }
+
+    #[test]
+    fn a_checked_unary_plus_is_not_a_clr_operator() {
+        // Not valid C#; the scanner must not invent op_CheckedAddition for it.
+        let s = scan("class C { public static C operator checked +(C a) => a; }");
+        assert_eq!(s.members.first().map(|m| m.name.as_str()), Some("operator"));
+    }
+
+    #[test]
+    fn arithmetic_and_conversion_operators_reconcile() {
+        let mut c = ty("C", "class", &["op_Addition", "op_Implicit", "op_Implicit"], &[]);
+        for m in &mut c.methods {
+            m.params = match m.name.as_str() {
+                "op_Addition" => vec![Param { name: "a".into(), ty: "C".into() }, Param { name: "b".into(), ty: "C".into() }],
+                _ => vec![Param { name: "c".into(), ty: "C".into() }],
+            };
+        }
+        c.methods[1].return_type = "System.Int32".into();
+        c.methods[2].return_type = "System.String".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 3, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan(
+            "class C {
+                public static C operator +(C a, C b) => a;
+                public static implicit operator string(C c) => \"\";
+                public static implicit operator int(C c) => 0;
+            }",
+        );
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.iter().filter(|m| m.kind == "method").count(), 3, "{:?}", r.matched);
+        // The int conversion matches the int declaration (line 4), not the first op_Implicit.
+        assert_eq!(r.matched[1].line, Some(4), "{:?}", r.matched[1]);
+        assert_eq!(r.matched[2].line, Some(3), "{:?}", r.matched[2]);
+    }
+
+    #[test]
+    fn conversion_targets_in_different_namespaces_are_distinct() {
+        let mut c = ty("C", "class", &["op_Implicit", "op_Implicit"], &[]);
+        for m in &mut c.methods {
+            m.params = vec![Param { name: "c".into(), ty: "C".into() }];
+        }
+        c.methods[0].return_type = "A.Result".into();
+        c.methods[1].return_type = "B.Result".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 2, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan(
+            "class C {
+                public static implicit operator B.Result(C c) => null;
+                public static implicit operator A.Result(C c) => null;
+            }",
+        );
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        let lines: Vec<Option<u32>> = r.matched.iter().map(|m| m.line).collect();
+        assert_eq!(lines, vec![Some(3), Some(2)], "A.Result must not match B.Result: {:?}", r.matched);
+    }
+
+    #[test]
+    fn a_nested_conversion_target_matches_metadata_separators() {
+        let mut c = ty("C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "C".into() }];
+        c.methods[0].return_type = "A.Outer/Inner".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("class C { public static implicit operator A.Outer.Inner(C c) => null; }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.first().and_then(|m| m.line), Some(1), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn a_short_nested_conversion_target_matches_metadata_separators() {
+        let mut c = ty("C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "C".into() }];
+        c.methods[0].return_type = "N.Outer/Inner".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("class C { public static implicit operator Inner(C c) => null; }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.first().and_then(|m| m.line), Some(1), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn qualified_generic_conversion_targets_alias_builtin_arguments() {
+        let mut c = ty("C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "C".into() }];
+        c.methods[0].return_type = "System.Collections.Generic.List<System.Int32>".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("class C { public static implicit operator System.Collections.Generic.List<int>(C c) => null; }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.first().and_then(|m| m.line), Some(1), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn a_short_conversion_target_matches_the_qualified_metadata_name() {
+        let mut c = ty("C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "C".into() }];
+        c.methods[0].return_type = "A.Result".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("class C { public static implicit operator Result(C c) => null; }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.first().and_then(|m| m.line), Some(1), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn a_namespace_relative_conversion_target_matches() {
+        let mut c = ty("N.C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "N.C".into() }];
+        c.methods[0].return_type = "N.Outer/Inner".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("namespace N { class C { public static implicit operator Outer.Inner(C c) => null; } }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.first().and_then(|m| m.line), Some(1), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn an_enclosing_type_relative_conversion_target_matches() {
+        let mut c = ty("N.C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "N.C".into() }];
+        c.methods[0].return_type = "N.C/Outer/Inner".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("namespace N { class C { public static implicit operator Outer.Inner(C c) => null; } }");
+        let r = reconcile(&members, &s);
+        assert!(r.missing.is_empty(), "{:?}", r.missing);
+        assert!(r.extra.is_empty(), "{:?}", r.extra);
+        assert_eq!(r.matched.first().and_then(|m| m.line), Some(1), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn an_unrelated_qualified_conversion_target_does_not_match() {
+        let mut c = ty("N.C", "class", &["op_Implicit"], &[]);
+        c.methods[0].params = vec![Param { name: "c".into(), ty: "N.C".into() }];
+        c.methods[0].return_type = "N.Other/Inner".into();
+        let members = Members { types: vec![c], total_types: 1, total_methods: 1, total_fields: 0, truncated: false, warnings: vec![] };
+        let s = scan("namespace N { class C { public static implicit operator Outer.Inner(C c) => null; } }");
+        let r = reconcile(&members, &s);
+        assert_eq!(r.missing.len(), 1, "{:?}", r.missing);
+        assert_eq!(r.extra.len(), 1, "{:?}", r.extra);
+        assert!(r.matched.is_empty(), "{:?}", r.matched);
+    }
+
+    #[test]
+    fn a_short_name_does_not_equate_distinct_nested_targets() {
+        let targets = [("op_Implicit", "N.Other/Inner", 1), ("op_Implicit", "N.C/Inner", 1)];
+        assert!(conversion_targets_match("N.C/Inner", "Inner", "N.C", &targets, "op_Implicit", 1));
+        assert!(!conversion_targets_match("N.Other/Inner", "Inner", "N.C", &targets, "op_Implicit", 1));
+    }
+
+    #[test]
+    fn conversion_ambiguity_is_per_operator_kind_and_outer_name() {
+        // An op_Explicit target with the same terminal name cannot make an op_Implicit ambiguous.
+        let kinds = [("op_Implicit", "N.Foo", 1), ("op_Explicit", "M.Foo", 1)];
+        assert!(conversion_targets_match("N.Foo", "Foo", "C", &kinds, "op_Implicit", 1));
+        // Generic arguments share a terminal name; the outer names still decide.
+        let generic = [("op_Implicit", "N.Box<Q.Item>", 1), ("op_Implicit", "M.Other<Q.Item>", 1)];
+        assert!(conversion_targets_match("N.Box<Q.Item>", "Box<Q.Item>", "C", &generic, "op_Implicit", 1));
+    }
+
+    #[test]
+    fn a_global_qualified_conversion_target_is_absolute() {
+        let targets = [("op_Implicit", "A.Result", 1), ("op_Implicit", "Result", 1)];
+        assert!(conversion_targets_match("A.Result", "global::A.Result", "N.C", &targets, "op_Implicit", 1));
+        assert!(!conversion_targets_match("N.A.Result", "global::A.Result", "N.C", &targets, "op_Implicit", 1));
+        assert!(conversion_targets_match("Result", "global::Result", "N.C", &targets, "op_Implicit", 1));
+        assert!(!conversion_targets_match("A.Result", "global::Result", "N.C", &targets, "op_Implicit", 1));
+    }
+
+    #[test]
     fn junk_does_not_panic() {
         for src in ["", "{{{{", "}}}}", "class", "class X {", "\"unterminated", "'", "/*", "@\"", "$\"\"\"", "namespace ;", "class X { void (", "enum E { , }"]
         {
@@ -1032,5 +1570,77 @@ public sealed class Box<T> : IDisposable where T : class
             weird.push(char::from_u32(i * 7 % 0x2fff).unwrap_or('x'));
         }
         let _ = scan(&weird);
+    }
+
+    #[test]
+    fn positional_record_declares_properties() {
+        use crate::dotnet::model::PropertyInfo;
+        use crate::dotnet::{MethodInfo, Param, TypeInfo};
+        let method = |name: &str, params: &[&str], ty: &str| MethodInfo {
+            token: String::new(),
+            name: name.into(),
+            key: String::new(),
+            signature: name.into(),
+            return_type: ty.into(),
+            params: params.iter().map(|p| Param { name: String::new(), ty: (*p).into() }).collect(),
+            generic_params: vec![],
+            visibility: "public",
+            modifiers: vec![],
+            code_type: "il",
+            internal_call: false,
+            pinvoke: false,
+            rva: 0,
+            body: None,
+        };
+        let members = Members {
+            types: vec![TypeInfo {
+                token: "0x02000002".into(),
+                full_name: "N.Point".into(),
+                namespace: "N".into(),
+                name: "Point".into(),
+                kind: "class",
+                visibility: "public",
+                modifiers: vec![],
+                extends: Some("object".into()),
+                enclosing_type: None,
+                generic_params: vec![],
+                interfaces: vec![],
+                fields: vec![],
+                methods: vec![
+                    method(".ctor", &["int", "int"], "void"),
+                    method("get_X", &[], "int"),
+                    method("set_X", &["int"], "void"),
+                    method("get_Y", &[], "int"),
+                    method("set_Y", &["int"], "void"),
+                ],
+                properties: vec![PropertyInfo { name: "X".into(), ty: "int".into() }, PropertyInfo { name: "Y".into(), ty: "int".into() }],
+                events: vec![],
+            }],
+            total_types: 1,
+            total_methods: 5,
+            total_fields: 0,
+            truncated: false,
+            warnings: vec![],
+        };
+        for src in [
+            "namespace N { public record Point(int X, int Y); }",
+            "namespace N { public record Point(int X, int Y) { } }",
+            "namespace N { public record Point(int X, int Y) { public int X { get; init; } = X; } }",
+            "namespace N { public record Point(int X, [property: Obsolete] int Y) { public int X { get; init; } = X; public int Y { get; init; } = Y; } }",
+        ] {
+            let s = scan(src);
+            let props: Vec<(&str, &str, &str)> =
+                s.members.iter().filter(|m| m.kind == "property").map(|m| (m.type_name.as_str(), m.name.as_str(), m.ty.as_str())).collect();
+            assert_eq!(props.len(), 2, "{src}: {props:?}");
+            assert!(props.contains(&("N.Point", "X", "int")), "{src}: {props:?}");
+            assert!(props.contains(&("N.Point", "Y", "int")), "{src}: {props:?}");
+            let r = reconcile(&members, &s);
+            assert!(r.missing.is_empty(), "{src}: {:?}", r.missing);
+            assert!(r.extra.is_empty(), "{src}: {:?}", r.extra);
+            assert_eq!(r.matched.len(), 3, "{src}");
+        }
+        // A class with a primary constructor does not get properties.
+        let s = scan("namespace N { public class C(int x) { } }");
+        assert!(s.members.iter().all(|m| m.kind != "property"));
     }
 }

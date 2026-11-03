@@ -593,9 +593,32 @@ impl Xml {
     }
 }
 
+/// Decode a UTF-16 XML property list after its byte-order mark into UTF-8 text.
+/// Surrogate pairs join normally; a lone surrogate fails as malformed rather
+/// than turning into replacement characters that tokenize into garbage element
+/// names.
+fn decode_utf16_xml(data: &[u8], big_endian: bool) -> Result<String, FormatError> {
+    let r = Reader::new(data);
+    let mut units = Vec::with_capacity(data.len() / 2);
+    let mut off = 0;
+    while let Some(unit) = if big_endian { r.u16_be(off) } else { r.u16_le(off) } {
+        units.push(unit);
+        off += 2;
+    }
+    String::from_utf16(&units).map_err(|_| FormatError::Malformed("invalid UTF-16 in XML plist".into()))
+}
+
 /// Parse an XML property list.
 pub fn parse_xml(data: &[u8]) -> Result<Value, FormatError> {
-    let text = String::from_utf8_lossy(data);
+    // Apple's Core Foundation reader accepts XML plists in UTF-16 as well as
+    // UTF-8: it recognises both byte-order marks. `from_utf8_lossy` turns a
+    // UTF-16 byte stream into NUL-separated text, so the encoding is settled
+    // here, before tokenizing.
+    let text = match data {
+        [0xFF, 0xFE, rest @ ..] => decode_utf16_xml(rest, false)?,
+        [0xFE, 0xFF, rest @ ..] => decode_utf16_xml(rest, true)?,
+        _ => String::from_utf8_lossy(data).into_owned(),
+    };
     let toks = tokenize(&text)?;
     let mut x = Xml { toks, pos: 0, nodes: 0 };
     x.skip_text();
@@ -673,5 +696,22 @@ mod tests {
         assert!(parse(&cyc).is_err());
         let deep = "<plist>".to_string() + &"<array>".repeat(1000) + &"</array>".repeat(1000) + "</plist>";
         assert!(parse(deep.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn xml_plist_utf16_byte_orders_parse() {
+        // Apple's Core Foundation reader accepts UTF-16 XML plists with either
+        // byte-order mark; the reader used to lossy-decode them as UTF-8 and
+        // reject the NUL-separated text (issue #333).
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-16\"?><!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\"><plist version=\"1.0\"><dict><key>Message</key><string>hello</string></dict></plist>";
+        let units: Vec<u16> = xml.encode_utf16().collect();
+        let mut le = vec![0xFF, 0xFE];
+        le.extend(units.iter().copied().flat_map(u16::to_le_bytes));
+        let mut be = vec![0xFE, 0xFF];
+        be.extend(units.iter().copied().flat_map(u16::to_be_bytes));
+        for data in [&le[..], &be[..]] {
+            let v = parse(data).unwrap_or_else(|e| panic!("UTF-16 XML plist should parse: {e}"));
+            assert_eq!(v.get("Message").and_then(Value::as_str), Some("hello"));
+        }
     }
 }

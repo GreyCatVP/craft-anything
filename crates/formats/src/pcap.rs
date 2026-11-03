@@ -634,22 +634,24 @@ fn transport(proto: u8, p: &[u8], d: &mut Decoded) {
     };
     match proto {
         6 => {
-            let (Some(sp), Some(dp), Some(seq), Some(ack), Some(off), Some(flags), Some(win)) =
-                (r.u16_be(0), r.u16_be(2), r.u32_be(4), r.u32_be(8), r.u8(12), r.u8(13), r.u16_be(14))
-            else {
+            let (Some(sp), Some(dp)) = (r.u16_be(0), r.u16_be(2)) else {
                 d.note = Some("TCP header cut short".into());
                 return;
             };
             d.protocols.push("tcp");
-            let payload = p.get(usize::from(off >> 4) * 4..).unwrap_or(&[]);
+            let (seq, ack, off, flags, win) = (r.u32_be(4), r.u32_be(8), r.u8(12), r.u8(13), r.u16_be(14));
+            if win.is_none() {
+                d.note = Some("TCP header cut short".into());
+            }
+            let payload = off.map_or(&[][..], |off| p.get(usize::from(off >> 4) * 4..).unwrap_or(&[]));
             d.transport = Some(Transport {
                 protocol: "tcp",
                 src_port: Some(sp),
                 dst_port: Some(dp),
-                tcp_flags: Some(tcp_flags(flags)),
-                seq: Some(seq),
-                ack: Some(ack),
-                window: Some(win),
+                tcp_flags: flags.map(tcp_flags),
+                seq,
+                ack,
+                window: win,
                 payload_len: payload.len(),
                 ..empty
             });
@@ -781,10 +783,27 @@ fn dns(msg: &[u8], d: &mut Decoded, label: &'static str) {
                 (28, 16) => Ipv6Addr::from(<[u8; 16]>::try_from(rd).unwrap_or([0; 16])).to_string(),
                 (2 | 5 | 12, _) => dns_name(msg, rd_off).map(|(n, _)| n).unwrap_or_default(),
                 (15, _) => dns_name(msg, rd_off + 2).map(|(n, _)| n).unwrap_or_default(),
-                (16, _) => rd
-                    .get(1..)
-                    .map(|t| String::from_utf8_lossy(t.get(..usize::from(rd.first().copied().unwrap_or(0))).unwrap_or(t)).into_owned())
-                    .unwrap_or_default(),
+                (16, _) => {
+                    // RFC 1035 §3.3.14: one TXT RDATA holds any number of
+                    // length-prefixed character strings, and a zero-length
+                    // string does not end the record. Consumers join them all
+                    // (RFC 7208 §3.3), so keep every string instead of the
+                    // first one and skip the rest of the RDATA.
+                    let mut txt = String::new();
+                    let mut pos = 0;
+                    while let Some(&len) = rd.get(pos) {
+                        let len = usize::from(len);
+                        let end = (pos + 1).saturating_add(len).min(rd.len());
+                        match rd.get(pos + 1..end) {
+                            Some(part) => {
+                                txt.push_str(&String::from_utf8_lossy(part));
+                                pos = end;
+                            }
+                            None => break,
+                        }
+                    }
+                    txt
+                }
                 (_, n) => format!("<{n} bytes>"),
             };
             out.answers.push(DnsAnswer { name, rtype: qtype_name(rt), ttl, value });
@@ -1015,6 +1034,9 @@ pub struct Summary {
     pub dns_queries: Vec<Count>,
     /// "name TYPE value" from DNS responses.
     pub dns_answers: Vec<Count>,
+    /// "question A|AAAA address" from DNS responses: each address answered, keyed by the response's first
+    /// question (so CNAME chains end at the name that was asked), as Wireshark's fields report them.
+    pub dns_addresses: Vec<Count>,
     /// "METHOD host target" from HTTP/1.x requests.
     pub http_requests: Vec<Count>,
     /// Server names from TLS ClientHellos.
@@ -1063,6 +1085,7 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
     let mut flow_rows: Vec<Flow> = Vec::new();
     let (mut protocols, mut stacks, mut endpoints) = (Tally::default(), Tally::default(), Tally::default());
     let (mut queries, mut answers, mut http, mut sni, mut alpn) = (Tally::default(), Tally::default(), Tally::default(), Tally::default(), Tally::default());
+    let mut addresses = Tally::default();
     for f in cap.by_ref() {
         if f.number % 4096 == 0 && cancelled() {
             return Err(FormatError::Malformed("cancelled".into()));
@@ -1074,8 +1097,10 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
             s.last_ts_ns = Some(s.last_ts_ns.map_or(t, |x| x.max(t)));
         }
         let d = decode(f.link_type, f.data);
-        for p in &d.protocols {
-            protocols.add((*p).to_string());
+        for (i, p) in d.protocols.iter().enumerate() {
+            if !d.protocols[..i].contains(p) {
+                protocols.add((*p).to_string());
+            }
         }
         stacks.add(d.stack());
         let Some(ip) = &d.ip else {
@@ -1130,6 +1155,13 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
             for a in &dns.answers {
                 answers.add(format!("{} {} {}", a.name, a.rtype, a.value));
             }
+            if dns.response
+                && let Some(q) = dns.questions.first()
+            {
+                for a in dns.answers.iter().filter(|a| matches!(a.rtype.as_str(), "A" | "AAAA") && a.value.parse::<IpAddr>().is_ok()) {
+                    addresses.add(format!("{} {} {}", q.name, a.rtype, a.value));
+                }
+            }
         }
         if let Some(h) = &d.http
             && h.kind == "request"
@@ -1154,6 +1186,7 @@ pub fn summarize(data: &[u8], cancelled: &dyn Fn() -> bool) -> Result<Summary, F
     s.endpoints = endpoints.done("endpoints", &mut capped);
     s.dns_queries = queries.done("dns_queries", &mut capped);
     s.dns_answers = answers.done("dns_answers", &mut capped);
+    s.dns_addresses = addresses.done("dns_addresses", &mut capped);
     s.http_requests = http.done("http_requests", &mut capped);
     s.tls_sni = sni.done("tls_sni", &mut capped);
     s.tls_alpn = alpn.done("tls_alpn", &mut capped);
@@ -1185,7 +1218,64 @@ pub fn iso8601(ns: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use craft_anything_testkit::pcap::{dns_query, pcap, pcapng, sample_frames, udp};
+    use craft_anything_testkit::pcap::{dns_query, eth, ipv4_pkt, pcap, pcapng, sample_frames, udp};
+
+    #[test]
+    fn tcp_cut_inside_header_keeps_ports() {
+        // Ports sit in the first 4 bytes; a cut later in the header must not drop them (as UDP).
+        let mut tcp = Vec::new();
+        tcp.extend(41000u16.to_be_bytes());
+        tcp.extend(9000u16.to_be_bytes());
+        tcp.extend([0, 0, 0, 1, 0, 0, 0, 0, 0x50, 0x18, 4, 0, 0, 0, 0, 0]);
+        let mut frame = eth(0x0800, &ipv4_pkt(6, [10, 0, 0, 1], [10, 0, 0, 2], &tcp));
+        frame.truncate(14 + 20 + 11);
+        let d = decode(1, &frame);
+        let t = d.transport.unwrap();
+        assert_eq!((t.src_port, t.dst_port), (Some(41000), Some(9000)));
+        assert_eq!(t.seq, Some(1));
+        assert_eq!(t.ack, None);
+        assert_eq!(t.window, None);
+        assert!(d.protocols.contains(&"tcp"));
+    }
+
+    /// One-answer DNS response for `example.com` with a TXT answer carrying `rdata`.
+    fn txt_response(rdata: &[u8]) -> Vec<u8> {
+        let mut m = vec![0x12, 0x34, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0];
+        m.extend(b"\x07example\x03com\x00\x00\x01\x00\x01");
+        m.extend([0xc0, 12, 0, 16, 0, 1, 0, 0, 0x00, 0x3c]);
+        m.extend((rdata.len() as u16).to_be_bytes());
+        m.extend(rdata);
+        m
+    }
+
+    #[test]
+    fn dns_txt_answer_keeps_every_character_string() {
+        // RFC 1035 §3.3.14: one TXT RDATA holds any number of length-prefixed
+        // character strings. Only the first used to survive (issue #330).
+        let rdata = [
+            5, b'f', b'i', b'r', b's', b't', // "first"
+            6, b's', b'e', b'c', b'o', b'n', b'd', // "second"
+        ];
+        let frame = eth(0x0800, &ipv4_pkt(17, [8, 8, 8, 8], [192, 168, 1, 10], &udp(53, 50000, &txt_response(&rdata))));
+        let d = decode(1, &frame);
+        let dns = d.dns.unwrap();
+        assert_eq!(dns.answers.len(), 1);
+        assert_eq!(dns.answers[0].rtype, "TXT");
+        assert_eq!(dns.answers[0].value, "firstsecond");
+        assert!(!dns.incomplete);
+    }
+
+    #[test]
+    fn dns_txt_empty_first_string_keeps_later_content() {
+        // A zero-length character string does not end the record.
+        let rdata = [0, 6, b's', b'e', b'c', b'o', b'n', b'd'];
+        let frame = eth(0x0800, &ipv4_pkt(17, [8, 8, 8, 8], [192, 168, 1, 10], &udp(53, 50000, &txt_response(&rdata))));
+        let d = decode(1, &frame);
+        let dns = d.dns.unwrap();
+        assert_eq!(dns.answers.len(), 1);
+        assert_eq!(dns.answers[0].value, "second");
+        assert!(!dns.incomplete);
+    }
 
     fn classic_link_word(link_word: u32, le: bool, nanos: bool, trailer: usize) {
         let link = link_word & 0xffff;
@@ -1246,6 +1336,18 @@ mod tests {
     #[test]
     fn fcs_bits_are_masked_in_nanosecond_files() {
         classic_link_word(0x24000001, true, true, 4);
+    }
+
+    #[test]
+    fn fcs_bits_are_masked_in_big_endian_nanosecond_files() {
+        classic_link_word(0x24000001, false, true, 4);
+        classic_link_word(1, false, true, 0);
+    }
+
+    #[test]
+    fn fcs_bits_do_not_change_big_endian_nanosecond_raw_ip() {
+        classic_link_word(0x24000065, false, true, 4);
+        classic_link_word(101, false, true, 0);
     }
 
     #[test]
@@ -1319,6 +1421,19 @@ mod tests {
         assert_eq!(summarize(&pcap(&frames), &|| false).unwrap().format, "pcap");
         assert_eq!(iso8601(1_700_000_000_000_000_500), "2023-11-14T22:13:20.000000500Z");
         assert_eq!(iso8601(0), "1970-01-01T00:00:00.000000000Z");
+    }
+
+    #[test]
+    fn qinq_frames_count_vlan_once_per_frame() {
+        let mut payload = vec![0x00, 0x0a, 0x81, 0x00, 0x00, 0x14, 0x08, 0x00];
+        payload.extend(ipv4_pkt(17, [10, 0, 0, 1], [10, 0, 0, 2], &udp(40000, 9999, b"ping")));
+        let frame = eth(0x88a8, &payload);
+        let s = summarize(&pcap(&[frame.clone(), frame.clone(), frame]), &|| false).unwrap();
+        let count = |name: &str| s.protocols.iter().find(|c| c.value == name).map(|c| c.count);
+        assert_eq!(s.stacks[0].value, "eth:vlan:vlan:ipv4:udp");
+        assert_eq!(count("vlan"), Some(3));
+        assert_eq!(count("eth"), Some(3));
+        assert_eq!(count("ipv4"), Some(3));
     }
 
     #[test]

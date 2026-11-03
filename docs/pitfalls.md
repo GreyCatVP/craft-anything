@@ -71,6 +71,10 @@ before running anything, and run new tests on a machine without the program.
 It happened again when Clean room began refusing tools before their program is looked for: a
 "missing adb" test returned early on a machine with adb and failed in CI without it. A test of
 what happens without a program builds its session in the mode the tool runs in.
+It happened a third time with Ghidra: the test session's engine store was empty, but the lookup
+still searched PATH, `~/.local/bin` and `/opt/ghidra`, so two Deep-mode tests got Ghidra's answer
+on a machine that had it. `testing::session()` now sets `engines.only_configured`, so it finds only
+the engines its settings or store name.
 
 **A failing crate hid the next crate's tests.** `cargo test -p a -p b` stopped after a failure in
 `a`, so `b`'s tests never ran; the rerun was filtered to the failing test, and a broken engine id
@@ -162,6 +166,14 @@ It happened again with Vulkan on Windows (#394): starting Vulkan loaded an Intel
 (`igvk64.dll`) that crashed with `0xc0000005` on startup. Windows now starts DX12 only by default
 (which includes WARP); `WGPU_BACKEND` still allows choosing other backends.
 
+**A shader compiler picked by a default that looks around the computer.** wgpu's DX12 `Auto`
+compiler takes a `dxcompiler.dll` it finds on the PATH; one without `dxil.dll` makes unsigned
+shaders, and on an RTX 5060 Ti the device was lost as the window opened ("Parent device is
+lost", #522). Where a library chooses a program or DLL by searching, name the one that ships
+with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) as the way to
+another. A window that can't start now says how to draw without the graphics card
+(`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
@@ -187,6 +199,15 @@ deadline. Create a lock's folder first, and treat any error but "already exists"
 Compile the `.java` against Ghidra's jars (`javac -proc:none -cp <Ghidra/**/lib/*.jar>`) before a
 live run. Ghidra also rejects project paths with a folder starting with a dot, as
 `tempfile::tempdir()`'s do: give live-test temp folders a plain prefix.
+
+**A check that read another worktree.** A PR was tested in a worktree that shared the main
+`target/`; `xtask` finds the repository through `CARGO_MANIFEST_DIR`, fixed when it's built, so
+afterwards `cargo xtask` in the main tree reused that binary and read the worktree's files. Once the
+worktree was removed it said "can't read docs/ROADMAP.md"; while it existed, every check that
+reads files itself (`pending`, `secrets`, `layers`, `locks`, `tools --check`…) would have looked
+at the wrong tree (the cargo commands `ci` runs use the folder they're started in). Give every
+worktree its own `CARGO_TARGET_DIR`, and rebuild `xtask` (or delete it from `target/`) after
+sharing one.
 
 **Stopping a long run leaves children behind** unless every program goes through
 `craft_anything_platform::process`. After stopping one, check that its child processes are gone.
@@ -372,6 +393,11 @@ the final check failed a finished build; Try again then studied the original aga
 builder the first brief. A run decides what's left from what the project records, not from which
 button started it, and a check that couldn't look says nothing about the build.
 
+**A stopped tool call broke the next request.** Retaining a stopped assistant reply kept its
+tool calls without matching results. The next model request then carried unpaired calls.
+Every retained call needs a matching result, including an explicit non-execution result.
+Test the next serialized request as well as whether a tool ran.
+
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts
 broke, and "Basic Membership" lost a word. It also tested whole tokens, so a secret inside a URL or
@@ -391,6 +417,14 @@ PIE program and shared library. Whenever an address crosses between engines, mov
 image bases (`ghidra::Rebase`, from the base the bridge reports) and say in the evidence which
 space each address is in.
 
+**An id that only means something on one computer, kept in a folder that travels.** The project
+saved Claude Code's session id, but the session itself lives in `~/.claude/projects/` on the
+computer (and under the folder) that started it; a project synced to another computer stopped at
+"No conversation found" (#452), and the retry for a cut-off turn asked for the same missing session
+three more times. Anything a project keeps must still work where the folder goes: keep what the id
+points to as well (`agent-session.jsonl`), tell "not here" apart from a failure by a typed signal
+(`Conversation::session_lost`), and never retry what can't succeed.
+
 ## Agent tooling
 
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were
@@ -399,6 +433,11 @@ mangled by the shell several times. Write multi-line edit scripts to a file and 
 **A Python edit that turned every line into CRLF.** `Path.write_text` on Windows writes CRLF
 line endings, so a scripted size change rewrote 19 LF files with CRLF (git only warned). Write
 with `write_bytes(s.encode())` and check `git ls-files --eol -m` after scripted edits.
+
+**A process search that found itself.** Looking for a helper by a word in its command line, with
+that word in the search's own command, listed the search: "a helper is left behind" after every
+run, with a new pid each time. The new pid was the clue. Build the pattern from parts
+(`'Set' + 'Thread'`), and don't stop processes by pattern on a machine where real builds may run.
 
 **A command that waits for a terminal.** `git stash show -p` opened a pager and an empty
 `python - <<'EOF'` heredoc opened the interactive interpreter; both sat waiting for input until

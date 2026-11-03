@@ -652,6 +652,15 @@ fn game_unity_bundle_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
             Err(e) => lims.push(Limitation::new("objects_unread", format!("{}'s objects couldn't be read: {}", node.path, e.message))),
         }
     }
+    let serialized_total = nodes.iter().filter(|n| n.flags & 4 != 0).count();
+    if serialized_total > MAX_COUNTED {
+        lims.push(Limitation::new(
+            "files_unread",
+            format!(
+                "Only the first {MAX_COUNTED} of the bundle's {serialized_total} serialized files were read; pass `file` to game_unity_list for the others."
+            ),
+        ));
+    }
     let matching = matching(&nodes, |n| n.path.as_str(), p.filter.as_deref());
     let page: Vec<Value> = matching
         .iter()
@@ -674,7 +683,8 @@ fn game_unity_bundle_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
         "files": page,
     });
     let objects: usize = counted.values().filter_map(|v| v["object_count"].as_u64()).sum::<u64>() as usize;
-    let summary = format!("{name}: a Unity {} bundle with {} file(s) and {objects} object(s).", h.unity_revision, nodes.len());
+    let at_least = if serialized_total > MAX_COUNTED { "at least " } else { "" };
+    let summary = format!("{name}: a Unity {} bundle with {} file(s) and {at_least}{objects} object(s).", h.unity_revision, nodes.len());
     let shown_count = page.len() as u64;
     let b = builder(ctx, "game_unity_bundle_list", Subject { kind: "archive".into(), sha256: None, name: Some(name) }, params_json(&p))
         .result(result)
@@ -1564,6 +1574,19 @@ mod tests {
         assert_eq!(v["result"]["matching"].as_u64(), Some(1));
         let not = craft_anything_testkit::temp_file("x.bundle", b"UnityWeb and some more bytes");
         assert!(call(json!({"path": not})).unwrap_err().message.contains("isn't a UnityFS bundle"));
+    }
+
+    #[test]
+    fn a_bundle_listing_says_when_it_read_only_some_serialized_files() {
+        use craft_anything_testkit::games::{unity_bundle_files, unity_serialized_file};
+        let e = Engine::new(crate::testing::session());
+        let serialized = unity_serialized_file("2022.3.62f1", &[(1, vec![0; 16])]);
+        let names: Vec<String> = (1..=17).map(|i| format!("member-{i:02}")).collect();
+        let members: Vec<(&str, &[u8], bool)> = names.iter().map(|s| (s.as_str(), serialized.as_slice(), true)).collect();
+        let p = craft_anything_testkit::temp_file("many.bundle", &unity_bundle_files(&members));
+        let v = e.call("game_unity_bundle_list", json!({"path": p, "limit": 500}), CallOptions::new(Caller::Mcp)).unwrap().to_json();
+        assert_eq!(v["limitations"][0]["code"], "files_unread", "{v}");
+        assert!(v["summary"].as_str().unwrap().contains("at least 16 object(s)"), "{v}");
     }
 
     #[test]

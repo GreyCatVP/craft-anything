@@ -71,19 +71,25 @@ pub fn ask(
     let cfg = crate::AiConfig::from_settings(settings);
     let entry = builder_backend(&cfg, project_builder(&cfg, ws))?;
     let deep = settings.deep_mode;
-    let (mut conv, from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
+    let cli = |resume: Option<String>| -> Box<dyn Conversation> {
+        let spec = CliSpec {
+            question: true,
+            deep,
+            logs: logs.clone(),
+            resume,
+            preamble: Some(PREAMBLE.into()),
+            ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
+        };
+        Box::new(CliConversation::new(spec))
+    };
+    let (mut conv, mut from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
         BackendKind::AgentCli => {
-            let session = ws.manifest.agent_session.clone();
+            let session = ws.manifest.agent_session_for(&entry.config.model).map(str::to_string);
+            if let Some(id) = session.as_deref() {
+                bring_back_session(ws, &entry, id);
+            }
             let from = if session.is_some() { AnsweredFrom::BuildersSession } else { AnsweredFrom::TheFiles };
-            let spec = CliSpec {
-                question: true,
-                deep,
-                logs,
-                resume: session,
-                preamble: Some(PREAMBLE.into()),
-                ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
-            };
-            (Box::new(CliConversation::new(spec)), from)
+            (cli(session), from)
         }
         _ => {
             // An engine of its own, pointed at this project, so a build running meanwhile keeps its.
@@ -97,16 +103,58 @@ pub fn ask(
             (Box::new(conv), AnsweredFrom::TheFiles)
         }
     };
-    let prompt = match from {
+    let prompt = |from| match from {
         AnsweredFrom::BuildersSession => format!("{}\n\nQuestion: {question}", context(ws)),
         AnsweredFrom::TheFiles => format!("{PREAMBLE}{}\n\nQuestion: {question}", context(ws)),
     };
-    conv.send(&prompt);
-    let (answer, cost_usd) = collect(conv.as_mut(), cancel, WAIT)?;
+    conv.send(&prompt(from));
+    let mut answered = collect(conv.as_mut(), cancel, WAIT);
+    // The builder's session isn't on this computer (the project was copied here): the question
+    // is answered from the files instead.
+    if answered.is_err() && from == AnsweredFrom::BuildersSession && conv.session_lost() {
+        // Forgotten, so later questions don't ask for it again. Not saving it isn't worth failing
+        // the question over: the next build finds it missing too, forgets it and says so.
+        if let Some(lost) = ws.manifest.agent_session.as_deref() {
+            let _ = forget_lost_session(&ws.root, lost);
+        }
+        from = AnsweredFrom::TheFiles;
+        conv = cli(None);
+        conv.send(&prompt(from));
+        answered = collect(conv.as_mut(), cancel, WAIT);
+    }
+    let (answer, cost_usd) = answered?;
     // A copy of a session reports the whole session's running cost, not this question's (a
     // live run said $22.67 for a few cents of cache reads): say nothing rather than that.
     let cost_usd = cost_usd.filter(|_| from != AnsweredFrom::BuildersSession);
     Ok(Answered { answer, from, backend: entry.config.name.clone(), cost_usd })
+}
+
+/// The builder's session, kept in the project, put back where its agent looks when this computer
+/// doesn't have it (#451), so the question is answered from the builder's own conversation. Only
+/// for an agent here (a remote one keeps its sessions there). Without it the question is answered
+/// from the files, as when nothing was kept, so a failure here only costs that.
+fn bring_back_session(ws: &Workspace, entry: &crate::BackendEntry, id: &str) {
+    if entry.config.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty()) {
+        return;
+    }
+    if let Some(saved) = super::kept_session_bytes(ws) {
+        let adapter = crate::cli_agents::AgentAdapters::default().for_agent(&entry.config.model);
+        let _ = adapter.restore_session(id, &saved, &ws.root);
+    }
+}
+
+/// Forget the project's builder session `lost`, which this computer doesn't have, as the build
+/// does. A question may be asked while a build runs, so this reads the project again and only
+/// clears the id if it's still `lost`: a build may have saved another since. Returns whether it
+/// was cleared.
+fn forget_lost_session(root: &Path, lost: &str) -> Result<bool, ToolError> {
+    let mut now = Workspace::open(root)?;
+    if now.manifest.agent_session.as_deref() != Some(lost) {
+        return Ok(false);
+    }
+    now.manifest.agent_session = None;
+    now.save()?;
+    Ok(true)
 }
 
 /// The answer's text and cost, once its turn is done.
@@ -215,6 +263,28 @@ fn ago(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A question that finds the builder's session missing forgets it, unless a build has saved
+    /// another meanwhile: then that one stays.
+    #[test]
+    fn a_lost_session_is_forgotten_but_never_one_a_build_saved_since() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        ws.manifest.agent_session = Some("gone".into());
+        ws.manifest.last_reply = "Built it.".into();
+        ws.save().unwrap();
+        assert!(forget_lost_session(&ws.root, "gone").unwrap());
+        let now = Workspace::open(&ws.root).unwrap();
+        assert_eq!(now.manifest.agent_session, None);
+        assert_eq!(now.manifest.last_reply, "Built it.", "nothing else changes");
+
+        ws.manifest.agent_session = Some("new-from-a-build".into());
+        ws.save().unwrap();
+        assert!(!forget_lost_session(&ws.root, "gone").unwrap());
+        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("new-from-a-build"));
+
+        assert!(forget_lost_session(&d.path().join("no-such-project"), "gone").is_err(), "an error, never a panic");
+    }
 
     #[test]
     fn the_newest_files_come_first_and_build_output_is_left_out() {

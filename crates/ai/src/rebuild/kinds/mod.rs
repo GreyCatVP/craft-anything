@@ -226,7 +226,7 @@ impl<C: Check> Check for DeepOnly<C> {
     }
 }
 
-/// The project's own build must succeed (cargo, npm, or the game engine's).
+/// The project's own build must succeed (cargo, npm, or the game engine's); a static site has none.
 pub struct BuildCheck;
 
 impl Check for BuildCheck {

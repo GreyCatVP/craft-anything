@@ -686,6 +686,104 @@ fn a_304_with_its_cached_body_answers_as_200() {
 }
 
 #[test]
+fn a_304_without_its_cached_body_has_no_replayable_answer() {
+    for recorded in [false, true] {
+        let mut e = entry("GET", &format!("{A}/cached"), 304, "");
+        if !recorded {
+            e["response"]["content"].as_object_mut().unwrap().remove("text");
+        }
+        let s = built(vec![e]);
+        let no = missing(get(&s, &mut Turns::default(), "/cached", ""));
+        assert_eq!(serde_json::to_value(no.reason).unwrap(), "cached_body_unavailable");
+        assert_eq!(no.nearest, [NearbyRoute { method: "GET".into(), template: "/cached".into() }]);
+    }
+}
+
+#[test]
+fn polling_skips_304_samples_without_a_cached_body() {
+    let s = built(vec![
+        entry("GET", &format!("{A}/poll"), 304, ""),
+        entry("GET", &format!("{A}/poll"), 200, r#"{"n":1}"#),
+        entry("GET", &format!("{A}/poll"), 304, ""),
+        entry("GET", &format!("{A}/poll"), 200, r#"{"n":2}"#),
+    ]);
+    let mut turns = Turns::default();
+    for expected in [1, 2, 1, 2] {
+        let f = found(get(&s, &mut turns, "/poll", ""));
+        assert_eq!((f.status, f.of), (200, 2));
+        assert_eq!(body(&f), format!("{{\"n\":{expected}}}"));
+    }
+}
+
+#[test]
+fn a_missing_cached_answer_does_not_fall_back_to_a_different_query_or_id() {
+    let s = built(vec![
+        entry("GET", &format!("{A}/users/1?view=summary"), 304, ""),
+        entry("GET", &format!("{A}/users/1?view=details"), 200, r#"{"details":true}"#),
+        entry("GET", &format!("{A}/users/2?view=summary"), 200, r#"{"id":2}"#),
+    ]);
+    let no = missing(get(&s, &mut Turns::default(), "/users/1", "view=summary"));
+    assert_eq!(serde_json::to_value(no.reason).unwrap(), "cached_body_unavailable");
+    assert_eq!(body(&found(get(&s, &mut Turns::default(), "/users/2", "view=summary"))), r#"{"id":2}"#);
+}
+
+#[test]
+fn a_missing_cached_graphql_answer_keeps_its_operation() {
+    let mut cached = entry("POST", &format!("{A}/graphql"), 304, "");
+    cached["request"]["postData"] = json!({"text": r#"{"operationName":"GetUser"}"#});
+    let mut other = entry("POST", &format!("{A}/graphql"), 200, r#"{"feed":[]}"#);
+    other["request"]["postData"] = json!({"text": r#"{"operationName":"GetFeed"}"#});
+    let s = built(vec![cached, other]);
+    let no = missing(answer(&s, &mut Turns::default(), "POST", "/graphql", "", br#"{"operationName":"GetUser"}"#));
+    assert_eq!(serde_json::to_value(no.reason).unwrap(), "cached_body_unavailable");
+    assert_eq!(body(&found(answer(&s, &mut Turns::default(), "POST", "/graphql", "", br#"{"operationName":"GetFeed"}"#))), r#"{"feed":[]}"#);
+}
+
+#[test]
+fn a_304_whose_cached_body_was_left_out_is_unavailable() {
+    let mut invalid = entry("GET", &format!("{A}/cached"), 304, "@@@");
+    invalid["response"]["content"]["encoding"] = json!("base64");
+    let fake_pem_header = ["-----BEGIN ", "PRIVATE KEY-----"].concat();
+    let cases = [
+        (entry("GET", &format!("{A}/cached"), 304, "large"), BuildOptions { max_body_bytes: 1, ..Default::default() }, BodyLeftOut::TooLarge),
+        (entry("GET", &format!("{A}/cached"), 304, "{}"), BuildOptions { max_total_body_bytes: 1, ..Default::default() }, BodyLeftOut::FileLimit),
+        (invalid, BuildOptions::default(), BodyLeftOut::Undecodable),
+        (entry("GET", &format!("{A}/cached"), 304, &fake_pem_header), BuildOptions::default(), BodyLeftOut::HeldSecret),
+    ];
+    for (e, options, reason) in cases {
+        let s = build_from_bytes(&har_of(vec![e]), &options).unwrap();
+        assert_eq!(s.routes[0].samples[0].body_left_out, Some(reason));
+        let no = missing(get(&s, &mut Turns::default(), "/cached", ""));
+        assert_eq!(serde_json::to_value(no.reason).unwrap(), "cached_body_unavailable");
+    }
+}
+
+#[test]
+fn cached_text_and_binary_304_bodies_still_replay_as_200() {
+    let mut binary = entry("GET", &format!("{A}/binary"), 304, "//4=");
+    binary["response"]["content"]["mimeType"] = json!("application/octet-stream");
+    binary["response"]["content"]["encoding"] = json!("base64");
+    let s = built(vec![entry("GET", &format!("{A}/text"), 304, r#"{"cached":true}"#), binary]);
+    let text = found(get(&s, &mut Turns::default(), "/text", ""));
+    assert_eq!((text.status, body(&text).as_str()), (200, r#"{"cached":true}"#));
+    let binary = found(get(&s, &mut Turns::default(), "/binary", ""));
+    assert_eq!((binary.status, binary.body.as_slice()), (200, &b"\xff\xfe"[..]));
+}
+
+#[test]
+fn an_existing_v1_file_does_not_replay_a_bare_304() {
+    let s: StandIn = serde_json::from_str(
+        r#"{"version":1,"routes":[{"method":"GET","template":"/cached","samples":[{"path":"/cached","status":304,"body_left_out":"not_recorded"}]}]}"#,
+    )
+    .unwrap();
+    let no = missing(get(&s, &mut Turns::default(), "/cached", ""));
+    assert_eq!(serde_json::to_value(no.reason).unwrap(), "cached_body_unavailable");
+    let controls = built(vec![entry("GET", &format!("{A}/empty"), 200, ""), entry("GET", &format!("{A}/no-content"), 204, "")]);
+    assert_eq!(found(get(&controls, &mut Turns::default(), "/empty", "")).status, 200);
+    assert_eq!(found(get(&controls, &mut Turns::default(), "/no-content", "")).status, 204);
+}
+
+#[test]
 fn a_saved_stand_in_reads_back_the_same() {
     let opts = BuildOptions { source_name: Some("site.har".into()), source_sha256: Some("abc".into()), ..Default::default() };
     let s = build_from_bytes(&secret_recording(), &opts).unwrap();

@@ -673,7 +673,14 @@ fn formats_ai_weights_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutpu
         other => format_err(other, "a GGUF or safetensors model"),
     })?;
     let tensors = std::mem::take(&mut r.tensors);
-    let (items, cov) = page(&tensors, p.offset, p.limit);
+    // summary keeps every tensor, for core_evidence_browse; complete returns the asked-for page.
+    let (items, cov) = if p.detail == Detail::Summary {
+        let all: Vec<Value> = tensors.iter().map(|t| serde_json::to_value(t).unwrap_or(Value::Null)).collect();
+        let n = all.len() as u64;
+        (all, Coverage::complete(n))
+    } else {
+        page(&tensors, p.offset, p.limit)
+    };
     let arch = r.architecture.as_deref().map_or_else(|| "A model with no recorded architecture".to_string(), |a| format!("A {a} model"));
     let quant = r.quantization.as_deref().map_or_else(String::new, |q| format!(", quantized as {q}"));
     let summary = format!(
@@ -1293,6 +1300,39 @@ mod tests {
         assert!(!call_err(&e, "formats_ai_weights_show", json!({"path": p})).message.is_empty());
         let p = temp_file("no.bin", b"not a model, not even close");
         assert!(!call_err(&e, "formats_ai_weights_show", json!({"path": p})).message.is_empty());
+    }
+
+    #[test]
+    fn a_model_summary_keeps_every_tensor_for_browsing() {
+        let e = engine();
+        let mut header = json!({"__metadata__": {"format": "pt"}});
+        for i in 0..250 {
+            header[format!("t{i:03}.weight")] = json!({"dtype": "F32", "shape": [1], "data_offsets": [i * 4, i * 4 + 4]});
+        }
+        let p = temp_file("many.safetensors", &pf::safetensors_file(&header.to_string(), 1000));
+        let summary = call(&e, "formats_ai_weights_show", json!({"path": p, "detail": "summary"}));
+        assert_eq!(summary["result"]["tensors"], 250);
+        let source = summary["result"]["saved_evidence"].clone();
+        let browse = |offset: usize, limit: usize| {
+            call(&e, "core_evidence_browse", json!({"source": source, "show": {"kind": "rows", "list": "tensors", "offset": offset, "limit": limit}}))
+        };
+        let tail = browse(200, 200);
+        assert_eq!(tail["result"]["shown"]["items"].as_array().unwrap().len(), 50);
+        assert_eq!(tail["result"]["coverage"]["total"], 250);
+        let mut names = Vec::new();
+        let mut cursor = 0usize;
+        loop {
+            let v = browse(cursor, 64);
+            names.extend(v["result"]["shown"]["items"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap().to_owned()));
+            match v["result"]["coverage"]["next_offset"].as_u64() {
+                Some(next) => {
+                    assert!(next > cursor as u64);
+                    cursor = next as usize;
+                }
+                None => break,
+            }
+        }
+        assert_eq!(names, (0..250).map(|i| format!("t{i:03}.weight")).collect::<Vec<_>>());
     }
 
     #[test]

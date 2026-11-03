@@ -107,7 +107,7 @@ fn db_sqlite_show(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolEr
                 let total = rc.count;
                 let shown = page.rows.len() as u64;
                 let next = p.offset as u64 + shown;
-                let cov = if page.truncated || rc.bounded || next < total {
+                let cov = if page.truncated || rc.bounded || next < total || !page.notes.is_empty() {
                     Coverage { status: CoverageStatus::Partial, examined: Some(shown), total: Some(total), next_offset: (next < total).then_some(next) }
                 } else {
                     Coverage { status: CoverageStatus::Complete, examined: Some(shown), total: Some(total), next_offset: None }
@@ -219,7 +219,94 @@ mod tests {
     use crate::Engine;
     use craft_anything_testkit::sqlite as fx;
     use craft_anything_testkit::temp_file;
-    use serde_json::json;
+    use serde_json::{Value, json};
+
+    fn check_without_rowid(sql: &str, stored: Vec<Vec<fx::Val>>, expected: Value) {
+        let e = Engine::new(crate::testing::session());
+        let p = temp_file("rows.db", &fx::without_rowid_db(sql, &stored));
+        let count = expected.as_array().unwrap().len();
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t", "limit": count + 1}));
+        assert_eq!(v["result"]["tables"][0]["row_count"], count, "WITHOUT ROWID row_count");
+        let rows = v["result"]["rows"]["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), count);
+        for (row, values) in rows.iter().zip(expected.as_array().unwrap()) {
+            assert_eq!(row["rowid"], Value::Null);
+            assert_eq!(&row["values"], values);
+        }
+        assert_eq!(v["coverage"]["status"], "complete");
+        assert_eq!(v["coverage"]["total"], count);
+        assert_eq!(v["coverage"]["next_offset"], Value::Null);
+        assert!(v["result"]["rows"]["notes"].as_array().unwrap().is_empty());
+        let first = call(&e, "db_sqlite_show", json!({"path": p, "table": "t", "limit": 1}));
+        assert_eq!(first["result"]["rows"]["rows"][0]["values"], expected[0]);
+        assert_eq!(first["coverage"]["total"], count);
+        assert_eq!(first["coverage"]["next_offset"], 1);
+        let last = call(&e, "db_sqlite_show", json!({"path": p, "table": "t", "offset": count - 1, "limit": 2}));
+        assert_eq!(last["result"]["rows"]["rows"][0]["values"], expected[count - 1]);
+        assert_eq!(last["coverage"]["next_offset"], Value::Null);
+        assert_eq!(last["coverage"]["status"], "complete");
+    }
+
+    #[test]
+    fn without_rowid_b1_composite_key() {
+        use fx::Val::{Int, Text};
+        check_without_rowid(
+            "CREATE TABLE t(a TEXT, b INT, PRIMARY KEY(a,b)) WITHOUT ROWID",
+            vec![vec![Text("j".into()), Int(2)], vec![Text("k".into()), Int(1)], vec![Text("m".into()), Int(3)]],
+            json!([["j", 2], ["k", 1], ["m", 3]]),
+        );
+    }
+
+    #[test]
+    fn without_rowid_b2_interior_rows() {
+        use fx::Val::Text;
+        let pad = "p".repeat(200);
+        let rows = (0..3000).map(|i| vec![Text(format!("k{i:04}")), Text(pad.clone())]).collect();
+        let expected = (0..3000).map(|i| json!([format!("k{i:04}"), pad])).collect::<Vec<_>>();
+        check_without_rowid("CREATE TABLE t(a TEXT PRIMARY KEY, pad TEXT) WITHOUT ROWID", rows, json!(expected));
+    }
+
+    #[test]
+    fn without_rowid_b4_integer_key() {
+        use fx::Val::{Int, Text};
+        check_without_rowid(
+            "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT) WITHOUT ROWID",
+            vec![vec![Int(5), Text("a".into())], vec![Int(9), Text("b".into())]],
+            json!([[5, "a"], [9, "b"]]),
+        );
+    }
+
+    #[test]
+    fn without_rowid_b5_declaration_order() {
+        use fx::Val::{Int, Text};
+        check_without_rowid(
+            "CREATE TABLE t(v TEXT, k INT PRIMARY KEY) without\n rowid ;",
+            vec![vec![Int(5), Text("a".into())], vec![Int(9), Text("b".into())]],
+            json!([["a", 5], ["b", 9]]),
+        );
+    }
+
+    #[test]
+    fn without_rowid_b3_rowid_control() {
+        let e = Engine::new(crate::testing::session());
+        let p = temp_file("rows.db", &fx::indexed_rowid_db());
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
+        assert_eq!(v["result"]["tables"][0]["row_count"], 2);
+        assert_eq!(v["result"]["rows"]["rows"], json!([{"rowid": 1, "values": ["z", 1]}, {"rowid": 2, "values": ["a", 2]}]));
+    }
+
+    #[test]
+    fn without_rowid_overflow_and_composite_storage_order() {
+        use fx::Val::{Int, Text};
+        let pad = "x".repeat(2000);
+        let rows = (0..5).rev().map(|i| vec![Int(i), Text(format!("k{i}")), Text(pad.clone())]).collect();
+        let expected = (0..5).rev().map(|i| json!([pad, format!("k{i}"), i])).collect::<Vec<_>>();
+        check_without_rowid(
+            "CREATE TABLE t(pad TEXT, \"a key\" TEXT, b INT, CONSTRAINT pk PRIMARY KEY(b DESC, \"a key\" COLLATE BINARY)) WITHOUT ROWID",
+            rows,
+            json!(expected),
+        );
+    }
 
     #[test]
     fn inspects_schema_and_rows() {
@@ -246,6 +333,20 @@ mod tests {
         assert_eq!(rb["rows"][0]["values"][1], "beta");
         assert_eq!(rows["coverage"]["next_offset"], 2);
         assert_eq!(rows["coverage"]["total"], 3);
+    }
+
+    #[test]
+    fn payload_cap_is_disclosed_in_coverage() {
+        let e = Engine::new(crate::testing::session());
+        for size in [1_000_000, 8_400_000] {
+            let bytes = fx::overflow_row_db(&[fx::Val::Int(42), fx::Val::Blob(vec![0x5a; size]), fx::Val::Int(73)]);
+            let p = temp_file("overflow.db", &bytes);
+            let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "items"}));
+            let partial = size == 8_400_000;
+            assert_eq!(v["coverage"]["status"], if partial { "partial" } else { "complete" });
+            assert_eq!(v["result"]["rows"]["notes"].as_array().unwrap().is_empty(), !partial);
+            assert_eq!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "read_notes"), partial);
+        }
     }
 
     #[test]
@@ -283,5 +384,34 @@ mod tests {
         let v = call(&e, "db_sqlite_show", json!({"path": p}));
         assert!(v["summary"].as_str().unwrap().contains("WAL"));
         assert!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "wal_not_read"));
+    }
+
+    #[test]
+    fn short_records_include_defaults_and_disclose_expressions() {
+        let e = Engine::new(crate::testing::session());
+        let bytes = fx::table_db("CREATE TABLE t(n INT, x INT DEFAULT 42, d TEXT DEFAULT (lower('A')))", &[(1, vec![fx::Val::Int(1)])]);
+        let p = temp_file("defaults.db", &bytes);
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
+        assert_eq!(v["result"]["rows"]["rows"][0]["values"], json!([1, 42, null]));
+        assert!(v["result"]["rows"]["notes"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("unsupported DEFAULT")));
+    }
+
+    #[test]
+    fn payload_cap_without_rowid_is_disclosed_in_coverage() {
+        let e = Engine::new(crate::testing::session());
+        let bytes = fx::without_rowid_db(
+            "CREATE TABLE t(v BLOB, k INT PRIMARY KEY, tail INT) WITHOUT ROWID",
+            &[vec![fx::Val::Int(42), fx::Val::Blob(vec![0x5a; 8_400_000]), fx::Val::Int(73)]],
+        );
+        let p = temp_file("overflow-index.db", &bytes);
+        let v = call(&e, "db_sqlite_show", json!({"path": p, "table": "t"}));
+        assert_eq!(v["coverage"]["status"], "partial");
+        assert_eq!(
+            v["result"]["rows"]["rows"][0]["values"],
+            json!([
+                {"blob_len": 8_400_000, "truncated": true}, 42, {"not_read": true}
+            ])
+        );
+        assert!(v["limitations"].as_array().unwrap().iter().any(|l| l["code"] == "read_notes"));
     }
 }

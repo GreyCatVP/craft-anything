@@ -303,8 +303,8 @@ impl ChatStream {
             None if self.done => StopReason::EndTurn,
             None => return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")),
         };
-        // Some servers say "stop" even when they emitted tool calls.
-        let stop = if has_calls { StopReason::ToolUse } else { stop };
+        // Some servers say "stop" for tool calls. A limit or refusal must still prevent execution.
+        let stop = if has_calls && stop == StopReason::EndTurn { StopReason::ToolUse } else { stop };
         let model = if self.model.is_empty() { fallback_model.to_string() } else { self.model };
         Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model })
     }
@@ -453,6 +453,33 @@ mod tests {
             r.message.tool_uses(),
             vec![("c1".into(), "core_session_show".into(), json!({"x": 1})), ("c2".into(), "core_targets_list".into(), json!({}))]
         );
+    }
+
+    #[test]
+    fn native_tool_calls_preserve_terminal_stop_reasons() {
+        for (finish, expected) in [
+            (Some("length"), StopReason::MaxTokens),
+            (Some("content_filter"), StopReason::Refusal),
+            (Some("pause_turn"), StopReason::PauseTurn),
+            (Some("provider_stop"), StopReason::Other("provider_stop".into())),
+            (Some("tool_calls"), StopReason::ToolUse),
+            (Some("stop"), StopReason::ToolUse),
+            (None, StopReason::ToolUse),
+        ] {
+            let mut stream = ChatStream::default();
+            let call = json!({"choices":[{"delta":{"tool_calls":[{
+                "index":0,"id":"call_a","function":{"name":"core_session_show","arguments":"{}"}
+            }]}}]});
+            stream.apply(&SseEvent { event: None, data: call.to_string() }, &mut |_| {}).unwrap();
+            if let Some(reason) = finish {
+                let end = json!({"choices":[{"delta":{},"finish_reason":reason}]});
+                stream.apply(&SseEvent { event: None, data: end.to_string() }, &mut |_| {}).unwrap();
+            }
+            stream.apply(&SseEvent { event: None, data: "[DONE]".into() }, &mut |_| {}).unwrap();
+            let result = stream.finish("m").unwrap();
+            assert_eq!(result.stop, expected, "finish_reason={finish:?}");
+            assert_eq!(result.message.tool_uses(), vec![("call_a".into(), "core_session_show".into(), json!({}))]);
+        }
     }
 
     #[test]

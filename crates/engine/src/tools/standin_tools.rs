@@ -153,6 +153,7 @@ fn route_row(r: &standin::StandInRoute) -> Value {
         "requests": r.requests,
         "samples": r.samples.len(),
         "samples_left_out": r.samples_left_out,
+        "unavailable_cached_answers": r.samples.iter().filter(|s| s.status == 304).count(),
         "bodies_left_out": r.samples.iter().filter(|s| s.body_left_out.is_some_and(|b| b != BodyLeftOut::NotRecorded)).count(),
     })
 }
@@ -196,6 +197,7 @@ fn web_standin_build(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     let rows: Vec<Value> = built.routes.iter().skip(p.offset).take(limit).map(route_row).collect();
     let dropped = built.dropped.total();
     let samples: usize = built.routes.iter().map(|r| r.samples.len()).sum();
+    let unavailable_cached_answers = built.routes.iter().flat_map(|r| &r.samples).filter(|s| s.status == 304).count();
     let summary = format!(
         "{total} route(s) on {} host(s) from {} recorded request(s), with {samples} recorded answer(s); {dropped} secret(s) dropped. Written to {}.",
         built.hosts.len(),
@@ -211,6 +213,7 @@ fn web_standin_build(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         "routes_total": total,
         "routes": rows,
         "samples": samples,
+        "unavailable_cached_answers": unavailable_cached_answers,
         "dropped": built.dropped,
         "skipped": built.skipped,
         "source": built.source,
@@ -228,6 +231,12 @@ fn web_standin_build(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         .limitation(Limitation::new("secrets_dropped", format!("{dropped} credential or secret-shaped value(s) were dropped, so anything that needs a real session won't work. Other response text is kept as recorded, and may hold personal data: name it in hidden_values, and don't commit this file.")))
         .coverage(Coverage::page(shown, total as u64, p.offset as u64))
         .location(Location::new("path", out.display().to_string()));
+    if unavailable_cached_answers > 0 {
+        b = b.limitation(Limitation::new(
+            "cached_body_unavailable",
+            format!("{unavailable_cached_answers} recorded 304 response(s) have no usable cached body. They are kept in the file but cannot be replayed; record the full responses to supply these answers."),
+        ));
+    }
     if built.source.cut_short {
         b = b.limitation(Limitation::new(
             "cut_short",
@@ -327,7 +336,7 @@ impl Answerer for Replay {
                         "method": r.method,
                         "path": path,
                         "nearest": n.nearest,
-                        "message": "The recording behind this stand-in has no answer for this request.",
+                        "message": "The recording behind this stand-in has no replayable answer for this request.",
                     }),
                 );
                 response.headers.push((ANSWER_HEADER.into(), "no-recorded-answer".into()));

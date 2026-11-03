@@ -1,7 +1,7 @@
 # Chinese UI localisation
 
-The desktop app offers **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
-alongside English, German, French and Japanese, in **Settings → General → Language**. The choice is saved in the
+The desktop app offers **Deutsch** (`de`), **Русский** (`ru`), **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`),
+alongside English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
 existing `language` setting. **System** uses the operating system's preferred
 supported language; if none matches, it uses English. An explicit choice takes
 precedence over the system language.

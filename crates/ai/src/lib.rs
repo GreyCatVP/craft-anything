@@ -217,6 +217,12 @@ pub trait Conversation: Send {
     fn session_id(&self) -> Option<String> {
         None
     }
+    /// The saved session the last message was to continue isn't on this computer (the project
+    /// was started on another one, or in another folder): that message did nothing, and the next
+    /// one starts a new session, which knows nothing of the old.
+    fn session_lost(&self) -> bool {
+        false
+    }
     /// Drain new events (non-blocking).
     fn poll(&mut self) -> Vec<AgentEvent>;
     fn answer_consent(&mut self, call_id: &str, allow: bool);
@@ -581,7 +587,14 @@ impl AiHub {
             Some(t) => Box::new(Tunneled { inner: model, _tunnel: t }) as Box<dyn ChatModel>,
             None => model,
         };
-        Ok(ModelSlot { name: c.name.clone(), model, local, effort: e.options.effort, max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS) })
+        Ok(ModelSlot {
+            name: c.name.clone(),
+            model,
+            local,
+            effort: e.options.effort,
+            max_turns: e.options.max_turns.unwrap_or(agent::DEFAULT_MAX_TURNS),
+            context_tokens: e.options.context_tokens.unwrap_or(0),
+        })
     }
 
     fn project_root(&self) -> Option<PathBuf> {

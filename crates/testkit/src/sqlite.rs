@@ -196,12 +196,163 @@ pub fn table_db(sql: &str, rows: &[(i64, Vec<Val>)]) -> Vec<u8> {
     file
 }
 
+/// Build one table row, spilling its record over a chain of overflow pages.
+pub fn overflow_row_db(values: &[Val]) -> Vec<u8> {
+    let record = build_record(values);
+    let max_local = PAGE_SIZE - 35;
+    let min_local = (PAGE_SIZE - 12) * 32 / 255 - 23;
+    let candidate = min_local + (record.len().saturating_sub(min_local) % (PAGE_SIZE - 4));
+    let local = if record.len() <= max_local {
+        record.len()
+    } else if candidate <= max_local {
+        candidate
+    } else {
+        min_local
+    };
+    let overflow = &record[local..];
+    let pages = 2 + overflow.len().div_ceil(PAGE_SIZE - 4);
+    let mut file = vec![0; pages * PAGE_SIZE];
+    write_db_header(&mut file[..PAGE_SIZE], pages as u32);
+    let sql = format!("CREATE TABLE items({})", (0..values.len()).map(|i| format!("c{i}")).collect::<Vec<_>>().join(", "));
+    let schema = build_record(&[Val::Text("table".into()), Val::Text("items".into()), Val::Text("items".into()), Val::Int(2), Val::Text(sql)]);
+    write_table_leaf(&mut file[..PAGE_SIZE], 100, &[(1, schema)]);
+    let mut cell = sqlite_varint(record.len() as u64);
+    cell.extend(sqlite_varint(1));
+    cell.extend_from_slice(&record[..local]);
+    if !overflow.is_empty() {
+        cell.extend_from_slice(&3u32.to_be_bytes());
+    }
+    let top = PAGE_SIZE - cell.len();
+    let leaf = &mut file[PAGE_SIZE..2 * PAGE_SIZE];
+    leaf[0] = 0x0d;
+    leaf[3..5].copy_from_slice(&1u16.to_be_bytes());
+    leaf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+    leaf[8..10].copy_from_slice(&(top as u16).to_be_bytes());
+    leaf[top..].copy_from_slice(&cell);
+    for (i, chunk) in overflow.chunks(PAGE_SIZE - 4).enumerate() {
+        let base = (i + 2) * PAGE_SIZE;
+        let next = if i + 3 < pages { (i + 4) as u32 } else { 0 };
+        file[base..base + 4].copy_from_slice(&next.to_be_bytes());
+        file[base + 4..base + 4 + chunk.len()].copy_from_slice(chunk);
+    }
+    file
+}
+
 /// A database whose header declares WAL mode (write/read version 2) but no sidecar is present.
 pub fn wal_mode_db() -> Vec<u8> {
     let mut db = simple_db();
     db[18] = 2; // write version: WAL
     db[19] = 2; // read version: WAL
     db
+}
+
+/// Build a WITHOUT ROWID table from records already sorted and arranged in storage order.
+pub fn without_rowid_db(sql: &str, rows: &[Vec<Val>]) -> Vec<u8> {
+    fn cell(file: &mut Vec<u8>, record: &[u8]) -> Vec<u8> {
+        let max = (PAGE_SIZE - 12) * 64 / 255 - 23;
+        let min = (PAGE_SIZE - 12) * 32 / 255 - 23;
+        let local = if record.len() <= max {
+            record.len()
+        } else {
+            let candidate = min + (record.len() - min) % (PAGE_SIZE - 4);
+            if candidate <= max { candidate } else { min }
+        };
+        let mut out = sqlite_varint(record.len() as u64);
+        out.extend_from_slice(&record[..local]);
+        if local < record.len() {
+            out.extend_from_slice(&((file.len() / PAGE_SIZE + 1) as u32).to_be_bytes());
+            for (i, chunk) in record[local..].chunks(PAGE_SIZE - 4).enumerate() {
+                let base = file.len();
+                file.resize(base + PAGE_SIZE, 0);
+                if local + (i + 1) * (PAGE_SIZE - 4) < record.len() {
+                    file[base..base + 4].copy_from_slice(&((base / PAGE_SIZE + 2) as u32).to_be_bytes());
+                }
+                file[base + 4..base + 4 + chunk.len()].copy_from_slice(chunk);
+            }
+        }
+        out
+    }
+    fn tree(file: &mut Vec<u8>, rows: &[Vec<Val>], height: u32) -> u32 {
+        let base = file.len();
+        let page = (base / PAGE_SIZE + 1) as u32;
+        file.resize(base + PAGE_SIZE, 0);
+        let interior = height > 0;
+        let mut cells = Vec::new();
+        let mut right = 0;
+        if interior {
+            // Up to four children; every leaf is at the same depth.
+            let children = (rows.len() + 1).div_ceil(4usize.pow(height)).max(2);
+            let mut start = 0;
+            for i in 0..children {
+                let remaining_children = children - i;
+                let len = (rows.len() - start - (remaining_children - 1)) / remaining_children;
+                let child = tree(file, &rows[start..start + len], height - 1);
+                start += len;
+                if i + 1 == children {
+                    right = child;
+                } else {
+                    let mut entry = child.to_be_bytes().to_vec();
+                    entry.extend_from_slice(&cell(file, &build_record(&rows[start])));
+                    cells.push(entry);
+                    start += 1;
+                }
+            }
+        } else {
+            for row in rows {
+                cells.push(cell(file, &build_record(row)));
+            }
+        }
+        let page_bytes = &mut file[base..base + PAGE_SIZE];
+        page_bytes[0] = if interior { 2 } else { 10 };
+        page_bytes[3..5].copy_from_slice(&(cells.len() as u16).to_be_bytes());
+        let header = if interior { 12 } else { 8 };
+        if interior {
+            page_bytes[8..12].copy_from_slice(&right.to_be_bytes());
+        }
+        let mut top = PAGE_SIZE;
+        for (i, entry) in cells.iter().enumerate() {
+            top -= entry.len();
+            page_bytes[top..top + entry.len()].copy_from_slice(entry);
+            page_bytes[header + 2 * i..header + 2 * i + 2].copy_from_slice(&(top as u16).to_be_bytes());
+        }
+        page_bytes[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+        page
+    }
+    let mut file = vec![0; PAGE_SIZE];
+    let mut height = 0;
+    let mut capacity = 3;
+    while rows.len() > capacity {
+        height += 1;
+        capacity = capacity * 4 + 3;
+    }
+    let root = tree(&mut file, rows, height);
+    let schema = build_record(&[Val::Text("table".into()), Val::Text("t".into()), Val::Text("t".into()), Val::Int(root.into()), Val::Text(sql.into())]);
+    let pages = (file.len() / PAGE_SIZE) as u32;
+    write_db_header(&mut file[..PAGE_SIZE], pages);
+    write_table_leaf(&mut file[..PAGE_SIZE], 100, &[(1, schema)]);
+    file
+}
+
+/// A rowid table with a separate secondary index (the index must not contribute rows).
+pub fn indexed_rowid_db() -> Vec<u8> {
+    let mut file = vec![0; PAGE_SIZE * 3];
+    write_db_header(&mut file[..PAGE_SIZE], 3);
+    let schema: Vec<_> = [("table", "t", 2, "CREATE TABLE t(a TEXT, b INT)"), ("index", "ti", 3, "CREATE INDEX ti ON t(a)")]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (kind, name, root, sql))| {
+            (i as i64 + 1, build_record(&[Val::Text(kind.into()), Val::Text(name.into()), Val::Text("t".into()), Val::Int(root), Val::Text(sql.into())]))
+        })
+        .collect();
+    write_table_leaf(&mut file[..PAGE_SIZE], 100, &schema);
+    let rows = [(1, build_record(&[Val::Text("z".into()), Val::Int(1)])), (2, build_record(&[Val::Text("a".into()), Val::Int(2)]))];
+    write_table_leaf(&mut file[PAGE_SIZE..PAGE_SIZE * 2], 0, &rows);
+    let index = without_rowid_db(
+        "CREATE TABLE t(a TEXT PRIMARY KEY) WITHOUT ROWID",
+        &[vec![Val::Text("a".into()), Val::Int(2)], vec![Val::Text("z".into()), Val::Int(1)]],
+    );
+    file[PAGE_SIZE * 2..].copy_from_slice(&index[PAGE_SIZE..PAGE_SIZE * 2]);
+    file
 }
 
 #[cfg(test)]

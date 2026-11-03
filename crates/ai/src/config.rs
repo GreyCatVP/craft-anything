@@ -9,6 +9,8 @@
 //! kind = "anthropic"
 //! model = "claude-opus-5-5"
 //! effort = "high"
+//! # Conversation trimming budget; does not set the server's context window.
+//! context_tokens = 120000
 //!
 //! [ai.roles]
 //! lead = "Claude"
@@ -43,6 +45,10 @@ pub struct BackendOptions {
     /// Most model turns per user message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
+    /// Input tokens before trimming and summarising the conversation. Omitted or zero uses the
+    /// local/cloud default; this does not change the model server's own context window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
     /// Agent CLIs: the program to run instead of the default for `model`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -248,6 +254,7 @@ mod tests {
         let mut a = entry("Claude", BackendKind::Anthropic);
         a.options.effort = Some(Effort::High);
         a.options.fallbacks_enabled = Some(false);
+        a.options.context_tokens = Some(120_000);
         c.upsert(a);
         c.upsert(entry("Local", BackendKind::OpenaiCompatible));
         c.roles.insert("reviewer".into(), "Local".into());
@@ -260,6 +267,27 @@ mod tests {
         assert_eq!(back, c);
         assert!(text.contains("[[ai.backends]]"), "{text}");
         assert!(text.contains("effort = \"high\""), "{text}");
+        assert!(text.contains("context_tokens = 120000"), "{text}");
+    }
+
+    #[test]
+    fn backend_context_budget_is_optional_and_validated() {
+        let table = |line: &str| -> toml::Table {
+            toml::from_str(&format!("[[backends]]\nname = \"Local\"\nkind = \"openai_compatible\"\nmodel = \"qwen3:8b\"\n{line}")).unwrap()
+        };
+        for (line, expected) in [
+            ("", None),
+            ("context_tokens = 0", Some(0)),
+            ("context_tokens = 8000", Some(8000)),
+            ("context_tokens = 9223372036854775807", Some(i64::MAX as u64)),
+        ] {
+            let config = AiConfig::from_table(&table(line)).unwrap();
+            assert_eq!(config.backends[0].options.context_tokens, expected);
+            assert_eq!(AiConfig::from_table(&config.to_table().unwrap()).unwrap(), config);
+        }
+        for line in ["context_tokens = -1", "context_tokens = \"8000\"", "context_tokens = 8.5"] {
+            assert_eq!(AiConfig::from_table(&table(line)).unwrap_err().code, ErrorCode::BadSettings);
+        }
     }
 
     #[test]

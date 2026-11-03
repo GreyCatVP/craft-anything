@@ -22,6 +22,8 @@ pub struct PromptBox<'a> {
     pub attach: Option<&'a str>,
     /// A run or answer is in progress: a stop button beside Send, named this ("Stop", "Pause").
     pub stop_button: Option<&'a str>,
+    /// The stop was asked for and hasn't finished: the button says so and ignores clicks (#551).
+    pub stopping: bool,
     /// Show the send button (the Make screen has its own big Start button).
     pub send: bool,
     /// A sent message is still waiting and can be taken back: Up at the start of the box asks for it.
@@ -213,10 +215,12 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                             out.send = true;
                         }
                     }
-                    if let Some(name) = b.stop_button
-                        && icons::button(ui, "circle-stop", 30.0, false, name).clicked()
-                    {
-                        out.stop = true;
+                    // Named, not a bare icon: the hint says "press Pause", so the button says Pause.
+                    if let Some(name) = b.stop_button {
+                        let label = if b.stopping { "Pausing…" } else { name };
+                        if widgets::secondary(ui, Some("circle-stop"), label).clicked() && !b.stopping {
+                            out.stop = true;
+                        }
                     }
                 });
             });
@@ -327,5 +331,53 @@ mod tests {
         assert_eq!(as_typed("Add tags\n(1 picture attached)"), "Add tags");
         assert_eq!(as_typed("First\nsecond line"), "First\nsecond line");
         assert_eq!(as_typed("Use 3\ncolours"), "Use 3\ncolours");
+    }
+
+    /// #551: the hint says "press Pause", so a labelled Pause button is there; after it's pressed
+    /// the button says Pausing… and a second click does nothing.
+    #[test]
+    fn the_pause_button_is_named_and_says_when_it_was_pressed() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable as _;
+        #[derive(Default)]
+        struct Screen {
+            stops: u32,
+            stopping: bool,
+        }
+        impl eframe::App for Screen {
+            fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let b = PromptBox {
+                        name: "Ask for a change",
+                        hint: String::new(),
+                        rows: (1, 8),
+                        attach: None,
+                        stop_button: Some("Pause"),
+                        stopping: self.stopping,
+                        send: true,
+                        recall: false,
+                        history: None,
+                        font_size: 14.0,
+                    };
+                    if show(ui, &mut String::new(), &[], b).stop {
+                        self.stops += 1;
+                    }
+                });
+            }
+        }
+        let mut h = Harness::builder().with_size(egui::vec2(800.0, 400.0)).build_eframe(|cc| {
+            crate::CraftApp::setup_context(&cc.egui_ctx);
+            Screen::default()
+        });
+        h.run();
+        h.get_by_label("Pause").click();
+        h.run();
+        assert_eq!(h.state().stops, 1);
+        h.state_mut().stopping = true;
+        h.run();
+        assert!(h.query_by_label("Pause").is_none());
+        h.get_by_label("Pausing…").click();
+        h.run();
+        assert_eq!(h.state().stops, 1, "pressing it again changes nothing");
     }
 }

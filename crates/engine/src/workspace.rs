@@ -378,6 +378,10 @@ pub struct Manifest {
     /// The coding agent's session, so a later request continues the same conversation.
     #[serde(default)]
     pub agent_session: Option<String>,
+    /// The coding agent that saved `agent_session` (`claude-code`, `codex`…); none: saved before
+    /// this was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_by: Option<String>,
     /// Kinds of agent action the person allowed for this workspace ("bash:npm", "web_fetch"…).
     #[serde(default)]
     pub allowed_actions: Vec<String>,
@@ -428,6 +432,7 @@ impl Manifest {
             updated_ms: now,
             checks: Vec::new(),
             agent_session: None,
+            agent_session_by: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
             asset_budget_usd: ASSET_BUDGET_USD,
@@ -438,6 +443,12 @@ impl Manifest {
             questions: None,
             awaiting_check: false,
         }
+    }
+
+    /// The saved session, if `agent` (`claude-code`, `codex`…) saved it: another agent can't
+    /// continue it (#469). One saved before the agent was kept counts.
+    pub fn agent_session_for(&self, agent: &str) -> Option<&str> {
+        self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
     }
 
     /// Take the fields the person owns from `other` (what's on disk).
@@ -860,15 +871,21 @@ impl Workspace {
     pub fn inbox_dir(&self) -> PathBuf {
         self.root.join("inbox")
     }
-    /// The API builder's conversation, kept so a follow-up continues it (`ai::context`).
     /// A builder has worked on this project and its conversation was kept, so a later run carries
     /// it on instead of starting over.
     pub fn builder_started(&self) -> bool {
         self.manifest.agent_session.is_some() || self.transcript_path().is_file()
     }
 
+    /// The API builder's conversation, kept so a follow-up continues it (`ai::context`).
     pub fn transcript_path(&self) -> PathBuf {
         self.root.join("transcript.json")
+    }
+
+    /// A copy of the coding agent's own session (Claude Code's), kept after every turn so the
+    /// conversation travels with the project folder to another computer.
+    pub fn agent_session_path(&self) -> PathBuf {
+        self.root.join(AGENT_SESSION_FILE)
     }
 
     /// Every workspace under `projects_dir`, most recently updated first. Folders without a
@@ -897,6 +914,9 @@ impl Workspace {
     }
 }
 
+/// The coding agent's session, copied into the project ([`Workspace::agent_session_path`]).
+pub const AGENT_SESSION_FILE: &str = "agent-session.jsonl";
+
 /// The names Craft Anything keeps in a project folder beside app/. A folder the person picks
 /// mustn't already have any of them.
 pub const OWN_NAMES: &[&str] = &[
@@ -909,6 +929,7 @@ pub const OWN_NAMES: &[&str] = &[
     ASSETS,
     "transcript.json",
     "extract-transcript.json",
+    AGENT_SESSION_FILE,
     "inbox",
     "checks",
     "capture",
@@ -1377,6 +1398,22 @@ mod tests {
         }
     }
 
+    /// #469: a saved session is only for the agent that saved it.
+    #[test]
+    fn a_session_is_only_for_the_agent_that_saved_it() {
+        let mut m = Manifest::new("x", "A thing", TargetRef::None);
+        assert_eq!(m.agent_session_for("codex"), None);
+        m.agent_session = Some("s1".into());
+        assert_eq!(m.agent_session_for("codex"), Some("s1"), "one saved before the agent was kept counts");
+        m.agent_session_by = Some("claude-code".into());
+        assert_eq!(m.agent_session_for("claude-code"), Some("s1"));
+        assert_eq!(m.agent_session_for("codex"), None);
+        let text = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap().agent_session_by.as_deref(), Some("claude-code"));
+    }
+
+    /// A rename survives a stale save, a copy takes the build but not the conversation (nor its
+    /// kept session), and a delete leaves the person's own files.
     #[test]
     fn a_project_is_renamed_duplicated_and_deleted_without_touching_the_persons_files() {
         let d = tempfile::tempdir().unwrap();
@@ -1389,6 +1426,7 @@ mod tests {
         std::fs::write(ws.reference_dir().join("picture-1.png"), "x").unwrap();
         ws.manifest.agent_session = Some("old".into());
         ws.save().unwrap();
+        std::fs::write(ws.agent_session_path(), "{}\n").unwrap();
 
         ws.rename("  Snake II ").unwrap();
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.name, "Snake II");
@@ -1405,6 +1443,7 @@ mod tests {
         assert!(copy.reference_dir().join("picture-1.png").is_file());
         assert!(!copy.app_dir().join("target").exists(), "compiler output is made again, not copied");
         assert!(copy.manifest.agent_session.is_none(), "a copy has its own conversation");
+        assert!(!copy.agent_session_path().exists(), "and doesn't carry the original's");
 
         ws.delete().unwrap();
         assert!(!d.path().join("snake").exists(), "a project of its own goes with its folder");
@@ -1415,11 +1454,12 @@ mod tests {
         std::fs::write(mine.join("index.html"), "<p>hi</p>").unwrap();
         let ws = Workspace::create_at(&mine, "Site", "x", TargetRef::None, Some(ExistingFiles::Edit)).unwrap();
         std::fs::create_dir_all(ws.inbox_dir()).unwrap();
+        std::fs::write(ws.agent_session_path(), "{}\n").unwrap();
         let copy = ws.duplicate("Site copy").unwrap();
         assert!(copy.app_dir().join("index.html").is_file() && !copy.manifest.app_in_root, "the copy's app is in its app/");
         assert!(!copy.app_dir().join(MANIFEST).exists(), "without the original's records");
         ws.delete().unwrap();
         assert_eq!(std::fs::read_to_string(mine.join("index.html")).unwrap(), "<p>hi</p>");
-        assert!(!mine.join(MANIFEST).exists() && !mine.join("inbox").exists());
+        assert!(!mine.join(MANIFEST).exists() && !mine.join("inbox").exists() && !mine.join(AGENT_SESSION_FILE).exists());
     }
 }
