@@ -168,7 +168,7 @@ impl Session {
             project.store_unknown(unknown)?;
         }
         self.project = Some(project);
-        if let Err(error) = crate::tools::investigation_tools::save(self, investigation) {
+        if let Err(error) = crate::tools::investigation_tools::save_new_project(self, investigation) {
             self.project = None;
             return Err(error);
         }

@@ -154,11 +154,11 @@ pub(crate) fn discover(config: &BackendConfig, options: &BackendOptions, directo
 /// Validate explicit selections against the current instance before saving or starting a run.
 pub(crate) fn validate(options: &BackendOptions, models: &[AgentModel]) -> Result<(), ToolError> {
     let Some(id) = options.cli_model.as_deref() else {
-        return if options.cli_thinking.is_none() { Ok(()) } else { Err(ToolError::invalid("Choose an OpenCode model before choosing its thinking depth.")) };
+        return if options.cli_thinking.is_none() { Ok(()) } else { Err(ToolError::invalid("Choose a model before choosing its thinking depth.")) };
     };
     let Some(model) = models.iter().find(|m| m.id == id) else {
-        return Err(ToolError::invalid(format!("The selected OpenCode model {id:?} is no longer available."))
-            .with_remediation("Reload the models on this computer and choose an available model or the OpenCode default."));
+        return Err(ToolError::invalid(format!("The selected model {id:?} is no longer available."))
+            .with_remediation("Reload the models on this computer and choose an available model or the agent's default."));
     };
     if let Some(depth) = options.cli_thinking.filter(|d| !model.thinking.contains(d)) {
         return Err(ToolError::invalid(format!("{} does not offer {} thinking.", model.id, depth.title()))
@@ -183,6 +183,13 @@ pub fn select_with_stop(context: &ModelContext, model: Option<&str>, thinking: O
     let mut options = context.backend.options.clone();
     options.cli_model = model.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
     options.cli_thinking = thinking;
+    if adapter.requires_acp() {
+        options.cli_reasoning_effort = None;
+        options.effort = None;
+        if options.cli_model != context.backend.options.cli_model {
+            options.cli_context = None;
+        }
+    }
     adapter.validate_model(&context.backend.config, &options, context.directory.as_deref(), stop)?;
     Ok(options)
 }

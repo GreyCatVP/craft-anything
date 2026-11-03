@@ -36,7 +36,7 @@ pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
     if models.is_empty() {
         ui.label(tr("OpenCode has no visible chat models. Connect a provider in OpenCode, then reload."));
     }
-    let default = tr("OpenCode default");
+    let default = if picker.context.backend.config.model == "opencode" { tr("OpenCode default") } else { tr("Model default") };
     let selected = picker.model.as_deref().unwrap_or(&default);
     let response = egui::ComboBox::from_id_salt(("agent-model", &picker.context.backend.config.name))
         .icon(widgets::combo_icon)
@@ -47,14 +47,14 @@ pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
                 picker.thinking = None;
             }
             for model in models {
-                let label = format!("{} · {}", model.name, model.id);
+                let label = if model.name == model.id { model.name.clone() } else { format!("{} · {}", model.name, model.id) };
                 if ui.selectable_label(picker.model.as_ref() == Some(&model.id), label).clicked() && picker.model.as_ref() != Some(&model.id) {
                     picker.model = Some(model.id.clone());
                     picker.thinking = None;
                 }
             }
         });
-    widgets::named(response.response, "OpenCode model");
+    widgets::named(response.response, if picker.context.backend.config.model == "opencode" { "OpenCode model" } else { "Model" });
     let model = models.iter().find(|m| picker.model.as_ref() == Some(&m.id));
     let missing = picker.model.is_some() && model.is_none();
     if missing {
@@ -178,18 +178,32 @@ impl CraftApp {
                 return;
             }
         };
+        let model = context.backend.options.cli_model.clone();
+        let thinking = context
+            .backend
+            .options
+            .cli_thinking
+            .or_else(|| context.backend.options.cli_reasoning_effort.and_then(|value| craft_anything_ai::Effort::parse(value.as_str())));
+        self.load_agent_model_catalog(context, model, thinking);
+    }
+
+    pub fn reload_agent_model(&mut self, name: &str) {
+        if let Some(picker) = self.agent_model_picker.as_ref().filter(|picker| picker.context.backend.config.name == name) {
+            self.load_agent_model_catalog(picker.context.clone(), picker.model.clone(), picker.thinking);
+        } else {
+            self.pick_agent_model(name);
+        }
+    }
+
+    fn load_agent_model_catalog(&mut self, context: craft_anything_ai::ModelContext, model: Option<String>, thinking: Option<craft_anything_ai::Effort>) {
         self.model_request = self.model_request.wrapping_add(1);
         let request = self.model_request;
-        self.agent_model_picker = Some(AgentModelPicker {
-            request,
-            model: context.backend.options.cli_model.clone(),
-            thinking: context.backend.options.cli_thinking,
-            context: context.clone(),
-            result: None,
-        });
+        self.agent_model_picker = Some(AgentModelPicker { request, model: model.clone(), thinking, context: context.clone(), result: None });
         let hub = self.hub.clone();
         self.jobs.spawn(tr("List an AI's models"), false, move |_| {
-            let result = hub.agent_models(&context);
+            let mut query = context.clone();
+            query.backend.options.cli_model = model;
+            let result = hub.agent_models(&query);
             Ok(crate::Done::AgentModelChoices { request, context, result })
         });
     }
@@ -222,9 +236,6 @@ impl CraftApp {
     /// Populate the persistent model controls on a worker, once for each backend/model pair.
     pub fn pick_model_options(&mut self, name: &str) {
         let options = self.backend_options.get(name).cloned().unwrap_or_default();
-        let reasoning = options
-            .cli_reasoning_effort
-            .or_else(|| options.effort.and_then(|effort| serde_json::from_value(serde_json::Value::String(effort.as_str().into())).ok()));
         self.model_tuning.insert(
             name.into(),
             crate::ModelTuningDraft {
@@ -232,7 +243,6 @@ impl CraftApp {
                 cli_model: options.cli_model.clone(),
                 choices: None,
                 context: options.cli_context,
-                reasoning,
                 saving: false,
                 error: None,
             },

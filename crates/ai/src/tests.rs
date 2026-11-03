@@ -176,6 +176,7 @@ fn opencode_selection_is_validated_saved_and_refused_without_native_mcp() {
         std::thread::sleep(Duration::from_millis(10));
     }
     events.extend(conversation.poll());
+    events.retain(|event| !matches!(event, AgentEvent::Status { .. }));
     assert!(
         matches!(events.as_slice(), [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }]
         if message.contains("cannot yet connect")),
@@ -254,7 +255,7 @@ input_per_mtok = 1.0
     assert!(h.set_role(Role::Builder, None).is_err());
     assert!(h.set_enabled("Claude Code", false).is_err());
     assert!(h.remove_backend("Claude Code").is_err());
-    let options = crate::model_options::SetModelOptions { backend: "Claude Code".into(), expected_cli_model: None, context: None, reasoning: None };
+    let options = crate::model_options::SetModelOptions { backend: "Claude Code".into(), expected_cli_model: None, context: None };
     assert_eq!(h.set_model_options(&options).unwrap_err().code, ErrorCode::BadSettings);
     assert_eq!(std::fs::read(&file).unwrap(), before, "the settings file was changed");
     assert!(h.keys.get("Other").is_none(), "a refused add stored its key");
@@ -340,14 +341,25 @@ fn a_claude_ais_effort_is_changed() {
 }
 
 #[test]
-fn copilot_is_added_without_an_api_key_and_keeps_its_agent_id_when_models_change() {
+fn copilot_uses_shared_selection_and_rejects_failed_discovery_without_saving() {
     let (hub, _directory) = hub();
     let config =
         BackendConfig { name: "GitHub Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
     assert!(!config.kind.needs_key());
-    assert_eq!(model_in_use(&config, None).as_deref(), Some("Copilot CLI default"));
-    hub.add_backend(config, None).unwrap();
-    hub.set_model("GitHub Copilot", "chosen-copilot-model").unwrap();
+    assert_eq!(model_in_use(&config, None).as_deref(), Some("GitHub Copilot default"));
+    hub.add_backend_with(
+        BackendEntry {
+            config,
+            options: BackendOptions {
+                cli_model: Some("chosen-copilot-model".into()),
+                command: Some("craft-anything-no-such-test-agent".into()),
+                ..Default::default()
+            },
+        },
+        None,
+    )
+    .unwrap();
+    assert!(hub.set_model("GitHub Copilot", "unavailable-model").is_err());
     let backend = hub.backends().into_iter().find(|backend| backend.name == "GitHub Copilot").unwrap();
     let options = hub.options();
     assert_eq!(backend.model, "copilot");
@@ -355,21 +367,24 @@ fn copilot_is_added_without_an_api_key_and_keeps_its_agent_id_when_models_change
 }
 
 #[test]
-fn copilot_tuning_is_saved_and_reset_when_the_selected_model_changes() {
-    use crate::config::{CliContext, CliReasoningEffort};
+fn copilot_context_is_saved_without_changing_shared_thinking() {
+    use crate::config::CliContext;
     let (hub, _directory) = hub();
     let config = BackendConfig { name: "Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
-    hub.add_backend(config, None).unwrap();
-    let params = crate::model_options::SetModelOptions {
-        backend: "Copilot".into(),
-        expected_cli_model: None,
-        context: Some(CliContext::Long),
-        reasoning: Some(CliReasoningEffort::Xhigh),
-    };
+    hub.add_backend_with(
+        BackendEntry {
+            config: config.clone(),
+            options: BackendOptions { cli_model: Some("test-model".into()), cli_thinking: Some(Effort::Max), ..Default::default() },
+        },
+        None,
+    )
+    .unwrap();
+    let params =
+        crate::model_options::SetModelOptions { backend: "Copilot".into(), expected_cli_model: Some("test-model".into()), context: Some(CliContext::Long) };
     hub.set_model_options(&params).unwrap();
     assert_eq!(hub.options()["Copilot"].cli_context, Some(CliContext::Long));
-    assert_eq!(hub.options()["Copilot"].cli_reasoning_effort, Some(CliReasoningEffort::Xhigh));
-    hub.set_model("Copilot", "another-model").unwrap();
+    assert_eq!(hub.options()["Copilot"].cli_thinking, Some(Effort::Max));
+    hub.add_backend_with(BackendEntry { config, options: BackendOptions { cli_model: Some("another-model".into()), ..Default::default() } }, None).unwrap();
     assert_eq!(hub.options()["Copilot"].cli_context, None);
     assert_eq!(hub.options()["Copilot"].cli_reasoning_effort, None);
     assert!(hub.set_model_options(&params).is_err());

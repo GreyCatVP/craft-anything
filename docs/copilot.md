@@ -29,7 +29,7 @@ configurations are refused rather than falling back to an interactive CLI. Extra
 refused because they could override the integration's tool or authentication configuration.
 
 The `model` field identifies the agent. To select a model, use the app's model picker or set
-`cli_model` on the same backend entry. With no override, the app shows **Copilot CLI default**
+`cli_model` on the same backend entry. With no override, the app shows **Model default**
 and respects the CLI's own model configuration. The picker offers `auto` and models advertised
 by a fresh ACP session. Model discovery has a deadline and requires the CLI to be ready and
 authenticated. Account entitlement, model access, organization policies and billing remain
@@ -37,12 +37,15 @@ GitHub's responsibility; a Copilot subscription is not an unlimited API allowanc
 
 ## Context and Reasoning
 
-In Settings > AI, **Context window** and **Reasoning** are always shown beneath each Copilot
-entry's model selector. Their choices load automatically for that model. Changing a selection
-saves it immediately; there is no separate options menu or apply/cancel step. The rows stay
-visible while loading or saving. A failed discovery shows its error with a retry control.
-Changing the model reloads its choices and clears the old overrides so an unsupported effort
-is not carried into the new model.
+Copilot uses the same model and **Thinking depth** picker as OpenCode. In Settings > AI, choose
+**Change...**, select a model and its advertised thinking depth, then **Apply**. Model changes
+reload model-specific metadata on a worker; stale results and unsupported choices are refused.
+The shared catalogue and validated save use `AgentModel`, `ModelContext`, `cli_thinking`,
+`ai_models_list` and `ai_model_set`, rather than a second Copilot model-selection path.
+
+**Context window** remains a separate, always-visible Copilot control. It loads automatically
+and saves immediately, without changing thinking depth. Loading and retryable errors keep the
+control visible. Changing the model clears the old context override.
 
 - **Default** inherits Copilot CLI's own setting. It is not the same as an explicit `none` effort.
 - **Standard** passes `--context default`; **Extended** passes `--context long_context`.
@@ -59,25 +62,29 @@ The saved options are typed backend fields, not unrestricted extra arguments:
 ```toml
 cli_model = "gpt-6-luna"
 cli_context = "long_context"
-cli_reasoning_effort = "xhigh"
+cli_thinking = "xhigh"
 ```
 
-Place these on the same backend entry. An older `effort = "high"` remains a fallback until the
-new controls are changed; selecting Default removes that old override too. GUI changes take
+Place these on the same backend entry. Older `cli_reasoning_effort` and `effort` settings remain
+fallbacks until the shared model/thinking picker is saved; that save clears the old overrides.
+An explicit `cli_thinking = "none"` is different from omitting `cli_thinking`. GUI changes take
 effect on the next chat turn, or the next build/continue run, not midway through a running turn.
 Model discovery sends no model prompt and runs off the UI thread.
 
 The same capability is available headlessly:
 
 ```sh
+craft-anything-cli ai-models-list --name "GitHub Copilot"
+craft-anything-cli ai-model-set --name "GitHub Copilot" --model gpt-6-luna --thinking xhigh
 craft-anything-cli ai-model-options-show --backend "GitHub Copilot"
-craft-anything-cli ai-model-options-set --backend "GitHub Copilot" --expected-cli-model gpt-6-luna --context long_context --reasoning xhigh
+craft-anything-cli ai-model-options-set --backend "GitHub Copilot" --expected-cli-model gpt-6-luna --context long_context
 ```
 
-The show tool returns the current `cli_model` and supported choices. Supply that model as
+The context show tool returns the current `cli_model` and supported choices. Supply that model as
 `expected_cli_model` when saving; a changed model is refused instead of applying stale choices.
 For a backend inheriting the CLI's model, the guard is null. The write tool also accepts null
-context/reasoning values to restore defaults.
+context to restore its default. Model and thinking changes go through the shared `ai_model_set`
+validation path; the context-only tool never changes thinking.
 
 ## Tools and Permissions
 
@@ -124,6 +131,12 @@ with `core_finding_record`, and correct one with `core_finding_edit`. Correction
 require valid evidence and can refuse a stale `based_on_revision`. Omitting `confidence` keeps
 the existing confidence; supplying it explicitly replaces it.
 
+Every project-backed investigation writer holds the same OS file lock across loading state,
+checking its revision, applying the change and writing structured state plus Markdown renders.
+The wait is cancellable and times out after ten seconds. Concurrent edits based on the same
+revision cannot both succeed; malformed state is refused rather than replaced with an empty
+investigation. The lock is released when its handle closes, including after process exit.
+
 An older MCP process that started without a project may still hold its findings only in memory.
 Before closing that conversation, ask it to export its investigation or a report to a file.
 Those session-only records are not automatically recovered by the new shared-project path.
@@ -143,6 +156,10 @@ Those session-only records are not automatically recovered by the new shared-pro
 - The target handoff has process-level MCP tests in both modes. Finding correction/persistence
   has engine tests, and a headless UI test checks that recorded ids and statements render.
   The live authenticated target-to-finding workflow was confirmed by the person using the app.
+- Separate-process regressions verify concurrent appends, stale revision refusal and matching
+  rendered files. Lock cancellation/timeouts and preservation of malformed state have tests.
+  The shared-picker rework has isolated catalogue, persistence and headless GUI tests; it has
+  not received a new live-account run after this rebase.
 - ACP usage totals are unavailable here. The activity stream says so, and no dollar cost is
   fabricated. Consult Copilot CLI for usage and billing.
 - Questions use current project context rather than a fork of the builder's conversation.

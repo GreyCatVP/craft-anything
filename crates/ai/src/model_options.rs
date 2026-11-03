@@ -22,8 +22,6 @@ pub struct SetModelOptions {
     pub expected_cli_model: Option<String>,
     /// Null inherits the CLI's context choice.
     pub context: Option<CliContext>,
-    /// Null inherits the CLI's reasoning choice; "none" explicitly disables extra reasoning.
-    pub reasoning: Option<CliReasoningEffort>,
 }
 
 pub(crate) fn update(config: &mut AiConfig, params: &SetModelOptions) -> Result<(), ToolError> {
@@ -35,8 +33,6 @@ pub(crate) fn update(config: &mut AiConfig, params: &SetModelOptions) -> Result<
         return Err(ToolError::invalid("The model changed while its options were being edited.").with_remediation("Reload the model options and choose again."));
     }
     entry.options.cli_context = params.context;
-    entry.options.cli_reasoning_effort = params.reasoning;
-    entry.options.effort = None;
     Ok(())
 }
 
@@ -51,8 +47,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "ai_model_options_show",
             title: "Show model options",
-            summary: "Discover the selected Copilot model's reasoning levels and CLI context tiers without sending a model prompt. Returns cli_model for the expected_cli_model guard when saving.",
-            beginner: "See this model's context and reasoning choices.",
+            summary: "Discover the selected Copilot model's context tiers without sending a model prompt. Returns cli_model for the expected_cli_model guard when saving. Use ai_models_list for model and thinking choices.",
+            beginner: "See this model's context choices.",
             toolset: Toolset::Setup,
             effects: Effects::READ_ONLY.union(Effects::LAUNCHES_PROCESS),
             requires: Requires::Nothing,
@@ -62,8 +58,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "ai_model_options_set",
             title: "Set model options",
-            summary: "Save a Copilot backend's context tier and reasoning level. Null inherits CLI defaults; reasoning=none explicitly disables extra reasoning. Refuses a stale expected_cli_model.",
-            beginner: "Choose context and reasoning for this model.",
+            summary: "Save a Copilot backend's context tier. Null inherits the CLI default. Refuses a stale expected_cli_model and leaves thinking unchanged; use ai_model_set for model and thinking choices.",
+            beginner: "Choose context for this model.",
             toolset: Toolset::Setup,
             effects: Effects::MUTATES_SESSION.union(Effects::WRITES_FILESYSTEM),
             requires: Requires::Nothing,
@@ -94,7 +90,7 @@ fn set(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     settings.ai = config.to_table()?;
     settings.save_to(&ctx.session.config_dir().join("config.toml"))?;
     ctx.session.settings = settings;
-    Ok(ToolOutput::Value(serde_json::json!({"backend": params.backend, "context": params.context, "reasoning": params.reasoning})))
+    Ok(ToolOutput::Value(serde_json::json!({"backend": params.backend, "context": params.context})))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -161,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn model_options_tools_save_explicit_none_and_refuse_stale_model_edits() {
+    fn context_tools_preserve_shared_thinking_and_refuse_stale_model_edits() {
         use crate::{BackendEntry, BackendOptions};
         use craft_anything_engine::{CallOptions, Caller, Engine, Session};
         let directory = tempfile::tempdir().unwrap();
@@ -176,20 +172,20 @@ mod tests {
                 ssh_host: None,
                 enabled: true,
             },
-            options: BackendOptions { cli_model: Some("test-model".into()), ..Default::default() },
+            options: BackendOptions { cli_model: Some("test-model".into()), cli_thinking: Some(crate::Effort::None), ..Default::default() },
         });
         session.settings.ai = config.to_table().unwrap();
         let engine = Engine::shared(session, specs());
-        let params = json!({"backend":"Copilot", "expected_cli_model":"test-model", "context":"long_context", "reasoning":"none"});
+        let params = json!({"backend":"Copilot", "expected_cli_model":"test-model", "context":"long_context"});
         engine.call("ai_model_options_set", params, CallOptions::new(Caller::Agent)).unwrap();
         let saved = AiConfig::from_settings(&engine.session().settings);
-        assert_eq!(saved.get("Copilot").unwrap().options.cli_reasoning_effort, Some(CliReasoningEffort::None));
+        assert_eq!(saved.get("Copilot").unwrap().options.cli_thinking, Some(crate::Effort::None));
         assert_eq!(saved.get("Copilot").unwrap().options.cli_context, Some(CliContext::Long));
-        let mut stale = SetModelOptions { backend: "Copilot".into(), expected_cli_model: Some("old-model".into()), context: None, reasoning: None };
+        let mut stale = SetModelOptions { backend: "Copilot".into(), expected_cli_model: Some("old-model".into()), context: None };
         let mut saved = saved;
         assert!(update(&mut saved, &stale).is_err());
         stale.expected_cli_model = Some("test-model".into());
         update(&mut saved, &stale).unwrap();
-        assert_eq!(saved.get("Copilot").unwrap().options.cli_reasoning_effort, None);
+        assert_eq!(saved.get("Copilot").unwrap().options.cli_thinking, Some(crate::Effort::None));
     }
 }

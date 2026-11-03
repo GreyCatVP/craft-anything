@@ -8,6 +8,7 @@
 //! process; [`AcpConversation`] runs it against the agent through `craft_anything_platform`.
 
 use super::{McpCommand, display_for};
+use crate::model::Stop;
 use crate::{AgentEvent, Conversation, FailureKind, TurnFailure};
 use craft_anything_platform::sync::Mutex;
 use craft_anything_platform::{RunningProcess, StdinMode};
@@ -539,11 +540,17 @@ impl AcpConversation {
 
     /// Read a fresh session's selected model and configuration choices without a model turn.
     /// Blocking and bounded, with the same process cleanup as model catalogue discovery.
-    pub fn model_metadata(mut self, timeout: Duration) -> Result<ModelMetadata, craft_anything_evidence::ToolError> {
+    pub fn model_metadata(self, timeout: Duration) -> Result<ModelMetadata, craft_anything_evidence::ToolError> {
+        self.model_metadata_with_stop(timeout, &Stop::default())
+    }
+
+    pub(crate) fn model_metadata_with_stop(mut self, timeout: Duration, stop: &Stop) -> Result<ModelMetadata, craft_anything_evidence::ToolError> {
+        stop.check()?;
         self.spawn()?;
         self.busy.store(true, Ordering::SeqCst);
         let started = Instant::now();
         loop {
+            stop.check()?;
             let ready = self.lock().as_ref().filter(|shared| shared.core.ready).map(|shared| ModelMetadata {
                 models: shared.core.models.clone(),
                 current_model: shared.core.current_model.clone(),

@@ -311,7 +311,6 @@ pub struct ModelTuningDraft {
     pub cli_model: Option<String>,
     pub choices: Option<craft_anything_ai::model_options::ModelTuning>,
     pub context: Option<craft_anything_ai::config::CliContext>,
-    pub reasoning: Option<craft_anything_ai::config::CliReasoningEffort>,
     #[serde(default)]
     pub saving: bool,
     #[serde(default)]
@@ -322,17 +321,11 @@ impl ModelTuningDraft {
     /// Drop an override the selected model does not advertise before presenting its controls.
     pub fn set_choices(&mut self, choices: craft_anything_ai::model_options::ModelTuning) {
         self.context = self.context.filter(|value| choices.context.iter().any(|choice| choice.value == *value));
-        self.reasoning = self.reasoning.filter(|value| choices.reasoning.iter().any(|choice| choice.value == *value));
         self.choices = Some(choices);
     }
 
     pub fn params(&self) -> craft_anything_ai::model_options::SetModelOptions {
-        craft_anything_ai::model_options::SetModelOptions {
-            backend: self.backend.clone(),
-            expected_cli_model: self.cli_model.clone(),
-            context: self.context,
-            reasoning: self.reasoning,
-        }
+        craft_anything_ai::model_options::SetModelOptions { backend: self.backend.clone(), expected_cli_model: self.cli_model.clone(), context: self.context }
     }
 }
 
@@ -1475,8 +1468,6 @@ impl CraftApp {
                         && let Some(options) = self.backend_options.get_mut(&params.backend)
                     {
                         options.cli_context = params.context;
-                        options.cli_reasoning_effort = params.reasoning;
-                        options.effort = None;
                     }
                     if let Some(state) = self.model_tuning.get_mut(&params.backend) {
                         state.saving = false;
@@ -1484,9 +1475,6 @@ impl CraftApp {
                             && let Some(options) = self.backend_options.get(&params.backend)
                         {
                             state.context = options.cli_context;
-                            state.reasoning = options
-                                .cli_reasoning_effort
-                                .or_else(|| options.effort.and_then(|effort| serde_json::from_value(serde_json::Value::String(effort.as_str().into())).ok()));
                         }
                     }
                 }

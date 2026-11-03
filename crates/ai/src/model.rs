@@ -87,6 +87,8 @@ pub struct ToolDef {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Effort {
+    None,
+    Minimal,
     Low,
     #[default]
     Medium,
@@ -98,12 +100,16 @@ pub enum Effort {
 }
 
 impl Effort {
-    /// Every level, least to most.
+    /// The API/Claude levels, least to most.
     pub const ALL: [Effort; 5] = [Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
+
+    pub const CLI_ALL: [Effort; 7] = [Effort::None, Effort::Minimal, Effort::Low, Effort::Medium, Effort::High, Effort::Xhigh, Effort::Max];
 
     /// The stable lowercase id used in settings, API requests and agent model references.
     pub fn as_str(self) -> &'static str {
         match self {
+            Effort::None => "none",
+            Effort::Minimal => "minimal",
             Effort::Low => "low",
             Effort::Medium => "medium",
             Effort::High => "high",
@@ -115,12 +121,14 @@ impl Effort {
     /// Parse a known level, ignoring surrounding whitespace and case.
     pub fn parse(s: &str) -> Option<Effort> {
         let s = s.trim();
-        Effort::ALL.into_iter().find(|e| e.as_str().eq_ignore_ascii_case(s))
+        Effort::CLI_ALL.into_iter().find(|e| e.as_str().eq_ignore_ascii_case(s))
     }
 
     /// The display label for this level in model pickers and validation messages.
     pub fn title(self) -> &'static str {
         match self {
+            Self::None => "None",
+            Self::Minimal => "Minimal",
             Self::Low => "Low",
             Self::Medium => "Medium",
             Self::High => "High",

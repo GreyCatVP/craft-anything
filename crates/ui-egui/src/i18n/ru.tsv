@@ -130,6 +130,7 @@ App	Приложение
 App details on device	Сведения о приложении на устройстве
 Apple apps	Приложения Apple
 Apply	Применить
+Apply model options	Применить параметры модели
 Approve an agent action	Одобрить действие агента
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Приложения и игры: продолжать уточнение, пока они не станут похожи на ваши изображения настолько. Выключено — сходство только сообщается.
 Architectures	Архитектуры
@@ -271,6 +272,7 @@ Connect to a browser	Подключиться к браузеру
 Connect {name}	Подключить {name}
 Connected devices	Подключённые устройства
 Connected phone	Подключённый телефон
+Context window	Окно контекста
 Continue	Продолжить
 Contradicted	Опровергнуто
 Control-flow graph: a map of every path a function can take, like a flowchart.	Граф потока управления: карта всех путей, по которым может пройти функция, как блок-схема.
@@ -320,6 +322,7 @@ Deep	Глубокий
 Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	Режим «Глубокий» теперь декомпилирует с помощью Ghidra. Первый просмотр большой программы может занять несколько минут.
 Deep mode on	Включён режим «Глубокий»
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Глубокий: мы читаем его код, файлы и исходник страницы всеми имеющимися инструментами, а также Ghidra, если он установлен. Нажмите, чтобы переключить.
+Default	По умолчанию
 Delete a project	Удалить проект
 Delete it	Удалить
 Delete the project	Удалить проект
@@ -392,6 +395,7 @@ Export a report (Markdown)	Экспортировать отчёт (Markdown)
 Export captured scripts	Экспортировать записанные скрипты
 Export evidence	Экспортировать доказательства
 Export report	Экспортировать отчёт
+Extended	Расширенный
 Extract an archive	Распаковать архив
 Extract firmware	Извлечь прошивку
 Extract with this	Извлечь с помощью этого
@@ -621,6 +625,7 @@ List strings	Список строк
 Live: the project's latest build	В реальном времени: последняя сборка проекта
 Load a picture	Загрузить изображение
 Load a screenshot	Загрузить скриншот
+Load model options	Загрузить параметры модели
 Loading…	Загрузка…
 Log	Журнал
 Look again	Искать снова
@@ -669,6 +674,7 @@ Minimise	Свернуть
 Mode	Режим
 Model	Модель
 Model default	По умолчанию для модели
+Model options	Параметры модели
 Model: {model}	Модель: {model}
 Modules	Модули
 More detail	Подробнее
@@ -880,6 +886,7 @@ Read the project	Читать проект
 Reading what's inside…	Чтение того, что внутри…
 Ready	Готово
 Ready: {what} is on this computer.	Готово: {what} есть на этом компьютере.
+Reasoning	Рассуждение
 Rebuild status	Состояние пересборки
 Record a finding	Записать находку
 Record a hypothesis	Записать гипотезу
@@ -986,6 +993,7 @@ Server address	Адрес сервера
 Session status	Состояние сессии
 Set a project's asset budget	Установить бюджет ресурсов проекта
 Set an AI's program	Установить программу ИИ
+Set model options	Задать параметры модели
 Set one up	Настроить
 Set up a brain…	Настроить «мозг»…
 Set up a builder	Настроить конструктор
@@ -995,6 +1003,7 @@ Show a project	Показать проект
 Show folder	Показать папку
 Show me everything	Показать всё
 Show me the proof	Покажи мне доказательство
+Show model options	Показать параметры модели
 Show pinned builds	Показать закреплённые сборки
 Show settings	Показать настройки
 Show the answer	Показать ответ
@@ -1018,6 +1027,7 @@ Some plugins couldn't be read:	Некоторые плагины не удало
 Something a program borrows from the operating system or a library, like "open a file".	То, что программа берёт взаймы у операционной системы или библиотеки, например «открыть файл».
 Something a program or library offers for other programs to use.	То, что программа или библиотека предлагает другим программам для использования.
 Source	Источник
+Standard	Стандартный
 Start	Старт
 Start a Frida session	Запустить сессию Frida
 Start a GDB session	Запустить сессию GDB
@@ -1152,6 +1162,7 @@ Unreal IoStore	IoStore Unreal
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal собирает игры с помощью Xcode от Apple, бесплатного в App Store.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal есть здесь, но ему также нужны инструменты C++ Visual Studio.
 Unreal pak	Пак Unreal
+Update a finding	Обновить вывод
 Update a hypothesis	Обновить гипотезу
 Update an open question	Обновить открытый вопрос
 Update the checklist	Обновить контрольный список

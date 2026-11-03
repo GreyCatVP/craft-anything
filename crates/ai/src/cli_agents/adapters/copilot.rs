@@ -21,6 +21,34 @@ impl AgentAdapter for Copilot {
         true
     }
 
+    fn has_model_catalog(&self) -> bool {
+        true
+    }
+
+    fn model_catalog_depends_on_selection(&self) -> bool {
+        true
+    }
+
+    fn model_catalog(
+        &self,
+        config: &BackendConfig,
+        options: &BackendOptions,
+        directory: Option<&Path>,
+        stop: &Stop,
+    ) -> Result<Vec<models::AgentModel>, ToolError> {
+        let metadata = super::super::acp_model_metadata(config, options, directory, stop)?;
+        Ok(catalogue(&metadata, options))
+    }
+
+    fn validate_model(&self, config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>, stop: &Stop) -> Result<(), ToolError> {
+        stop.check()?;
+        self.validate_options(options)?;
+        if options.cli_model.is_none() && options.cli_thinking.is_none() {
+            return Ok(());
+        }
+        models::validate(options, &self.model_catalog(config, options, directory, stop)?)
+    }
+
     fn plain_fallback(&self) -> bool {
         false
     }
@@ -69,7 +97,12 @@ impl AgentAdapter for Copilot {
         if let Some(context) = options.cli_context {
             args.extend(["--context".into(), context.as_str().into()]);
         }
-        if let Some(effort) = options.cli_reasoning_effort.map(|effort| effort.as_str()).or_else(|| options.effort.map(|effort| effort.as_str())) {
+        if let Some(effort) = options
+            .cli_thinking
+            .map(|effort| effort.as_str())
+            .or_else(|| options.cli_reasoning_effort.map(|effort| effort.as_str()))
+            .or_else(|| options.effort.map(|effort| effort.as_str()))
+        {
             args.extend(["--reasoning-effort".into(), effort.into()]);
         }
         args
@@ -104,6 +137,20 @@ impl AgentAdapter for Copilot {
     }
 }
 
+fn catalogue(metadata: &super::super::acp::ModelMetadata, options: &BackendOptions) -> Vec<models::AgentModel> {
+    let tuning = crate::model_options::ModelTuning::from_metadata(metadata.current_model.clone(), &metadata.config_options);
+    let active = options.cli_model.as_deref().unwrap_or(&metadata.current_model);
+    let thinking: Vec<_> = tuning.reasoning.iter().filter_map(|choice| crate::Effort::parse(choice.value.as_str())).collect();
+    let mut ids = metadata.models.clone();
+    ids.insert(0, "auto".into());
+    if !metadata.current_model.is_empty() {
+        ids.push(metadata.current_model.clone());
+    }
+    ids.sort();
+    ids.dedup();
+    ids.into_iter().map(|id| models::AgentModel { name: id.clone(), thinking: if id == active { thinking.clone() } else { Vec::new() }, id }).collect()
+}
+
 /// CLI-level names for our built-in tools and the progressive-toolset helpers. Read them from
 /// the same catalogues as the MCP server so new built-ins aren't lost to a handwritten list.
 /// Runtime plugin tools stay out until their exposure has its own restriction test.
@@ -119,6 +166,27 @@ fn mcp_tools() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_catalogue_exposes_only_the_selected_models_advertised_thinking() {
+        let metadata = super::super::super::acp::ModelMetadata {
+            models: vec!["first".into(), "second".into()],
+            current_model: "first".into(),
+            config_options: vec![json!({"id":"reasoning_effort", "options":[{"value":"none","name":"None"},{"value":"high","name":"High"}]})],
+        };
+        let mut options = BackendOptions { cli_model: Some("first".into()), cli_thinking: Some(crate::Effort::None), ..Default::default() };
+        let models = catalogue(&metadata, &options);
+        assert_eq!(models.iter().find(|model| model.id == "first").unwrap().thinking, [crate::Effort::None, crate::Effort::High]);
+        assert!(models.iter().find(|model| model.id == "second").unwrap().thinking.is_empty());
+        assert!(models::validate(&options, &models).is_ok());
+        options.cli_thinking = Some(crate::Effort::Minimal);
+        assert!(models::validate(&options, &models).is_err());
+        for effort in crate::Effort::CLI_ALL {
+            options.cli_thinking = Some(effort);
+            options.cli_reasoning_effort = Some(crate::config::CliReasoningEffort::High);
+            assert!(Copilot.acp_options(&options, Access::Build).windows(2).any(|pair| pair == ["--reasoning-effort", effort.as_str()]));
+        }
+    }
 
     #[test]
     fn copilot_context_and_full_reasoning_range_round_trip_and_reach_the_cli() {

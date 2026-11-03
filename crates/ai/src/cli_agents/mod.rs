@@ -531,14 +531,24 @@ pub fn acp_model_choices(config: &BackendConfig, options: &BackendOptions) -> Re
 
 /// Discover settings for the backend's selected model, without a tool server or model prompt.
 pub fn acp_model_tuning(config: &BackendConfig, options: &BackendOptions) -> Result<crate::model_options::ModelTuning, ToolError> {
-    let mut spec = CliSpec::new(config.clone(), options.clone(), false, None);
+    let metadata = acp_model_metadata(config, options, None, &Stop::default())?;
+    Ok(crate::model_options::ModelTuning::from_metadata(metadata.current_model, &metadata.config_options))
+}
+
+pub(crate) fn acp_model_metadata(
+    config: &BackendConfig,
+    options: &BackendOptions,
+    directory: Option<&Path>,
+    stop: &Stop,
+) -> Result<acp::ModelMetadata, ToolError> {
+    let mut spec = CliSpec::new(config.clone(), options.clone(), false, directory.map(Path::to_path_buf));
     spec.question = true;
     spec.options.cli_context = None;
     spec.options.cli_reasoning_effort = None;
+    spec.options.cli_thinking = None;
     spec.options.effort = None;
     let conversation = acp_for(&spec).ok_or_else(|| ToolError::invalid("Model settings need a local ACP connection."))?;
-    let metadata = conversation.model_metadata(Duration::from_secs(15))?;
-    Ok(crate::model_options::ModelTuning::from_metadata(metadata.current_model, &metadata.config_options))
+    conversation.model_metadata_with_stop(Duration::from_secs(15), stop)
 }
 
 /// A conversation backed by an agent CLI. Each message is one CLI run; Claude Code runs resume
@@ -2191,8 +2201,10 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
             let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
             spec.adapters.register(Arc::new(AcpOnlyAgent(guidance)));
             let (sender, receiver) = std::sync::mpsc::channel();
-            run_cli(&spec, "hello", &sender, &Stop::default(), &Mutex::new(None), &Mutex::new(None));
-            let output: Vec<_> = receiver.try_iter().collect();
+            let state = RunState { session: Arc::default(), verified: Arc::default(), lost: Arc::default(), failure: Arc::default() };
+            let done = run_cli(&spec, "hello", false, &sender, &Stop::default(), &state);
+            let mut output: Vec<_> = receiver.try_iter().collect();
+            output.push(done);
             let [AgentEvent::Error { remediation: Some(fix), .. }, AgentEvent::TurnDone { .. }] = output.as_slice() else { panic!("{output:?}") };
             assert!(fix.contains("test-acp-agent") && fix.contains("remove the SSH host") && fix.contains("do not disable ACP"), "{fix}");
             assert!(!fix.to_lowercase().contains("copilot"), "{fix}");

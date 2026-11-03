@@ -112,6 +112,7 @@ const ACTIONS: &[Action] = &[
     a("set_model",           "change the model an AI uses",                    Cli("ai model <name> <model>")),
     a("set_effort",          "change how hard a Claude AI thinks",             Cli("ai effort <name> <level>")),
     a("pick_agent_model",    "list an agent's visible models and thinking depths", Tool(&["ai_models_list"])),
+    a("reload_agent_model",  "reload model-specific thinking choices",         Tool(&["ai_models_list"])),
     a("set_agent_model",     "choose an agent's model and thinking depth",     Tool(&["ai_model_set"])),
     a("pick_model_options",  "discover context and reasoning for a model",     Tool(&["ai_model_options_show"])),
     a("set_model_options",   "save a model's context and reasoning choices",   Tool(&["ai_model_options_set"])),
@@ -139,6 +140,7 @@ const ACTIONS: &[Action] = &[
 /// `CraftApp` methods that aren't person-facing actions: callbacks, polling, drawing, helpers.
 #[rustfmt::skip]
 const PLUMBING: &[(&str, &str)] = &[
+    ("load_agent_model_catalog", "worker dispatch shared by the model picker and its reload action"),
     ("stuck_banner", "draws what the lock watchdog found; `sync::problems` and its log are the headless side"),
     ("act", "runs a button's tool on a worker (play, preview, open folder)"),
     ("waiting_question", "finds the question an answer is for"),

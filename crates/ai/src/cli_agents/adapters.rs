@@ -44,6 +44,10 @@ pub trait AgentAdapter: Send + Sync {
     fn has_model_catalog(&self) -> bool {
         false
     }
+
+    fn model_catalog_depends_on_selection(&self) -> bool {
+        false
+    }
     /// Query models visible in this backend's execution context, respecting cancellation.
     /// Agents without catalogue support return an empty list.
     fn model_catalog(

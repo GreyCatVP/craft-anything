@@ -546,6 +546,11 @@ points to as well (`agent-session.jsonl`), tell "not here" apart from a failure 
 **A finding correction reset omitted confidence to inferred.** Edit defaults must preserve existing
 values unless explicitly changed; test omitted fields and every supplied confidence level.
 
+**Atomic replacements still lost concurrent investigation updates.** A process-local mutex and
+rename protect neither a cross-process revision check nor the whole read/modify/write sequence.
+Hold one OS file lock from load through every rendered write, use it for all writers, bound and
+cancel the wait, and test with separate processes. Never treat malformed state as an empty update.
+
 **An optional view refresh could fail the builder's turn.** Log cache-refresh errors and continue
 relaying agent events; only failures of the actual build belong on its fatal path.
 
