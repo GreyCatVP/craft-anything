@@ -129,9 +129,12 @@ pub fn doctor(host: &Host, req: &DoctorRequest) -> DoctorReport {
                 let program_ok = entry_command(&e).and_then(|v| v.into_iter().next()).is_some_and(|p| Path::new(&p).is_file());
                 if config::is_disabled(c, &text) {
                     Check::new(name, CheckStatus::Warn, format!("{} lists Craft Anything as disabled.", c.display)).fix(setup_cmd)
+                } else if config::entry_turned_off(c, &text) {
+                    Check::new(name, CheckStatus::Warn, format!("{} has Craft Anything turned off (enabled = false).", c.display))
+                        .fix(format!("Set enabled = true (or remove it) under [mcp_servers.craft-anything] in {}.", c.config.display()))
                 } else if !program_ok {
                     Check::new(name, CheckStatus::Fail, format!("{} points to a craft-anything-cli that no longer exists.", c.display)).fix(setup_cmd)
-                } else if desired.as_ref() == Some(&e) {
+                } else if desired.as_ref().is_some_and(|d| c.entry_is_current(&e, d)) {
                     Check::new(name, CheckStatus::Ok, format!("{} is connected.", c.display))
                 } else {
                     Check::new(name, CheckStatus::Warn, format!("{} is connected to a different copy or shape of the command.", c.display)).fix(setup_cmd)

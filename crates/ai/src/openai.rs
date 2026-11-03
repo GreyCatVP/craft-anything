@@ -192,7 +192,7 @@ pub fn messages_json(m: &Msg, react: bool) -> Vec<Value> {
                 .into_iter()
                 .map(|(id, name, input)| json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
                 .collect();
-            let mut v = json!({"role": "assistant", "content": if text.is_empty() { Value::Null } else { Value::String(text) }});
+            let mut v = json!({"role": "assistant", "content": text});
             if !calls.is_empty()
                 && let Some(o) = v.as_object_mut()
             {
@@ -504,6 +504,7 @@ mod tests {
         let m = b["messages"].as_array().unwrap();
         assert_eq!(m[0]["role"], "system");
         assert_eq!(m[2]["tool_calls"][0]["function"]["arguments"], "{\"a\":1}");
+        assert_eq!(m[2]["content"], "");
         assert_eq!(m[3]["role"], "tool");
         assert_eq!(m[4]["tool_call_id"], "c2");
         assert_eq!(b["tool_choice"], "auto");

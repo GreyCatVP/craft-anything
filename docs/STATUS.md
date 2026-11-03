@@ -155,8 +155,8 @@ The full workspace gates (`cargo xtask ci`) passed in [hosted CI for #541](https
   with its writing tools, shell and code execution switched off, and Maki refuses anything else
   that would ask (an MCP server's tools, in subagents too) unless the person allowed it in Maki's
   own permissions. It hasn't been run as a `maki -p` builder here.
-- Claude Code is fully wired as a builder; Codex works through its own flags but is unverified on
-  a real install and doesn't resume; other agent programs get plain text in and out. API-key
+- Claude Code is fully wired as a builder; Codex works through its own flags (our tools are pre-approved for
+  `codex exec`, see `docs/codex.md`) but is unverified on a real install and doesn't resume; other agent programs get plain text in and out. API-key
   backends (Anthropic, OpenRouter, OpenAI, local; Kimi K3 through OpenRouter is offered by Detect; a backend chosen as the Extractor takes a Deep-mode game's own files out into `app/Original/` after the study) build with our own loop and the Build tools,
   trim and summarise long conversations and keep them in `transcript.json`; no live API build has
   been run yet.

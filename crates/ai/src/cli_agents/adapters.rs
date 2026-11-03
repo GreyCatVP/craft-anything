@@ -535,6 +535,12 @@ impl AgentAdapter for Codex {
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.command={}", toml_string(&cx.mcp.command))]);
         let args_toml = format!("[{}]", cx.mcp.args.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "));
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.args={args_toml}")]);
+        // `codex exec` can't ask, so without this it refuses a tool not marked read-only, such as
+        // rebuild_start, before our server sees the call (#540). Only tools that ask the person
+        // themselves are approved; every other tool keeps the person's own Codex policy.
+        for tool in craft_anything_engine::AGENT_APP_PREAPPROVED_TOOLS {
+            v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.tools.{tool}.approval_mode=\"approve\"")]);
+        }
         if let Some(m) = &cx.options.cli_model {
             v.extend(["-m".into(), m.clone()]);
         }
@@ -577,7 +583,9 @@ impl AgentAdapter for Codex {
                     out.push(p.started(&id, &name, item.get("arguments").cloned().unwrap_or(Value::Null)));
                 }
                 let failed = item.get("status").and_then(Value::as_str) == Some("failed") || item.get("error").is_some_and(|e| !e.is_null());
-                let text = item.get("result").or_else(|| item.get("error")).map(|r| r.to_string()).unwrap_or_default();
+                let tool = item.get("tool").and_then(Value::as_str).unwrap_or_default();
+                let ours = item.get("server").and_then(Value::as_str) == Some(MCP_NAME);
+                let text = codex_tool_text(&item, tool, ours);
                 out.push(p.finished(&id, !failed, &text));
             }
             ("item.started", "command_execution") => {
@@ -600,6 +608,30 @@ impl AgentAdapter for Codex {
     }
 }
 
+/// What a finished Codex tool call says. A failed call carries `"result": null` beside its
+/// `error`, which showed as "null" (#540), so null fields are skipped and an error's message is
+/// used as written. Codex's refusal to run one of our tools it can't ask about gets the way out.
+fn codex_tool_text(item: &Value, tool: &str, ours: bool) -> String {
+    let field = |k: &str| item.get(k).filter(|v| !v.is_null());
+    let error = field("error").map(|e| e.get("message").and_then(Value::as_str).map_or_else(|| e.to_string(), str::to_string));
+    let text = match (field("result"), error) {
+        (_, Some(e)) => e,
+        (Some(r), None) => r.to_string(),
+        (None, None) => String::new(),
+    };
+    // Another MCP server's refusal isn't fixed by our setup: it keeps Codex's own words.
+    if ours && text.contains(CODEX_NEEDS_APPROVAL) {
+        // The feed keeps 200 characters of a result, so the fix comes first and fits.
+        return format!(
+            "Codex blocked {tool}: it can't ask for approval here. Fix: run `craft-anything-cli setup --client codex --yes`, then retry. See docs/codex.md."
+        );
+    }
+    text
+}
+
+/// Codex's wording when a tool needs approval and its policy is `never` (#540).
+const CODEX_NEEDS_APPROVAL: &str = "requires approval, but approval policy is never";
+
 /// Gemini CLI (`--output-format stream-json`). Flags are checked against `gemini --help`.
 pub struct GeminiCli;
 
@@ -608,12 +640,23 @@ impl AgentAdapter for GeminiCli {
         &["gemini-cli", "gemini"]
     }
 
+    /// Gemini CLI reads its message from stdin and appends `-p` to it, so a long one can't pass
+    /// Windows' command-line limit, which is 8,191 characters through npm's `gemini.cmd`.
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
+    }
+
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut a = cx.options.args.clone();
         if let Some(m) = &cx.options.cli_model {
             a.extend(["-m".into(), m.clone()]);
         }
-        a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), format!("{}{}", cx.preamble, cx.prompt)]);
+        // An empty `-p` keeps it headless and adds nothing to the message on stdin (see `stdin_text`).
+        a.extend(["--output-format".into(), "stream-json".into(), "-p".into(), String::new()]);
         a
     }
 

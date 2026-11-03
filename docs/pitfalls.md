@@ -37,6 +37,9 @@ added an app the new rule rejected; both were green on their own branch.
 - It happened again with translations: #117 added UI strings and #115, merged right after it,
   added a check that every string has a Chinese translation, so `cargo xtask ci` failed on
   `main`. A PR that adds a check, or adds what a check covers, is tested on top of the other.
+  And again with a new catalog: #555 added "Pausing…" to every catalog there was, and #486 (Russian)
+  merged after it without it. A new language and a new UI string merged together need the string
+  in the new catalog too.
 
 **A dependency change merged without its lockfile.** Changes were staged with
 `git add -A crates apps docs`, which leaves out the root `Cargo.lock`, so a new dependency reached

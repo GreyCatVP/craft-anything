@@ -316,8 +316,12 @@ Owner: open · Status: in progress
 - [ ] Aider has no adapter, so the plain one hands it the prompt as a file name, and it can open a
       browser sign-in nobody agreed to (#72). Give it an adapter, or stop offering it
 - [ ] Codex (#499): in a chat the tool server has no active target, tools turned on with
-      `enable_toolset` can't be called, and `rebuild_start` is refused by the approval policy. The
+      `enable_toolset` can't be called, The
       reporter attached a patch for chat continuity; look at that first
+- [x] Codex (#540): `rebuild_start` was refused by `codex exec`'s approval policy and showed as
+      `null`; setup and the builder now approve our tools for Codex (we still ask before running
+      code) and a refusal explains the fix (`docs/codex.md`)
+- [ ] Codex (#540): run `codex exec` on a real install and check `rebuild_start` gets through
 - [ ] Codex: resume support (`codex exec resume <id>`), verified on a real install
 - [ ] Every adapter but Claude Code's still takes the message in argv (`prompt_on_stdin`), so a long
       one can pass Windows' command-line limit as Claude Code's did (#402); hand each its message on
