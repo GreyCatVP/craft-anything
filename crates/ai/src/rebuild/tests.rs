@@ -137,6 +137,16 @@ fn stack_choice() {
 }
 
 #[test]
+fn german_requests_keep_their_project_kind() {
+    for request in ["Ein einfaches Snake-Spiel", "Dasselbe Spiel mit einer Bestenliste"] {
+        assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
+    }
+    for request in ["Eine Website für meine Bäckerei", "Diese Webseite nachbauen"] {
+        assert_eq!(choose(request, &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "{request}");
+    }
+}
+
+#[test]
 fn chinese_requests_keep_their_project_kind() {
     for request in ["一个简单的贪吃蛇游戏", "簡單的貪食蛇遊戲", "复刻它的玩法"] {
         assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
