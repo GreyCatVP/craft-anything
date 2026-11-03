@@ -25,6 +25,8 @@ pub enum Format {
     Coff,
     DosMz,
     DosCom,
+    /// Original Xbox executable.
+    Xbe,
     Raw,
 }
 
@@ -37,6 +39,7 @@ impl Format {
             Format::Coff => "COFF object file",
             Format::DosMz => "DOS MZ executable",
             Format::DosCom => "DOS .COM program",
+            Format::Xbe => "XBE (Original Xbox)",
             Format::Raw => "raw machine code",
         }
     }
@@ -449,6 +452,9 @@ pub fn parse_binary(data: &[u8]) -> Result<Binary, FormatError> {
         b.info.insert("universal_slices".into(), slices.iter().map(|s| s.arch.clone()).collect::<Vec<_>>().join(", "));
         b.warnings.push(format!("universal binary with {} slices; analysing the {} slice", slices.len(), pick.arch));
         return Ok(b);
+    }
+    if crate::xbe::is_xbe(data) {
+        return crate::xbe::binary(data);
     }
     if data.starts_with(b"MZ") && !crate::pe::has_pe_header(data) {
         return crate::dos::mz_binary(data);

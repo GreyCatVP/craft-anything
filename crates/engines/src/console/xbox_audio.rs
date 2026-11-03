@@ -301,6 +301,10 @@ mod tests {
                 writable: false,
             }],
             libraries: vec![xbe::Library { name: "DSOUND".into(), major: 1, minor: 0, build: 5849, qfe: 1, debug: false }],
+            headers: 0,
+            entry: None,
+            kernel_thunk: None,
+            keys: None,
         };
         let mut file = vec![0u8; 0x100];
         file.extend_from_slice(code);

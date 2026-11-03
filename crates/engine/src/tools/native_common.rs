@@ -60,7 +60,7 @@ pub fn disasm_err(e: DisasmError) -> ToolError {
 /// Build an image for a target of any native kind.
 pub fn image_for(t: &Target) -> Result<Image, ToolError> {
     match t.kind {
-        TargetKind::Elf | TargetKind::Pe | TargetKind::MachO | TargetKind::MachOFat | TargetKind::Managed | TargetKind::Unknown => {
+        TargetKind::Elf | TargetKind::Pe | TargetKind::MachO | TargetKind::MachOFat | TargetKind::Managed | TargetKind::Xbe | TargetKind::Unknown => {
             Image::parse(t.bytes.clone()).map_err(disasm_err)
         }
         TargetKind::DosCom => Image::dos_com(t.bytes.clone()).map_err(disasm_err),

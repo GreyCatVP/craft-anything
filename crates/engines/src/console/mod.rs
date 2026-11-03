@@ -17,6 +17,7 @@ pub mod build;
 pub mod ps3;
 pub mod xbox;
 pub mod xbox_audio;
+pub mod xbox_map;
 
 /// Every console that can be recompiled, in the order people see them.
 pub static CONSOLES: &[&dyn Console] = &[&xbox::Xbox, &ps3::Ps3];

@@ -1417,3 +1417,9 @@ Rebuild and play	重新构建并运行
 The game is running.	游戏正在运行。
 The game stopped after {secs} s.	游戏在 {secs} 秒后停止。
 The recompiler missed {n} function(s) the game reached; they can be added for you.	重编译器漏掉了游戏用到的 {n} 个函数；可以为你添加。
+Open a build's original executable	打开构建的原始可执行文件
+Original code to generated C++	原始代码与生成的 C++ 对照
+Recompiling console games	重编译主机游戏
+What does this game do at start-up?	这个游戏启动时做了什么？
+Which XDK libraries does it use?	它用了哪些 XDK 库？
+Where does it call the kernel?	它在哪里调用内核？

@@ -547,7 +547,14 @@ fn core_target_triage(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, To
     };
     let native_kind = matches!(
         t.kind,
-        TargetKind::Elf | TargetKind::Pe | TargetKind::MachO | TargetKind::MachOFat | TargetKind::Managed | TargetKind::DosCom | TargetKind::RawBinary
+        TargetKind::Elf
+            | TargetKind::Pe
+            | TargetKind::MachO
+            | TargetKind::MachOFat
+            | TargetKind::Managed
+            | TargetKind::DosCom
+            | TargetKind::Xbe
+            | TargetKind::RawBinary
     );
     let parsed = if native_kind || t.kind == TargetKind::Unknown { super::native_common::image_for(&t).map(Some) } else { Ok(None) };
     let builder = EvidenceBuilder::new("core_target_triage", t.subject(), Environment::builtin(ctx.session.clean_room())).params(json!({"path": p.path}));

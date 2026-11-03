@@ -68,6 +68,7 @@ pub fn triage(bin: &Binary, data: &[u8], file_name: &str) -> Report {
             Some(_) => "Apple",
         },
         Format::DosMz | Format::DosCom => "DOS",
+        Format::Xbe => "Original Xbox",
         Format::Coff => "Windows (object file)",
         Format::Raw => "no operating system (raw code)",
     };

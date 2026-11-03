@@ -7,7 +7,7 @@
 use super::native_common::{params_json, spec};
 use super::static_input::builder;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
-use craft_anything_engines::console::{self, CONSOLES, Status, Verdict, build};
+use craft_anything_engines::console::{self, CONSOLES, Status, Verdict, build, xbox_map};
 use craft_anything_evidence::{Confidence, Coverage, Limitation, Location, Subject, ToolError};
 use craft_anything_platform::process::Launch;
 use schemars::JsonSchema;
@@ -25,7 +25,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "List consoles that can be recompiled",
             "List the consoles whose original games can be statically recompiled into native programs: each one's backend (project, licence, which version a build uses (each new build fetches the latest upstream commit), the programs its build needs, what it takes), and for Windows, Linux, macOS, Android and iOS whether the backend's output runs there, only builds, or isn't available, with why. Reads nothing of any game.",
             "See which consoles' games can be turned into PC programs, and where they'd run.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::EVIDENCE,
             Requires::Nothing,
             schema_of::<ListParams>,
@@ -36,7 +36,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "Check an original console game",
             "Look at a game the person owns for a console from game_consoles_list (console id, absolute path of a disc image, an extracted game folder or an executable): its title, id and executables, and the compatibility checks for that console's recompiler, each pass/note/warn/fail, with a verdict (ready or blocked). Original Xbox: reads disc images in place and default.xbe's header (XDK library builds against the backend's signatures). PlayStation 3: reads PARAM.SFO and tells plain ELFs from encrypted executables; nothing is ever decrypted, so an encrypted EBOOT.BIN blocks until the person supplies the decrypted ELF they made.",
             "Check whether a game you own can be recompiled, and what's missing if not.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::EVIDENCE.union(Effects::CARRIES_TARGET_CONTENT),
             Requires::Nothing,
             schema_of::<InspectParams>,
@@ -47,7 +47,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "Recompile an original console game",
             "Start (or resume) recompiling a game the person owns into a native program, in the background, and return at once. Takes the console id, the game's absolute path (as for game_original_inspect) and an absolute output folder (new or empty, or one holding this game's earlier build, which resumes from its first unfinished stage). Stages: validation, dependency installation (the backend's latest upstream source is cloned into the folder, plus its toolchain checks), file extraction, native project generation, executable analysis, recompilation, compilation, packaging. Progress is in <output>/recomp.json and recomp.log: read them with game_recomp_status (or pass wait to answer only when it ends). After changing the build's config (game_recomp_config_set), pass from = \"recompile\" to run recompilation, compilation and packaging again. Runs the backend's own build programs and downloads its source and libraries. Nothing is decrypted.",
             "Turn a game you own into a program for this computer. It takes a while; you can watch each step.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::WRITES_FILESYSTEM.union(Effects::LAUNCHES_PROCESS).union(Effects::ACCESSES_NETWORK).union(Effects::EXECUTES_FOREIGN_CODE),
             Requires::Nothing,
             schema_of::<StartParams>,
@@ -58,7 +58,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "Show a recompile build",
             "Show a recompile build's state from its output folder (absolute path): each stage's status (pending, running, done, failed, interrupted) and message, the backend commit used, whether it's running now, what Play starts, and the last lines of its log (lines, default 200).",
             "See how far a recompile has got.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::READ_ONLY,
             Requires::Nothing,
             schema_of::<StatusParams>,
@@ -69,7 +69,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "Stop a recompile build",
             "Stop a running recompile build (output folder, absolute path): the program it's running is ended and the stage marked interrupted; game_recomp_start resumes it.",
             "Pause a recompile; you can carry on later.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::LAUNCHES_PROCESS,
             Requires::Nothing,
             schema_of::<OutParams>,
@@ -80,7 +80,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "Play a recompiled game",
             "Start the program a finished recompile build made (output folder, absolute path), with the arguments and environment its backend needs; its output goes to <output>/play.log. Waits up to 8 seconds: if the game quits in that time, answers with its exit code, the error lines of its log, and what the log asks for (Original Xbox: functions the recompiler missed, by address, and XDK data it couldn't place, by name), so it can be fixed with game_recomp_config_set and rebuilt.",
             "Play the recompiled game.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::LAUNCHES_PROCESS.union(Effects::EXECUTES_FOREIGN_CODE),
             Requires::Nothing,
             schema_of::<OutParams>,
@@ -91,13 +91,149 @@ pub fn specs() -> Vec<ToolSpec> {
             "Fix a recompile build's config",
             "Set one entry of an Original Xbox build's config/game.toml (output folder, absolute path): section functions (key: an address the recompiler missed, as play's log names it; value: an optional name) or symbols/data (key: an XDK name; value: its address in the XBE, which the native tools on the build's game/assets/default.xbe can find). Replaces the entry or adds it. Then rebuild with game_recomp_start from = \"recompile\".",
             "Teach the recompiler something it missed about the game.",
-            Toolset::Formats,
+            Toolset::Recompile,
             Effects::WRITES_FILESYSTEM,
             Requires::Nothing,
             schema_of::<ConfigParams>,
             game_recomp_config_set,
         ),
+        spec(
+            "game_recomp_open",
+            "Open a build's original executable",
+            "Open an Original Xbox build's executable (output folder, absolute path: its game/assets/default.xbe) as the active target, so every native tool (functions, disassembly, callers, callees, references, pseudocode) reads the original game code. The names the build's config gives addresses (XDK functions and data the symbol scan placed, functions named by hand) become target names; names the person or AI already gave are kept.",
+            "Look at the original game code behind a recompiled game.",
+            Toolset::Recompile,
+            Effects::MUTATES_SESSION,
+            Requires::Nothing,
+            schema_of::<OutParams>,
+            game_recomp_open,
+        ),
+        spec(
+            "game_recomp_function_source",
+            "Original code to generated C++",
+            "Map between an Original Xbox build's original executable and the C++ the recompiler generated (output folder, absolute path). Given an address: the function holding it (its generated name, file and lines), the generated line of that very instruction, its XDK or hand-given name, any host function in the build's src/ that replaces it, and the generated code (up to `lines` lines around the instruction). Given a generated file and line instead (a compiler error, a crash symbol): the original function and instruction there. The map is kept in <output>/code_map.tsv and rebuilt when the generated code changes.",
+            "Find the C++ for a piece of the original game, or the other way round.",
+            Toolset::Recompile,
+            Effects::WRITES_FILESYSTEM,
+            Requires::Nothing,
+            schema_of::<SourceParams>,
+            game_recomp_function_source,
+        ),
     ]
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SourceParams {
+    /// Absolute path of the build's folder.
+    pub output: String,
+    /// An original address (hex), e.g. `0x3AB12A`: a function's entry or any instruction in it.
+    #[serde(default)]
+    pub address: Option<String>,
+    /// A generated file name instead (`x86_recomp.115.cpp`), with `line`.
+    #[serde(default)]
+    pub file: Option<String>,
+    /// The 1-based line in `file`.
+    #[serde(default)]
+    pub line: Option<usize>,
+    /// Generated lines to include (default 60, at most 400; 0 for none).
+    #[serde(default)]
+    pub lines: Option<usize>,
+}
+
+fn game_recomp_open(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: OutParams = parse_params(params)?;
+    let out = PathBuf::from(&p.output);
+    let xbe = out.join("game").join("assets").join("default.xbe");
+    if !xbe.is_file() {
+        return Err(ToolError::invalid(format!("{} has no game/assets/default.xbe.", out.display()))
+            .with_remediation("Give an Original Xbox build's folder whose extract stage has run."));
+    }
+    let names = std::fs::read_to_string(out.join("game").join("config").join("game.toml")).map(|t| xbox_map::config_names(&t)).unwrap_or_default();
+    let target = crate::target::Target::load(&xbe)?;
+    let (id, name) = (target.id.clone(), target.name.clone());
+    ctx.session.add_target(target);
+    let t = ctx.session.active_mut()?;
+    // Every function the recompiler generated is a known entry: the analysis also finds the ones
+    // only reached through pointers (vtables, callbacks), as the generated code has them.
+    let map = xbox_map::CodeMap::load(&out).ok();
+    let starts = map.as_ref().map(|m| m.bodies.len());
+    if let Some(map) = map {
+        let mut img = super::native_common::image_for(&t.target)?;
+        img.bin.function_starts.extend(map.bodies.iter().map(|b| u64::from(b.address)));
+        img.bin.function_starts.sort_unstable();
+        img.bin.function_starts.dedup();
+        t.ext.insert(std::sync::Arc::new(super::native_common::NativeImage(std::sync::Arc::new(img))));
+    }
+    let (mut added, mut kept) = (0, 0);
+    for (a, n) in names {
+        match t.annotations.names.entry(u64::from(a)) {
+            std::collections::btree_map::Entry::Vacant(v) => {
+                v.insert(n);
+                added += 1;
+            }
+            std::collections::btree_map::Entry::Occupied(_) => kept += 1,
+        }
+    }
+    ctx.session.save_annotations()?;
+    Ok(ToolOutput::Value(json!({
+        "target": id,
+        "name": name,
+        "path": xbe.display().to_string(),
+        "names_added": added,
+        "names_kept": kept,
+        "known_functions": starts,
+        "next": "native_functions_list, native_function_disassemble, native_function_callers_list; game_recomp_function_source for the generated C++",
+    })))
+}
+
+fn game_recomp_function_source(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: SourceParams = parse_params(params)?;
+    let out = PathBuf::from(&p.output);
+    let map = xbox_map::CodeMap::load(&out)?;
+    let want = p.lines.unwrap_or(60).min(400);
+    let (body, instruction) = match (&p.address, &p.file, p.line) {
+        (Some(a), None, None) => {
+            let t = a.trim();
+            let at = u32::from_str_radix(t.trim_start_matches("0x").trim_start_matches("0X"), 16)
+                .map_err(|_| ToolError::invalid(format!("{a:?} isn't a hex address.")))?;
+            let body = map.containing(at).ok_or_else(|| ToolError::invalid(format!("No generated function at or below {at:#X}.")))?;
+            (body.clone(), Some(at))
+        }
+        (None, Some(f), Some(l)) => {
+            let body = map.at_line(f, l).ok_or_else(|| {
+                ToolError::invalid(format!("Line {l} of {f} isn't inside a generated function."))
+                    .with_remediation("Give a line between a function's X86_FUNC and its closing brace.")
+            })?;
+            let before = xbox_map::lines(&out, &body.file, body.first, l)?;
+            (body.clone(), before.iter().rev().find_map(|x| xbox_map::instruction_at(x)))
+        }
+        _ => return Err(ToolError::invalid("Give either address, or file and line.")),
+    };
+    let all = xbox_map::lines(&out, &body.file, body.first, body.last)?;
+    // The generated line of the instruction itself (its `// ADDR …` comment).
+    let ins_line = instruction.and_then(|a| all.iter().position(|l| xbox_map::instruction_at(l) == Some(a)).map(|i| body.first + i));
+    let centre = ins_line.unwrap_or(body.first);
+    let from = centre.saturating_sub(want / 3).max(body.first);
+    let excerpt: Vec<&String> = all.iter().skip(from - body.first).take(want).collect();
+    let names = std::fs::read_to_string(out.join("game").join("config").join("game.toml")).map(|t| xbox_map::config_names(&t)).unwrap_or_default();
+    let name = names.iter().find(|(a, _)| *a == body.address).map(|(_, n)| n.clone());
+    let overrides: Vec<Value> = xbox_map::overrides(&out, body.address).into_iter().map(|(f, l)| json!({"file": f, "line": l})).collect();
+    let note = match (instruction, ins_line) {
+        (Some(a), None) if a != body.address => {
+            Some(format!("{a:#X} has no instruction comment in this body: it may be data, or code the recompiler reached from another entry."))
+        }
+        _ => None,
+    };
+    Ok(ToolOutput::Value(json!({
+        "function": {"address": format!("{:#X}", body.address), "generated_name": xbox_map::function_name(body.address), "name": name},
+        "generated": {"file": format!("game/generated/game/{}", body.file), "first_line": body.first, "last_line": body.last},
+        "instruction": instruction.map(|a| json!({"address": format!("{a:#X}"), "line": ins_line})),
+        "replaced_by": overrides,
+        "excerpt_from_line": from,
+        "excerpt": excerpt,
+        "note": note,
+    })))
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -332,5 +468,73 @@ mod tests {
         assert!(err.remediation.unwrap_or_default().contains("xbox"));
         let out = e.call("game_original_inspect", json!({"console": "ps3", "path": path}), CallOptions::new(Caller::Cli)).unwrap();
         assert!(serde_json::to_value(&out).unwrap().to_string().contains("blocked"));
+    }
+
+    /// A build folder with a tiny XBE (one code section: `push esi; call +0; pop esi; ret` at
+    /// 0x11000), its config and one generated file, as Xbox XBE Recomp lays them out.
+    fn build() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let game = dir.path().join("game");
+        for d in ["assets", "config", "generated/game", "src/game"] {
+            std::fs::create_dir_all(game.join(d)).unwrap();
+        }
+        let mut x = vec![0u8; 0x1010];
+        let put = |x: &mut Vec<u8>, off: usize, v: u32| x[off..off + 4].copy_from_slice(&v.to_le_bytes());
+        x[..4].copy_from_slice(b"XBEH");
+        put(&mut x, 0x104, 0x10000);
+        put(&mut x, 0x108, 0x1000);
+        put(&mut x, 0x10C, 0x2000);
+        put(&mut x, 0x118, 0x10200);
+        put(&mut x, 0x11C, 1);
+        put(&mut x, 0x120, 0x10400);
+        put(&mut x, 0x128, 0x11000 ^ 0xA8FC_57AB);
+        put(&mut x, 0x158, 0x10900 ^ 0x5B6D_40B6);
+        put(&mut x, 0x900, 0x8000_0001);
+        put(&mut x, 0x400, 4 | 2);
+        put(&mut x, 0x404, 0x11000);
+        put(&mut x, 0x408, 0x10);
+        put(&mut x, 0x40C, 0x1000);
+        put(&mut x, 0x410, 0x10);
+        put(&mut x, 0x414, 0x10800);
+        x[0x800..0x805].copy_from_slice(b".text");
+        x[0x1000..0x1008].copy_from_slice(&[0x56, 0xE8, 0, 0, 0, 0, 0x5E, 0xC3]);
+        std::fs::write(game.join("assets/default.xbe"), x).unwrap();
+        std::fs::write(game.join("config/game.toml"), "[functions]\n0x11000 = \"Boot\"\n[symbols]\nDirectSoundCreate = 0\n").unwrap();
+        let body = "X86_FUNC(__imp__sub_00011000) {\n\t// 00011000 push esi\n\tX86_PUSH32(ctx.esi);\n\t// 00011006 pop esi\n\tX86_POP32(ctx.esi);\n\t// 00011007 ret\n}\n";
+        std::fs::write(game.join("generated/game/x86_recomp.0.cpp"), format!("#include \"x86_recomp_shared.h\"\n\n{body}")).unwrap();
+        std::fs::write(game.join("generated/game/codegen.stamp"), "").unwrap();
+        std::fs::write(game.join("src/game/hooks.cpp"), "X86_FUNC(sub_00011000) {\n}\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_builds_executable_opens_with_its_names_and_the_native_tools_read_it() {
+        let dir = build();
+        let out = dir.path().display().to_string();
+        let e = engine(true);
+        let o = |id: &str, p: serde_json::Value| serde_json::to_value(e.call(id, p, CallOptions::new(Caller::Cli)).unwrap()).unwrap().to_string();
+        let opened = o("game_recomp_open", json!({"output": out}));
+        assert!(opened.contains("\"names_added\":1"), "{opened}");
+        let dis = o("native_function_disassemble", json!({"function": "Boot"}));
+        assert!(dis.contains("Boot:") && dis.contains("push esi") && dis.contains("\"kind\":\"xbe\""), "{dis}");
+        // Clean room never reads the original
+        assert!(engine(false).call("game_recomp_open", json!({"output": out}), CallOptions::new(Caller::Cli)).is_err());
+    }
+
+    #[test]
+    fn maps_original_addresses_to_generated_lines_and_back() {
+        let dir = build();
+        let out = dir.path().display().to_string();
+        let e = engine(true);
+        let o = |p: serde_json::Value| serde_json::to_value(e.call("game_recomp_function_source", p, CallOptions::new(Caller::Cli)).unwrap()).unwrap();
+        let v = o(json!({"output": out, "address": "0x11006"}));
+        let text = v.to_string();
+        assert!(text.contains("sub_00011000") && text.contains("\"name\":\"Boot\"") && text.contains("x86_recomp.0.cpp"), "{text}");
+        assert!(text.contains("\"line\":6") && text.contains("src/game/hooks.cpp"), "{text}");
+        assert!(dir.path().join("code_map.tsv").is_file());
+        let back = o(json!({"output": out, "file": "x86_recomp.0.cpp", "line": 7})).to_string();
+        assert!(back.contains("\"address\":\"0x11006\""), "{back}");
+        assert!(e.call("game_recomp_function_source", json!({"output": out, "address": "0x10000"}), CallOptions::new(Caller::Cli)).is_err());
+        assert!(e.call("game_recomp_function_source", json!({"output": out}), CallOptions::new(Caller::Cli)).is_err());
     }
 }

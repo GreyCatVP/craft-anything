@@ -527,16 +527,22 @@ The original-address-to-generated-code mapping is kept at every step: the AI deb
 function, not an unrelated codebase.
 
 **Phase 1: the original Xbox executable as an analysis target**
-- [ ] `Format::Xbe` in the shared executable reader: sections, entry point, kernel imports (by
-      ordinal) as import slots, library versions; `TargetKind::Xbe`, so every native tool
+- [x] `Format::Xbe` in the shared executable reader: header block and sections, the entry point
+      and kernel thunk table (decoded with the retail or debug address key), kernel imports by
+      ordinal as import slots, library versions; `TargetKind::Xbe`, so every native tool
       (functions, disassembly, callers, callees, references, cross-references, pseudocode) works
-- [ ] A Recompile tool set (`Toolset::Recompile`) holding the console tools, given to the
-      Recompile chat
-- [ ] `game_recomp_open`: open a build's executable as the active target with the recompiler's
-      names (`[symbols]`, `[functions]`, `[data]`) as user names, never over the person's own
-- [ ] `game_recomp_function_source`: an original address to its generated function, file and line
-      (and the generated line of one instruction), any host override of it, its XDK name; a
-      generated file and line back to the original address
+- [x] A Recompile tool set (`Toolset::Recompile`) holding the console tools
+- [x] `game_recomp_open`: opens a build's executable as the active target with the recompiler's
+      names (`[symbols]`, `[functions]`, `[data]`) as user names, never over the person's own, and
+      every generated function's address as a known function start, so code reached only
+      through pointers (XACT's) is found too
+- [x] `game_recomp_function_source`: an original address to its generated function, file and the
+      line of that very instruction, any host override in `src/`, its XDK or hand-given name; a
+      generated file and line back to the original function and instruction. The map is kept in
+      the build as `code_map.tsv` (versioned, rebuilt when the generated code changes)
+- [ ] Kernel imports are named by ordinal (`xboxkrnl_294`); a table of the kernel's export names
+- [ ] The Recompile chat is given the Recompile tool set and told to start with `game_recomp_open`
+      (Phase 4 wires the chat)
 
 **Phase 2: crash analysis**
 - [ ] A Windows minidump reader (exception, threads, modules, memory) in `formats`;

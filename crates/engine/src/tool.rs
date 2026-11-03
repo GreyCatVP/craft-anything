@@ -99,6 +99,9 @@ pub enum Toolset {
     Setup,
     /// A builder's own hands: reading, writing and building the project it works in.
     Build,
+    /// Original console titles: checking, recompiling, playing and fixing a build, and tracing it
+    /// back to the original executable.
+    Recompile,
     /// A group added at run time (its id, lower-case letters, digits and `_`).
     Custom(&'static str),
 }
@@ -110,7 +113,7 @@ impl Serialize for Toolset {
 }
 
 impl Toolset {
-    pub const ALL: [Toolset; 17] = [
+    pub const ALL: [Toolset; 18] = [
         Toolset::Core,
         Toolset::Native,
         Toolset::Apple,
@@ -128,6 +131,7 @@ impl Toolset {
         Toolset::Projects,
         Toolset::Setup,
         Toolset::Build,
+        Toolset::Recompile,
     ];
 
     pub fn id(self) -> &'static str {
@@ -149,6 +153,7 @@ impl Toolset {
             Toolset::Projects => "projects",
             Toolset::Setup => "setup",
             Toolset::Build => "build",
+            Toolset::Recompile => "recompile",
             Toolset::Custom(id) => id,
         }
     }
@@ -177,6 +182,7 @@ impl Toolset {
             Toolset::Projects => "Projects",
             Toolset::Setup => "Engines and settings",
             Toolset::Build => "Building",
+            Toolset::Recompile => "Recompiling console games",
             Toolset::Custom(id) => id,
         }
     }

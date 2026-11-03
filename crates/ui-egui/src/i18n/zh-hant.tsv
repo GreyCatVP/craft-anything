@@ -1417,3 +1417,9 @@ Rebuild and play	重新建置並執行
 The game is running.	遊戲正在執行。
 The game stopped after {secs} s.	遊戲在 {secs} 秒後停止。
 The recompiler missed {n} function(s) the game reached; they can be added for you.	重新編譯器漏掉了遊戲用到的 {n} 個函式；可以為你加入。
+Open a build's original executable	開啟建置的原始可執行檔
+Original code to generated C++	原始程式碼與產生的 C++ 對照
+Recompiling console games	重新編譯主機遊戲
+What does this game do at start-up?	這個遊戲啟動時做了什麼？
+Which XDK libraries does it use?	它用了哪些 XDK 函式庫？
+Where does it call the kernel?	它在哪裡呼叫核心？

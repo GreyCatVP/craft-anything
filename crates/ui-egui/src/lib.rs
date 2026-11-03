@@ -1760,7 +1760,7 @@ pub fn human_bytes(n: usize) -> String {
 /// Icon for a target kind.
 pub fn kind_icon(k: TargetKind) -> &'static str {
     match k {
-        TargetKind::Elf | TargetKind::Pe | TargetKind::MachO | TargetKind::MachOFat | TargetKind::DosCom | TargetKind::RawBinary => "cpu",
+        TargetKind::Elf | TargetKind::Pe | TargetKind::MachO | TargetKind::MachOFat | TargetKind::DosCom | TargetKind::Xbe | TargetKind::RawBinary => "cpu",
         TargetKind::Managed | TargetKind::Jar | TargetKind::JavaClass => "boxes",
         TargetKind::Wasm => "binary",
         TargetKind::Apk | TargetKind::Dex => "smartphone",

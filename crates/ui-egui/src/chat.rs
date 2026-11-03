@@ -118,6 +118,7 @@ pub fn suggestions(kind: Option<TargetKind>) -> Vec<&'static str> {
         Some(Elf | Pe | MachO | MachOFat | DosCom | RawBinary) => {
             vec!["What does this program do?", "What does it send over the internet?", "Is it safe to run?", "Which files does it read or write?"]
         }
+        Some(Xbe) => vec!["What does this game do at start-up?", "Which XDK libraries does it use?", "Where does it call the kernel?"],
         Some(Managed | Jar | JavaClass) => vec!["What does this program do?", "What are its main parts?", "Does it talk to the internet?"],
         Some(Sqlite) => vec!["What does this app store?", "What tables are in here?", "Is anything sensitive saved in plain text?"],
         Some(Apk | Dex) => vec!["What does this app do?", "What permissions does it ask for?", "Which servers does it talk to?", "Does it track me?"],

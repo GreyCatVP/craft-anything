@@ -42,6 +42,8 @@ pub enum TargetKind {
     Sqlite,
     /// A DOS .COM program.
     DosCom,
+    /// An Original Xbox executable (`.xbe`).
+    Xbe,
     /// Raw bytes with a user-declared architecture (firmware, shellcode).
     RawBinary,
     Unknown,
@@ -69,6 +71,7 @@ impl TargetKind {
             TargetKind::Evm => "A smart contract (EVM bytecode)",
             TargetKind::Sqlite => "A SQLite database (how an app stores its data)",
             TargetKind::DosCom => "A DOS program",
+            TargetKind::Xbe => "An Original Xbox program",
             TargetKind::RawBinary => "Raw machine code",
             TargetKind::Unknown => "A file we don't recognise yet",
         }
@@ -85,6 +88,8 @@ pub fn sniff(bytes: &[u8], name: &str) -> TargetKind {
     let starts = |m: &[u8]| bytes.starts_with(m);
     if starts(b"SQLite format 3\0") {
         TargetKind::Sqlite
+    } else if craft_anything_formats::xbe::is_xbe(bytes) {
+        TargetKind::Xbe
     } else if starts(b"\x7fELF") {
         TargetKind::Elf
     } else if starts(b"MZ") {
