@@ -12,10 +12,10 @@ pub const OPENAI_BASE: &str = "https://api.openai.com/v1";
 pub const OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1";
 pub const OPENAI_DEFAULT_MODEL: &str = "gpt-5";
 pub const OPENROUTER_DEFAULT_MODEL: &str = "anthropic/claude-opus-5-5";
-/// Kimi K3 (Moonshot AI) on OpenRouter: 1M-token context, tool calls.
-pub const KIMI_K3: &str = "moonshotai/kimi-k3";
+/// Kimi K3.1 Pro (Moonshot AI) on OpenRouter: 1M-token context, tool calls.
+pub const KIMI_K3_1: &str = "moonshotai/kimi-k3.1-pro";
 /// OpenRouter models offered when adding it.
-pub const OPENROUTER_MODELS: &[&str] = &[OPENROUTER_DEFAULT_MODEL, KIMI_K3];
+pub const OPENROUTER_MODELS: &[&str] = &[OPENROUTER_DEFAULT_MODEL, KIMI_K3_1];
 /// Generic app identification for OpenRouter (no personal data).
 pub const APP_REFERER: &str = "https://github.com/storytold/craft-anything";
 pub const APP_TITLE: &str = "Craft Anything";

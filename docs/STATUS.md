@@ -217,7 +217,7 @@ was run; other text-call formats remain unsupported.
   own permissions. It hasn't been run as a `maki -p` builder here.
 - Claude Code is fully wired as a builder; Codex works through its own flags (our tools are pre-approved for
   `codex exec`, see `docs/codex.md`) but is unverified on a real install and doesn't resume; other agent programs get plain text in and out. API-key
-  backends (Anthropic, OpenRouter, OpenAI, local; Kimi K3 through OpenRouter is offered by Detect; a backend chosen as the Extractor takes a Deep-mode game's own files out into `app/Original/` after the study) build with our own loop and the Build tools,
+  backends (Anthropic, OpenRouter, OpenAI, local; Kimi K3.1 Pro through OpenRouter is offered by Detect; a backend chosen as the Extractor takes a Deep-mode game's own files out into `app/Original/` after the study) build with our own loop and the Build tools,
   trim and summarise long conversations and keep them in `transcript.json`; no live API build has
   been run yet.
 - Website checks compare the start page and up to 12 linked pages at the configured widths; the

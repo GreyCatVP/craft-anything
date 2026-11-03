@@ -255,7 +255,7 @@ yet, and the quick start is how every new person begins.
 - [ ] fal bills pictures "by rounding up to the nearest megapixel"; estimates use the exact size.
       Confirm on a real invoice whether a 1024×1024 picture bills as 1 or 2 megapixels, then round
       in the table (needs a key)
-- [ ] A live extraction run with Kimi K3 (needs the person's OpenRouter key)
+- [ ] A live extraction run with Kimi K3.1 Pro (needs the person's OpenRouter key)
 
 **A second computer or another system:**
 - [ ] A live run of a project copied between two real computers with Claude Code (#451, #452); done

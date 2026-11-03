@@ -31,22 +31,22 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
             out.push(Detected { suggestion: cfg(name, kind, model), reason: format!("Found {var} in your environment"), needs_key: false });
         }
     }
-    // Kimi K3 builds through OpenRouter: with its key found, or one the person pastes.
+    // Kimi K3.1 Pro builds through OpenRouter: with its key found, or one the person pastes.
     let found = get("OPENROUTER_API_KEY").is_some_and(|v| !v.trim().is_empty());
     out.push(Detected {
-        suggestion: cfg(KIMI_NAME, BackendKind::Openrouter, crate::openai::KIMI_K3),
+        suggestion: cfg(KIMI_NAME, BackendKind::Openrouter, crate::openai::KIMI_K3_1),
         reason: if found {
-            "Kimi K3 through OpenRouter, with the OPENROUTER_API_KEY in your environment".into()
+            "Kimi K3.1 Pro through OpenRouter, with the OPENROUTER_API_KEY in your environment".into()
         } else {
-            "Kimi K3 through OpenRouter: paste your OpenRouter key".into()
+            "Kimi K3.1 Pro through OpenRouter: paste your OpenRouter key".into()
         },
         needs_key: !found,
     });
     out
 }
 
-/// The name Kimi K3 is added under.
-pub const KIMI_NAME: &str = "Kimi K3 (OpenRouter)";
+/// The name Kimi K3.1 Pro is added under.
+pub const KIMI_NAME: &str = "Kimi K3.1 Pro (OpenRouter)";
 
 /// Is something listening at this URL's host:port? (bounded TCP connect)
 pub fn port_open(base_url: &str, timeout: Duration) -> bool {
@@ -252,9 +252,9 @@ mod tests {
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].suggestion.kind, BackendKind::Openrouter);
         assert!(d[0].reason.contains("OPENROUTER_API_KEY"));
-        // Kimi K3 rides on the same key, so it needs none of its own.
-        assert_eq!((d[1].suggestion.model.as_str(), d[1].needs_key), (crate::openai::KIMI_K3, false));
-        // Without a key, Kimi K3 is still offered, asking for one.
+        // Kimi K3.1 Pro rides on the same key, so it needs none of its own.
+        assert_eq!((d[1].suggestion.model.as_str(), d[1].needs_key), (crate::openai::KIMI_K3_1, false));
+        // Without a key, Kimi K3.1 Pro is still offered, asking for one.
         let none = env_keys(|_| Some("  ".into()));
         assert_eq!(none.len(), 1);
         assert!(none[0].needs_key && none[0].suggestion.name == KIMI_NAME);
