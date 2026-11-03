@@ -426,6 +426,11 @@ mangled by the shell several times. Write multi-line edit scripts to a file and 
 line endings, so a scripted size change rewrote 19 LF files with CRLF (git only warned). Write
 with `write_bytes(s.encode())` and check `git ls-files --eol -m` after scripted edits.
 
+**A process search that found itself.** Looking for a helper by a word in its command line, with
+that word in the search's own command, listed the search: "a helper is left behind" after every
+run, with a new pid each time. The new pid was the clue. Build the pattern from parts
+(`'Set' + 'Thread'`), and don't stop processes by pattern on a machine where real builds may run.
+
 **A command that waits for a terminal.** `git stash show -p` opened a pager and an empty
 `python - <<'EOF'` heredoc opened the interactive interpreter; both sat waiting for input until
 the tool timed out, with work left in a stash. Never run anything that can page or prompt: pass
