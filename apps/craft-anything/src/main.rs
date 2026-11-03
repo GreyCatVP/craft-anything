@@ -82,23 +82,40 @@ fn main() -> eframe::Result {
         setup.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(eframe::wgpu::Dx12Compiler::from_env());
         setup.native_adapter_selector = Some(Arc::new(pick_adapter));
     }
-    let run = eframe::run_native(
-        "Craft Anything",
-        options,
-        Box::new(move |cc| {
-            log::info!("window open");
-            CraftApp::setup_context(&cc.egui_ctx);
-            let mut app = CraftApp::new(engine, hub);
-            // The window is built hidden and its first frame is drawn afterwards, where a graphics
-            // driver may still crash: the mark stays until frames have been shown (#74).
-            app.after_first_frames(move || start_guard::opened(&config));
-            app.load_prefs(cc.storage);
-            if let Some(p) = open {
-                app.open_path(p);
-            }
-            Ok(Box::new(app))
-        }),
-    );
+    // Set once the first frames have been shown. Before that, eframe 0.36's wgpu panics when it
+    // can't configure the window's surface (no usable GPU, or no desktop: winget-pkgs validation
+    // starts the app that way and rejected the panic, exit 101), instead of returning an error.
+    let shown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shown_by_app = Arc::clone(&shown);
+    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "Craft Anything",
+            options,
+            Box::new(move |cc| {
+                log::info!("window open");
+                CraftApp::setup_context(&cc.egui_ctx);
+                let mut app = CraftApp::new(engine, hub);
+                // The window is built hidden and its first frame is drawn afterwards, where a graphics
+                // driver may still crash: the mark stays until frames have been shown (#74).
+                app.after_first_frames(move || {
+                    start_guard::opened(&config);
+                    shown_by_app.store(true, std::sync::atomic::Ordering::Relaxed);
+                });
+                app.load_prefs(cc.storage);
+                if let Some(p) = open {
+                    app.open_path(p);
+                }
+                Ok(Box::new(app))
+            }),
+        )
+    }));
+    let run = match run {
+        Ok(run) => run,
+        // A window that never showed: report it like any other start failure, below.
+        Err(payload) if !shown.load(std::sync::atomic::Ordering::Relaxed) => Err(eframe::Error::AppCreation(panic_text(payload.as_ref()).into())),
+        // A panic after the window was up is a bug, not a start failure: it ends the app as before.
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
     match &run {
         Ok(()) => log::info!("closed"),
         Err(e) => {
@@ -133,6 +150,15 @@ fn dx12_compiler(from_env: Option<eframe::wgpu::Dx12Compiler>) -> eframe::wgpu::
 #[cfg_attr(all(not(windows), not(test)), expect(dead_code, reason = "only Windows picks its own graphics adapter"))]
 fn wants_software(setting: Option<&str>) -> bool {
     setting.is_some_and(|s| s.trim().eq_ignore_ascii_case("software"))
+}
+
+/// The message a panic carried (`panic!` with a literal or a formatted string), or a generic one.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    match (payload.downcast_ref::<&str>(), payload.downcast_ref::<String>()) {
+        (Some(text), _) => (*text).to_string(),
+        (None, Some(text)) => text.clone(),
+        (None, None) => "the graphics start failed".to_string(),
+    }
 }
 
 /// What to try when the window can't start. A lost graphics device on Windows gets the way to the
@@ -205,6 +231,18 @@ fn adapter_rank(backend: eframe::wgpu::Backend, device: eframe::wgpu::DeviceType
 mod tests {
     use super::*;
     use eframe::wgpu::{Backend as B, DeviceType as T};
+
+    /// A panic before the window showed becomes the error the start-failure dialog shows: wgpu's
+    /// own message when there is one (`panic!` with a literal or a formatted string).
+    #[test]
+    fn a_start_panic_keeps_its_message() {
+        let literal: Box<dyn std::any::Any + Send> = Box::new("wgpu error: Validation Error");
+        let formatted: Box<dyn std::any::Any + Send> = Box::new(String::from("In Surface::configure: Invalid surface"));
+        let other: Box<dyn std::any::Any + Send> = Box::new(7_u8);
+        assert_eq!(panic_text(literal.as_ref()), "wgpu error: Validation Error");
+        assert_eq!(panic_text(formatted.as_ref()), "In Surface::configure: Invalid surface");
+        assert_eq!(panic_text(other.as_ref()), "the graphics start failed");
+    }
 
     /// #27: a VMware VM offers its virtual GPU over GL and WARP over DX12; GL drew a black window.
     /// #33: a start that shows nothing is looked at through `desktop.log`; between same-class
