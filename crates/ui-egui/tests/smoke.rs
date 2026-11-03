@@ -59,6 +59,21 @@ fn first_run_walks_through_four_screens() {
     h.get_by_label("Just look inside");
 }
 
+/// A model server on another computer can be added from the first run's AI step, without
+/// leaving for Settings.
+#[test]
+fn first_run_ai_step_can_add_a_server_by_its_address() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.get_by_label("I'm new to this").click();
+    h.run_steps(3);
+    assert_eq!(h.state().state.first_run, FirstRunStep::Brain);
+    let _ = h.get_by_label("Server address");
+    let _ = h.get_by_label("AI name");
+    // The demo already has an AI, so "we didn't find one" isn't said.
+    assert!(h.query_by_label("We didn't find an AI on this computer yet").is_none());
+}
+
 /// #231: at the smallest window the app allows, Purpose's Continue was below the window with
 /// nothing to scroll; it scrolls into view above the footer and works.
 #[test]

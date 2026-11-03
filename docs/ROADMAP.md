@@ -250,6 +250,11 @@ been run live.
 - [x] Do not select an embedding, ranking or transcription model as a chat backend when a local server has no chat models — claimed: Afloat16, branch bugfix/r5.4-nonchat-model-detection-20261103
 - [x] Recognize specialised model file paths and numeric task-name versions during local chat setup
       — claimed: Afloat16, branch bugfix/r5.4-model-task-identifiers-20261103
+- [x] The first run's AI step can add a model server on another computer by its address (llama.cpp,
+      Ollama or LM Studio on a home server), the same form as Settings → AI
+- [ ] A chat sent while a llama.cpp router is still loading the model ended after 31 s with "The
+      answer stream ended early." and no next step (seen once live, 27B model); say the server may
+      still be loading it and to try again in a minute
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo

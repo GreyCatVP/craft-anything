@@ -673,7 +673,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
 
 /// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by
 /// its address (#54, #98). The server is asked for its models before it's added.
-fn server_form(app: &mut CraftApp, ui: &mut Ui) {
+/// The first run's AI step shows it too.
+pub(crate) fn server_form(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(14.0);
     widgets::caption(ui, "Add an AI by its address");
