@@ -165,11 +165,14 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 ### R5.3 A builder that can't make progress stops
 Owner: open · Status: todo
 Every round spends the person's money or quota. One that can't do anything shouldn't start.
-- [ ] A build stops and says why after two builder turns in a row that changed nothing in `app/`,
-      on every backend (#44, #110, #417, #481). The count is saved in the project, so it holds
-      across runs: a run ends at 7 checks (`max_rounds`) but check numbers carry on, so #44's check
-      28 and #417's 35+ look like several runs (a guess: Try again is the only restart found, and
-      Auto mode doesn't start runs)
+- [x] A build stops and says why after two checks in a row that found `app/` unchanged and the build
+      not good, on every backend (#44, #110, #417, #481): `rebuild/stall.rs`. The count
+      (`Manifest::stalled_checks`) is saved in the project, so Try again gets one more turn and
+      anything written to `app/` starts it again. A run ends at 7 checks (`max_rounds`) but check
+      numbers carry on, so #44's check 28 and #417's 35+ look like several runs (a guess: Try again
+      is the only restart found, and Auto mode doesn't start runs)
+- [ ] Check #110 live with a small local model that never writes (Ollama, qwen3.5:9b): that the run
+      stops after two checks with the new message
 - [x] A builder whose tools didn't start isn't resumed. `turn` (`rebuild/mod.rs`) tries 3 more times
       ("Picking up where it left off", #377) because `worth_retrying` doesn't know this error. Give
       it a typed signal, as `Conversation::session_lost` does, not one more word in that function's

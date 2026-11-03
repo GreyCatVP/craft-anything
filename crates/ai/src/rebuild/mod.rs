@@ -49,6 +49,7 @@ pub mod question;
 pub mod runs;
 pub mod self_check;
 pub mod stacks;
+mod stall;
 pub mod stand_in;
 mod study;
 #[cfg(test)]
@@ -684,6 +685,9 @@ impl Worker {
         let mut reminded = false;
         // The builder finished and only the check didn't: the build is there to check.
         let mut only_check = carrying_on && !first && opts.message.is_none() && ws.manifest.awaiting_check;
+        // How `app/` was at the last check (or when the run began): a check that finds it the same
+        // and the build still not good is a stalled one (#110).
+        let mut app_seen = stall::fingerprint(&ws.app_dir());
         loop {
             if !std::mem::take(&mut only_check) {
                 let doing = match (round, carrying_on) {
@@ -728,6 +732,10 @@ impl Worker {
             let checks = self.checks_with_a_retry(ws, kind, round)?;
             ws.manifest.checks.extend(checks.iter().cloned());
             ws.manifest.awaiting_check = false;
+            let app_now = stall::fingerprint(&ws.app_dir());
+            ws.manifest.stalled_checks =
+                if checks.iter().all(|c| c.good(opts.good_enough)) { 0 } else { stall::next(ws.manifest.stalled_checks, app_seen, app_now) };
+            app_seen = app_now;
             ws.save()?;
             for c in &checks {
                 self.emit(RunEvent::Checked(c.clone()));
@@ -738,6 +746,10 @@ impl Worker {
                 continue;
             }
             let Some(check) = not_good else { break };
+            // The builder keeps answering and writes nothing: say so, not another round (#110).
+            if stall::stopped(ws.manifest.stalled_checks) {
+                return Err(stall::error());
+            }
             if refinements >= opts.max_rounds {
                 break;
             }

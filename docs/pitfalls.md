@@ -177,6 +177,12 @@ with the system (FXC), and keep the environment variable (`WGPU_DX12_COMPILER`) 
 another. A window that can't start now says how to draw without the graphics card
 (`CRAFT_ANYTHING_RENDERER=software`). Not run on the reporter's machine or on Windows here.
 
+**A loop that doesn't ask whether anything happened.** A small local model answered "I fixed it"
+while `app/` stayed empty, and the run checked, refined and asked again for 28 checks (#110, #44,
+#417, #481). A loop that spends money on each round checks that the round changed something
+(`rebuild/stall.rs` compares `app/` at each check) and stops with a reason when it didn't, twice in a
+row; the count is kept in the project so a restart doesn't hide it.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias

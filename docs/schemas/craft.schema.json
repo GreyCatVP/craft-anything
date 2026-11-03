@@ -98,6 +98,12 @@
       "type": "string",
       "default": ""
     },
+    "stalled_checks": {
+      "description": "Checks in a row that found `app/` as it was and the build not good: the builder answered\nwithout writing anything (`rebuild::stall`). Kept here so Try again doesn't start over.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
     "start_files": {
       "description": "The names in the person's folder when the project started there (at most\n[`START_FILES_SHOWN`]), so the builder knows what to start from.",
       "type": "array",

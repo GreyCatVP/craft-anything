@@ -415,6 +415,14 @@ pub struct Manifest {
     /// that picks this up only needs to check: nothing is left to build.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub awaiting_check: bool,
+    /// Checks in a row that found `app/` as it was and the build not good: the builder answered
+    /// without writing anything (`rebuild::stall`). Kept here so Try again doesn't start over.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub stalled_checks: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Manifest {
@@ -442,6 +450,7 @@ impl Manifest {
             builder: None,
             questions: None,
             awaiting_check: false,
+            stalled_checks: 0,
         }
     }
 
