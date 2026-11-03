@@ -359,9 +359,12 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
-- [ ] A saved agent program path that no longer exists (Codex desktop moves its CLI to a new
+- [x] A saved agent program path that no longer exists (Codex desktop moves its CLI to a new
       build folder on every update) says so and names the path, instead of "isn't installed or
-      isn't on your PATH" (#721) — claimed: FuryNocturn, branch bugfix/stale-agent-program-path
+      isn't on your PATH" (#721); it stays a missing program, so a builder turn isn't retried
+- [ ] When a saved Codex desktop path is gone, offer the CLI found in its newest build folder
+      (asking first, never replacing a custom program silently), and let Detect/Test check the
+      configured program itself (#721)
 - [x] GitHub Copilot through its own CLI login and ACP, without credential import:
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
