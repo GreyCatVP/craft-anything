@@ -73,6 +73,8 @@ enum Supply<'a> {
     Shape(Shape),
     Count(u32),
     Seconds(f64),
+    /// A length in milliseconds: the seconds asked for times a thousand, rounded up.
+    Millis(i64),
     Flag(bool),
 }
 
@@ -88,6 +90,10 @@ fn supply<'a>(req: &AssetRequest<'a>, role: Role) -> Option<Supply<'a>> {
         (R::Model3d { faces, .. }, Role::Faces) => Some(Supply::Count(faces)),
         (R::Model3d { textured, .. }, Role::Textured) => Some(Supply::Flag(textured)),
         (R::SoundEffect { duration_seconds, .. } | R::Music { duration_seconds, .. }, Role::Duration) => Some(Supply::Seconds(duration_seconds)),
+        // `as` saturates, and a length that is not a number never gets here (`map_request` refuses it).
+        (R::SoundEffect { duration_seconds, .. } | R::Music { duration_seconds, .. }, Role::DurationMs) => {
+            Some(Supply::Millis((duration_seconds * 1000.0).ceil() as i64))
+        }
         (R::Music { instrumental, .. }, Role::Instrumental) => Some(Supply::Flag(instrumental)),
         // No voice asked for is no voice sent.
         (R::Speech { voice_id, .. }, Role::Voice) => filled(Some(voice_id)).map(Supply::Text),
@@ -134,7 +140,7 @@ fn option_of(role: Role) -> Option<AssetOption> {
         Role::Shape | Role::Width | Role::Height => Some(AssetOption::Shape),
         Role::Faces => Some(AssetOption::Faces),
         Role::Textured => Some(AssetOption::Textured),
-        Role::Duration => Some(AssetOption::Duration),
+        Role::Duration | Role::DurationMs => Some(AssetOption::Duration),
         Role::Instrumental => Some(AssetOption::Instrumental),
         Role::Voice => Some(AssetOption::Voice),
     }
@@ -146,7 +152,7 @@ fn holds(role: Role, kind: &FieldKind) -> bool {
         Role::Prompt => matches!(kind, FieldKind::Text),
         Role::Image => matches!(kind, FieldKind::Text | FieldKind::Image | FieldKind::Images),
         Role::Shape => matches!(kind, FieldKind::Choice(_)),
-        Role::Width | Role::Height | Role::Faces | Role::Duration => matches!(kind, FieldKind::Integer { .. } | FieldKind::Number { .. }),
+        Role::Width | Role::Height | Role::Faces | Role::Duration | Role::DurationMs => matches!(kind, FieldKind::Integer { .. } | FieldKind::Number { .. }),
         Role::Textured | Role::Instrumental => matches!(kind, FieldKind::Bool),
         Role::Voice => matches!(kind, FieldKind::Text | FieldKind::Choice(_)),
     }
@@ -231,6 +237,9 @@ fn place(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) ->
         // `as` saturates, and `round` of a finite number is finite: no overflow, no panic.
         (Supply::Seconds(x), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(x.round() as i64, *min, *max))),
         (Supply::Seconds(x), FieldKind::Number { min, max }) => float(bounded(x, *min, *max)),
+        // Milliseconds are whole numbers even for a field declared as a number.
+        (Supply::Millis(ms), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(ms, *min, *max))),
+        (Supply::Millis(ms), FieldKind::Number { min, max }) => Some(Value::from(bounded_whole(ms, *min, *max))),
         (Supply::Flag(on), FieldKind::Bool) => Some(Value::Bool(on)),
         _ => None,
     }
@@ -777,6 +786,60 @@ mod tests {
         let mapped = map(&fields, music);
         assert_eq!(body(&mapped), json!({"prompt": "calm", "force_instrumental": true}));
         assert_eq!(mapped.ignored, [AssetOption::Duration]);
+    }
+
+    /// A length in milliseconds (ElevenLabs' music, `music_length_ms`) is the seconds asked for times a
+    /// thousand, rounded up, and a whole number whatever kind of number the field is declared as.
+    #[test]
+    fn a_length_in_milliseconds_is_a_whole_number_of_them() {
+        let roles = InputRoles::built_in();
+        let music = |seconds: f64| AssetRequest::Music { prompt: "calm", duration_seconds: seconds, instrumental: false };
+        let sound = |seconds: f64| AssetRequest::SoundEffect { prompt: "wind", duration_seconds: seconds };
+        let whole = [field("prompt", FieldKind::Text), field("music_length_ms", int(Some(3000), Some(600_000)))];
+        assert_eq!(body(&map(&whole, music(12.3))), json!({"prompt": "calm", "music_length_ms": 12300}));
+        assert_eq!(body(&map(&whole, music(12.0004))), json!({"prompt": "calm", "music_length_ms": 12001}), "rounded up, never short");
+        assert_eq!(body(&map(&whole, music(1.0))), json!({"prompt": "calm", "music_length_ms": 3000}), "held to the field's lowest");
+        assert_eq!(body(&map(&whole, music(1e300))), json!({"prompt": "calm", "music_length_ms": 600_000}), "held to the field's highest");
+        // A number field is given the same whole number, not 12300.0.
+        let number = [field("prompt", FieldKind::Text), field("duration_ms", num(Some(3000.0), Some(600_000.0)))];
+        let mapped = map(&number, music(12.3));
+        assert_eq!(body(&mapped), json!({"prompt": "calm", "duration_ms": 12300}));
+        assert!(mapped.body.get("duration_ms").is_some_and(|v| v.is_i64()), "{:?}", mapped.body);
+        // A sound effect has a length too, and a field with no limits takes the length as it is.
+        let free = [field("text", FieldKind::Text), field("duration_ms", int(None, None))];
+        assert_eq!(body(&map(&free, sound(2.5))), json!({"text": "wind", "duration_ms": 2500}));
+        // It is a length: not a field that holds text, and not for a request that has none.
+        let text = [field("prompt", FieldKind::Text), field("music_length_ms", FieldKind::Text)];
+        assert_eq!(body(&map(&text, music(12.3))), json!({"prompt": "calm"}));
+        let speech = AssetRequest::Speech { text: "hello", voice_id: "v" };
+        assert_eq!(body(&map(&[field("text", FieldKind::Text), field("duration_ms", int(None, None))], speech)), json!({"text": "hello"}));
+        // A length that is not a number is refused, as for seconds.
+        assert_eq!(map_request(&whole, &music(f64::NAN), roles).unwrap_err().code, ErrorCode::BadInput);
+        // Only a request with a length ever has something for the role.
+        for (kind, used) in
+            [(AssetKind::Image, false), (AssetKind::Model3d, false), (AssetKind::Speech, false), (AssetKind::SoundEffect, true), (AssetKind::Music, true)]
+        {
+            assert_eq!(used_by(kind, Role::DurationMs), used, "{kind:?}");
+        }
+    }
+
+    /// The length in milliseconds is the option "duration": a model that takes it does not ignore it.
+    #[test]
+    fn a_model_that_takes_the_length_in_milliseconds_does_not_ignore_it() {
+        let roles = InputRoles::built_in();
+        let prompt = field("prompt", FieldKind::Text);
+        let millis = field("music_length_ms", int(Some(3000), Some(600_000)));
+        let instrumental = field("force_instrumental", FieldKind::Bool);
+        assert_eq!(runnable(&[prompt.clone(), millis.clone()], AssetKind::Music, roles), Ok(vec![AssetOption::Instrumental]));
+        assert_eq!(runnable(&[prompt.clone(), millis.clone(), instrumental], AssetKind::Music, roles), Ok(vec![]));
+        assert_eq!(runnable(&[prompt.clone(), millis], AssetKind::SoundEffect, roles), Ok(vec![]));
+        // A field of the wrong kind takes nothing.
+        let text = field("music_length_ms", FieldKind::Text);
+        assert_eq!(runnable(&[prompt, text], AssetKind::SoundEffect, roles), Ok(vec![AssetOption::Duration]));
+        // And the mapper agrees with `runnable`.
+        let fields = [field("prompt", FieldKind::Text), field("music_length_ms", int(None, None))];
+        let music = AssetRequest::Music { prompt: "calm", duration_seconds: 5.0, instrumental: true };
+        assert_eq!(map(&fields, music).ignored, [AssetOption::Instrumental]);
     }
 
     #[test]

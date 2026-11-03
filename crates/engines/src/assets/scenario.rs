@@ -1706,6 +1706,10 @@ mod listing_tests {
             ("gone", 410, "{}".to_string(), false),
             ("unprocessable", 422, "{}".to_string(), false),
             ("teapot", 418, "{}".to_string(), false),
+            // Asked not to follow a redirect, an answer that is one is not the model.
+            ("moved", 301, "{}".to_string(), false),
+            ("see other", 303, "{}".to_string(), false),
+            ("not modified", 304, "{}".to_string(), false),
             // The network, a timeout, a request answered too early and a server's trouble may pass.
             ("request timeout", 408, "{}".to_string(), true),
             ("too early", 425, "{}".to_string(), true),

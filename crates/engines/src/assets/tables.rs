@@ -130,6 +130,8 @@ pub enum Role {
     Textured,
     /// How long a sound or a track lasts, in seconds.
     Duration,
+    /// How long a sound or a track lasts, in milliseconds (a whole number of them).
+    DurationMs,
     /// Music without vocals.
     Instrumental,
     /// The voice speech is read in.
@@ -139,8 +141,19 @@ pub enum Role {
 impl Role {
     /// Every role. A new variant must be added here as well as to the matches on `Role`, which
     /// the compiler checks; a test requires `input_roles.toml` to give each one a field name.
-    pub const ALL: [Role; 10] =
-        [Role::Prompt, Role::Image, Role::Shape, Role::Width, Role::Height, Role::Faces, Role::Textured, Role::Duration, Role::Instrumental, Role::Voice];
+    pub const ALL: [Role; 11] = [
+        Role::Prompt,
+        Role::Image,
+        Role::Shape,
+        Role::Width,
+        Role::Height,
+        Role::Faces,
+        Role::Textured,
+        Role::Duration,
+        Role::DurationMs,
+        Role::Instrumental,
+        Role::Voice,
+    ];
 }
 
 /// The field names of each role, as written in `input_roles.toml`.
@@ -155,12 +168,13 @@ struct RoleNames {
     faces: Vec<String>,
     textured: Vec<String>,
     duration: Vec<String>,
+    duration_ms: Vec<String>,
     instrumental: Vec<String>,
     voice: Vec<String>,
 }
 
 impl RoleNames {
-    fn by_role(&self) -> [(Role, &[String]); 10] {
+    fn by_role(&self) -> [(Role, &[String]); 11] {
         [
             (Role::Prompt, &self.prompt),
             (Role::Image, &self.image),
@@ -170,6 +184,7 @@ impl RoleNames {
             (Role::Faces, &self.faces),
             (Role::Textured, &self.textured),
             (Role::Duration, &self.duration),
+            (Role::DurationMs, &self.duration_ms),
             (Role::Instrumental, &self.instrumental),
             (Role::Voice, &self.voice),
         ]
@@ -403,6 +418,7 @@ mod tests {
                 Role::Faces => "target_face_count",
                 Role::Textured => "should_texture",
                 Role::Duration => "seconds_total",
+                Role::DurationMs => "music_length_ms",
                 Role::Instrumental => "force_instrumental",
                 Role::Voice => "voice_id",
             }
@@ -411,7 +427,7 @@ mod tests {
         for role in Role::ALL {
             assert_eq!(table.role_of(example_field(role)), Some(role), "{role:?} has no field name in input_roles.toml");
         }
-        // `ALL` lists each role once, and the table parser's own list covers the same ten.
+        // `ALL` lists each role once, and the table parser's own list covers the same eleven.
         let distinct: HashSet<Role> = Role::ALL.into_iter().collect();
         assert_eq!(distinct.len(), Role::ALL.len());
         let parsed: HashSet<Role> = RoleNames::default().by_role().into_iter().map(|(role, _)| role).collect();
@@ -443,12 +459,14 @@ mod tests {
             ("should_texture", Role::Textured),
             ("enable_pbr", Role::Textured),
             ("seconds_total", Role::Duration),
+            // Milliseconds are their own role: a length in seconds is not passed to them.
+            ("music_length_ms", Role::DurationMs),
+            ("duration_ms", Role::DurationMs),
             ("force_instrumental", Role::Instrumental),
             ("voice_id", Role::Voice),
         ] {
             assert_eq!(roles.role_of(field), Some(role), "{field}");
         }
-        assert_eq!(roles.role_of("music_length_ms"), None, "milliseconds are not seconds");
         assert_eq!(roles.role_of("Prompt"), None, "field names are exact");
         // The first value in the table's order that the field allows, not the first it lists.
         assert_eq!(roles.shape_value(Shape::Square, &strings(&["1:1", "square", "square_hd"])), Some("square_hd".into()));
