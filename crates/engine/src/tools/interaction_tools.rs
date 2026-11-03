@@ -252,7 +252,7 @@ pub(crate) fn resolve(base: &Path, p: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-pub(crate) use crate::workspace::{inside, really_inside};
+pub(crate) use crate::workspace::{inside, may_reach, really_inside};
 
 /// The program a command part starts (a leading quoted path keeps its spaces) and the rest.
 fn program_of(part: &str) -> (&str, &str) {
@@ -427,7 +427,8 @@ pub fn off_limits(ws: Option<&Workspace>, tool: &str, input: &Value) -> Option<S
         crate::workspace::TargetRef::Local { path } => {
             // The original and, when it's one file, the folder it sits in.
             let root = if path.is_file() { path.parent().unwrap_or(path) } else { path.as_path() };
-            let touches = |p: &str| !p.is_empty() && resolve(&ws.root, p).is_some_and(|p| inside(root, &p) && !inside(&ws.root, &p));
+            // Followed through links, so a link in the project to the original doesn't open it.
+            let touches = |p: &str| !p.is_empty() && resolve(&ws.root, p).is_some_and(|p| may_reach(root, &p) && !really_inside(&ws.root, &p));
             match tool {
                 "Read" | "Write" | "Edit" | "MultiEdit" => touches(&s("file_path")),
                 "NotebookRead" | "NotebookEdit" => touches(&s("notebook_path")),
@@ -493,7 +494,8 @@ pub fn never_unasked(ws: Option<&Workspace>, tool: &str, input: &Value) -> Optio
         "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
             let target = if tool == "NotebookEdit" { s("notebook_path") } else { s("file_path") };
             let p = resolve(ws.map(|w| w.root.clone()).as_deref().unwrap_or(Path::new("/")), &target)?;
-            let system = SYSTEM_DIRS.iter().any(|d| inside(Path::new(d), &p));
+            // Followed through links: a link in app/ to a system folder is that folder.
+            let system = SYSTEM_DIRS.iter().any(|d| may_reach(Path::new(d), &p));
             // The inbox (where answers are written), the manifest and the other records stay out of reach.
             let ours = ws.is_some_and(|w| w.is_own_record(&p));
             (system || ours).then(|| refuse("changes system files or Craft Anything's own records")).flatten()
@@ -674,17 +676,22 @@ mod tests {
         assert!(matches!(decide(None, "Write", &json!({"file_path": "/tmp/x"})), Decision::Ask { .. }));
     }
 
+    /// A link to a folder; false where this system won't let a test make one.
+    fn link_dir(target: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(target, link);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(target, link);
+        made.is_ok()
+    }
+
     #[test]
     fn a_write_through_a_link_out_of_app_is_asked() {
         let (_d, w) = ws();
         let outside = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(w.app_dir()).unwrap();
         let link = w.app_dir().join("out");
-        #[cfg(unix)]
-        let made = std::os::unix::fs::symlink(outside.path(), &link);
-        #[cfg(windows)]
-        let made = std::os::windows::fs::symlink_dir(outside.path(), &link);
-        if made.is_err() {
+        if !link_dir(outside.path(), &link) {
             eprintln!("skipped: this system won't make links for tests");
             return;
         }
@@ -692,6 +699,36 @@ mod tests {
         assert!(matches!(decide(Some(&w), "Write", &through("x.txt")), Decision::Ask { .. }));
         assert!(matches!(decide(Some(&w), "Edit", &through("new/y.txt")), Decision::Ask { .. }));
         assert_eq!(decide(Some(&w), "Write", &json!({"file_path": w.app_dir().join("ok.txt").display().to_string()})), Decision::Allow);
+        assert_eq!(never_unasked(Some(&w), "Write", &through("x.txt")), None, "an ordinary folder may be asked about");
+    }
+
+    /// Auto mode approves what the policy asks about, so the lines it never crosses must follow
+    /// links too: a link in app/ to a system folder, or (Clean room) to the original.
+    #[test]
+    fn auto_mode_and_clean_room_limits_follow_links() {
+        let (_d, w) = ws();
+        std::fs::create_dir_all(w.app_dir()).unwrap();
+        let system = if cfg!(windows) { "C:/Windows" } else { "/etc" };
+        let sys = w.app_dir().join("sys");
+        if !link_dir(Path::new(system), &sys) {
+            eprintln!("skipped: this system won't make links for tests");
+            return;
+        }
+        let write = |p: &Path| json!({"file_path": p.display().to_string()});
+        assert!(never_unasked(Some(&w), "Write", &write(&sys.join("hosts"))).is_some());
+        assert!(never_unasked(Some(&w), "Edit", &write(&sys.join("new/x.conf"))).is_some());
+        assert_eq!(never_unasked(Some(&w), "Write", &write(&w.app_dir().join("main.rs"))), None);
+
+        let dir = tempfile::tempdir().unwrap();
+        let game = dir.path().join("Some Game");
+        std::fs::create_dir_all(&game).unwrap();
+        let cw = Workspace::create(&dir.path().join("projects"), "g", "Recreate this game", TargetRef::Local { path: game.clone() }).unwrap();
+        std::fs::create_dir_all(cw.app_dir()).unwrap();
+        let orig = cw.app_dir().join("orig");
+        assert!(link_dir(&game, &orig));
+        assert!(off_limits(Some(&cw), "Read", &write(&orig.join("data.ini"))).is_some());
+        assert!(off_limits(Some(&cw), "Write", &write(&orig.join("new.txt"))).is_some());
+        assert_eq!(off_limits(Some(&cw), "Read", &write(&cw.app_dir().join("main.rs"))), None);
     }
 
     #[test]

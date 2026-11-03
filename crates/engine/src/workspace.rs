@@ -972,6 +972,17 @@ pub fn really_inside(dir: &Path, p: &Path) -> bool {
     inside(dir, p) && matches!((real_path(dir), real_path(p)), (Some(d), Some(p)) if inside(&d, &p))
 }
 
+/// The other side of [`really_inside`], for places that must be kept out of: `p` may land in
+/// `dir` as written, once links are followed (also links in `dir`'s own path, such as macOS's
+/// `/etc` → `/private/etc`), or because a link in `p` can't be followed to tell.
+pub fn may_reach(dir: &Path, p: &Path) -> bool {
+    inside(dir, p)
+        || match real_path(p) {
+            Some(real) => inside(dir, &real) || real_path(dir).is_some_and(|d| inside(&d, &real)),
+            None => true,
+        }
+}
+
 /// How many of a picked folder's names are kept for the builder.
 pub const START_FILES_SHOWN: usize = 40;
 
