@@ -1,10 +1,19 @@
-//! ElevenLabs audio, using the caller's key and published rate estimates.
-use super::{AssetProvider, Generated, LegacyRequest, http};
-use craft_anything_evidence::ToolError;
-use serde_json::json;
+//! ElevenLabs audio, using the caller's key. [`ElevenLabs::list`] and [`ElevenLabs::describe`] say
+//! which models make each type of audio and what they cost in credits: speech models come from the
+//! account's own list, sound effects and music are the two fixed endpoints whose rates the app keeps
+//! (`known_models.toml`).
+use super::inputs::{FieldKind, InputField, REMEDIATION};
+use super::model::{ListedModel, MAX_ASSET_CREDITS, ModelDetail, ModelList, Pricing, Rate, Unit};
+use super::tables::{KnownModel, KnownModels};
+use super::{AssetKind, AssetProvider, Generated, LegacyRequest, http};
+use craft_anything_evidence::{ErrorCode, ToolError};
+use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::time::Duration;
 
 pub const ID: &str = "elevenlabs";
+/// What people call it.
+const NAME: &str = "ElevenLabs";
 pub struct ElevenLabs {
     base: String,
 }
@@ -14,6 +23,10 @@ impl Default for ElevenLabs {
         Self { base: "https://api.elevenlabs.io/v1".into() }
     }
 }
+
+/// The lengths, in seconds, of a sound effect and of a track that ElevenLabs makes.
+const SOUND_SECONDS: (f64, f64) = (0.5, 30.0);
+const MUSIC_SECONDS: (f64, f64) = (3.0, 600.0);
 
 /// Check modality-specific limits, identifiers, provider ownership, and a positive finite estimate.
 fn validate(req: &LegacyRequest) -> Result<(), ToolError> {
@@ -25,12 +38,12 @@ fn validate(req: &LegacyRequest) -> Result<(), ToolError> {
         }
         LegacyRequest::SoundEffect { model, prompt, duration_seconds } => {
             http::text(prompt, 2000)?;
-            http::duration(duration_seconds, 0.5, 30.0)?;
+            http::duration(duration_seconds, SOUND_SECONDS.0, SOUND_SECONDS.1)?;
             model
         }
         LegacyRequest::Music { model, prompt, duration_seconds, .. } => {
             http::text(prompt, 2000)?;
-            http::duration(duration_seconds, 3.0, 600.0)?;
+            http::duration(duration_seconds, MUSIC_SECONDS.0, MUSIC_SECONDS.1)?;
             model
         }
         _ => return Err(http::bad("ElevenLabs does not support this asset request.")),
@@ -102,6 +115,219 @@ impl AssetProvider for ElevenLabs {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Listing: the models ElevenLabs makes audio with, and what they cost in credits.
+// ---------------------------------------------------------------------------------------------
+
+/// The most models of the account's list that are read.
+const MAX_MODELS: usize = 200;
+/// How long the one request for the list may take.
+const LIST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Said beside a speech list made without a key.
+const NO_KEY: &str = "Add an ElevenLabs key in Settings \u{2192} AI \u{2192} Game assets to list the speech models your account can use and what each \
+                      costs; sound effects and music need no list.";
+
+impl ElevenLabs {
+    /// The models ElevenLabs makes `kind` with, and what each costs in credits.
+    ///
+    /// Speech models are the account's: `GET /models` with the key (which needs the `models_read`
+    /// permission), the models that make speech and need no alpha access, each priced by its
+    /// `character_cost_multiplier` in credits a character. Without a key the list is empty and
+    /// `error` says to add one. Sound effects and music have one model each, fixed in
+    /// `known_models.toml` with the credit rate the app keeps for it, and are listed with or without a
+    /// key and without a request. ElevenLabs makes no pictures or 3D models: the list is empty.
+    ///
+    /// A request that fails is an error (nothing was read); a list longer than [`MAX_MODELS`] is cut,
+    /// and `error` says so.
+    pub fn list(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
+        match kind {
+            AssetKind::SoundEffect | AssetKind::Music => Ok(ModelList { models: fixed_models(kind), error: None }),
+            AssetKind::Image | AssetKind::Model3d => Ok(ModelList { models: Vec::new(), error: None }),
+            AssetKind::Speech => {
+                let Some(key) = key else { return Ok(ModelList { models: Vec::new(), error: Some(NO_KEY.to_string()) }) };
+                let Account { models, cut } = self.account(http::key(key)?)?;
+                let mut listed: HashSet<&str> = HashSet::new();
+                let models = models
+                    .iter()
+                    .filter_map(|entry| {
+                        let id = speech_id(entry)?;
+                        listed.insert(id).then(|| speech_model(entry, id))
+                    })
+                    .collect();
+                let error = cut.then(|| format!("The list is incomplete: only the first {MAX_MODELS} models were read."));
+                Ok(ModelList { models, error })
+            }
+        }
+    }
+
+    /// One model with the inputs a request for it carries and its price. A sound effect or music
+    /// model is one of the fixed two and needs no request; a speech model is looked up in the
+    /// account's list, and one it no longer holds (or that makes no speech, or needs alpha access) is a
+    /// [`ErrorCode::BadSettings`] error that names it.
+    pub fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
+        let key = http::key(key)?;
+        if http::id(model).is_err() {
+            return Err(http::bad("That is not an id ElevenLabs gives its models.").with_remediation(REMEDIATION));
+        }
+        if let Some(fixed) = fixed_model(model) {
+            return Ok(ModelDetail {
+                id: fixed.id.clone(),
+                name: fixed.name.clone(),
+                kinds: fixed.kinds.clone(),
+                fields: fixed.kinds.first().map_or_else(Vec::new, |&kind| fixed_fields(kind)),
+                pricing: per_second(fixed),
+            });
+        }
+        let Account { models, .. } = self.account(key)?;
+        let entry = models.iter().find(|entry| speech_id(entry) == Some(model)).ok_or_else(|| http::gone(NAME, model))?;
+        Ok(ModelDetail {
+            id: model.to_string(),
+            name: name_of(entry, model),
+            kinds: vec![AssetKind::Speech],
+            fields: fixed_fields(AssetKind::Speech),
+            pricing: speech_pricing(entry),
+        })
+    }
+
+    /// The account's models, at most [`MAX_MODELS`] of them, as ElevenLabs answered. The key goes only
+    /// to ElevenLabs' API.
+    fn account(&self, key: &str) -> Result<Account, ToolError> {
+        let response = http::agent(LIST_TIMEOUT).get(format!("{}/models", self.base)).header("xi-api-key", key).call().map_err(|_| http::cannot_reach(NAME))?;
+        let status = response.status().as_u16();
+        // A key without `models_read` is answered 404 (`workspace_not_found`), a key that is wrong 401.
+        if matches!(status, 401 | 403 | 404) {
+            return Err(refused());
+        }
+        http::status(status)?;
+        let Value::Array(mut models) = http::json(response.into_body())? else {
+            return Err(http::garbled("ElevenLabs' model list could not be read."));
+        };
+        let cut = models.len() > MAX_MODELS;
+        models.truncate(MAX_MODELS);
+        Ok(Account { models, cut })
+    }
+}
+
+/// The models of the account's list that were read, and whether more were left unread.
+struct Account {
+    models: Vec<Value>,
+    cut: bool,
+}
+
+/// ElevenLabs would not list its models for this key.
+fn refused() -> ToolError {
+    ToolError::new(ErrorCode::BadSettings, "ElevenLabs did not let this key read its list of models.").with_remediation(
+        "Check the key in Settings \u{2192} AI \u{2192} Game assets. A restricted key needs the models_read permission (turn it on for the key at \
+         elevenlabs.io/app/settings/api-keys); without it ElevenLabs answers that the workspace was not found.",
+    )
+}
+
+/// The id of a model of the account's list that this app can make speech with: one that does text
+/// to speech, needs no alpha access, and has an id that is safe in a request.
+fn speech_id(entry: &Value) -> Option<&str> {
+    let is = |field: &str| entry.get(field).and_then(Value::as_bool) == Some(true);
+    if !is("can_do_text_to_speech") || is("requires_alpha_access") {
+        return None;
+    }
+    entry.get("model_id")?.as_str().filter(|id| http::id(id).is_ok())
+}
+
+fn speech_model(entry: &Value, id: &str) -> ListedModel {
+    ListedModel {
+        provider: ID.into(),
+        id: id.to_string(),
+        name: name_of(entry, id),
+        kinds: vec![AssetKind::Speech],
+        pricing: speech_pricing(entry),
+        ignores: Vec::new(),
+    }
+}
+
+/// The name to show: ElevenLabs', else the known-models table's, else the id.
+fn name_of(entry: &Value, id: &str) -> String {
+    http::shown_name(entry.get("name").and_then(Value::as_str), KnownModels::built_in().name(ID, id), id)
+}
+
+/// What a clip costs: its characters times the model's `character_cost_multiplier`, in credits.
+fn speech_pricing(entry: &Value) -> Pricing {
+    credits(entry.pointer("/model_rates/character_cost_multiplier").and_then(Value::as_f64), Rate::PerCharacter)
+}
+
+/// What a fixed model costs: the credits a second that `known_models.toml` keeps for it.
+fn per_second(model: &KnownModel) -> Pricing {
+    credits(model.credits_per_second, Rate::PerSecond)
+}
+
+/// A rate in credits. A number that is not finite, is negative or is above the most a limit can be is
+/// no rate (it would skew every limit), and the price is [`Pricing::Unknown`].
+fn credits(rate: Option<f64>, per: fn(f64) -> Rate) -> Pricing {
+    match rate.filter(|rate| rate.is_finite() && (0.0..=MAX_ASSET_CREDITS).contains(rate)) {
+        Some(rate) => Pricing::Before { unit: Unit::Credits, rate: per(rate) },
+        None => Pricing::Unknown,
+    }
+}
+
+// ElevenLabs has deprecated both fixed models, which are still served: `eleven_text_to_sound_v2` is
+// removed on 2027-03-01 (replaced by `eleven_text_to_sound_v3`) and `music_v1` on 2027-01-31
+// (replaced by `music_v2_5`; `music_v2` is there too). Neither replacement is a fixed model of
+// `known_models.toml` yet because ElevenLabs documents no credit rate for them (read on 2026-11-03:
+// https://elevenlabs.io/docs/overview/capabilities/sound-effects, .../music, .../models, and the API
+// pricing page https://elevenlabs.io/pricing/api, which is in dollars). Guessing a rate would
+// mislimit spending: when one is documented, move the entries there to the newer ids.
+
+/// The fixed models of an audio type: the one endpoint ElevenLabs has for it, no list names it.
+fn fixed_models(kind: AssetKind) -> Vec<ListedModel> {
+    KnownModels::built_in()
+        .fixed(ID, kind)
+        .into_iter()
+        .map(|model| ListedModel {
+            provider: ID.into(),
+            id: model.id.clone(),
+            name: model.name.clone(),
+            kinds: model.kinds.clone(),
+            pricing: per_second(model),
+            ignores: Vec::new(),
+        })
+        .collect()
+}
+
+/// The fixed model of this id, if it is one.
+fn fixed_model(id: &str) -> Option<&'static KnownModel> {
+    [AssetKind::SoundEffect, AssetKind::Music].into_iter().find_map(|kind| KnownModels::built_in().fixed(ID, kind).into_iter().find(|model| model.id == id))
+}
+
+/// The inputs of a request to ElevenLabs' endpoint for `kind`, which are the same for every model
+/// of it: what this app sends. A length the request leaves out is one ElevenLabs chooses, and a
+/// sound whose length is chosen costs 200 credits instead of the rate a second, so `duration_seconds`
+/// is a field the request always fills. The length of a track is in milliseconds, which no
+/// [`InputRoles`](super::tables::InputRoles) role takes.
+fn fixed_fields(kind: AssetKind) -> Vec<InputField> {
+    let field = |name: &str, kind: FieldKind, required: bool, has_default: bool| InputField { name: name.into(), kind, required, has_default };
+    // The request always names the model; ElevenLabs has one of its own for a request that does not.
+    let model_id = field("model_id", FieldKind::Text, false, true);
+    match kind {
+        AssetKind::Speech => vec![field("text", FieldKind::Text, true, false), field("voice_id", FieldKind::Text, true, false), model_id],
+        AssetKind::SoundEffect => vec![
+            field("text", FieldKind::Text, true, false),
+            field("duration_seconds", FieldKind::Number { min: Some(SOUND_SECONDS.0), max: Some(SOUND_SECONDS.1) }, false, true),
+            model_id,
+        ],
+        AssetKind::Music => vec![
+            field("prompt", FieldKind::Text, true, false),
+            field(
+                "music_length_ms",
+                FieldKind::Integer { min: Some((MUSIC_SECONDS.0 * 1000.0) as i64), max: Some((MUSIC_SECONDS.1 * 1000.0) as i64) },
+                false,
+                true,
+            ),
+            field("force_instrumental", FieldKind::Bool, false, true),
+            model_id,
+        ],
+        AssetKind::Image | AssetKind::Model3d => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +390,357 @@ mod tests {
         let error = ElevenLabs { base }.generate("sk-test", &req).unwrap_err();
         assert_eq!(error.code, ErrorCode::GarbledOutput);
         assert_eq!(crate::assets::charged_usd(&error), Some(req.listed_cost()));
+    }
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+    use crate::assets::inputs::{FieldKind, map_request};
+    use crate::assets::model::{ListedModel, MAX_ASSET_CREDITS, ModelList, Pricing, Rate, Unit};
+    use crate::assets::tables::{InputRoles, KnownModels};
+    use crate::assets::{AssetKind, AssetRequest};
+    use craft_anything_evidence::ErrorCode;
+    use craft_anything_platform::sync::Mutex;
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+
+    // The API these tests stand in for, read on 2026-11-03 (https://elevenlabs.io/docs/api-reference/models/list):
+    // `GET /v1/models` answers a JSON array of models. A model has `model_id`, `name`,
+    // `can_do_text_to_speech`, `requires_alpha_access`, `maximum_text_length_per_request` and
+    // `model_rates.character_cost_multiplier` (credits a character). The key needs the `models_read`
+    // permission; a key without it was reported to get 404 `workspace_not_found`, not 401. The fixtures
+    // are invented to that shape: no request was made with a key.
+
+    const KEY: &str = "sk-test";
+
+    fn model(id: &str, name: &str, multiplier: Value) -> Value {
+        json!({
+            "model_id": id,
+            "name": name,
+            "can_do_text_to_speech": true,
+            "requires_alpha_access": false,
+            "maximum_text_length_per_request": 10000,
+            "model_rates": {"character_cost_multiplier": multiplier}
+        })
+    }
+
+    /// ElevenLabs answering the one request for the list with `models`.
+    fn account(models: Value) -> (ElevenLabs, Arc<Mutex<Vec<String>>>) {
+        answering(vec![(200, models.to_string())])
+    }
+
+    fn answering(answers: Vec<(u16, String)>) -> (ElevenLabs, Arc<Mutex<Vec<String>>>) {
+        let (base, seen) = http::tests::serve(move |_| answers);
+        (ElevenLabs { base }, seen)
+    }
+
+    /// An ElevenLabs that answers nothing: a request to it fails, and none is recorded.
+    fn silent() -> (ElevenLabs, Arc<Mutex<Vec<String>>>) {
+        answering(Vec::new())
+    }
+
+    fn ids(list: &ModelList) -> Vec<&str> {
+        list.models.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    fn credits(rate: Rate) -> Pricing {
+        Pricing::Before { unit: Unit::Credits, rate }
+    }
+
+    #[test]
+    fn speech_models_come_from_the_account() {
+        let (provider, seen) = account(json!([
+            model("eleven_multilingual_v2", "Eleven Multilingual v2", json!(1.0)),
+            model("eleven_flash_v2_5", "Eleven Flash v2.5", json!(0.5)),
+            // Not speech: a model that only converts one voice into another.
+            json!({"model_id": "eleven_english_sts_v2", "name": "Eleven English STS v2", "can_do_text_to_speech": false,
+                   "model_rates": {"character_cost_multiplier": 1.0}}),
+            // Speech, but only for accounts with alpha access.
+            json!({"model_id": "eleven_alpha", "name": "Alpha", "can_do_text_to_speech": true, "requires_alpha_access": true,
+                   "model_rates": {"character_cost_multiplier": 1.0}}),
+        ]));
+        let list = provider.list(Some(KEY), AssetKind::Speech).unwrap();
+        assert_eq!(list.error, None);
+        assert_eq!(ids(&list), ["eleven_multilingual_v2", "eleven_flash_v2_5"]);
+        assert_eq!(
+            list.models[1],
+            ListedModel {
+                provider: "elevenlabs".into(),
+                id: "eleven_flash_v2_5".into(),
+                name: "Eleven Flash v2.5".into(),
+                kinds: vec![AssetKind::Speech],
+                pricing: credits(Rate::PerCharacter(0.5)),
+                ignores: Vec::new(),
+            }
+        );
+        assert_eq!(list.models[0].pricing, credits(Rate::PerCharacter(1.0)));
+        assert_eq!(list.models[0].pricing.shown(AssetKind::Speech), "1 credit a character");
+        assert_eq!(list.models[1].pricing.shown(AssetKind::Speech), "0.5 credits a character");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "one request: the account's list");
+        assert!(seen[0].starts_with("GET /models "), "{}", seen[0]);
+        assert!(seen[0].to_ascii_lowercase().contains("xi-api-key: sk-test"));
+    }
+
+    /// What the account's list says is untrusted: odd entries, ids, names and rates are tidied or
+    /// left out, and a rate nobody could believe is no price.
+    #[test]
+    fn what_the_account_says_is_read_with_care() {
+        let hostile = format!("Evil\nmodel{}", "x".repeat(300));
+        let (provider, _) = account(json!([
+            model("eleven_multilingual_v2", "", json!(1.0)),
+            model("a_negative_rate", "Negative", json!(-1.0)),
+            model("a_huge_rate", "Huge", json!(1e300)),
+            model("just_over", "Over", json!(MAX_ASSET_CREDITS + 1.0)),
+            model("the_most", "Most", json!(MAX_ASSET_CREDITS)),
+            model("a_free_one", "Free", json!(0.0)),
+            model("a_text_rate", "Text", json!("1")),
+            model("a_null_rate", "Null", Value::Null),
+            model("hostile_name", &hostile, json!(2.0)),
+            model("../escapes", "Escapes", json!(1.0)),
+            model("has a space", "Space", json!(1.0)),
+            model("", "No id", json!(1.0)),
+            model("eleven_multilingual_v2", "Again", json!(9.0)),
+            json!({"model_id": "no_rates", "name": "No rates", "can_do_text_to_speech": true}),
+            json!({"model_id": "text_flag", "name": "Text flag", "can_do_text_to_speech": "true", "model_rates": {"character_cost_multiplier": 1.0}}),
+            json!({"name": "No model id", "can_do_text_to_speech": true}),
+            json!({"model_id": 7, "can_do_text_to_speech": true}),
+            json!("not a model"),
+            Value::Null,
+        ]));
+        let list = provider.list(Some(KEY), AssetKind::Speech).unwrap();
+        assert_eq!(
+            ids(&list),
+            [
+                "eleven_multilingual_v2",
+                "a_negative_rate",
+                "a_huge_rate",
+                "just_over",
+                "the_most",
+                "a_free_one",
+                "a_text_rate",
+                "a_null_rate",
+                "hostile_name",
+                "no_rates"
+            ]
+        );
+        let by_id = |id: &str| list.models.iter().find(|m| m.id == id).unwrap();
+        // A blank name is the table's, and the first of two models with one id is the one kept.
+        assert_eq!(by_id("eleven_multilingual_v2").name, "ElevenLabs Multilingual v2");
+        assert_eq!(by_id("eleven_multilingual_v2").pricing, credits(Rate::PerCharacter(1.0)));
+        for unbelievable in ["a_negative_rate", "a_huge_rate", "just_over", "a_text_rate", "a_null_rate", "no_rates"] {
+            assert_eq!(by_id(unbelievable).pricing, Pricing::Unknown, "{unbelievable}");
+        }
+        assert_eq!(by_id("the_most").pricing, credits(Rate::PerCharacter(MAX_ASSET_CREDITS)), "the most is still a price");
+        assert_eq!(by_id("a_free_one").pricing, credits(Rate::PerCharacter(0.0)), "free is a price");
+        let name = &by_id("hostile_name").name;
+        assert!(name.starts_with("Evilmodelxxx") && !name.chars().any(char::is_control) && name.chars().count() <= 81, "{name:?}");
+    }
+
+    #[test]
+    fn sound_and_music_come_from_the_table() {
+        let (provider, seen) = silent();
+        let known = KnownModels::built_in();
+        for (kind, id) in [(AssetKind::SoundEffect, "eleven_text_to_sound_v2"), (AssetKind::Music, "music_v1")] {
+            // With a key and without one: nothing is asked of ElevenLabs.
+            for key in [Some(KEY), None] {
+                let list = provider.list(key, kind).unwrap();
+                assert_eq!(list.error, None, "{kind:?}");
+                assert_eq!(ids(&list), [id]);
+                let listed = &list.models[0];
+                let rate = known.credits_per_second("elevenlabs", id).unwrap();
+                assert_eq!(listed.pricing, credits(Rate::PerSecond(rate)));
+                assert_eq!((listed.provider.as_str(), listed.kinds.as_slice(), listed.ignores.as_slice()), ("elevenlabs", &[kind][..], &[][..]));
+                assert_eq!(Some(listed.name.as_str()), known.name("elevenlabs", id));
+            }
+        }
+        let sound = provider.list(None, AssetKind::SoundEffect).unwrap();
+        assert_eq!(sound.models[0].pricing.shown(AssetKind::SoundEffect), "40 credits a second");
+        let music = provider.list(None, AssetKind::Music).unwrap();
+        assert_eq!(music.models[0].pricing.shown(AssetKind::Music), "15 credits a second");
+        // ElevenLabs makes no pictures or 3D models.
+        for kind in [AssetKind::Image, AssetKind::Model3d] {
+            let list = provider.list(Some(KEY), kind).unwrap();
+            assert_eq!((list.models.len(), list.error), (0, None), "{kind:?}");
+        }
+        assert!(seen.lock().unwrap().is_empty(), "no request was made");
+    }
+
+    #[test]
+    fn no_key_lists_only_the_fixed_models() {
+        let (provider, seen) = silent();
+        let speech = provider.list(None, AssetKind::Speech).unwrap();
+        assert!(speech.models.is_empty());
+        let said = speech.error.unwrap();
+        assert!(said.starts_with("Add an ElevenLabs key"), "{said}");
+        for kind in [AssetKind::SoundEffect, AssetKind::Music] {
+            let list = provider.list(None, kind).unwrap();
+            assert_eq!(list.models.len(), 1, "{kind:?} is still listed");
+        }
+        assert!(seen.lock().unwrap().is_empty(), "no request was made");
+        // A key that cannot be sent is refused before anything is asked.
+        for key in ["", "  ", "k\u{e9}y", "k\ney"] {
+            assert_eq!(provider.list(Some(key), AssetKind::Speech).unwrap_err().code, ErrorCode::BadSettings, "{key:?}");
+        }
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_restricted_key_says_what_permission_is_missing() {
+        for status in [404, 401, 403] {
+            // The answer's own words never reach the person.
+            let body = json!({"detail": {"status": "workspace_not_found", "message": "SECRET-BODY sk-test"}}).to_string();
+            let (provider, seen) = answering(vec![(status, body.clone()), (status, body)]);
+            let listed = provider.list(Some(KEY), AssetKind::Speech).unwrap_err();
+            let described = provider.describe(KEY, "eleven_multilingual_v2").unwrap_err();
+            for error in [listed, described] {
+                assert_eq!(error.code, ErrorCode::BadSettings, "{status}");
+                let said = http::words(&error);
+                assert!(said.contains("models_read"), "{status}: {said}");
+                assert!(!said.contains("SECRET-BODY") && !said.contains(KEY) && !said.contains("workspace_not_found"), "{status}: {said}");
+            }
+            assert_eq!(seen.lock().unwrap().len(), 2);
+        }
+        // Sound effects and music need no list, so such a key lists them as well as any.
+        let (provider, _) = answering(vec![(404, "{}".into())]);
+        assert_eq!(provider.list(Some(KEY), AssetKind::Music).unwrap().models.len(), 1);
+    }
+
+    #[test]
+    fn a_list_that_fails_says_why_without_repeating_the_answer() {
+        let secret = "SECRET-BODY sk-test".to_string();
+        let huge = "x".repeat(usize::try_from(http::MAX_JSON).unwrap() + 1);
+        let cases = [
+            (429, secret.clone(), ErrorCode::OverLimit),
+            (500, secret.clone(), ErrorCode::ProgramFailed),
+            (200, "not json".to_string(), ErrorCode::GarbledOutput),
+            (200, json!({"models": []}).to_string(), ErrorCode::GarbledOutput),
+            (200, huge, ErrorCode::OverLimit),
+        ];
+        for (status, body, code) in cases {
+            // An answer is served once, so each request has a server of its own.
+            let (provider, _) = answering(vec![(status, body)]);
+            let error = provider.list(Some(KEY), AssetKind::Speech).unwrap_err();
+            assert_eq!(error.code, code, "{status}: {error:?}");
+            let said = format!("{error:?}");
+            assert!(!said.contains("SECRET-BODY") && !said.contains(KEY) && !said.contains("xxxx"), "{status}: {said}");
+        }
+        // A model is looked up in the same list, so it fails the same way.
+        let (provider, _) = answering(vec![(500, secret)]);
+        let error = provider.describe(KEY, "eleven_multilingual_v2").unwrap_err();
+        assert_eq!(error.code, ErrorCode::ProgramFailed);
+        assert!(!format!("{error:?}").contains("SECRET-BODY"));
+        // Nothing listens: the connection fails.
+        let nobody = ElevenLabs { base: "http://127.0.0.1:9".into() };
+        let error = nobody.list(Some(KEY), AssetKind::Speech).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert!(error.message.contains("ElevenLabs") && error.remediation.is_some());
+    }
+
+    #[test]
+    fn at_most_two_hundred_models_are_read() {
+        let many: Vec<Value> = (0..250).map(|i| model(&format!("model_{i}"), "Speech", json!(1.0))).collect();
+        let (provider, _) = account(Value::Array(many));
+        let list = provider.list(Some(KEY), AssetKind::Speech).unwrap();
+        assert_eq!(list.models.len(), 200);
+        assert_eq!(ids(&list).last(), Some(&"model_199"));
+        let said = list.error.unwrap();
+        assert!(said.contains("incomplete") && said.contains("200"), "{said}");
+        // Exactly the bound is not incomplete.
+        let exact: Vec<Value> = (0..200).map(|i| model(&format!("model_{i}"), "Speech", json!(1.0))).collect();
+        let (provider, _) = account(Value::Array(exact));
+        let list = provider.list(Some(KEY), AssetKind::Speech).unwrap();
+        assert_eq!((list.models.len(), list.error), (200, None));
+    }
+
+    #[test]
+    fn a_speech_model_is_described_with_its_fixed_fields_and_price() {
+        let (provider, seen) = account(json!([
+            model("eleven_flash_v2_5", "Eleven Flash v2.5", json!(0.5)),
+            model("eleven_multilingual_v2", "Eleven Multilingual v2", json!(1.0)),
+        ]));
+        let detail = provider.describe(KEY, "eleven_flash_v2_5").unwrap();
+        assert_eq!((detail.id.as_str(), detail.name.as_str()), ("eleven_flash_v2_5", "Eleven Flash v2.5"));
+        assert_eq!(detail.kinds, [AssetKind::Speech]);
+        assert_eq!(detail.pricing, credits(Rate::PerCharacter(0.5)));
+        let names: Vec<&str> = detail.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["text", "voice_id", "model_id"]);
+        let (text, voice, model_id) = (&detail.fields[0], &detail.fields[1], &detail.fields[2]);
+        assert!(text.required && voice.required, "a clip needs words and a voice");
+        assert!(!model_id.required && model_id.has_default, "the model is named by the request, ElevenLabs has its own otherwise");
+        assert!(detail.fields.iter().all(|f| f.kind == FieldKind::Text));
+        assert!(seen.lock().unwrap()[0].starts_with("GET /models "));
+
+        // The fields take a speech request, and a clip without a voice is refused.
+        let roles = InputRoles::built_in();
+        let mapped = map_request(&detail.fields, &AssetRequest::Speech { text: "hello", voice_id: "voice_1" }, roles).unwrap();
+        assert_eq!(Value::Object(mapped.body), json!({"text": "hello", "voice_id": "voice_1"}));
+        assert!(mapped.ignored.is_empty());
+        assert!(map_request(&detail.fields, &AssetRequest::Speech { text: "hello", voice_id: "" }, roles).is_err());
+    }
+
+    #[test]
+    fn sound_and_music_are_described_without_asking() {
+        let (provider, seen) = silent();
+        let roles = InputRoles::built_in();
+
+        let sound = provider.describe(KEY, "eleven_text_to_sound_v2").unwrap();
+        assert_eq!((sound.id.as_str(), sound.name.as_str()), ("eleven_text_to_sound_v2", "ElevenLabs Sound Effects v2"));
+        assert_eq!(sound.kinds, [AssetKind::SoundEffect]);
+        assert_eq!(sound.pricing, credits(Rate::PerSecond(40.0)));
+        // The rate is for a sound whose length is given, so a sound is always asked for with one.
+        let wind = AssetRequest::SoundEffect { prompt: "wind", duration_seconds: 2.5 };
+        let mapped = map_request(&sound.fields, &wind, roles).unwrap();
+        assert_eq!(Value::Object(mapped.body), json!({"text": "wind", "duration_seconds": 2.5}));
+        assert!(mapped.ignored.is_empty());
+        let long = map_request(&sound.fields, &AssetRequest::SoundEffect { prompt: "wind", duration_seconds: 99.0 }, roles).unwrap();
+        assert_eq!(long.body.get("duration_seconds").and_then(Value::as_f64), Some(30.0), "no longer than ElevenLabs makes");
+
+        let music = provider.describe(KEY, "music_v1").unwrap();
+        assert_eq!((music.id.as_str(), music.name.as_str()), ("music_v1", "ElevenLabs Music v1"));
+        assert_eq!(music.kinds, [AssetKind::Music]);
+        assert_eq!(music.pricing, credits(Rate::PerSecond(15.0)));
+        let calm = AssetRequest::Music { prompt: "calm", duration_seconds: 10.0, instrumental: true };
+        let mapped = map_request(&music.fields, &calm, roles).unwrap();
+        assert_eq!(mapped.body.get("prompt"), Some(&json!("calm")));
+        assert_eq!(mapped.body.get("force_instrumental"), Some(&json!(true)));
+        assert!(seen.lock().unwrap().is_empty(), "no request was made");
+    }
+
+    #[test]
+    fn a_model_that_is_not_there_is_a_clear_error() {
+        let page = || {
+            json!([
+                model("eleven_flash_v2_5", "Flash", json!(0.5)),
+                json!({"model_id": "eleven_english_sts_v2", "name": "STS", "can_do_text_to_speech": false}),
+                json!({"model_id": "eleven_alpha", "name": "Alpha", "can_do_text_to_speech": true, "requires_alpha_access": true}),
+            ])
+        };
+        // Gone from the list, in it but not speech, in it but alpha only: none is a model to run.
+        for id in ["eleven_gone", "eleven_english_sts_v2", "eleven_alpha"] {
+            let (provider, _) = account(page());
+            let error = provider.describe(KEY, id).unwrap_err();
+            assert_eq!(error.code, ErrorCode::BadSettings, "{id}");
+            assert!(error.message.contains(id) && error.message.contains("no longer available at ElevenLabs"), "{}", error.message);
+            assert_eq!(error.remediation.as_deref(), Some(crate::assets::inputs::REMEDIATION));
+        }
+        let (provider, _) = account(page());
+        assert_eq!(provider.describe(KEY, "eleven_flash_v2_5").unwrap().name, "Flash");
+    }
+
+    #[test]
+    fn an_id_or_key_that_cannot_be_sent_is_refused_before_anything_is_asked() {
+        let (provider, seen) = silent();
+        for id in ["", "../models", "a b", "eleven\n", "x?y=z", &"a".repeat(201)] {
+            let error = provider.describe(KEY, id).unwrap_err();
+            assert_eq!(error.code, ErrorCode::BadSettings, "{id:?}");
+            assert!(error.remediation.is_some() && !error.message.contains('\n'), "{id:?}");
+        }
+        for key in ["", "  ", "k\u{e9}y", "k\ney"] {
+            assert_eq!(provider.describe(key, "music_v1").unwrap_err().code, ErrorCode::BadSettings, "{key:?}");
+            assert_eq!(provider.describe(key, "eleven_flash_v2_5").unwrap_err().code, ErrorCode::BadSettings, "{key:?}");
+        }
+        assert!(seen.lock().unwrap().is_empty());
     }
 }

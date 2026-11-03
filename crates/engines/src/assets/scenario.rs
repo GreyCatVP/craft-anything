@@ -2,12 +2,12 @@
 //! is done by the asset table's endpoints (`assets.toml`) until the live lists replace them;
 //! [`Scenario::list`] and [`Scenario::describe`] read Scenario's own list of public models, each
 //! model's inputs and what it costs in credits.
-use super::inputs::{FieldKind, InputField, MAX_CHOICES, MAX_FIELDS, REMEDIATION, clipped, runnable};
+use super::inputs::{FieldKind, InputField, MAX_CHOICES, MAX_FIELDS, REMEDIATION, runnable};
 use super::model::{AssetOption, ListedModel, MAX_ASSET_CREDITS, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::tables::{InputRoles, KnownModels};
 use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
-use http::{CURSOR_LENGTH, NAME_LENGTH, time_is_up, words};
+use http::{CURSOR_LENGTH, time_is_up, words};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -264,8 +264,13 @@ impl Scenario {
     ///
     /// Every page and every model is a request, and the whole call has a deadline, so the list can
     /// end early: then the models read so far are returned, and `error` says the list is incomplete.
-    /// A failure before anything was read is an error. A model whose inputs could not be read is
-    /// still offered when the table knows it.
+    /// A failure before anything was read is an error. What Scenario says of a model stands against
+    /// the table: a model that is gone, retiring, refused to this account, answered with something no
+    /// use, or whose inputs this app cannot fill is left out even when the table knows it. Only a
+    /// model that was not heard about falls back to the table (it is offered, with no price, when the
+    /// table says it makes `kind`): one whose request failed in passing (the network, a timeout,
+    /// HTTP 408 or 425, a server error), one the reading stopped before (the key was refused or a
+    /// limit reached) and one not reached before the time or the bound was up.
     pub fn list(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
         let auth = key.map(|key| self.auth(key)).transpose()?;
         let deadline = Instant::now() + self.list_deadline;
@@ -463,7 +468,12 @@ impl Scenario {
                 401 | 402 | 429 => Trouble::Stops(e),
                 // This account may not use this model; others are another matter.
                 403 => Trouble::Unusable(e),
-                _ => Trouble::Passing(e),
+                // A request that timed out, one answered too early, or a server in trouble may go
+                // through next time.
+                408 | 425 | 500..=599 => Trouble::Passing(e),
+                // Any other answer (a bad request, a model that is gone, a redirect) is Scenario's word
+                // that this model cannot be got this way, and waiting will not change it.
+                _ => Trouble::Unusable(e),
             });
         }
         let mut answer = http::json_up_to(response.into_body(), http::MAX_JSON).map_err(|e| match e.code {
@@ -485,10 +495,7 @@ impl Scenario {
             Some(auth) => request.header("Authorization", auth).call(),
             None => request.call(),
         }
-        .map_err(|_| {
-            ToolError::new(ErrorCode::EngineMissing, "Couldn't reach Scenario to read its models.")
-                .with_remediation("Check your internet connection and try again.")
-        })
+        .map_err(|_| http::cannot_reach(NAME))
     }
 }
 
@@ -538,9 +545,11 @@ enum Reading {
     LeftOut,
     /// The request was refused for every model, and the reading stopped.
     Stopped(ToolError),
-    /// The request failed in a way that may pass (the network, a server error): nothing is known of the model.
+    /// The request failed in a way that may pass (the network, a timeout, HTTP 408 or 425, a server
+    /// error): nothing is known of the model.
     Failed,
-    /// The answer is no use, or the account may not use the model: the model cannot be run.
+    /// The answer is no use, or Scenario refused it (the account may not use the model, or any other
+    /// 4xx or 3xx answer): the model cannot be run.
     Unusable,
     /// No request was made: the time was up, the reading stopped, or the list was too long.
     NotReached,
@@ -551,10 +560,12 @@ enum Trouble {
     /// Every other request would meet it too: the key was refused (401), or the account is out of
     /// credit (402) or over a rate limit (429).
     Stops(ToolError),
-    /// The request failed in a way that may pass: the network, a server error.
+    /// The request failed in a way that may pass: the network, a timeout, HTTP 408 or 425, a server
+    /// error (5xx).
     Passing(ToolError),
-    /// The answer is of no use (too large, unreadable, no model in it), or the account may not use
-    /// this model (403), which says nothing of the others.
+    /// The answer is of no use (too large, unreadable, no model in it), or Scenario refused it: the
+    /// account may not use this model (403), the request was wrong or the model is gone (any other
+    /// 4xx), or it was redirected (3xx). That says nothing of the other models.
     Unusable(ToolError),
 }
 
@@ -611,7 +622,7 @@ fn labels<'a>(model: &'a Value, key: &str) -> impl Iterator<Item = &'a str> {
 ///
 /// Only `custom` models (606 of the 766 public ones on 2026-11-03) are listed, not the LoRA-type ones
 /// (`flux.1-lora`, ... 160 of them, many with `txt2img`): they are style variants of base models, and
-/// they would use up the [`MAX_DESCRIBED`] models read for one list (Ruling 19). The run-any-model
+/// they would use up the [`MAX_DESCRIBED`] models read for one list. The run-any-model
 /// call would take them (https://docs.scenario.com/api/resources/generate/methods/run_model says
 /// "any model"), so offering them is a matter of dropping this check.
 fn candidate(model: &Value, kind: AssetKind) -> Option<Candidate> {
@@ -679,13 +690,7 @@ fn is_deleted(model: &Value) -> bool {
 
 /// The name to show: Scenario's, else the known-models table's, else the id.
 fn name_of(model: &Value, id: &str) -> String {
-    [model.get("name").and_then(Value::as_str), KnownModels::built_in().name(ID, id)]
-        .into_iter()
-        .flatten()
-        .map(|name| clipped(name, NAME_LENGTH))
-        .map(|name| name.trim().to_string())
-        .find(|name| !name.is_empty())
-        .unwrap_or_else(|| id.to_string())
+    http::shown_name(model.get("name").and_then(Value::as_str), KnownModels::built_in().name(ID, id), id)
 }
 
 fn quoted(typical: Option<f64>) -> Pricing {
@@ -694,9 +699,9 @@ fn quoted(typical: Option<f64>) -> Pricing {
 
 /// What a model costs: every run is quoted before it starts (`?dryRun=api`), so the price is a quote,
 /// and `typical` is the usual one if the model's statistics give it. A statistic that is not a
-/// number this app can believe (not finite, negative, or more than a limit can be) is no statistic
-/// (Ruling 17): the price is still a quote, so the model is still tracked, and a limit is checked
-/// against the run's own quote, not this number.
+/// number this app can believe (not finite, negative, or more than a limit can be) is no statistic:
+/// the price is still a quote, so the model is still tracked, and a limit is checked against the
+/// run's own quote, not this number.
 fn pricing_of(model: &Value, kinds: &[AssetKind]) -> Pricing {
     quoted(typical_cost(model, kinds).filter(|cost| cost.is_finite() && (0.0..=MAX_ASSET_CREDITS).contains(cost)))
 }
@@ -773,7 +778,7 @@ fn field_kind(item: &Value) -> Result<FieldKind, ToolError> {
         },
         Some("number") if allowed.is_none() => FieldKind::Number { min: limit("min"), max: limit("max") },
         Some("boolean") => FieldKind::Bool,
-        // A file is a picture unless its `kind` says otherwise; a list of files likewise (Ruling 18).
+        // A file is a picture unless its `kind` says otherwise; a list of files likewise.
         Some("file") if is_picture(item) => FieldKind::Image,
         Some("file_array") if is_picture(item) => FieldKind::Images,
         _ => FieldKind::Other,
@@ -1345,7 +1350,7 @@ mod listing_tests {
             model("model_odd-stats", Some(json!("nothing"))),
             // A variant with no capability named is as good as any.
             model("model_unnamed", Some(stats(json!([{"variantKey": "a", "costPerAssetP50CU": 4}]), None))),
-            // Ruling 17: a statistic that is negative, or above the most a limit can be, is no statistic: a
+            // A statistic that is negative, or above the most a limit can be, is no statistic: a
             // run is quoted by a dry run anyway, so the model is still tracked.
             model("model_negative", Some(stats(json!([variant("txt2img", "a", json!(-3))]), None))),
             model("model_huge", Some(stats(json!([variant("txt2img", "a", json!(1e300))]), None))),
@@ -1566,7 +1571,7 @@ mod listing_tests {
         assert_eq!((field("image").kind, field("image").required), (FieldKind::Image, true));
         assert_eq!(field("photo").kind, FieldKind::Image, "a file is a picture unless it says otherwise");
         assert_eq!(field("sound").kind, FieldKind::Other);
-        // Ruling 18: a list of pictures is one this app can fill (with the one picture); a list of anything else is not.
+        // A list of pictures is one this app can fill (with the one picture); a list of anything else is not.
         assert_eq!((field("references").kind, field("gallery").kind), (FieldKind::Images, FieldKind::Images));
         for other in ["clips", "tags", "weights", "loras", "base", "layers", "mystery"] {
             assert_eq!(field(other).kind, FieldKind::Other, "{other}");
@@ -1636,7 +1641,7 @@ mod listing_tests {
         .unwrap();
         let request = AssetRequest::Model3d { image_url: Some("asset_abc"), prompt: None, textured: true, faces: 3000 };
         let mapped = map_request(&solid, &request, roles).unwrap();
-        // A face count is a whole number, though Scenario has only one kind of number (Ruling 18).
+        // A face count is a whole number, though Scenario has only one kind of number.
         assert_eq!(Value::Object(mapped.body), json!({"image": "asset_abc", "targetPolycount": 3000, "shouldTexture": true}));
         assert_eq!(runnable(&solid, AssetKind::Model3d, roles), Ok(vec![]));
 
@@ -1696,8 +1701,17 @@ mod listing_tests {
             ("not json", 200, "not json".to_string(), false),
             ("no model", 200, "{}".to_string(), false),
             ("forbidden", 403, "{}".to_string(), false),
+            // Any other refusal says this app asked wrongly or the model is not for it: not a passing failure.
+            ("bad request", 400, "{}".to_string(), false),
+            ("gone", 410, "{}".to_string(), false),
+            ("unprocessable", 422, "{}".to_string(), false),
+            ("teapot", 418, "{}".to_string(), false),
+            // The network, a timeout, a request answered too early and a server's trouble may pass.
+            ("request timeout", 408, "{}".to_string(), true),
+            ("too early", 425, "{}".to_string(), true),
             ("server error", 500, "oops".to_string(), true),
             ("bad gateway", 502, "oops".to_string(), true),
+            ("unavailable", 503, "oops".to_string(), true),
         ];
         for (what, status, body, offered) in cases {
             let known = entry(KNOWN, "", &["txt2img"], &[]);

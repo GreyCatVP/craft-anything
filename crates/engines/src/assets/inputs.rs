@@ -466,7 +466,7 @@ mod tests {
         assert!(map_request(&backwards, &faces(300), InputRoles::built_in()).is_ok());
     }
 
-    /// Ruling 18: a face count or a size is a whole number whatever kind of number the field is
+    /// A face count or a size is a whole number whatever kind of number the field is
     /// declared as. JSON writes 3000.0 for a float, which an integer input may refuse.
     #[test]
     fn faces_width_and_height_are_sent_as_whole_numbers_to_a_number_field() {
@@ -488,7 +488,7 @@ mod tests {
         assert_eq!(map(&[field("prompt", FieldKind::Text), field("duration", num(None, None))], sound).body.get("duration"), Some(&json!(2.5)));
     }
 
-    /// Ruling 18: a field that takes a list of pictures is given the one picture, as a list.
+    /// A field that takes a list of pictures is given the one picture, as a list.
     #[test]
     fn a_list_of_pictures_is_filled_with_the_one_picture() {
         let roles = InputRoles::built_in();
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(runnable(&[prompt, with_default(required(field("loras", FieldKind::Other)))], AssetKind::Image, roles), Ok(vec![AssetOption::Shape]));
     }
 
-    /// fal's Hunyuan 3D models take their picture as `input_image_url`, not `image_url` (Ruling 15):
+    /// fal's Hunyuan 3D models take their picture as `input_image_url`, not `image_url`:
     /// without that name they were hidden as models this app has nothing to put a picture in.
     #[test]
     fn a_picture_input_called_input_image_url_is_filled() {

@@ -60,6 +60,24 @@ pub(super) fn too_slow(provider: &str) -> ToolError {
         .with_remediation("Refresh the list to read the rest.")
 }
 
+/// The provider's model list could not be fetched at all (the connection failed or timed out).
+pub(super) fn cannot_reach(provider: &str) -> ToolError {
+    ToolError::new(ErrorCode::EngineMissing, format!("Couldn't reach {provider} to read its models."))
+        .with_remediation("Check your internet connection and try again.")
+}
+
+/// The name to show for a model: the provider's, else the known-models table's, else its id. Each
+/// is tidied (no control characters, at most [`NAME_LENGTH`] characters), and a blank one is skipped.
+pub(super) fn shown_name(provider_name: Option<&str>, table_name: Option<&str>, id: &str) -> String {
+    [provider_name, table_name]
+        .into_iter()
+        .flatten()
+        .map(|name| clipped(name, NAME_LENGTH))
+        .map(|name| name.trim().to_string())
+        .find(|name| !name.is_empty())
+        .unwrap_or_else(|| id.to_string())
+}
+
 /// A chosen model its provider no longer serves; its name is the provider's, so it is clipped.
 pub(super) fn gone(provider: &str, model: &str) -> ToolError {
     ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" is no longer available at {provider}.", clipped(model, NAME_LENGTH)))
@@ -196,7 +214,7 @@ pub(super) mod tests {
                         Ok((s, _)) => break s,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             assert!(start.elapsed() < Duration::from_secs(10), "local request was never sent");
-                            std::thread::sleep(Duration::from_millis(5));
+                            std::thread::sleep(Duration::from_millis(1));
                         }
                         Err(e) => panic!("local accept failed: {e}"),
                     }
@@ -222,7 +240,10 @@ pub(super) mod tests {
                 reader.read_exact(&mut payload).unwrap();
                 recorded.lock().unwrap().push(format!("{head}{}", String::from_utf8_lossy(&payload)));
                 std::thread::sleep(delay);
-                write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                // The client may be gone before the body is written (it does not read the body of an
+                // error answer). That ends nothing here: a panic would kill the thread and with it every
+                // answer still to come, which made tests that ask twice fail now and then.
+                let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
             }
         });
         (base, seen)
@@ -242,6 +263,23 @@ pub(super) mod tests {
         assert_eq!(words(&slow), "Reading Acme's model list took too long, so it was cut short. Refresh the list to read the rest.");
         assert_eq!(words(&ToolError::new(ErrorCode::BadSettings, "No remedy.")), "No remedy.");
         assert!(!time_is_up(Instant::now() + Duration::from_secs(60)) && time_is_up(Instant::now()));
+    }
+
+    #[test]
+    fn a_model_is_named_by_its_provider_then_the_table_then_its_id() {
+        assert_eq!(shown_name(Some("  Flux  "), Some("Table"), "id"), "Flux");
+        assert_eq!(shown_name(Some(" \n "), Some("Table"), "id"), "Table", "a blank name is skipped");
+        assert_eq!(shown_name(None, None, "id"), "id");
+        assert_eq!(shown_name(Some("ev\nil"), None, "id"), "evil");
+        let long = shown_name(Some(&"x".repeat(500)), None, "id");
+        assert_eq!(long.chars().count(), NAME_LENGTH + 1, "cut short, with an ellipsis");
+    }
+
+    #[test]
+    fn an_unreachable_provider_is_named() {
+        let error = cannot_reach("Acme");
+        assert_eq!((error.code, error.message.as_str()), (ErrorCode::EngineMissing, "Couldn't reach Acme to read its models."));
+        assert!(error.remediation.is_some());
     }
 
     #[test]

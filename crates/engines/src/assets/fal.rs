@@ -5,13 +5,13 @@
 //! replace them; [`Fal::list`] and [`Fal::describe`] read fal's own list of models, each model's
 //! inputs and its prices from the platform API.
 
-use super::inputs::{REMEDIATION, clipped, runnable};
+use super::inputs::{REMEDIATION, runnable};
 use super::model::{ListedModel, MAX_ASSET_BUDGET_USD, ModelDetail, ModelList, Pricing, Rate, Unit};
 use super::openapi::input_fields;
 use super::tables::{InputRoles, KnownModels};
 use super::{AssetKind, AssetProvider, Generated, LegacyRequest, Shape, SizeBy, charged, http};
 use craft_anything_evidence::{ErrorCode, ToolError};
-use http::{CURSOR_LENGTH, NAME_LENGTH, encode, time_is_up, words};
+use http::{CURSOR_LENGTH, encode, time_is_up, words};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -320,10 +320,7 @@ impl Fal {
             Some(key) => request.header("Authorization", &format!("Key {key}")).call(),
             None => request.call(),
         }
-        .map_err(|_| {
-            ToolError::new(ErrorCode::EngineMissing, "Couldn't reach fal.ai to read its models.")
-                .with_remediation("Check your internet connection and try again.")
-        })
+        .map_err(|_| http::cannot_reach(NAME))
     }
 }
 
@@ -441,15 +438,7 @@ fn listed_model(model: &Value, category: &str, kind: AssetKind) -> Option<Listed
 
 /// The name to show: fal's, else the known-models table's, else the id.
 fn name_of(model: &Value, id: &str) -> String {
-    let fals = model.pointer("/metadata/display_name").and_then(Value::as_str);
-    let table = KnownModels::built_in().name(ID, id);
-    [fals, table]
-        .into_iter()
-        .flatten()
-        .map(|name| clipped(name, NAME_LENGTH))
-        .map(|name| name.trim().to_string())
-        .find(|name| !name.is_empty())
-        .unwrap_or_else(|| id.to_string())
+    http::shown_name(model.pointer("/metadata/display_name").and_then(Value::as_str), KnownModels::built_in().name(ID, id), id)
 }
 
 /// Whether `id` is one fal's endpoints can be called by and is safe in a URL: path segments of
@@ -492,9 +481,9 @@ type RateOf = fn(f64) -> Rate;
 const BILLED_PER: &[(&str, RateOf)] =
     &[("image", Rate::PerRequest), ("video", Rate::PerRequest), ("request", Rate::PerRequest), ("megapixel", Rate::PerMegapixel)];
 
-/// What a price from fal's price list means. Only a plain dollar amount is a price (Rulings 5 and
-/// 16): a number that is not finite, is negative or is above the most a project may spend, or a
-/// price in another currency, is no price at all.
+/// What a price from fal's price list means. Only a plain dollar amount is a price: a number
+/// that is not finite, is negative or is above the most a project may spend (a limit must not be
+/// skewed by one), or a price in another currency, is no price at all.
 fn pricing_of(unit_price: f64, unit: &str, currency: &str) -> Pricing {
     if !currency.eq_ignore_ascii_case("usd") || !unit_price.is_finite() || !(0.0..=MAX_ASSET_BUDGET_USD).contains(&unit_price) {
         return Pricing::Unknown;
@@ -1300,8 +1289,8 @@ mod listing_tests {
         ] {
             assert_eq!(rate(unit, 0.01), Pricing::After { unit: Unit::Usd }, "{unit:?}");
         }
-        // A price that is not a plain dollar amount is no price at all (Ruling 5): not a number, below
-        // nothing, or (Ruling 16) above the most a project may spend, which no real model charges.
+        // A price that is not a plain dollar amount is no price at all: not a number, below
+        // nothing, or above the most a project may spend, which no real model charges.
         for price in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.001, -1e300, 1e300, MAX_ASSET_BUDGET_USD + 0.01] {
             assert_eq!(rate("image", price), Pricing::Unknown, "{price}");
             assert_eq!(rate("gpu_second", price), Pricing::Unknown, "{price}");

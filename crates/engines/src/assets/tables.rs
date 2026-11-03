@@ -425,7 +425,7 @@ mod tests {
             ("prompt", Role::Prompt),
             ("text", Role::Prompt),
             ("image_url", Role::Image),
-            // fal's Hunyuan 3D models name their picture so (Ruling 15).
+            // fal's Hunyuan 3D models name their picture `input_image_url`.
             ("input_image_url", Role::Image),
             ("aspect_ratio", Role::Shape),
             // Scenario writes its input names in camelCase: the ones its generate calls have always

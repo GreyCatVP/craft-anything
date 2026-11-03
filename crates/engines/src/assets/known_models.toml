@@ -69,7 +69,18 @@ name = "ElevenLabs Multilingual v2"
 kinds = ["speech"]
 
 # ElevenLabs' two fixed endpoints. Credit rates are the ones ElevenLabs states, converted to
-# credits per second:
+# credits per second.
+#
+# Both ids are deprecated by ElevenLabs, which still serves them: `eleven_text_to_sound_v2` is
+# removed on 2027-03-01 (replaced by `eleven_text_to_sound_v3`) and `music_v1` on 2027-01-31
+# (replaced by `music_v2_5`; `music_v2` also exists). The replacements are not listed here because
+# ElevenLabs documents no credit rate for them, and a guessed rate would mislimit spending. Read on
+# 2026-11-03: https://elevenlabs.io/docs/overview/capabilities/sound-effects ("40 credits per
+# second" with no model named, v2 "deprecated and will be removed on March 1, 2027"),
+# https://elevenlabs.io/docs/overview/capabilities/music (no credit cost for any model, `music_v1`
+# "will be removed on January 31, 2027"), https://elevenlabs.io/docs/overview/models, and
+# https://elevenlabs.io/pricing/api (dollars, not credits). When ElevenLabs documents their rates,
+# add them as `fixed` models and remove the old ones before the removal dates.
 #
 # Sound effects: "Cost: 40 credits per second when duration is specified" (the range is 0.1 to
 # 30 seconds), https://elevenlabs.io/docs/overview/capabilities/sound-effects, read on 2026-11-03.
