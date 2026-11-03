@@ -135,11 +135,16 @@ fn wants_software(setting: Option<&str>) -> bool {
     setting.is_some_and(|s| s.trim().eq_ignore_ascii_case("software"))
 }
 
-/// What to try when the window can't start: a lost graphics device gets the way to the software
-/// renderer, and anything else the usual driver advice.
+/// What to try when the window can't start. A lost graphics device on Windows gets the way to the
+/// software renderer; on macOS that setting does nothing (only Windows picks its adapter), so it
+/// gets the update advice and the report path. Anything else gets the usual driver advice.
 fn graphics_advice(error: &str) -> &'static str {
     if error.to_lowercase().contains("device is lost") {
-        "The graphics driver stopped while the window opened. Update it, then try again. If it keeps happening, set the environment variable CRAFT_ANYTHING_RENDERER=software to draw without the graphics card (slower), and start the app again."
+        if cfg!(target_os = "macos") {
+            "The Mac's graphics stopped while the window opened. Install the latest macOS update, then try again. If it keeps happening, please report it with the log file (Craft Anything issue #742 covers the Metal shader case)."
+        } else {
+            "The graphics driver stopped while the window opened. Update it, then try again. If it keeps happening, set the environment variable CRAFT_ANYTHING_RENDERER=software to draw without the graphics card (slower), and start the app again."
+        }
     } else {
         "Updating your graphics driver often fixes this."
     }
@@ -282,10 +287,27 @@ mod graphics_tests {
         assert!(matches!(dx12_compiler(Some(Dx12Compiler::StaticDxc)), Dx12Compiler::StaticDxc));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_lost_device_says_how_to_draw_without_the_graphics_card() {
         assert!(graphics_advice("WGPU error: Parent device is lost").contains("CRAFT_ANYTHING_RENDERER=software"));
         assert!(!graphics_advice("No adapter").contains("software"));
+        assert!(wants_software(Some(" Software ")) && !wants_software(Some("gpu")) && !wants_software(None));
+    }
+
+    /// #742: on macOS `CRAFT_ANYTHING_RENDERER` does nothing, so the advice must not name it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_lost_device_on_a_mac_does_not_point_at_the_windows_only_setting() {
+        let advice = graphics_advice("WGPU error: Parent device is lost");
+        assert!(!advice.contains("CRAFT_ANYTHING_RENDERER"), "{advice}");
+        assert!(advice.contains("#742"));
+        assert!(!graphics_advice("No adapter").contains("CRAFT_ANYTHING_RENDERER"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn wants_software_reads_the_setting() {
         assert!(wants_software(Some(" Software ")) && !wants_software(Some("gpu")) && !wants_software(None));
     }
 }
