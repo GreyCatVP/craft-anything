@@ -505,7 +505,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let detected = app.detected.clone().unwrap_or_default();
     if detected.is_empty() && !app.detecting {
         ui.label(
-            RichText::new(tr("Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have."))
+            RichText::new(tr("Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below."))
                 .color(t.text_faint),
         );
     }

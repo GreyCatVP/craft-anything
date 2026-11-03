@@ -412,7 +412,7 @@ Not now	後で
 Nothing allowed yet.	まだ何も許可されていません。
 Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below.	まだビルドできません。Claude Code をインストールして一度サインインするか、下で API キーを使って AI を追加してください。
 Nothing found	何も見つかりません
-Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have.	まだ見つかっていません。API キー、ローカルのモデルサーバー(Ollama、LM Studio)、すでにあるエージェントアプリを探します。
+Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below.	まだ見つかっていません。API キー、ローカルのモデルサーバー(Ollama、LM Studio)、すでにあるエージェントアプリを探します。別のポートや別のコンピュータにあるサーバーは、下でアドレスを指定して追加できます。
 Nothing inside it is read.	中身は一切読みません。
 Nothing inside it is read; we work from what you can see. Your version gets its own art.	中身は読みません。見えるものから作業し、あなたの版には独自のアートを使います。
 Nothing made yet. What you make shows up here.	まだ何も作っていません。作ったものがここに並びます。
