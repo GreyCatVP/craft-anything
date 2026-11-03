@@ -252,7 +252,7 @@ pub(crate) fn resolve(base: &Path, p: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-pub(crate) use crate::workspace::inside;
+pub(crate) use crate::workspace::{inside, really_inside};
 
 /// The program a command part starts (a leading quoted path keeps its spaces) and the rest.
 fn program_of(part: &str) -> (&str, &str) {
@@ -342,7 +342,10 @@ pub fn decide(ws: Option<&Workspace>, tool: &str, input: &Value) -> Decision {
             // also when the app is the project folder itself.
             let checks = ws.map(Workspace::checks_dir);
             match (&app, resolve(app.as_deref().unwrap_or(Path::new("/")), &target)) {
-                (Some(app), Some(p)) if (inside(app, &p) || checks.as_ref().is_some_and(|c| inside(c, &p))) && !ws.is_some_and(|w| w.is_own_record(&p)) => {
+                // Followed through links, so a link in app/ can't lead a write out of it.
+                (Some(app), Some(p))
+                    if (really_inside(app, &p) || checks.as_ref().is_some_and(|c| really_inside(c, &p))) && !ws.is_some_and(|w| w.is_own_record(&p)) =>
+                {
                     Decision::Allow
                 }
                 _ => Decision::Ask { title: format!("Change a file outside the project: {target}"), kind },
@@ -669,6 +672,26 @@ mod tests {
         let sneaky = format!("{}/../../evil.txt", w.app_dir().display());
         assert!(matches!(decide(Some(&w), "Edit", &json!({"file_path": sneaky})), Decision::Ask { .. }));
         assert!(matches!(decide(None, "Write", &json!({"file_path": "/tmp/x"})), Decision::Ask { .. }));
+    }
+
+    #[test]
+    fn a_write_through_a_link_out_of_app_is_asked() {
+        let (_d, w) = ws();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(w.app_dir()).unwrap();
+        let link = w.app_dir().join("out");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), &link);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), &link);
+        if made.is_err() {
+            eprintln!("skipped: this system won't make links for tests");
+            return;
+        }
+        let through = |name: &str| json!({"file_path": link.join(name).display().to_string()});
+        assert!(matches!(decide(Some(&w), "Write", &through("x.txt")), Decision::Ask { .. }));
+        assert!(matches!(decide(Some(&w), "Edit", &through("new/y.txt")), Decision::Ask { .. }));
+        assert_eq!(decide(Some(&w), "Write", &json!({"file_path": w.app_dir().join("ok.txt").display().to_string()})), Decision::Allow);
     }
 
     #[test]
