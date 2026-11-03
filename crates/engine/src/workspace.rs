@@ -656,7 +656,7 @@ fn read_ledger(bytes: &[u8]) -> Result<Vec<AssetRecord>, ToolError> {
 /// What `kind` has used under `t`: the generations of that kind since the provider was chosen,
 /// at that provider and in that unit. A generation recorded before ledger version 1 has no
 /// provider; it counts only for a type billed in dollars and counted from the start of the project.
-fn type_usage(records: &[AssetRecord], kind: AssetKind, t: &TypeAssets) -> TypeUsage {
+pub(crate) fn type_usage(records: &[AssetRecord], kind: AssetKind, t: &TypeAssets) -> TypeUsage {
     let mut usage = TypeUsage::default();
     let Some(provider) = t.choice.provider.as_deref() else { return usage };
     for record in records.iter().filter(|r| r.kind == kind.ledger_name() && r.at_ms >= t.since_ms) {

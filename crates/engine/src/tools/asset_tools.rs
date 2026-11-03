@@ -436,7 +436,7 @@ impl Job {
     }
 }
 
-fn unit_words(unit: Unit) -> &'static str {
+pub(crate) fn unit_words(unit: Unit) -> &'static str {
     match unit {
         Unit::Usd => "dollars",
         Unit::Credits => "credits",
@@ -531,7 +531,7 @@ impl Receipt<'_> {
 
 /// Whether `t`'s limit is enforced in this project: it is switched on, the project doesn't ignore
 /// the budget, and the type's price is one to count with.
-fn limit_applies(ws: &Workspace, t: &TypeAssets) -> bool {
+pub(crate) fn limit_applies(ws: &Workspace, t: &TypeAssets) -> bool {
     t.limit_on && !ws.manifest.assets.ignore_budget && t.choice.pricing.tracked()
 }
 
@@ -744,7 +744,7 @@ fn summary(ws: &Workspace, ready: &Ready, saved: &str, made: &Generated, extra: 
 }
 
 /// An amount as a result reports it: to a hundredth of a cent or credit.
-fn round(x: f64) -> f64 {
+pub(crate) fn round(x: f64) -> f64 {
     (x * 10_000.0).round() / 10_000.0
 }
 
