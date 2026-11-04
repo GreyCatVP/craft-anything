@@ -440,9 +440,11 @@ Owner: open · Status: in progress
 - [x] A relative program path started in another folder is looked up where it was started
       before it's reported as missing (Unix: a script whose interpreter is missing was said to
       have no file there)
-- [ ] When a saved Codex desktop path is gone, offer the CLI found in its newest build folder
-      (asking first, never replacing a custom program silently), and let Detect/Test check the
-      configured program itself (#721)
+- [x] `ai test` names the program it ran and the saved one it replaced, and `doctor` says a saved
+      path has no program there instead of blaming PATH (#721)
+- [ ] Settings says when a saved agent program is gone and which one runs in its place; today a
+      build moves to the newest build folder or the usual program without saying so, and the
+      setting keeps the old path (read on a worker, not while drawing) (#721)
 - [x] GitHub Copilot through its own CLI login and ACP, without credential import:
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes

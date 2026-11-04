@@ -103,6 +103,30 @@ fn a_coding_agent_test_says_it_only_checked_the_version() {
     let r = h.test_backend("Agent").unwrap();
     assert!(r.version_only && r.reply.starts_with("cargo "), "{r:?}");
     assert_eq!(serde_json::to_value(&r).unwrap()["version_only"], true, "the CLI's ai test prints it");
+    assert_eq!((r.program.as_deref(), r.saved_program_replaced), (Some("cargo"), None), "the saved program ran");
+}
+
+/// #721: a saved path an update removed. A test that passes through the usual program says so, and
+/// doctor doesn't blame PATH when nothing can be found.
+#[test]
+fn a_saved_program_that_is_gone_is_named_by_test_and_doctor() {
+    let (h, _d) = hub();
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("old-build").join("agent").display().to_string();
+    let backend = |name: &str, model: &str| BackendEntry {
+        config: BackendConfig { name: name.into(), kind: BackendKind::AgentCli, model: model.into(), base_url: None, ssh_host: None, enabled: true },
+        options: BackendOptions { command: Some(gone.clone()), ..Default::default() },
+    };
+    // cargo stands in for the agent's usual program: it's there wherever these tests run.
+    h.add_backend_with(backend("Usual", "cargo"), None).unwrap();
+    h.add_backend_with(backend("Nowhere", "no-such-agent-program"), None).unwrap();
+
+    let r = h.test_backend("Usual").unwrap();
+    assert_eq!((r.program.as_deref(), r.saved_program_replaced.as_deref()), (Some("cargo"), Some(gone.as_str())));
+
+    let reach = h.check_reachability();
+    let nowhere = reach.iter().find(|(name, _)| name == "Nowhere").map(|(_, r)| r.clone()).unwrap();
+    assert_eq!(nowhere, Err(format!("there's no program at {gone}")));
 }
 
 /// Every known agent with an adapter of its own is offered when adding a coding agent.

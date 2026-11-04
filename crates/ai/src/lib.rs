@@ -327,6 +327,13 @@ pub struct TestReport {
     /// whether it's signed in, has a model and quota shows only when it gets a message (#48).
     #[serde(default)]
     pub version_only: bool,
+    /// The coding agent's program that ran, which `reply` is the answer of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    /// The saved program that couldn't be used, when `program` ran in its place (#721: an update
+    /// moved it), so a passing test doesn't hide a setting that's out of date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_program_replaced: Option<String>,
 }
 
 /// Text kept in the journal for a user message (bounded).
@@ -947,6 +954,8 @@ impl AiHub {
                 latency_ms: start.elapsed().as_millis() as u64,
                 reply: out.stdout_text().lines().next().unwrap_or_default().trim().to_string(),
                 version_only: true,
+                saved_program_replaced: e.options.command.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != program).map(str::to_string),
+                program: Some(program),
             });
         }
         let mut slot = self.build_model(&e)?;
@@ -969,6 +978,8 @@ impl AiHub {
             latency_ms: start.elapsed().as_millis() as u64,
             reply: r.message.text().trim().to_string(),
             version_only: false,
+            program: None,
+            saved_program_replaced: None,
         })
     }
 
@@ -1047,7 +1058,11 @@ fn reach(e: &BackendEntry, key: Option<String>) -> Result<u64, String> {
         }
         BackendKind::AgentCli => {
             let program = cli_agents::program_of(&e.config, &e.options);
-            craft_anything_platform::which(&program).map(|_| ()).ok_or_else(|| format!("{program} isn't on PATH"))
+            // A saved path that's gone (#721): PATH has nothing to do with it.
+            let by_path = std::path::Path::new(&program).parent().is_some_and(|p| !p.as_os_str().is_empty());
+            craft_anything_platform::which(&program)
+                .map(|_| ())
+                .ok_or_else(|| if by_path { format!("there's no program at {program}") } else { format!("{program} isn't on PATH") })
         }
     };
     r.map(|_| start.elapsed().as_millis() as u64)
