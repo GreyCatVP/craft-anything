@@ -680,7 +680,8 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
     changed |= generated_assets(app, ui);
     if changed {
         app.settings_changed();
-        // A project that has not chosen a type follows Settings' default for it: its usage is read for that.
+        // Settings' defaults only seed new projects. An old project open here may take them until
+        // its first save as it opens stores them: its usage is read again for that.
         app.refresh_side_panel();
     }
 }

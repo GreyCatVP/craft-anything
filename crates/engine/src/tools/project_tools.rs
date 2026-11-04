@@ -210,12 +210,28 @@ pub struct DuplicateParams {
     pub name: Option<String>,
 }
 
-fn project_duplicate(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+/// What an AI is told when it asked for generated assets on a project (a new one, or a copy of
+/// one that had them on) and they were left off.
+pub const ASSETS_LEFT_OFF: &str = "Generated assets are off for this project: only the person can turn them on, in the project's Generated assets panel.";
+
+/// Copy a project. Generated assets spend the person's money, so a copy an AI makes (an agent, an
+/// MCP client, or a command line an AI started) has them off, and the result says so; the person's
+/// own copies keep the original's switch.
+fn project_duplicate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: DuplicateParams = parse_params(params)?;
-    let ws = open(&p.project)?;
+    let settings = ctx.session.settings.assets.clone();
+    let ws = open_keeping(&p.project, &settings)?;
     let name = p.name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("{} copy", ws.manifest.name));
-    let copy = ws.duplicate(&name)?;
-    Ok(ToolOutput::Value(json!({"project": copy.root, "name": copy.manifest.name})))
+    let by_ai = matches!(ctx.caller, Caller::Agent | Caller::Mcp);
+    let copy = if by_ai { ws.duplicate_assets_off(&name)? } else { ws.duplicate(&name)? };
+    let mut out = json!({"project": copy.root, "name": copy.manifest.name, "generate_assets": copy.manifest.generate_assets});
+    if by_ai
+        && ws.manifest.generate_assets
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("generate_assets_note".into(), json!(ASSETS_LEFT_OFF));
+    }
+    Ok(ToolOutput::Value(out))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -274,7 +290,13 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         let mut after = ws.manifest.clone();
         change(&mut after);
         approve_loosening(ctx, &ws, &loosenings(&ws.manifest, &after, &settings))?;
-        ws.set_person(change)?;
+        // Stored with the change: what a project from before version 4 took from Settings.
+        ws.set_person(|m| {
+            m.assets.keep_effective(&settings);
+            change(m);
+        })?;
+    } else {
+        keep_defaults(&mut ws, &settings);
     }
     Ok(ToolOutput::Value(assets_report(&ws, &settings, &ws.try_assets())))
 }
@@ -487,7 +509,11 @@ fn project_assets_choose(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let mut after = ws.manifest.clone();
     after.assets.choose(p.kind, choice.clone(), &settings, now);
     approve_loosening(ctx, &ws, &loosenings(&ws.manifest, &after, &settings))?;
-    ws.set_person(|m| m.assets.choose(p.kind, choice, &settings, now))?;
+    ws.set_person(|m| {
+        // The other types of a project from before version 4 keep what they took from Settings.
+        m.assets.keep_effective(&settings);
+        m.assets.choose(p.kind, choice, &settings, now);
+    })?;
     Ok(ToolOutput::Value(assets_report(&ws, &settings, &ws.try_assets())))
 }
 
@@ -524,8 +550,14 @@ fn project_assets_limit(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         after.assets.set_limit(p.kind, p.limit, p.enabled, &settings)?;
         approve_loosening(ctx, &ws, &loosenings(&ws.manifest, &after, &settings))?;
         let mut applied = Ok(());
-        ws.set_person(|m| applied = m.assets.set_limit(p.kind, p.limit, p.enabled, &settings))?;
+        ws.set_person(|m| {
+            // The other types of a project from before version 4 keep what they took from Settings.
+            m.assets.keep_effective(&settings);
+            applied = m.assets.set_limit(p.kind, p.limit, p.enabled, &settings);
+        })?;
         applied?;
+    } else {
+        keep_defaults(&mut ws, &settings);
     }
     Ok(ToolOutput::Value(assets_report(&ws, &settings, &ws.try_assets())))
 }
@@ -724,6 +756,24 @@ fn open(project: &std::path::Path) -> Result<Workspace, ToolError> {
         ToolError::new(ErrorCode::NotFound, format!("{} isn't a project folder: {why}", project.display()))
             .with_remediation("Pass a folder from project_list (it holds craft.json).")
     })
+}
+
+/// Open a project to work with its generated assets. A project from before each type had its own
+/// choice first gets Settings' defaults stored for the types it hasn't chosen, so a later change to
+/// Settings never changes it (see [`Workspace::keep_asset_defaults`]).
+fn open_keeping(project: &std::path::Path, settings: &AssetSettings) -> Result<Workspace, ToolError> {
+    let mut ws = open(project)?;
+    keep_defaults(&mut ws, settings);
+    Ok(ws)
+}
+
+/// [`Workspace::keep_asset_defaults`], for a tool that changes nothing else. If the save fails, the
+/// project keeps taking Settings' defaults and the failure is only logged: the next save says what
+/// is wrong.
+fn keep_defaults(ws: &mut Workspace, settings: &AssetSettings) {
+    if let Err(e) = ws.keep_asset_defaults(settings) {
+        log::warn!("couldn't store the asset defaults in {}: {}", ws.root.display(), e.message);
+    }
 }
 
 fn summary(ws: &Workspace) -> Value {
@@ -1321,6 +1371,75 @@ mod tests {
             assert_eq!((&neither["generate_assets"], &neither["ignore_budget"]), (&json!(false), &json!(false)));
             let disk = Workspace::open(&ws.root).unwrap().manifest;
             assert!(!disk.generate_assets && !disk.assets.ignore_budget);
+        }
+
+        /// A project from before each type had its own choice gets Settings' defaults stored the first
+        /// time a tool works on its assets; Settings changed afterwards doesn't change it.
+        #[test]
+        fn an_old_project_keeps_the_settings_it_was_first_opened_with() {
+            let music = AssetChoice {
+                provider: Some("elevenlabs".into()),
+                model: "music_v1".into(),
+                model_name: "Music v1".into(),
+                unit: Unit::Credits,
+                pricing: Pricing::After { unit: Unit::Credits },
+            };
+            let mut session = crate::testing::session();
+            session.settings.assets.defaults.insert(AssetKind::Music, music.clone());
+            session.settings.assets.credit_limit = 750.0;
+            let e = Engine::new(session);
+            let d = tempfile::tempdir().unwrap();
+            let old = r#"{"version":3,"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true,"asset_budget_usd":12.0}"#;
+            std::fs::write(d.path().join(MANIFEST), old).unwrap();
+            let report = call(&e, "project_assets_allow", json!({"project": d.path()})).unwrap();
+            assert_eq!((&report["types"]["music"]["model"], &report["types"]["music"]["limit"]), (&json!("music_v1"), &json!(750.0)));
+            let stored = Workspace::open(d.path()).unwrap().manifest.assets;
+            assert_eq!(stored.types.len(), AssetKind::ALL.len(), "stored on the first open");
+            assert_eq!((&stored.types[&AssetKind::Music].choice, stored.types[&AssetKind::Music].limit), (&music, 750.0));
+            assert_eq!(stored.types[&AssetKind::Image].limit, 12.0, "the old budget became the dollar types' limit");
+
+            // The person changes Settings' default and limits afterwards.
+            {
+                let mut s = e.session();
+                s.settings.assets.defaults.insert(AssetKind::Music, AssetChoice::off());
+                s.settings.assets.credit_limit = 9.0;
+                s.settings.assets.usd_limit = 1.0;
+            }
+            let report = call(&e, "project_assets_allow", json!({"project": d.path()})).unwrap();
+            let t = &report["types"]["music"];
+            assert_eq!((&t["provider"], &t["model"], &t["limit"]), (&json!("elevenlabs"), &json!("music_v1"), &json!(750.0)), "{report}");
+            assert_eq!(report["types"]["image"]["limit"], json!(12.0));
+            assert_eq!(Workspace::open(d.path()).unwrap().manifest.assets, stored, "the project keeps its stored choices and limits");
+        }
+
+        /// A copy an AI makes has generated assets off and says so; the person's own copy keeps them on.
+        #[test]
+        fn a_copy_made_by_an_ai_has_generated_assets_off() {
+            let e = asking();
+            let (_d, mut ws, _) = project();
+            ws.set_person(|m| m.generate_assets = true).unwrap();
+            for caller in [Caller::Agent, Caller::Mcp] {
+                let (r, cards) = call_as(&e, &ws, caller, "project_duplicate", json!({"project": ws.root, "name": format!("{caller:?} copy")}), Reply::Nothing);
+                let r = r.unwrap();
+                assert!(cards.is_empty(), "no card: the copy simply starts with them off");
+                assert_eq!(r["generate_assets"], false, "{caller:?}");
+                assert_eq!(r["generate_assets_note"], json!(ASSETS_LEFT_OFF), "{caller:?}");
+                let copy = Workspace::open(std::path::Path::new(r["project"].as_str().unwrap())).unwrap();
+                assert!(!copy.manifest.generate_assets, "{caller:?}: saved off");
+            }
+            assert!(Workspace::open(&ws.root).unwrap().manifest.generate_assets, "the original is unchanged");
+            for caller in [Caller::Cli, Caller::Ui] {
+                let (r, _) = call_as(&e, &ws, caller, "project_duplicate", json!({"project": ws.root, "name": format!("{caller:?} copy")}), Reply::Nothing);
+                let r = r.unwrap();
+                assert_eq!(r["generate_assets"], true, "{caller:?}");
+                assert!(r.get("generate_assets_note").is_none(), "{caller:?}: {r}");
+                assert!(Workspace::open(std::path::Path::new(r["project"].as_str().unwrap())).unwrap().manifest.generate_assets);
+            }
+            // With generation off in the original there is nothing to say.
+            ws.set_person(|m| m.generate_assets = false).unwrap();
+            let (r, _) = call_as(&e, &ws, Caller::Agent, "project_duplicate", json!({"project": ws.root, "name": "Off copy"}), Reply::Nothing);
+            let r = r.unwrap();
+            assert!(r["generate_assets"] == false && r.get("generate_assets_note").is_none(), "{r}");
         }
 
         #[test]

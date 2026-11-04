@@ -104,16 +104,19 @@ cost. Drawing the panel reads only memory: usage and the model lists are read on
 Settings → Builds holds the provider keys, the default provider, model and limit for each type that a
 new project copies, a default for Ignore budget, a line saying when the lists were fetched, and a
 Refresh button. There is one default limit for each unit ($5 and 500 credits), so changing it changes
-every type billed in that unit. A project that has chosen its own is not affected.
+every type billed in that unit for projects made afterwards. These defaults only seed new projects:
+an existing project keeps what it has stored.
 
 Choices, limits and Ignore budget are saved in `craft.json` version 4, and each generation in
 `assets.json` version 1 with its provider, model and the amount in its unit; older files are brought
-forward when opened (see [file-formats.md](file-formats.md)). Opening an old project gives each type
-Settings' default, except that a provider the project had left out is Off, with the project's old
-budget as the limit of a type billed in dollars; the old spending history is kept and counted in
-dollars. An older build opens a version 4 project read-only. An old project-wide "Always" answer to
-the over-budget question is not carried over, so each type asks once more; "Always" now switches that
-type's limit off, where the person can see it and switch it back on.
+forward when opened (see [file-formats.md](file-formats.md)). The first time this version opens an old
+project to work on it (the app, a project tool, a build or a generation; not a read-only one), each
+type gets Settings' default stored in the project, so later changes to Settings don't change it,
+except that a provider the project had left out is Off, with the project's old budget as the limit of
+a type billed in dollars; the old spending history is kept and counted in dollars. An older build
+opens a version 4 project read-only. An old project-wide "Always" answer to the over-budget question
+is not carried over, so each type asks once more; "Always" now switches that type's limit off, where
+the person can see it and switch it back on.
 
 The builder's prompts say, for each type, the provider and model the project uses and what it has
 used of its limit, and that these choices are the person's. A type is offered to the builder only when

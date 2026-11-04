@@ -969,7 +969,12 @@ impl Worker {
         };
         let mut snapshot = ws.clone();
         let usage = match Workspace::open(&ws.root) {
-            Ok(current) if !current.is_read_only() => {
+            Ok(mut current) if !current.is_read_only() => {
+                // A project from before each type had its own choice keeps what it takes from
+                // Settings now, so a later change to Settings doesn't change it.
+                if let Err(e) = current.keep_asset_defaults(&asset_settings) {
+                    log::warn!("couldn't store the asset defaults in {}: {}", current.root.display(), e.message);
+                }
                 snapshot.manifest.generate_assets = current.manifest.generate_assets;
                 snapshot.manifest.assets.clone_from(&current.manifest.assets);
                 asset_usage(&current, &asset_settings)

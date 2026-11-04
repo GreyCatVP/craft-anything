@@ -71,5 +71,6 @@ pub fn generates_assets(asked: bool, caller: Caller) -> bool {
     asked && matches!(caller, Caller::Ui | Caller::Cli)
 }
 
-/// What an AI is told when it asked for generated assets on a new project and they were left off.
-pub const ASSETS_LEFT_OFF: &str = "Generated assets are off for this project: only the person can turn them on, in the project's Generated assets panel.";
+/// What an AI is told when it asked for generated assets on a new project and they were left off
+/// (the same words `project_duplicate` gives for a copy).
+pub const ASSETS_LEFT_OFF: &str = craft_anything_engine::tools::project_tools::ASSETS_LEFT_OFF;

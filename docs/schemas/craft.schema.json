@@ -380,7 +380,7 @@
           }
         },
         "types": {
-          "description": "What the person chose for each type. A type that isn't here has not been chosen in this\nproject yet (a project from before version 4): it follows Settings' default for the type.",
+          "description": "What the person chose for each type. A type that isn't here has not been chosen in this\nproject yet (a project from before version 4): it takes Settings' default for the type\nuntil this build first opens the project to work on it, which stores that default here\n([`ProjectAssets::keep_effective`]).",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/TypeAssets"

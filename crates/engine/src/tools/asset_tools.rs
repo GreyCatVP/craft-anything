@@ -368,6 +368,11 @@ fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
     // The person may have changed their choices (generation, providers, limits) while this waited.
     ws.reload()?;
     generation_permitted(&ws)?;
+    // A project from before each type had its own choice keeps what it took from Settings from now
+    // on. If that can't be saved it still takes Settings' defaults, which are what this run uses.
+    if let Err(e) = ws.keep_asset_defaults(&settings) {
+        log::warn!("couldn't store the asset defaults in {}: {}", ws.root.display(), e.message);
+    }
     Ok(Job { keys, providers, settings, inbox, ws, _spending: spending })
 }
 

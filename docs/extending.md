@@ -69,14 +69,17 @@ ElevenLabs sound effects or music costs, because ElevenLabs publishes no rate fo
 endpoints in its API. Every other price is the provider's.
 
 Each project stores its choice for a kind: the provider, the model, its unit and the price the list
-gave. Settings → Builds holds the defaults a new project copies; changing them later does not change
-an existing project. Choosing another provider for a kind (Off counts as one) starts that kind's
-count afresh in the new provider's unit; another model of the same provider keeps the count. The
-builder does not choose models: the project's choice for each kind is the only model used, and the
-generation tools take no `model` parameter. A 3D model made from a description gets a picture made
-first, with the project's picture model (counted against the limit for pictures), only when the
-chosen 3D model starts from a picture and pictures are on. A 3D model that takes words is given the
-words directly; one that starts from a picture, with pictures Off, makes the tool stop and say so.
+gave. Settings → Builds holds the defaults a new project copies; they only seed new projects, and
+changing them later does not change an existing one. A project from before each kind had its own
+choice gets the defaults stored in it the first time this version opens it to work on it (not when it
+is read-only), and keeps them from then on. Choosing another provider for a kind (Off counts as one)
+starts that kind's count afresh in the new provider's unit; another model of the same provider keeps
+the count. The builder does not choose models: the project's choice for each kind is the only model
+used, and the generation tools take no `model` parameter. A 3D model made from a description gets a
+picture made first, with the project's picture model (counted against the limit for pictures), only
+when the chosen 3D model starts from a picture and pictures are on. A 3D model that takes words is
+given the words directly; one that starts from a picture, with pictures Off, makes the tool stop and
+say so.
 
 ### Units, limits and Ignore budget
 

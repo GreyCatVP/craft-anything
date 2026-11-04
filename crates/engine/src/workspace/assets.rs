@@ -41,7 +41,9 @@ pub struct ProjectAssets {
     /// Every limit in the project is off at once; usage is still counted.
     pub ignore_budget: bool,
     /// What the person chose for each type. A type that isn't here has not been chosen in this
-    /// project yet (a project from before version 4): it follows Settings' default for the type.
+    /// project yet (a project from before version 4): it takes Settings' default for the type
+    /// until this build first opens the project to work on it, which stores that default here
+    /// ([`ProjectAssets::keep_effective`]).
     pub types: BTreeMap<AssetKind, TypeAssets>,
     /// The one dollar budget a project of `craft.json` version 3 had. It stands in as the limit of
     /// the dollar-billed types that have not been chosen since.
@@ -88,6 +90,30 @@ impl ProjectAssets {
             (unit, _) => s.default_limit(unit),
         };
         TypeAssets { choice, limit, limit_on: true, since_ms: 0 }
+    }
+
+    /// Whether some type still takes Settings' default (a project from before version 4 that this
+    /// build hasn't stored the defaults in yet).
+    pub fn follows_settings(&self) -> bool {
+        AssetKind::ALL.iter().any(|k| !self.types.contains_key(k)) || self.legacy_budget_usd.is_some() || self.legacy_providers.is_some()
+    }
+
+    /// Store what each type not chosen yet has now ([`Self::effective`]: Settings' default, the old
+    /// provider list and budget applied), so a later change to Settings' defaults never changes the
+    /// project. The old budget and provider list have then done their part and are dropped.
+    /// Returns whether anything changed.
+    pub fn keep_effective(&mut self, s: &AssetSettings) -> bool {
+        let mut changed = false;
+        for kind in AssetKind::ALL {
+            if !self.types.contains_key(&kind) {
+                let t = self.effective(kind, s);
+                self.types.insert(kind, t);
+                changed = true;
+            }
+        }
+        let budget = self.legacy_budget_usd.take().is_some();
+        let providers = self.legacy_providers.take().is_some();
+        changed || budget || providers
     }
 
     /// Choose the provider and model for `kind`. The limit, its switch and the start of the count
@@ -647,6 +673,60 @@ mod tests {
         let disk = Workspace::open(&run.root).unwrap().manifest;
         assert!(disk.assets.ignore_budget && disk.assets.effective(AssetKind::Image, &s).limit == 20.0);
         assert_eq!(disk.assets.effective(AssetKind::Music, &s).choice, AssetChoice::off());
+    }
+
+    /// Settings' defaults only seed projects: an old project gets them stored the first time this
+    /// build opens it to work on it, and a later change to Settings leaves it as it was.
+    #[test]
+    fn an_old_project_keeps_the_defaults_it_was_opened_with() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(MANIFEST), v3(r#","asset_budget_usd":12.0,"asset_providers":["fal","scenario"]"#)).unwrap();
+        let s = settings();
+        let mut ws = Workspace::open(dir.path()).unwrap();
+        assert!(ws.manifest.assets.follows_settings());
+        assert!(ws.keep_asset_defaults(&s).unwrap(), "stored on the first open");
+        let disk = Workspace::open(dir.path()).unwrap().manifest;
+        assert!(!disk.assets.follows_settings());
+        assert_eq!(disk.assets.types.len(), AssetKind::ALL.len());
+        assert_eq!((disk.assets.legacy_budget_usd, disk.assets.legacy_providers.clone()), (None, None), "the old fields have done their part");
+        for kind in AssetKind::ALL {
+            assert_eq!(disk.assets.types[&kind], ws.manifest.assets.types[&kind], "{kind:?}");
+        }
+        let image = &disk.assets.types[&AssetKind::Image];
+        assert_eq!((image.choice.model.as_str(), image.limit, image.limit_on, image.since_ms), ("fal-ai/flux/dev", 12.0, true, 0));
+        assert_eq!(disk.assets.types[&AssetKind::Music].choice, AssetChoice::off(), "elevenlabs wasn't allowed");
+        // The person changes Settings' defaults and limits afterwards: the project keeps its own.
+        let mut later = settings();
+        later.defaults.insert(AssetKind::Image, pick("scenario", "model_other", Unit::Credits));
+        later.defaults.insert(AssetKind::Music, pick("elevenlabs", "music_v1", Unit::Credits));
+        later.usd_limit = 1.0;
+        later.credit_limit = 9.0;
+        let mut again = Workspace::open(dir.path()).unwrap();
+        assert!(!again.keep_asset_defaults(&later).unwrap(), "nothing left to store");
+        for (kind, model, limit) in [(AssetKind::Image, "fal-ai/flux/dev", 12.0), (AssetKind::Model3d, "model_meshy-7-1-img23d", 500.0)] {
+            let t = again.manifest.assets.effective(kind, &later);
+            assert_eq!((t.choice.model.as_str(), t.limit), (model, limit), "{kind:?}");
+        }
+        assert_eq!(again.manifest.assets.effective(AssetKind::Music, &later).choice, AssetChoice::off());
+        assert_eq!(again.manifest.assets, disk.assets);
+    }
+
+    #[test]
+    fn a_read_only_or_fully_stored_project_is_not_written() {
+        // A project from a newer build is never written.
+        let dir = tempfile::tempdir().unwrap();
+        let newer = r#"{"version":99,"name":"New","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1}"#;
+        std::fs::write(dir.path().join(MANIFEST), newer).unwrap();
+        let mut ws = Workspace::open(dir.path()).unwrap();
+        assert!(ws.is_read_only() && ws.manifest.assets.follows_settings());
+        assert!(!ws.keep_asset_defaults(&settings()).unwrap());
+        assert_eq!(std::fs::read_to_string(dir.path().join(MANIFEST)).unwrap(), newer);
+        // A project with every type stored has nothing to store.
+        let (_d, mut ws) = new_workspace();
+        ws.set_person(|m| m.assets = ProjectAssets::from_defaults(&settings(), 5)).unwrap();
+        let before = std::fs::read(ws.root.join(MANIFEST)).unwrap();
+        assert!(!ws.keep_asset_defaults(&AssetSettings::default()).unwrap());
+        assert_eq!(std::fs::read(ws.root.join(MANIFEST)).unwrap(), before);
     }
 
     #[test]

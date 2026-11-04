@@ -819,6 +819,16 @@ impl Workspace {
     /// questions or usage. An app edited in place is copied into the copy's app/. What a build
     /// makes again (dependencies, compiler output) is left out.
     pub fn duplicate(&self, name: &str) -> Result<Workspace, ToolError> {
+        self.copy_as(name, true)
+    }
+
+    /// The same copy as [`Self::duplicate`] with generated assets off, for a copy an AI asked for:
+    /// they spend the person's money, so only the person turns them on in the copy.
+    pub fn duplicate_assets_off(&self, name: &str) -> Result<Workspace, ToolError> {
+        self.copy_as(name, false)
+    }
+
+    fn copy_as(&self, name: &str, keep_generation: bool) -> Result<Workspace, ToolError> {
         let parent = self.root.parent().ok_or_else(|| ToolError::invalid(format!("{} has no parent folder to copy it into.", self.root.display())))?;
         let m = &self.manifest;
         let mut copy = Workspace::create(parent, name, &m.request, m.target.clone())?;
@@ -839,7 +849,7 @@ impl Workspace {
         // Ready stays ready; anything else can carry on (with a new conversation).
         copy.manifest.status = if m.status == Status::Ready { Status::Ready } else { Status::Stopped };
         copy.save()?;
-        let (generate, builder, allowed, questions) = (m.generate_assets, m.builder.clone(), m.allowed_actions.clone(), m.questions);
+        let (generate, builder, allowed, questions) = (m.generate_assets && keep_generation, m.builder.clone(), m.allowed_actions.clone(), m.questions);
         copy.set_person(|c| {
             c.generate_assets = generate;
             c.assets.clone_from(&m.assets);
@@ -967,6 +977,20 @@ impl Workspace {
         }
         let bytes = serde_json::to_vec_pretty(m).map_err(|e| ToolError::internal(e.to_string()))?;
         write_atomic(&self.root.join(MANIFEST), &bytes)
+    }
+
+    /// Store what a project from before version 4 still takes from Settings for its asset types
+    /// (see [`ProjectAssets::keep_effective`]), through [`Self::set_person`], so changing Settings'
+    /// defaults later never changes this project. Done the first time this build opens the project
+    /// to work on it; a read-only project (made by a newer build) and one with every type stored
+    /// are left alone. Returns whether it saved.
+    pub fn keep_asset_defaults(&mut self, s: &AssetSettings) -> Result<bool, ToolError> {
+        if self.is_read_only() || !self.manifest.assets.follows_settings() {
+            return Ok(false);
+        }
+        let mut changed = false;
+        self.set_person(|m| changed = m.assets.keep_effective(s))?;
+        Ok(changed)
     }
 
     /// Set the status and note, and save.

@@ -3188,6 +3188,35 @@ fn a_new_project_starts_with_the_asset_defaults_from_settings() {
     assert_eq!((saved.assets.legacy_budget_usd, saved.assets.legacy_providers), (None, None));
 }
 
+/// A project from before each asset type had its own choice gets Settings' defaults stored when a
+/// run first works on it, so changing Settings afterwards doesn't change what its builder is told.
+#[test]
+fn a_run_on_an_old_project_stores_the_asset_defaults_it_used() {
+    use craft_anything_engine::asset_choice::AssetChoice;
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{Pricing, Unit};
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":3,"name":"Old","request":"A game","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true}"#;
+    std::fs::write(d.path().join("craft.json"), old).unwrap();
+    let ws = Workspace::open(d.path()).unwrap();
+    let worker = check_worker(&ws, false);
+    let music = AssetChoice {
+        provider: Some("elevenlabs".into()),
+        model: "music_v1".into(),
+        model_name: "Music".into(),
+        unit: Unit::Credits,
+        pricing: Pricing::After { unit: Unit::Credits },
+    };
+    worker.engine.session().settings.assets.defaults.insert(AssetKind::Music, music.clone());
+    let _ = worker.turn_prompt(&ws, kind("game").as_ref(), &BuilderPrompt::Message("Add music".into()));
+    let saved = Workspace::open(d.path()).unwrap().manifest.assets;
+    assert_eq!(saved.types.len(), AssetKind::ALL.len(), "stored by the run's first turn");
+    assert_eq!(saved.types[&AssetKind::Music].choice, music);
+    worker.engine.session().settings.assets.defaults.clear();
+    let _ = worker.turn_prompt(&ws, kind("game").as_ref(), &BuilderPrompt::Message("Add more music".into()));
+    assert_eq!(Workspace::open(d.path()).unwrap().manifest.assets, saved, "Settings changed afterwards: the project keeps its own");
+}
+
 #[test]
 fn a_project_in_a_picked_folder_tells_the_builder_what_its_files_are() {
     use craft_anything_engine::workspace::ExistingFiles;

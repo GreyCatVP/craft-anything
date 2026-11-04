@@ -43,11 +43,13 @@ at the same provider changes none of that.
 Version 3's `asset_budget_usd` and `asset_providers` moved into `assets` as `legacy_budget_usd` and
 `legacy_providers`. They are written only for a project that had them in version 3: a new project
 stores all five types instead, and no tool changes them. A type the project has not chosen yet takes
-Settings' default for it, Off when `legacy_providers` is a list that leaves that provider out
-(missing or null: every provider, as in version 3), with `legacy_budget_usd` as the limit of a type
-billed in dollars. The master switch `generate_assets` still needs to be on.
-Choices, limits and "Ignore budget" are person-owned fields: builder saves preserve the values on
-disk, and duplicating a project retains them. An older build opens a version 4 project read-only.
+Settings' default for it until this version first opens the project to work on it, which stores that
+default for each such type and drops the two old fields; it is Off when `legacy_providers` is a list
+that leaves that provider out (missing or null: every provider, as in version 3), with
+`legacy_budget_usd` as the limit of a type billed in dollars. The master switch `generate_assets`
+still needs to be on. Choices, limits and "Ignore budget" are person-owned fields: builder saves
+preserve the values on disk, and duplicating a project retains them. An older build opens a version 4
+project read-only.
 
 `assets.json` version 1 is `{"version": 1, "records": [...]}`. Each record is one paid generation:
 `file`, `kind` (`image`, `model`, `speech`, `sound` or `music`), `prompt`, the `provider` and `model`

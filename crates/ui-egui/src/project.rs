@@ -189,9 +189,28 @@ impl CraftApp {
             };
             self.load_asked(&ws);
         }
+        self.keep_asset_defaults(&ws);
         self.workspace = Some(ws);
         self.refresh_side_panel();
         self.state.screen = Screen::Project;
+    }
+
+    /// A project from before each asset type had its own choice takes Settings' defaults for the
+    /// types it hasn't chosen; the first time it's opened here they are stored in it (on a worker),
+    /// so changing Settings later doesn't change it. Its asset rows wait for that like for any other
+    /// asset save. A project made by a newer Craft Anything is left as it is.
+    fn keep_asset_defaults(&mut self, ws: &Workspace) {
+        if ws.is_read_only() || !ws.manifest.assets.follows_settings() || self.asset_change_job.is_some() {
+            return;
+        }
+        let (mut kept, assets) = (ws.clone(), self.settings.assets.clone());
+        self.asset_change_job = Some(self.jobs.spawn(tr("Save asset settings"), false, move |_| {
+            // A failed save only means it keeps taking Settings' defaults, as before.
+            if let Err(e) = kept.keep_asset_defaults(&assets) {
+                log::warn!("couldn't store the asset defaults in {}: {}", kept.root.display(), e.message);
+            }
+            Ok(Done::AssetSettings(Workspace::open(&kept.root).map(Box::new)))
+        }));
     }
 
     /// Ask for a change (or continue after a pause or error).
