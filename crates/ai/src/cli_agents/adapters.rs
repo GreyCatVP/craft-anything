@@ -91,6 +91,12 @@ pub trait AgentAdapter: Send + Sync {
     fn validate_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
         Ok(())
     }
+    /// First `YYYY.MM.DD` agent version known to start Client-supplied MCP servers on
+    /// `session/new`. `None`: this adapter doesn't need that check. Older builds can accept the
+    /// list and then run without Craft Anything's tools.
+    fn acp_mcp_since(&self) -> Option<(u16, u8, u8)> {
+        None
+    }
     /// The model shown in Settings: an explicit choice or the CLI's own default. `None` means
     /// the agent picks its model and doesn't offer a model selector here.
     fn model_in_use(&self, _options: Option<&BackendOptions>) -> Option<String> {

@@ -525,6 +525,8 @@ Owner: open · Status: in progress
       Settings → AI offer it; #116's "error after every message" has no text yet (asked)
 - [ ] See whether Hermes still fails on 0.3.0 (#460: the fix its `fixed` label names was already in
       0.3.0 when it was filed, and it gives no version)
+- [ ] Live-check Cursor Agent ACP starts Craft Anything's MCP server on `session/new` (Detect finds
+      `agent`; extra `--force`/`--yolo` args are refused; versions before 2026.06.05 are refused)
 
 **Approvals:**
 - [ ] **decision** One approval behaviour across agents, and whether we want an auto-approve mode

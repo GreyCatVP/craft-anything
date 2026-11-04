@@ -154,6 +154,9 @@ pub struct AcpCore {
     models: Vec<String>,
     current_model: String,
     config_options: Vec<Value>,
+    /// When set, `initialize` must advertise an agent version on or after this date, so a build
+    /// does not start on an ACP agent known to ignore `session/new` MCP servers.
+    mcp_since: Option<(u16, u8, u8)>,
 }
 
 impl AcpCore {
@@ -179,6 +182,7 @@ impl AcpCore {
             models: Vec::new(),
             current_model: String::new(),
             config_options: Vec::new(),
+            mcp_since: None,
         }
     }
 
@@ -237,7 +241,11 @@ impl AcpCore {
     }
 
     fn mcp_servers(&self) -> Value {
-        if self.question { json!([]) } else { json!([{"name": super::MCP_NAME, "command": self.mcp.command, "args": self.mcp.args, "env": []}]) }
+        if self.question {
+            json!([])
+        } else {
+            json!([{"name": super::MCP_NAME, "type": "stdio", "command": self.mcp.command, "args": self.mcp.args, "env": []}])
+        }
     }
 
     /// One line from the agent.
@@ -290,6 +298,14 @@ impl AcpCore {
         let result = msg.get("result").unwrap_or(&Value::Null);
         match kind {
             Pending::Initialize => {
+                if let Some(min) = self.mcp_since
+                    && agent_version_too_old(result, min)
+                {
+                    return self.fail(
+                        format!("{} is too old to run Craft Anything's tools over ACP.", self.agent_name),
+                        Some(format!("Update {}, then try again.", self.agent_name)),
+                    );
+                }
                 let can_load = result.pointer("/agentCapabilities/loadSession").and_then(Value::as_bool).unwrap_or(false);
                 match self.resume.clone().filter(|_| can_load) {
                     Some(sid) => {
@@ -321,6 +337,9 @@ impl AcpCore {
                 }
                 if self.session.is_none() {
                     return self.fail(format!("{} started no session", self.agent_name), None);
+                }
+                if let Some(why) = mcp_not_started(result, super::MCP_NAME) {
+                    return self.fail(format!("{} started no Craft Anything tools.", self.agent_name), Some(why));
                 }
                 self.ready = true;
                 self.session_has_history = kind == Pending::LoadSession;
@@ -439,6 +458,58 @@ impl AcpCore {
             _ => return Vec::new(),
         };
         vec![Out::Event(ev)]
+    }
+}
+
+/// The advertised agent version in an `initialize` result (v1 `agentInfo`, v2 `info`).
+fn advertised_version(result: &Value) -> Option<&str> {
+    result.pointer("/agentInfo/version").or_else(|| result.pointer("/info/version")).and_then(Value::as_str)
+}
+
+/// The `YYYY.MM.DD` date at the start of a Cursor-style version (`2026.06.04-5fd875e`).
+fn version_date(s: &str) -> Option<(u16, u8, u8)> {
+    let date = s.split('-').next().unwrap_or(s);
+    let mut parts = date.split('.');
+    let year = parts.next()?.parse().ok()?;
+    let month = parts.next()?.parse().ok()?;
+    let day = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+fn agent_version_too_old(result: &Value, min: (u16, u8, u8)) -> bool {
+    version_date(advertised_version(result).unwrap_or_default()).is_none_or(|got| got < min)
+}
+
+/// When the session result reports MCP startup, why our server is missing or failed.
+fn mcp_not_started(result: &Value, name: &str) -> Option<String> {
+    let servers = result.get("mcpServers").or_else(|| result.pointer("/_meta/mcpServers"))?.as_array()?;
+    let statuses: Vec<(&str, &str)> = servers
+        .iter()
+        .filter_map(|server| {
+            let listed = server.get("name").and_then(Value::as_str)?;
+            let status = server.get("status").or_else(|| server.get("state")).and_then(Value::as_str);
+            let failed = server.get("error").is_some_and(|error| !error.is_null());
+            match (status, failed) {
+                (None, false) => None,
+                (Some(status), _) => Some((listed, status)),
+                (None, true) => Some((listed, "failed")),
+            }
+        })
+        .collect();
+    if statuses.is_empty() {
+        return None;
+    }
+    match statuses.iter().find(|(listed, _)| *listed == name) {
+        Some((_, status)) if ["connected", "ok", "ready", "started"].contains(status) => None,
+        Some((_, status)) => {
+            Some(format!("It reported Craft Anything's tools as {status}. Update the agent so it starts the MCP server sent with the session, then try again."))
+        }
+        None => Some(
+            "It started other MCP servers but not Craft Anything's. Update the agent so it starts the MCP server sent with the session, then try again.".into(),
+        ),
     }
 }
 
@@ -662,6 +733,9 @@ impl AcpConversation {
         let mut core = AcpCore::new(&self.backend, &name, self.cwd.clone(), self.mcp.clone(), resume);
         core.question = self.question;
         core.sign_in_fix = self.adapter.sign_in_fix();
+        if !self.question {
+            core.mcp_since = self.adapter.acp_mcp_since();
+        }
         if self.approver.is_some() {
             core = core.deciding();
         }
@@ -906,6 +980,7 @@ mod tests {
         assert_eq!(new[0]["method"], "session/new");
         assert_eq!(new[0]["params"]["cwd"], "/w/project");
         assert_eq!(new[0]["params"]["mcpServers"][0]["name"], "craft-anything");
+        assert_eq!(new[0]["params"]["mcpServers"][0]["type"], "stdio");
         assert_eq!(new[0]["params"]["mcpServers"][0]["env"], json!([]));
         let prompt = sent(&c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1"}}"#));
         assert_eq!(prompt[0]["method"], "session/prompt");
@@ -1192,6 +1267,38 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
         };
         let Some(c) = super::super::acp_for(&super::super::CliSpec::new(config, options, false, None)) else { panic!("Maki speaks ACP") };
         assert_eq!((c.program.as_str(), c.args.as_slice()), ("maki", &["--no-plugins", "acp", "-m", "anthropic/claude-sonnet-4-6"].map(String::from)[..]));
+    }
+
+    #[test]
+    fn a_session_that_reports_mcp_startup_failure_is_not_ready() {
+        let mut c = core(None);
+        c.start();
+        c.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        let failed = events(c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1","mcpServers":[{"name":"craft-anything","status":"failed"}]}}"#));
+        assert!(matches!(&failed[0], AgentEvent::Error { message, .. } if message.contains("started no Craft Anything tools")));
+        assert!(!c.ready);
+    }
+
+    #[test]
+    fn an_old_cursor_version_is_refused_before_the_session_starts() {
+        let mut c = core(None);
+        c.mcp_since = Some((2026, 6, 5));
+        c.start();
+        let refused = events(c.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"name":"cursor-agent","version":"2026.06.04-5fd875e"}}}"#));
+        assert!(matches!(&refused[0], AgentEvent::Error { message, .. } if message.contains("too old")));
+        assert!(!c.ready);
+        let mut c = core(None);
+        c.mcp_since = Some((2026, 6, 5));
+        c.start();
+        c.prompt("What does it do?");
+        let new = sent(&c.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentInfo":{"name":"cursor-agent","version":"2026.10.22-27dcf5f"}}}"#));
+        assert_eq!(new[0]["method"], "session/new");
+        let prompt = sent(&c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1","mcpServers":[{"name":"craft-anything","status":"connected"}]}}"#));
+        assert_eq!(prompt[0]["method"], "session/prompt");
+        assert!(c.ready);
+        assert_eq!(version_date("2026.06.04-5fd875e"), Some((2026, 6, 4)));
+        assert!(agent_version_too_old(&json!({"agentInfo":{"version":"2026.06.04-5fd875e"}}), (2026, 6, 5)));
+        assert!(!agent_version_too_old(&json!({"info":{"version":"2026.10.22-27dcf5f"}}), (2026, 6, 5)));
     }
 
     #[test]
