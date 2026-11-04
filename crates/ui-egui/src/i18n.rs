@@ -213,8 +213,13 @@ mod tests {
     }
 
     /// Arabic catalog: lookup returns translated strings, untranslated fall back to English.
+    /// Serializes tests that mutate the shared language state.
+    static LANGUAGE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Arabic catalog: lookup returns translated strings, untranslated fall back to English.
     #[test]
     fn arabic_catalog_lookup() {
+        let _guard = LANGUAGE_TEST_LOCK.lock().unwrap();
         set_language("ar");
         assert_eq!(language(), "ar");
         // "Apply" is translated in ar.tsv
@@ -229,6 +234,7 @@ mod tests {
     /// Arabic placeholder filling keeps {placeholders} intact.
     #[test]
     fn arabic_placeholder_filling() {
+        let _guard = LANGUAGE_TEST_LOCK.lock().unwrap();
         set_language("ar");
         let result = trf("Open {name}", &[("name", "ملف.tex")]);
         assert_eq!(result, "افتح ملف.tex");

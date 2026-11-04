@@ -148,7 +148,9 @@ TSV catalog (`key<TAB>translation`, `#` comments) included via `include_str!`.
 To add a language `xx`:
 
 1. Create `crates/ui-egui/src/i18n/xx.tsv` with `key<TAB>translation` rows. Keep `{placeholders}` and
-   escape sequences (`\n`, `…`) identical to the key. Lines starting with `#` are comments.
+   special characters identical to the key. Actual escape sequences (e.g. `\n`) must match the key;
+   literal Unicode characters (e.g. `…`) are not escape sequences and must also match exactly.
+   Lines starting with `#` are comments.
 2. Add a `LangInfo { code: "xx", name: "...", source: include_str!("i18n/xx.tsv") }` entry to
    `LANGUAGES` in `crates/ui-egui/src/i18n.rs` (alphabetical by code).
 3. The `tr()` fallback means untranslated keys show in English—partial catalogs are safe to ship.
