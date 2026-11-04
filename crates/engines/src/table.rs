@@ -78,6 +78,20 @@ pub struct KnownPath {
     pub rel: &'static str,
 }
 
+/// A folder that may hold an unpacked install: any sub-folder named after the engine (`ghidra_12.1.4_PUBLIC`,
+/// `ghidra/11.4/…`) is searched, down to `depth` levels. Where people unzip a release, or where a
+/// package manager unpacks one, when it isn't on PATH.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KnownRoot {
+    /// Host OS as in `std::env::consts::OS`.
+    pub os: &'static str,
+    pub base: Base,
+    /// Folder relative to `base` (`""` for `base` itself, `"Downloads"`).
+    pub rel: &'static str,
+    /// How many folder levels below the root to look (1: the root's own sub-folders).
+    pub depth: usize,
+}
+
 /// One optional external engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalEngine {
@@ -93,6 +107,8 @@ pub struct ExternalEngine {
     pub exes_windows: &'static [&'static str],
     /// Standard install locations, searched after PATH.
     pub known_paths: &'static [KnownPath],
+    /// Folders searched for an unpacked install of this engine, after the standard install locations.
+    pub known_roots: &'static [KnownRoot],
     /// Whether Settings → Engines has a path override for it (`ToolPaths`). Ghidra has its own folder setting.
     pub path_setting: bool,
     pub install: Install,
@@ -134,6 +150,22 @@ impl ExternalEngine {
             })
             .collect()
     }
+
+    /// The folders to search for an unpacked install on this OS, with how many levels down to look.
+    pub fn known_root_folders(&self) -> Vec<(std::path::PathBuf, usize)> {
+        let os = std::env::consts::OS;
+        self.known_roots
+            .iter()
+            .filter(|k| k.os == os)
+            .filter_map(|k| {
+                let base = match k.base {
+                    Base::Env(var) => std::path::PathBuf::from(std::env::var_os(var)?),
+                    Base::Dir(dir) => std::path::PathBuf::from(dir),
+                };
+                Some((base.join(k.rel), k.depth))
+            })
+            .collect()
+    }
 }
 
 const fn win(base: &'static str, rel: &'static str) -> KnownPath {
@@ -153,6 +185,38 @@ const NO_PATHS: &[KnownPath] = &[];
 /// Linux packages put Ghidra in a folder of its own and only a start script on PATH (`/usr/bin/ghidra`):
 /// Arch and its derivatives in `/opt/ghidra`, Debian and Kali in `/usr/share/ghidra` (#85).
 const GHIDRA_PATHS: &[KnownPath] = &[linux("/opt/ghidra", "support/analyzeHeadless"), linux("/usr/share/ghidra", "support/analyzeHeadless")];
+
+const NO_ROOTS: &[KnownRoot] = &[];
+
+const fn root(os: &'static str, base: Base, rel: &'static str, depth: usize) -> KnownRoot {
+    KnownRoot { os, base, rel, depth }
+}
+
+/// Ghidra is unzipped by hand almost anywhere (#740): Program Files, the home folder, Downloads and
+/// Desktop, and `/Applications`. Homebrew's cask unpacks to `Caskroom/ghidra/<version>/ghidra_…`, two
+/// levels down. Linux packages and the Arch/Debian folders sit under the system's share and library
+/// folders, one level down.
+const GHIDRA_ROOTS: &[KnownRoot] = &[
+    root("windows", Base::Env("ProgramFiles"), "", 1),
+    root("windows", Base::Env("ProgramFiles(x86)"), "", 1),
+    root("windows", Base::Env("USERPROFILE"), "", 1),
+    root("windows", Base::Env("USERPROFILE"), "Downloads", 1),
+    root("windows", Base::Env("USERPROFILE"), "Desktop", 1),
+    root("macos", Base::Dir("/Applications"), "", 1),
+    root("macos", Base::Env("HOME"), "", 1),
+    root("macos", Base::Env("HOME"), "Downloads", 1),
+    root("macos", Base::Env("HOME"), "Desktop", 1),
+    root("macos", Base::Dir("/opt/homebrew/Caskroom/ghidra"), "", 2),
+    root("macos", Base::Dir("/usr/local/Caskroom/ghidra"), "", 2),
+    root("linux", Base::Dir("/opt"), "", 1),
+    root("linux", Base::Dir("/usr/share"), "", 1),
+    root("linux", Base::Dir("/usr/lib"), "", 1),
+    root("linux", Base::Dir("/usr/local/share"), "", 1),
+    root("linux", Base::Dir("/usr/local/lib"), "", 1),
+    root("linux", Base::Env("HOME"), "", 1),
+    root("linux", Base::Env("HOME"), "Downloads", 1),
+    root("linux", Base::Env("HOME"), "Desktop", 1),
+];
 
 /// Browsers on Windows and macOS rarely put themselves on PATH.
 const CHROMIUM_PATHS: &[KnownPath] = &[
@@ -318,7 +382,7 @@ const fn manual(
     exes: &'static [&'static str],
     exes_windows: &'static [&'static str],
 ) -> ExternalEngine {
-    ExternalEngine { id, name, needed_for, exes, exes_windows, known_paths: NO_PATHS, path_setting: true, install: Install::Manual }
+    ExternalEngine { id, name, needed_for, exes, exes_windows, known_paths: NO_PATHS, known_roots: NO_ROOTS, path_setting: true, install: Install::Manual }
 }
 
 /// Every external engine. Ghidra first, then in the order of the Settings → Engines path list
@@ -331,6 +395,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["analyzeHeadless"],
         exes_windows: &["analyzeHeadless.bat"],
         known_paths: GHIDRA_PATHS,
+        known_roots: GHIDRA_ROOTS,
         path_setting: false,
         install: Install::Guided { pins: GHIDRA_PINS, how: GHIDRA_SETUP },
     },
@@ -341,6 +406,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["adb"],
         exes_windows: &["adb.exe"],
         known_paths: NO_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Pinned(ADB_PINS),
     },
@@ -351,6 +417,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["jadx"],
         exes_windows: &["jadx.bat"],
         known_paths: NO_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Pinned(JADX_PINS),
     },
@@ -361,6 +428,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["apktool"],
         exes_windows: &["apktool.bat"],
         known_paths: NO_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Pinned(APKTOOL_PINS),
     },
@@ -371,6 +439,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["chromium", "chromium-browser", "google-chrome", "chrome", "msedge", "brave"],
         exes_windows: &["chrome.exe", "msedge.exe", "brave.exe"],
         known_paths: CHROMIUM_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Manual,
     },
@@ -388,6 +457,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["java"],
         exes_windows: &["java.exe"],
         known_paths: NO_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Guided { pins: JAVA_PINS, how: GHIDRA_SETUP },
     },
@@ -400,6 +470,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["rizin"],
         exes_windows: &["rizin.exe"],
         known_paths: NO_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Pinned(RIZIN_PINS),
     },
@@ -411,6 +482,7 @@ pub const ENGINES: &[ExternalEngine] = &[
         exes: &["vineflower"],
         exes_windows: &["vineflower.bat", "vineflower.cmd"],
         known_paths: NO_PATHS,
+        known_roots: NO_ROOTS,
         path_setting: true,
         install: Install::Pinned(VINEFLOWER_PINS),
     },

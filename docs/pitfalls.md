@@ -554,6 +554,13 @@ three more times. Anything a project keeps must still work where the folder goes
 points to as well (`agent-session.jsonl`), tell "not here" apart from a failure by a typed signal
 (`Conversation::session_lost`), and never retry what can't succeed.
 
+**An installer that downloaded what was already there.** Ghidra was found only on PATH and at two
+Linux folders, so an unzipped copy in Downloads, Program Files or a Homebrew cask was missed, and
+the install then downloaded the same release again (#740). Install folders are a search, not a
+list: scan the folders people keep such things in (`KnownRoot`, by folder name, a set number of
+levels down), and make an install use a copy already found outside our store. Test each layout
+(unzipped, cask, capitalised name) with temp folders, not the machine the test runs on.
+
 ## Agent tooling
 
 **Shared CLI efforts reached Claude unchanged.** Keep CLI-only levels available for agents, but
