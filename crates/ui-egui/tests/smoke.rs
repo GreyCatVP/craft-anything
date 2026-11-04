@@ -2006,10 +2006,22 @@ fn the_front_door_works_on_a_project_the_person_already_has() {
     assert_eq!(h.state().state.make.existing, Some(ExistingFiles::Edit));
     assert_eq!(h.state().settings.existing_files, None, "the answer in Settings is left alone");
     h.get_by_label("Pick another folder…");
+
+    // Make never edits the folder picked here, and coming back asks for it again.
+    h.get_by_label("Make my own version").click();
+    h.run_steps(3);
+    assert!(h.state().state.make.folder.is_none() && h.state().state.make.existing.is_none());
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    h.get_by_label("Choose your project's folder…");
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.state_mut().state.make.request = "Link the footer to https://example.com".into();
+    h.run_steps(3);
     h.get_by_label("Start").click();
     assert!(wait(&mut h, |a| a.creating.is_none() && a.workspace.is_some()), "made on a worker");
     let ws = Workspace::open(mine.path()).expect("the project is the person's folder");
     assert!(ws.manifest.app_in_root && ws.app_dir() == mine.path());
+    assert_eq!(ws.manifest.target, TargetRef::None, "an address in the request isn't an original");
     assert_eq!(ws.manifest.name, mine.path().file_name().unwrap().to_string_lossy(), "named after its folder");
     assert_eq!(std::fs::read_to_string(mine.path().join("index.html")).unwrap(), "<p>hi</p>");
     assert_eq!(runs.started(), [mine.path().to_path_buf()]);

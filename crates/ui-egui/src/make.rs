@@ -44,7 +44,11 @@ pub fn normalize_url(s: &str) -> String {
 }
 
 /// The target the draft will use: the picked one, the typed address, or an address in the request.
+/// "Work on my project" has none: an address in its request is a link to add, not an original.
 pub fn resolve_target(d: &MakeDraft) -> TargetRef {
+    if d.mine {
+        return TargetRef::None;
+    }
     if d.target != TargetRef::None {
         return d.target.clone();
     }
@@ -69,11 +73,16 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
     let d = &mut app.state.make;
     let door = if d.look { 2 } else { usize::from(d.mine) };
     if let Some(i) = widgets::segmented_sized(ui, &["Make my own version", "Work on my project", "Just look inside"], door, 38.0, 12.5) {
+        let left = d.mine && i != 1;
         (d.mine, d.look) = (i == 1, i == 2);
         if d.mine {
             // The person's own project: there's nothing to recreate.
             (d.target, d.editing_url, d.found, d.builder, d.game) = (TargetRef::None, false, None, None, false);
             d.url.clear();
+        }
+        if left && d.existing == Some(ExistingFiles::Edit) {
+            // A version made on Make never edits the project picked here.
+            (d.folder, d.folder_files, d.existing) = (None, None, None);
         }
     }
     ui.add_space(18.0);
@@ -523,5 +532,7 @@ mod tests {
         d.request = "a snake game".into();
         assert_eq!(resolve_target(&d), TargetRef::None);
         assert_eq!(normalize_url("http://x.y"), "http://x.y");
+        let own = MakeDraft { mine: true, request: "Link the footer to https://example.com".into(), ..Default::default() };
+        assert_eq!(resolve_target(&own), TargetRef::None, "an address in the request isn't an original");
     }
 }

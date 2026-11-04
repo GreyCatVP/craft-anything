@@ -619,7 +619,7 @@ Gaps found while using the app for real projects.
       refused and a folder that's already a project opens. Until now that was only reachable
       through "Choose a folder…" under Make's Start, on a screen that asks what to recreate
       — claimed: xerenon, branch feature/r2.9-work-on-my-project; PR #686
-- [ ] Leaving "Work on my project" forgets a folder it would edit in place, so a version made on
+- [x] Leaving "Work on my project" forgets a folder it would edit in place, so a version made on
       Make can't edit that project, and an address in its request isn't read as an original to
       recreate (review of #686) — claimed: xerenon, branch bugfix/r2.9-own-project-review
 - [x] Choose Claude Code's folder (`CLAUDE_CONFIG_DIR`) per AI, so one computer can build with

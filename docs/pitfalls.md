@@ -58,6 +58,11 @@ whenever a `Cargo.toml` changed.
 on a new branch, open a new PR that says it supersedes the old one, and comment on the old one.
 Don't close or rewrite other people's work without asking.
 
+**Review fixes pushed to a PR that had already merged.** #686 was merged hours before its review
+comments were acted on; the fixes went to its branch and the threads were answered "Fixed", while
+`main` had the code without them. Read `gh pr view --json state,headRefOid` before pushing to a PR's
+branch, and land anything late in a new PR from `main`.
+
 ## Tests
 
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
