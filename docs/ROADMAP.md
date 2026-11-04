@@ -407,9 +407,9 @@ Owner: open · Status: in progress
 - [x] A saved agent program path that no longer exists (Codex desktop moves its CLI to a new
       build folder on every update) says so and names the path, instead of "isn't installed or
       isn't on your PATH" (#721); it stays a missing program, so a builder turn isn't retried
-- [ ] A relative program path started in another folder is looked up where it was started
+- [x] A relative program path started in another folder is looked up where it was started
       before it's reported as missing (Unix: a script whose interpreter is missing was said to
-      have no file there) — claimed: FuryNocturn, branch bugfix/r2.2-relative-program-path
+      have no file there)
 - [ ] When a saved Codex desktop path is gone, offer the CLI found in its newest build folder
       (asking first, never replacing a custom program silently), and let Detect/Test check the
       configured program itself (#721)

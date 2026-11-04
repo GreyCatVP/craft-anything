@@ -300,7 +300,7 @@ impl Process {
         // output is piped here, so it never needs one.
         #[cfg(windows)]
         wrap.wrap(process_wrap::std::JobObject).wrap(process_wrap::std::CreationFlags(windows::Win32::System::Threading::CREATE_NO_WINDOW));
-        let mut child = wrap.spawn().map_err(|e| spawn_error(&name, &self.program, e, self.remediation.as_deref()))?;
+        let mut child = wrap.spawn().map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
         let pid = child.id();
         let start = Instant::now();
         let activity = Arc::new(AtomicU64::new(0));
@@ -367,9 +367,21 @@ fn use_search_path(cmd: &mut std::process::Command) {
     }
 }
 
-fn spawn_error(name: &str, program: &OsStr, e: std::io::Error, remediation: Option<&str>) -> ToolError {
-    let found = crate::which::which_in(&program.to_string_lossy(), crate::which::search_path()).into_iter().next();
+fn spawn_error(name: &str, program: &OsStr, cwd: Option<&std::path::Path>, e: std::io::Error, remediation: Option<&str>) -> ToolError {
+    // Unix starts a relative path from the folder the child runs in; Windows from ours.
+    let looked_up = if cfg!(unix) { started_from(program, cwd) } else { std::path::PathBuf::from(program) };
+    let found = crate::which::which_in(&looked_up.to_string_lossy(), crate::which::search_path()).into_iter().next();
     spawn_error_for(name, program, e, remediation, found)
+}
+
+/// Where a program given by a relative path is when it starts in `cwd`. A bare name is left for
+/// the PATH lookup.
+fn started_from(program: &OsStr, cwd: Option<&std::path::Path>) -> std::path::PathBuf {
+    let path = std::path::Path::new(program);
+    match cwd {
+        Some(dir) if path.is_relative() && path.components().count() > 1 => dir.join(path),
+        _ => path.to_path_buf(),
+    }
 }
 
 /// `found` is where the program was looked up. "Not found" from the system for a file that is
@@ -920,7 +932,7 @@ impl Launch {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, e, self.remediation.as_deref()))?;
+        let child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
         let launched = Launched { pid: child.id(), started: Instant::now(), state: Arc::new(Mutex::new(LaunchState { child: Some(child), ended: None })) };
         // Reap it when it closes. If no thread can be made the child still runs (and `ended`
         // stays unknown); on Unix it stays a zombie until we exit, which is harmless.
@@ -1318,6 +1330,20 @@ mod error_tests {
         assert!(err.message.contains("isn't on your PATH"), "{}", err.message);
         assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("not_found"));
     }
+
+    /// A relative path is looked up in the folder the program starts in, not in ours; a bare name
+    /// and an absolute path are left as they are.
+    #[test]
+    fn a_relative_program_is_looked_up_where_it_starts() {
+        use std::path::Path;
+        let dir = Path::new("project");
+        let rel = Path::new("bin").join("agent");
+        assert_eq!(started_from(rel.as_os_str(), Some(dir)), dir.join(&rel));
+        assert_eq!(started_from(rel.as_os_str(), None), rel);
+        assert_eq!(started_from(OsStr::new("agent"), Some(dir)), Path::new("agent"));
+        let abs = std::env::temp_dir().join("agent");
+        assert_eq!(started_from(abs.as_os_str(), Some(dir)), abs);
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -1347,6 +1373,22 @@ mod tests {
         assert_eq!(err.code, ErrorCode::EngineMissing);
         assert!(err.message.contains("isn't installed or isn't on your PATH"), "{}", err.message);
         assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("not_found"));
+    }
+
+    /// The same script by a relative path, started in its project: it is there (where it was
+    /// started), so it isn't reported as a path with no file.
+    #[test]
+    fn a_relative_program_that_cannot_start_is_found_in_its_own_folder() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("bin")).unwrap();
+        let script = dir.path().join("bin").join("agent");
+        std::fs::write(&script, "#!/nonexistent/interpreter\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let err = Process::new("./bin/agent").cwd(dir.path()).run().unwrap_err();
+        assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("found_but_not_started"), "{}", err.message);
+        let err = Launch::new("./bin/agent").cwd(dir.path()).start_watched().map(|_| ()).unwrap_err();
+        assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("found_but_not_started"), "{}", err.message);
     }
 
     #[test]
