@@ -294,9 +294,12 @@ fn fallback_rank(name: &str) -> FallbackRank {
     }
 }
 
+/// Returns a `FontId` for the medium-weight proportional font at the given size.
 pub fn medium(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("medium".into()))
 }
+
+/// Returns a `FontId` for the semibold-weight proportional font at the given size.
 pub fn semibold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("semibold".into()))
 }

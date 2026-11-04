@@ -66,7 +66,7 @@ const SIGNATURES: &[Signature] = &[
     Signature { offset: 0, bytes: b"\x00\x00\x00\x18\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x00\x00\x00\x20\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x00\x00\x00\x24\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
-    Signature { offset: 0, bytes: b"\x00\x00\x00\x1C\x66\x74\x79\x70\x6D\x70\x34\x32", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
+    Signature { offset: 0, bytes: b"\x00\x00\x00\x1C\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x1A\x45\xDF\xA3", file_type: "Matroska video (MKV/WebM)", mime: "video/x-matroska", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x4D\x54\x68\x64", file_type: "MIDI file", mime: "audio/midi", confidence: Confidence::Observed },
 
@@ -83,7 +83,10 @@ const SIGNATURES: &[Signature] = &[
     Signature { offset: 0, bytes: b"<?xml", file_type: "XML document", mime: "application/xml", confidence: Confidence::Observed },
 ]
 
-/// Detect file type from first bytes.
+/// Detect file type from first bytes using the signature table.
+///
+/// Returns the first matching signature's file type, MIME type, and confidence,
+/// or `None` if no signature matches.
 fn detect(data: &[u8]) -> Option<(String, String, Confidence)> {
     for sig in SIGNATURES {
         if sig.offset + sig.bytes.len() <= data.len() {
@@ -198,6 +201,10 @@ fn looks_like_text(data: &[u8], whole: bool) -> bool {
     valid_utf8 as f64 / sample as f64 > 0.85
 }
 
+/// Build the `file_type_detect` tool specification.
+///
+/// Registers the magic-byte file type detector with the evidence system so it
+/// can be invoked through the tool dispatch layer.
 pub fn specs() -> Vec<ToolSpec> {
     let e = Effects::EVIDENCE;
     vec![
@@ -223,6 +230,12 @@ pub struct DetectParams {
     pub path: Option<String>,
 }
 
+/// Detect the file type of a file from its magic bytes.
+///
+/// Reads the first bytes of the file (or the active target when no path is
+/// given) and classifies it by signature, RIFF container, or UTF-8 text content.
+/// Returns evidence with the detected file type, MIME type, confidence, and
+/// coverage information.
 fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: DetectParams = parse_params(params)?;
 
