@@ -97,8 +97,8 @@ out of the project list.
 
 ## Adding a migration step
 
-1. Bump the version constant (`MANIFEST_VERSION`, `SETTINGS_VERSION` or `FORMAT_VERSION`).
-2. Append one function to the matching steps list (`MANIFEST_STEPS`, `SETTINGS_STEPS`,
+1. Bump the version constant (`MANIFEST_VERSION`, `LEDGER_VERSION`, `SETTINGS_VERSION` or `FORMAT_VERSION`).
+2. Append one function to the matching steps list (`MANIFEST_STEPS`, `LEDGER_STEPS`, `SETTINGS_STEPS`,
    `FORMAT_STEPS`). It takes the raw document from version n to n + 1: rename, move or fill keys.
    Return `Err` with a plain-English reason when it can't. A compile-time assertion fails if the
    list and the constant disagree.

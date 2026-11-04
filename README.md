@@ -83,7 +83,7 @@
     </td>
     <td width="25%" valign="top">
       <h3>🤖 Agent-ready</h3>
-      318 tools, each one a CLI command and an MCP tool, so any agent can drive the same engine the app uses. No AI is needed to inspect.
+      322 tools, each one a CLI command and an MCP tool, so any agent can drive the same engine the app uses. No AI is needed to inspect.
     </td>
   </tr>
 </table>
@@ -157,11 +157,12 @@ Qwen Code, opencode, goose, Hermes, Maki) can be switched to it per backend; of 
 been run live. Anthropic, OpenAI, OpenRouter and local
 OpenAI-compatible servers are available for questions and analysis (Settings → AI).
 
-Generated assets can use your own **Scenario** account for pictures and 3D models, and
-**ElevenLabs** for text-to-speech, sound effects and music. Add credentials in Settings → AI →
-Game assets and choose picture and 3D models in Settings → Builds. The project sidebar lets you
-switch each provider on or off, edit the shared asset budget and see estimated spending and the
-remaining amount. The CLI and MCP use the same tools and project budget.
+Generated assets can use your own **fal.ai**, **Scenario** and **ElevenLabs** accounts. Add their
+keys in Settings → Builds. Each project then chooses, for pictures, 3D models, speech, sound effects
+and music, a provider and one of the models it offers today, with the price the provider gives, and
+has a spending limit for each in the provider's own unit (dollars or credits). The project sidebar
+shows what each has used and lets you change a model or a limit, or ignore the budget altogether.
+The CLI and MCP use the same tools and limits.
 See [asset provider setup and spending estimates](docs/extending.md#built-in-generated-assets).
 
 ## Built for agents
@@ -181,7 +182,7 @@ connects Craft Anything to coding-agent apps.
 
 ## Under the hood
 
-A pure-Rust reverse-engineering engine with 318 tools (302 in the engine, the rest from the AI and
+A pure-Rust reverse-engineering engine with 322 tools (303 in the engine, the rest from the AI and
 setup layers) for native programs, .NET, Java, Android, Apple, Electron/JavaScript, websites,
 firmware, packet captures, databases and game files. Its own decoders, disassembler and
 decompiler work without any outside program; Deep mode uses them all, and Ghidra when it's

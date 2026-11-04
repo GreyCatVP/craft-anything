@@ -8,13 +8,16 @@ but output is incomplete in a known way · **Fixed** = was broken or partial in 
 and re-checked · **Unverified** = implemented, not runnable here (needs a device, engine or OS
 we don't have); source reviewed · **New** = added since the audit, unit-tested and smoke-tested.
 
-## Generated assets (2026-11-02)
+## Generated assets (2026-11-04)
 
-**New:** `assets_speech_generate`, `assets_sound_generate`, and `assets_music_generate` use
-ElevenLabs; the existing image and model tools can select Scenario. Provider protocol tests use
-local HTTP servers; engine tests cover provider selection, project opt-in, budget checks, file
-confinement and asset records. Scenario and ElevenLabs have not been exercised with live keys.
-The existing fal.ai defaults remain available. See [provider setup and spending estimates](extending.md#built-in-generated-assets).
+**Changed:** each project chooses a provider and model for each asset type (`project_assets_choose`)
+and a limit for each in the provider's unit (`project_assets_limit`); `assets_models_list` lists the
+models each provider offers with the price it gives. The picture and 3D model tools no longer take
+a model, and `project_assets_budget` is gone. `assets_speech_generate`, `assets_sound_generate` and
+`assets_music_generate` make audio with the model chosen for their type, from whichever provider
+it is. Provider protocol tests use local HTTP servers; engine tests cover model choice, limits,
+approvals, project opt-in, file confinement and asset records. No provider has been exercised with a
+live key. See [provider setup and spending estimates](extending.md#built-in-generated-assets).
 
 ## Summary by toolset
 

@@ -53,8 +53,9 @@ pub struct RebuildArgs {
     /// New projects only; otherwise it's chosen from the request and target.
     #[arg(long)]
     pub build_with: Option<String>,
-    /// Let the builder generate pictures and 3D models for a new game (needs a fal.ai key; paid
-    /// within the project's asset budget). Change it later with `project-assets-allow`. When an AI
+    /// Let the builder generate pictures, 3D models and audio for a new game (needs a key for a
+    /// provider that makes them; paid within each asset type's limit). Change it later with
+    /// `project-assets-allow`, and choose models with `project-assets-choose`. When an AI
     /// started the command, the project starts with them off: the person turns them on.
     #[arg(long)]
     pub generate_assets: bool,

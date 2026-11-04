@@ -563,6 +563,13 @@ three more times. Anything a project keeps must still work where the folder goes
 points to as well (`agent-session.jsonl`), tell "not here" apart from a failure by a typed signal
 (`Conversation::session_lost`), and never retry what can't succeed.
 
+**A price with its number inside the key, and a title lowercased.** The model picker passed
+"$0.15 a picture" whole to `tr`, so no catalog could ever hold it and every price stayed English; the
+list's "no provider makes {type}" note lowercased a translated title, which is wrong for German nouns.
+Neither failed a test or `cargo xtask i18n-coverage`, which sees only literal keys. Translate the
+words around a number and leave the number (`price_words`), give a mid-sentence noun its own catalog
+entry (`type_noun`), and check each language's words through `tr` in `tests/i18n.rs`, not by eye.
+
 ## Agent tooling
 
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were

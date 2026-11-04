@@ -15,7 +15,7 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | Mach-O Objective-C pointers | Chained offsets mapped only into file-empty `__PAGEZERO` reach the image-base fallback; pointer candidates must be backed by file bytes | Synthetic thin and fat Mach-O regression, plain-pointer and authenticated-rebase controls, null and unmapped-pointer checks. Real binaries were not checked for this correction |
 | Apple app graphs | Selecting a macOS bundle recognises its root-relative `Contents/Info.plist` and retains its service/extension type; nested XPC bundles appear in `services` and as `xpc-service` graph nodes, including their executables when hosted in frameworks | Synthetic inventory tests, including parent-directory and flat bundle layouts, selected services/extensions, framework-hosted service executables, and bare-program controls. Ordinary selected directories with `Contents/Info.plist` need an Apple bundle suffix; archives retain layout-based recognition. Framework libraries and dylibs stay excluded from executables. Real app bundles were not checked for this correction |
 | Chinese UI | Simplified (`zh-hans`) and Traditional (`zh-hant`) Chinese in Settings → General → Language; System chooses a supported OS language, otherwise English. Both catalogs cover UI controls and tool titles; translated titles are searchable. Raw tool data, AI text, logs, CLI/MCP and the separate browser viewer keep their original text. See [localisation](localization.md). | Catalog integrity and locale-resolution tests; `cargo xtask i18n-coverage`; isolated UI language-switch test. Platform visual checks are recorded separately. |
-| Engine | 302 engine tools (320 with the AI and setup layers') across native, managed, Java, Android, Apple, JS/Electron, web, firmware, packets, databases, game archives and assets; see [tools.md](tools.md) and [tool-status.md](tool-status.md). A saved result can be narrowed without running again (`core_evidence_browse` keeps the rows matching given field values, cut to chosen fields) | A functional audit of the original tools on real inputs on Windows, plus unit and integration tests; later additions have their own verification notes below |
+| Engine | 303 engine tools (322 with the AI and setup layers') across native, managed, Java, Android, Apple, JS/Electron, web, firmware, packets, databases, game archives and assets; see [tools.md](tools.md) and [tool-status.md](tool-status.md). A saved result can be narrowed without running again (`core_evidence_browse` keeps the rows matching given field values, cut to chosen fields) | A functional audit of the original tools on real inputs on Windows, plus unit and integration tests; later additions have their own verification notes below |
 | Tool argument correction | Shared parameter parsing keeps schema types strict and reports the rejected value's JSON Pointer when known, the original type error and guidance to correct the call. Unknown locations are null; a root failure uses the empty pointer | Parser regressions cover string/array mismatches, nested indices, escaped keys, oversized paths, enum locations, defaults and strict fields. Shared engine dispatch is checked for Agent, MCP and CLI callers: rejected arrays create no record, and corrected input creates one. No live Qwen or Ollama build was run for this correction |
 | German UI | German (`de`, informal "du") in Settings → General → Language; System picks it for a German OS language. The catalog has the same keys as the Chinese ones. Drafted with an AI, not yet reviewed by a native speaker. Requests such as "Ein einfaches Snake-Spiel" or "Eine Website für …" keep their project kind. See [localisation](localization.md). | Catalog and locale tests, key-set comparison with the Chinese catalogs, the isolated language-switch test, a kind-detection test; fmt, clippy, layers, locks and secrets are clean. Not checked: how the German texts look in the running window (length, line breaks), and the `de.tsv` wording by a native speaker. |
 | Java class usage | `java_class_users_find` includes the component class of multidimensional object arrays; primitive-array descriptors do not match an unrelated class with the same descriptor letter | Synthetic class files parsed by the built-in reader: one- and two-dimensional allocations, class names beginning with `L`, primitive arrays, hit limits and method filters; formats tests. This correction was not checked with javac output or a JVM |
@@ -31,8 +31,8 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | Backend context budgets | `context_tokens` in `[[ai.backends]]` controls when an API conversation is trimmed and summarised. Zero or omission retains local/cloud defaults; a nonzero conversation override takes priority. Before each attempt, including a fallback, fitting adds estimated history growth since the last successful request to its reported input size. Trimming resets that reference, and successful requests refresh it; summary usage remains in message totals | Regressions cover settings and model construction, defaults/overrides, smaller fallback budgets, large-budget arithmetic and new tool output growing beyond a fallback budget even when the history estimate alone is below the reported input. The latest tool results are preserved, and a short follow-up does not count already-sent history twice. This does not set server context parameters or guarantee that a complete request fits; no live provider was used |
 | Games | Engine detection for 12 engines (Unreal, Unity, Godot, Source, GameMaker, RPG Maker, Ren'Py, MonoGame, LÖVE, CryEngine, Cocos, Cube) with versions. Unreal and Godot games are rebuilt in the same engine, others in Unity; installed engines are found, Godot installs itself, others get guided installs. Picking an inner folder (Engine, Binaries, Paks…) finds the game's folder. Just look inside a game shows what it's made of (`core_target_triage` on its folder: engine and version, how its code ships, the libraries its Unity assembly names give away, its own code, scenes and size) and opens it in the chat to ask about it. The builder keeps `app/MECHANICS.md` and its structured twin `app/mechanics.json` (checked after each build), in Deep mode only, may reuse the original's readable files for private use (never decrypting; generated pictures and 3D models replace its art when the person turns them on; Clean room copies none of its files), lists them in `CREDITS.md` (checked, with the private-use line in `README.md`); a game is ready only when its `--self-test` shows the player moving, acting and the HUD drawn, and the result can be started from the project page | Unit tests; live runs on Windows |
 | Clean room and Deep mode | Clean room (the default) runs only the tools in `engine/src/clean_room.rs`: ones that touch no target or watch from outside (the website as a visitor sees it, pictures of a window, its controls, recorded runs, a phone's screen). Every other tool, a plugin's included, is refused in the app, CLI, MCP and agents, with a way to turn on Deep mode. A Clean room build studies an app or a game only from the person's pictures and words (and a picture of its window when runtime study is on); its builder's reads and commands go through an approval rule that keeps it out of the original's folder and site (with Claude Code, and with ACP agents for what they ask about; other agents aren't held to it, see roadmap R2.2). Deep mode (`deep_mode` in Settings, `--deep` for one CLI run) uses every tool: the builder sees them all, and a website's study also reads its JavaScript and watches its start page for ten seconds (capture/how-it-works.md). Ghidra adds its decompiler in Deep mode when it's installed: it is found, or installed after asking. Study starts one analysis of the main program, saved and shared with the builder's tool server through a lock file (up to 8 h, Java gets half the machine's memory or the amount set in Settings → Engines, 4 to 31 GB, four slow passes skipped). The builder must decompile before the build is checked; addresses the built-in analysis can't place go to Ghidra, which makes a function on demand (for this run only) where its analysis has none, e.g. code reached only through tables of pointers. Without Ghidra, Deep mode uses the built-in engines | Live runs with Ghidra 12.1.4 on Windows (a shared analysis, and a decompile in seconds on a large program). Live runs with Ghidra 12.2 on Linux x86-64 (decompiles by name in position-independent programs and shared libraries, whose addresses Ghidra moves). The guided install of Ghidra and its Java is offered on Linux and macOS too, but has only been tried on Windows. Clean room and Deep mode: engine, AI, MCP, CLI and app tests; no live Clean room build run yet |
-| Auto mode | Settings → Safety, on by default. Builder actions go ahead without asking, except a fixed set that is never done unasked (deleting outside the project, system changes, publishing…); questions get "decide yourself"; asset spending stops at the budget | Unit tests |
-| Generated assets | Per-project opt-in and budget ($5 default). Existing fal.ai defaults plus Scenario images and image-to-3D; ElevenLabs speech, sound effects and music as MP3. Credentials are per provider (keychain preferred, private unencrypted file fallback, or environment); Scenario has separate masked key and secret inputs, combined internally for Basic auth over HTTPS. Settings → Builds selects picture and 3D models; tool calls can override them. Every saved asset records a spending estimate. Scenario checks an authenticated dry-run quote against conservative $1/image and $10/model ceilings before a paid job; its USD tally assumes $0.01/CU. See [setup and spending estimates](extending.md#built-in-generated-assets) | Unit tests and local HTTP stand-ins for new providers, opt-in, budget and routing. Automated tests use no live Scenario or ElevenLabs calls. Previous live fal.ai 3D generation with FLUX dev; Nano Banana Pro still unverified live |
+| Auto mode | Settings → Safety, on by default. Builder actions go ahead without asking, except a fixed set that is never done unasked (deleting outside the project, system changes, publishing…); questions get "decide yourself"; a generation that would pass an asset type's limit stops instead of asking | Unit tests |
+| Generated assets | Per project, a provider and one of its current models for each of five asset types (pictures, 3D models, speech, sound effects, music), or Off, chosen in the project's panel; Settings → Builds holds the defaults a new project copies. fal.ai, Scenario and ElevenLabs are built in, and a provider is offered for a type when its key is saved and it makes that type. Model lists and prices come from the providers (`assets_models_list`, kept for ten minutes), and a model is offered only when the app can fill every input it requires; options it ignores are shown beside it. Each type has its own limit and switch in its provider's unit (US dollars for fal.ai, credits for Scenario and ElevenLabs, never converted; $5 and 500 credits by default), and a project can Ignore budget (every limit off, usage still counted). A model with no usable price is not tracked, and the screen says so; one priced only after the run can pass its limit by one generation. Credentials are per provider (keychain preferred, private unencrypted file fallback, or environment); Scenario has separate masked key and secret inputs, combined internally for Basic auth over HTTPS. When an AI asks to turn spending on, raise or switch off a limit, ignore the budget or choose a model, the person is asked first. See [project asset controls](#project-asset-controls) below and [setup and spending estimates](extending.md#built-in-generated-assets) | Unit tests and local HTTP stand-ins for all three providers (listing, prices, quotes, generation, charges after a failure, limits, approvals, migration of old files), and UI tests of the panel and Settings. No live provider call and no real invoice; the Scenario `inputs` and `performanceStats` fixtures follow the documented shape, not a live answer. Earlier live fal.ai 3D generation with FLUX dev; Nano Banana Pro still unverified live |
 | Claude Code builder | Runs the person's own `claude` in headless mode (Opus 5.5, high effort unless configured) with our MCP server, a permission-prompt tool and `core_person_ask`; preflights for our CLI (a build stops plainly if it's missing or won't start) and sign-in | Argument and stream-parser tests; live preflight; live builder turns; see [claude-code.md](claude-code.md) |
 | Agents over ACP | Opt-in per backend (`acp = true`): Gemini CLI, Qwen Code, opencode, goose, Hermes and Maki in their ACP mode, one agent process per chat or build with our MCP server; Maki's ACP mode takes the backend's model (`cli_model`). In chat, permission requests become consent questions; in builds they go through the same approval policy as Claude Code's (inbox, Auto mode). While a saved session loads, replayed updates are withheld from the new turn | Protocol unit tests against scripted agent messages and an approval-policy test. Run live with Maki 0.7.0 only (2026-11-02, Linux, headless CLI): a static page built to Ready in 38 s, a follow-up continued the same session with `session/load`, and with Auto mode off its command and tool requests were refused in an unattended run. Replay suppression passes scripted load-history, success/error and cancellation tests; this correction has not been rerun with a live agent. Turns report 0 tokens over ACP |
 | WASM plugins | With `--features wasm-plugins`: `[[plugins.wasm]]` components exporting `craft-anything:plugin/tools` add tools, and ones exporting `craft-anything:plugin/checks` add checks run after each kind's own (they get the build's file list as JSON) (added, listed, turned on or off and removed in Settings → Plugins or with `plugins_add`/`plugins_remove`/`plugins_list`); no imports, fresh instance per call, fuel and memory limits | Tests with components written in WAT (describe, call, checks, a looping call stopped, imports refused, end to end through the engine); `examples/wasm-plugin-wordcount` built from Rust and loaded |
@@ -86,38 +86,84 @@ sizes. A freshly compiled Bun program and the CLI/MCP transport were not run for
 
 ### Project asset controls
 
-Every project's details panel exposes the registered asset providers (the engine session's
-registry, so a fork's own providers appear too), including app projects whose recorded stack is
-Rust + egui. A master switch turns generated assets on and off; each provider has its own switch,
-which shows the stored choice even while the master switch is off, so pausing and resuming keeps
-the choices (paused switches can't be changed). The panel always shows the asset
-count, estimated spending, shared budget and remaining amount, even when all providers are off.
-An exact budget edit is saved with **Save budget**; changing the default in Settings still affects
-only new projects. Asset spending is separate from the coding agent's AI usage cost.
+Every project's details panel has a **Generated assets** table with a row for each asset type
+(pictures, 3D models, speech, sound effects, music), including app projects whose recorded stack is
+Rust + egui. A row shows the type, what it has used against its limit in the provider's own unit
+(dollars for fal.ai, credits for Scenario and ElevenLabs), a picker for the provider and model, and
+the limit's switch. The picker lists the models the providers offer today, grouped by provider and
+searchable, each with the price the provider gives, "price unknown", or "cost known after each run",
+and the options the model ignores. The limit is an amount field: what is typed is applied when the
+field is left, an amount that is not a limit is refused with a reason, and Esc puts the stored limit
+back; going in and out of the field never rounds a limit. The master switch turns generation on and
+off and keeps the choices while it is off. **Ignore budget** turns every limit in the project off at
+once; what is used is still counted and shown. Notes under the table say which types have an unknown
+price (usage not tracked), which can pass their limit by one generation (the price is known only after
+the run), and which provider has no key. Asset spending is separate from the coding agent's AI usage
+cost. Drawing the panel reads only memory: usage and the model lists are read on worker threads.
 
-Provider choices are enforced by the generation tools before any paid stage, retained across
-builder saves and project duplication, and persisted in `craft.json` version 3. Old projects keep
-their previous master asset opt-in behavior until individual providers are selected. UI and backend
-tests cover independent provider switches, exact/lowered budgets, existing spending, reopening,
-migration and disabled-provider no-spend cases. No new live generation was needed for these controls.
+Settings → Builds holds the provider keys, the default provider, model and limit for each type that a
+new project copies, a default for Ignore budget, a line saying when the lists were fetched, and a
+Refresh button. There is one default limit for each unit ($5 and 500 credits), so changing it changes
+every type billed in that unit. A project that has chosen its own is not affected.
 
-Builder prompts refresh provider permissions and live key availability before every turn, including
-fresh starts after a lost session and retries that resend the whole turn. A retry that continues
-the agent's own history sends no new prompt, so it keeps the policy its turn started with; the
-asset tools still check the current choices before any paid call. A key counts only when its provider is enabled for the project, and a
-modality (pictures, 3D, each audio kind) is offered and priced only through a provider that is both
-enabled and keyed. Isolated tests cover a disabled provider's saved key, keys added or removed during
-a run, and two enabled providers where only one has a key.
+Choices, limits and Ignore budget are saved in `craft.json` version 4, and each generation in
+`assets.json` version 1 with its provider, model and the amount in its unit; older files are brought
+forward when opened (see [file-formats.md](file-formats.md)). Opening an old project gives each type
+Settings' default, except that a provider the project had left out is Off, with the project's old
+budget as the limit of a type billed in dollars; the old spending history is kept and counted in
+dollars. An older build opens a version 4 project read-only. An old project-wide "Always" answer to
+the over-budget question is not carried over, so each type asks once more; "Always" now switches that
+type's limit off, where the person can see it and switch it back on.
 
-Budget authorization and recording now reject unreadable or invalid spending history instead of
-treating it as zero. The sidebar shows unavailable spending until the ledger is repaired. Returned
+The builder's prompts say, for each type, the provider and model the project uses and what it has
+used of its limit, and that these choices are the person's. A type is offered to the builder only when
+its provider has a key. The builder cannot choose models: the generation tools take no model
+parameter. A 3D model made from a description makes its first picture with the project's picture
+model, which counts against the pictures limit.
+
+When an AI asks (the builder, or an MCP client), anything that loosens spending needs the person's
+answer on an approval card in the project, and nothing is changed without it: turning generation on,
+Ignore budget on, a limit raised or switched off, or a model or provider chosen for a type. In Auto
+mode it is refused without a card. Tightening changes apply directly. Approval cards can be answered
+only from the app or the CLI, never by an AI, and that holds for every approval card, not only these.
+`settings_set` refuses an AI for the `assets.` settings, and a project an AI creates with
+generated assets requested starts with them off. The builder's own processes count as an AI: a
+rebuild sets `CRAFT_ANYTHING_AGENT=1` in the builder's environment, and the CLI treats a call made
+with it set as an AI, which also makes it ignore `--allow-run`. This stops a builder from acting
+unasked; it is not a sandbox, and a determined builder could unset the variable or edit the
+project's files directly.
+
+Spending authorization and recording reject unreadable or invalid spending history instead of
+treating it as zero. The panel shows usage as unreadable until the ledger is repaired, while the
+limits, switches and choices can still be changed and the ledger is left untouched. Returned
 costs are recorded before output publication; failed output saves retain their receipt, and late
 cost overruns stop any following paid stage after preserving known spending. A failure after the
 provider accepted the work (a failed Scenario job, a broken download or response) records the charge
 the provider reported before returning the error. One project's paid generations run one at a time
-across processes (an `assets.lock` file lock held from the budget check to the receipt), and a
+across processes (an `assets.lock` file lock held from the limit check to the receipt), and a
 generated file never overwrites the project's own records. This is checked
 receipt accounting, not a crash-safe reservation journal or an invoice reconciliation service.
+
+Estimates to know about:
+
+- ElevenLabs music is estimated at 15 credits a second, the approximate figure on ElevenLabs'
+  pricing FAQ for its music product, not a rate it states for the API model.
+- ElevenLabs sound effects are estimated at 40 credits a second for any length from 0.5 to 30
+  seconds, but its pricing page states that rate only up to 22 seconds, so the estimate for a longer
+  sound is unverified.
+- ElevenLabs is retiring both endpoints (sound effects on 2027-03-01, music on 2027-01-31) and
+  documents no credit rate for their replacements; those are added to the model table when it does.
+- Scenario and ElevenLabs runs no longer send the fixed extras the old table added (resolution,
+  `shouldRemesh`, `prompt_influence`), so each model's own defaults apply to the picture, 3D model or
+  sound made.
+- Speech estimates assume standard-priced voices; Voice Library multipliers can raise the real charge.
+
+Checked with local stand-in servers for all three providers (listing, prices, quotes, generation,
+charges after a failure, limits, approvals and the migration of old files) and with the UI test
+harness for the panel and Settings. Not checked: any live call to fal.ai, Scenario or ElevenLabs with
+a real key, so no model list, price, quote, billing header or generated file has been compared with a
+real account or an invoice. The Scenario `inputs` and `performanceStats` test fixtures follow the
+documented shape, not a live answer. The desktop app was not run on Windows or macOS for this.
 
 ### Native tool-call stop reasons
 
