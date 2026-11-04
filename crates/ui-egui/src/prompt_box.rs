@@ -131,6 +131,16 @@ pub struct PromptOut {
     pub restore: Option<Vec<PathBuf>>,
 }
 
+/// Give the prompt box named `name` the keyboard the next time it's drawn, the cursor at the end
+/// of its text (set the text first).
+pub fn focus(ctx: &egui::Context, name: &str) {
+    ctx.data_mut(|d| d.insert_temp(focus_id(name), true));
+}
+
+fn focus_id(name: &str) -> egui::Id {
+    egui::Id::new(("prompt-box-focus", name))
+}
+
 pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBox) -> PromptOut {
     let t = Tokens::get(ui.ctx());
     let mut out = PromptOut::default();
@@ -241,6 +251,12 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                         }),
                 );
                 widgets::named(r.clone(), b.name);
+                // Asked for elsewhere (`focus`): taken after the field's own focus handling, which
+                // gives the keyboard up when the click that asked for it landed outside the box.
+                if ui.data_mut(|d| d.remove_temp::<bool>(focus_id(b.name))).is_some() {
+                    r.request_focus();
+                    cursor_to_end(ui.ctx(), id, text);
+                }
                 if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) && !text.trim().is_empty() {
                     out.send = true;
                 }

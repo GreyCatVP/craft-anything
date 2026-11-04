@@ -662,6 +662,14 @@ Gaps found while using the app for real projects.
       picture on hover, decoded on a worker
 - [x] A picture over 20 MB dropped on a prompt box or picked in its dialog is refused when it's
       added, as a paste does (`workspace::attachable_picture`), before anything is copied
+- [x] The builder's open questions can be answered with a click: `core_unknown_add` /
+      `core_unknown_edit` keep up to three short suggested answers (`Unknown::suggested_answers`,
+      tidied with a note for each change), the brief asks for three (and about three choices for
+      `core_person_ask`), and the Project screen's Open questions card shows them as buttons with
+      "Let the builder decide" and "Write my own answer"; a click goes the same way as a typed
+      message (a note while it builds, else a follow-up), naming the question's id and quoting it,
+      and the brief tells the builder to close it with the answer (`resolved_by: person`, a valid
+      resolution without evidence ids)
 - [ ] When the builder decides a question, show the question and its choice as an answered card
       in the feed (the run sees only the tool call today; the builder's words say what it chose)
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running

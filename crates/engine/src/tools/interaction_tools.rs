@@ -37,7 +37,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "core_person_ask",
             title: "Ask the person",
-            summary: "Ask the person a question in the app and wait for the answer: a short question, up to six suggested answers shown as buttons, and optionally a typed reply. Use it when a choice changes the result (scope, style, which feature first) and you can't decide from the evidence. Returns the answer text, or a note to continue with your best judgement if nobody answers within 30 minutes.",
+            summary: "Ask the person a question in the app and wait for the answer: a short question, about three suggested answers (best first, up to six) shown as buttons so the person can answer with one click, and optionally a typed reply. Use it when a choice changes the result (scope, style, which feature first) and you can't decide from the evidence. Returns the answer text, or a note to continue with your best judgement if nobody answers within 30 minutes.",
             beginner: "Lets the assistant ask you a quick question.",
             toolset: Toolset::Core,
             effects: Effects::CHANGES_UI_STATE,
@@ -75,7 +75,8 @@ pub(crate) fn workspace_of(inbox: &Inbox) -> Option<Workspace> {
 pub struct AskParams {
     /// The question, in plain words.
     pub question: String,
-    /// Up to six short suggested answers, best first.
+    /// About three short suggested answers, best first (up to six), so the card always has
+    /// buttons to answer with.
     #[serde(default)]
     pub choices: Vec<String>,
     /// Accept a typed answer too (default true).

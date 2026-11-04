@@ -61,6 +61,10 @@ const ACTIONS: &[Action] = &[
     a("follow_up",           "ask a finished project for a change",            Cli("rebuild <target> <request> --continue-in")),
     a("send_message",        "send the project's prompt box (a follow-up)",    Cli("rebuild <target> <request> --continue-in")),
     a("answer_request",      "answer a question or approval card",             Tool(&["project_inbox_answer"])),
+    // Two ways, as with a typed message: a note while it builds, else a follow-up.
+    a("answer_open_question", "answer an open question while it builds (a note)", Tool(&["core_unknowns_show", "rebuild_note"])),
+    a("answer_open_question", "answer an open question when it's idle (a follow-up)", Cli("rebuild <target> <request> --continue-in")),
+    a("write_own_answer",    "start a typed answer to an open question",       UiOnly("fills the prompt box with the question and its id; sending it is send_message")),
     a("pause",               "stop the running build",                         Tool(&["rebuild_stop"])),
     a("unsend",              "take back a note the builder hasn't read yet",   Tool(&["rebuild_note_withdraw"])),
     a("continue_build",      "carry on a build that stopped part-way",         Cli("rebuild <target> <request> --continue-in --resume")),
@@ -145,6 +149,7 @@ const PLUMBING: &[(&str, &str)] = &[
     ("load_agent_model_catalog", "worker dispatch shared by the model picker and its reload action"),
     ("stuck_banner", "draws what the lock watchdog found; `sync::problems` and its log are the headless side"),
     ("act", "runs a button's tool on a worker (play, preview, open folder)"),
+    ("answers_ended", "marks open questions answered from the side panel as done when their run ends"),
     ("waiting_question", "finds the question an answer is for"),
     ("acted", "shows a button tool's result (toast, open the preview)"),
     ("engines_found", "a job's result"), ("engine_got", "a job's result"), ("ghidra_got", "a job's result"),

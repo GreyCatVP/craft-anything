@@ -1929,7 +1929,8 @@ fn a_build_that_stopped_part_way_offers_to_continue() {
 
 #[test]
 fn the_builders_open_questions_show_beside_the_project() {
-    let mut h = harness(|| {
+    // Tall enough that the whole side panel shows (clicks land where things are drawn).
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), || {
         let mut a = demo::app(demo::engine(Mode::Beginner, true));
         demo::fill_project(&mut a);
         a
@@ -1937,7 +1938,109 @@ fn the_builders_open_questions_show_beside_the_project() {
     h.run_steps(3);
     h.get_by_label("Open questions");
     h.get_by_label("May the original's logo and text be reused, or must they be placeholders?");
-    h.get_by_label("Answer any of them in a message below.");
+    for answer in ["Use placeholders", "Keep the text, replace the logo", "It's mine: reuse both"] {
+        h.get_by_label(answer);
+    }
+    // A question without suggested answers (an older project's) still offers both ways to answer.
+    h.get_by_label("Should the contact link open an email or a form?");
+    assert_eq!(h.query_all_by_label("Let the builder decide").count(), 2);
+    assert_eq!(h.query_all_by_label("Write my own answer").count(), 2);
+    // Writing one's own starts the message in the prompt box, under what's typed, and focuses it.
+    h.state_mut().state.project_input = "Make the header blue".into();
+    h.get_all_by_label("Write my own answer").nth(1).unwrap().click();
+    h.run_steps(3);
+    // It names the question's id, as a clicked answer does, so the builder can close it.
+    assert_eq!(
+        h.state().state.project_input,
+        "Make the header blue\nAbout open question unk_83e0b6f2c4d9a175 \"Should the contact link open an email or a form?\": "
+    );
+    assert!(h.get_by_label("Ask for a change").is_focused(), "the prompt box has the keyboard");
+}
+
+#[test]
+fn clicking_an_open_questions_answer_sends_it_to_the_builder() {
+    use craft_anything_ai::rebuild::StandIns;
+    use craft_anything_engine::evidence::{ResolvedBy, Severity, Unknown, UnknownStatus};
+    use craft_anything_engine::project::{Project, Purpose};
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    use craft_anything_ui_egui::state::FeedItem;
+    let d = tempfile::tempdir().unwrap();
+    let a = Workspace::create(d.path(), "Alpha", "A notes app", TargetRef::None).unwrap();
+    // The builder's questions, as core_unknown_add keeps them: one with answers, one from before
+    // (whose text holds a placeholder, which must reach the builder as written).
+    let project = Project::create(&a.investigation_dir(), "Alpha", Purpose::default()).unwrap();
+    let mut sync = Unknown::new("Should notes sync between computers?", "app", Severity::High);
+    sync.set_suggested_answers(&["Keep them on this computer".into(), "Sync through a folder".into()]);
+    project.store_unknown(&sync).unwrap();
+    let font = Unknown::new("Which font for the {a} heading?", "ui", Severity::Low);
+    project.store_unknown(&font).unwrap();
+    let runs = StandIns::new();
+    let (dir, r) = (d.path().to_path_buf(), runs.clone());
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || stand_in_app(dir, &r));
+    h.run_steps(2);
+    h.state_mut().open_workspace(a.clone());
+    assert!(wait(&mut h, |app| app.facts.open_questions.len() == 2), "read from the project on a worker");
+    h.run_steps(3);
+    const SENT: &str = "Answer sent. The builder reads it next.";
+    // Not building: the answer starts a follow-up, as a typed message would, and what's typed stays.
+    h.state_mut().state.project_input = "draft".into();
+    h.get_by_label("Sync through a folder").click();
+    h.run_steps(3);
+    let sent = format!("Answer to your open question {} \"Should notes sync between computers?\": Sync through a folder", sync.id);
+    assert!(h.state().state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text() == sent)), "{:?}", h.state().state.feed);
+    assert_eq!(runs.started(), std::slice::from_ref(&a.root), "a follow-up run started");
+    assert_eq!(h.state().state.project_input, "draft");
+    h.get_by_label(SENT);
+    assert!(h.query_by_label("Keep them on this computer").is_none(), "an answered question offers no more answers");
+    // While it builds, letting it decide waits as a note for its next step.
+    let decide = format!(
+        "Answer to your open question {} \"Which font for the {{a}} heading?\": you decide. Choose what makes it closest to what I asked for, and tell me what you chose.",
+        font.id
+    );
+    h.get_by_label("Let the builder decide").click();
+    h.run_steps(3);
+    h.get_by_label(&decide);
+    assert_eq!(runs.started().len(), 1, "no second run");
+    assert_eq!(h.query_all_by_label(SENT).count(), 2);
+    // Taking the note back asks the question again.
+    h.get_by_label("Take back: puts it in the box again").click();
+    h.run_steps(3);
+    assert_eq!(h.state().state.project_input, format!("{decide}\ndraft"));
+    assert_eq!(h.query_all_by_label(SENT).count(), 1);
+    h.state_mut().state.project_input = "draft".into();
+    h.get_by_label("Let the builder decide").click();
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label(SENT).count(), 2);
+    // It finishes without reading the note, so the note starts the next run and stays sent; the
+    // answer that run had is done, and its question asks again once the project is read again.
+    assert!(runs.finish(&a.root));
+    let only_font = |app: &CraftApp| app.answered.get(&a.root).is_some_and(|s| s.len() == 1 && s[0].unknown == font.id);
+    assert!(wait(&mut h, |app| runs.started().len() == 2 && app.runs.is_busy(&a.root) && only_font(app)), "the note went on");
+    h.run_steps(3);
+    h.get_by_label("Keep them on this computer");
+    assert_eq!(h.query_all_by_label(SENT).count(), 1);
+    // The builder closes the question it was answered and finishes. Until the project is read
+    // again, the closed question never offers its answers.
+    let mut closed = font.clone();
+    closed.status = UnknownStatus::Resolved;
+    closed.resolution = Some("The person let me decide: Inter".into());
+    closed.resolved_by = ResolvedBy::Person;
+    project.store_unknown(&closed).unwrap();
+    assert!(runs.finish(&a.root));
+    let start = Instant::now();
+    while h.state().answered.contains_key(&a.root) {
+        assert!(start.elapsed() < Duration::from_secs(10), "the project is read again after the run");
+        h.step();
+        if h.state().facts.open_questions.iter().any(|q| q.id == font.id) {
+            assert_eq!(h.query_all_by_label(SENT).count(), 1, "still shown as sent, never with its choices");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.run_steps(3);
+    assert_eq!(h.state().facts.open_questions.len(), 1);
+    assert!(h.query_by_label("Which font for the {a} heading?").is_none(), "closed");
+    assert!(h.query_by_label(SENT).is_none());
+    h.get_by_label("Keep them on this computer");
 }
 
 #[test]

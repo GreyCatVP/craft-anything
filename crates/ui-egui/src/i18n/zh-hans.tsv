@@ -91,6 +91,7 @@ API key (stored in your system keychain)	API 密钥 (存储在系统钥匙串中
 API key, if it needs one	API 密钥 (如需要)
 About 10 GB. Free for personal use with a Unity account.	约 10 GB。个人使用免费，需要 Unity 账户。
 About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	约 60 GB，需要 Epic Games 账户和 Visual Studio 的 C++ 工具。
+About open question {id} "{q}":	关于未解决的问题 {id}“{q}”：
 Add	添加
 Add Visual Studio's C++ tools	添加 Visual Studio 的 C++ 工具
 Add a brain	添加 AI
@@ -139,7 +140,8 @@ Android resources	Android 资源
 Annotate function	批注函数
 Another build is working, so this one waits its turn.	另一个构建正在进行，此构建正在排队。
 Answer a project's question	回答项目的问题
-Answer any of them in a message below.	在下方发送消息，回答其中任意问题。
+Answer sent. The builder reads it next.	回答已发送。构建助手接下来会读取。
+Answer to your open question {id} "{q}": {a}	对你的待解问题 {id} “{q}”的回答：{a}
 Answered by {name}	由 {name} 回答
 Answers come from {brain}. To build, set up a coding agent in Settings → AI.	由 {brain} 回答问题。要进行构建，请在设置 → AI 中配置编程智能体。
 App	应用
@@ -568,6 +570,7 @@ It closed straight away.	它启动后立即关闭了。
 It closed straight away. It said:	程序启动后立即关闭。输出如下：
 It isn't on this computer yet. Craft Anything can download Ghidra {version} and the Java runtime it needs (about {mb} MB), check both against their publishers' checksums, and set them up in its own folder. Nothing else on your computer changes.	此电脑尚未安装。Craft Anything 可以下载 Ghidra {version} 及所需的 Java 运行时 (约 {mb} MB)，对照发布者的校验和验证两者，并安装到自己的文件夹中。电脑上的其他内容不会改变。
 It isn't on this computer yet. Install Ghidra {version} from its release page, then choose its folder.	这台计算机尚未安装 Ghidra。请从发布页面安装 Ghidra {version}，然后选择其文件夹。
+It picks what fits your request best and tells you what it chose.	它会选择最符合你要求的方案，并告诉你选了什么。
 It's already open.	它已经打开了。
 It's already open. Right-click it to open another copy.	已经打开。右键点击可再打开一个副本。
 It's done	就这样吧
@@ -613,6 +616,7 @@ Leave a few GB for the rest of your computer.	请为计算机的其他任务留�
 Leave a path empty to use the managed install. We never need environment variables.	路径留空即可使用托管安装，无需设置环境变量。
 Leave empty to use the one Craft Anything sets up.	留空则使用 Craft Anything 安装的版本。
 Let a project generate assets	允许项目生成素材
+Let the builder decide	让构建助手决定
 Let's go	开始吧
 Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	允许构建助手为游戏制作逼真的 3D 模型和纹理，每个模型 {model}，每个项目预算 {budget}。
 Library resolution	库解析
@@ -1284,6 +1288,7 @@ Write a project file	写入项目文件
 Write a readable report	撰写易读的报告
 Write comment	写入注释
 Write inline comment	写入行内注释
+Write my own answer	自己写回答
 Write pseudo-C to a folder	将伪 C 代码写入文件夹
 Write the brief	撰写需求简报
 Write the handoff	撰写交接说明
@@ -1344,6 +1349,7 @@ the prompt box changed height	提示输入框高度发生变化
 title bar	标题栏
 under $0.01	低于 $0.01
 yesterday	昨天
+you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	由你决定。请选择最接近我要求的方案，并告诉我你选了什么。
 your files there are the app, edited in place	该位置的文件就是应用，将原位编辑
 {:.1} GB	{:.1} GB
 {:.1}M	{:.1}M

@@ -3,7 +3,7 @@
 use crate::project::write_atomic;
 use crate::target::{RawSpec, Target, TargetKind};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, empty_schema, parse_params, schema_of};
-use craft_anything_evidence::{ErrorCode, Evidence, Severity, ToolError, Unknown, UnknownStatus};
+use craft_anything_evidence::{ErrorCode, Evidence, ResolvedBy, Severity, ToolError, Unknown, UnknownStatus};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -127,7 +127,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "core_unknown_add",
             title: "Record an open question",
-            summary: "Record something not yet known, with what would settle it.",
+            summary: "Record something not yet known, with what would settle it and three short suggested answers the person can pick from (best first; up to 3, each up to 120 characters).",
             beginner: "Write down a question we still need to answer.",
             toolset: Toolset::Core,
             effects: Effects::MUTATES_SESSION,
@@ -138,7 +138,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "core_unknown_edit",
             title: "Update an open question",
-            summary: "Change an unknown's status, evidence or resolution. Pass based_on_revision; a stale revision gives stale_revision.",
+            summary: "Change an unknown's status, evidence, resolution or suggested answers (a new list replaces them). When the person's answer settles it, resolve it with their answer as the resolution and resolved_by person (no evidence ids needed). Pass based_on_revision; a stale revision gives stale_revision.",
             beginner: "Mark a question as answered (or still stuck).",
             toolset: Toolset::Core,
             effects: Effects::MUTATES_SESSION,
@@ -149,7 +149,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "core_unknown_verify",
             title: "Check an answer",
-            summary: "Check that a resolved unknown has a resolution and cites evidence that exists and is intact.",
+            summary: "Check that a resolved unknown has a resolution and cites evidence that exists and is intact (or, resolved_by person, was settled by the person's answer).",
             beginner: "Check that an answered question really has proof.",
             toolset: Toolset::Core,
             effects: Effects::READ_ONLY,
@@ -519,6 +519,10 @@ pub struct RecordUnknownParams {
     pub evidence_for: Vec<String>,
     #[serde(default)]
     pub evidence_against: Vec<String>,
+    /// Three short answers the person could pick from, best first (up to 3, each up to 120
+    /// characters), e.g. "Use placeholder text". They show as buttons under the question.
+    #[serde(default)]
+    pub suggested_answers: Vec<String>,
 }
 
 fn default_domain() -> String {
@@ -537,8 +541,19 @@ fn core_unknown_add(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
     u.probes = p.probes;
     u.evidence_for = p.evidence_for;
     u.evidence_against = p.evidence_against;
+    let notes = u.set_suggested_answers(&p.suggested_answers);
     ctx.session.put_unknown(u.clone())?;
-    Ok(ToolOutput::Value(serde_json::to_value(u).unwrap_or(Value::Null)))
+    Ok(ToolOutput::Value(with_notes(serde_json::to_value(u).unwrap_or(Value::Null), notes)))
+}
+
+/// The recorded unknown, with `notes` on what was changed in what was given (nothing when empty).
+fn with_notes(mut v: Value, notes: Vec<String>) -> Value {
+    if !notes.is_empty()
+        && let Some(o) = v.as_object_mut()
+    {
+        o.insert("notes".into(), json!(notes));
+    }
+    v
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -558,6 +573,30 @@ pub struct UpdateUnknownParams {
     pub evidence_against: Option<Vec<String>>,
     #[serde(default)]
     pub resolution: Option<String>,
+    /// Replaces the suggested answers (up to 3, best first; an empty list removes them).
+    #[serde(default)]
+    pub suggested_answers: Option<Vec<String>>,
+    /// Who settled it: `evidence` (cite it in evidence_for) or `person` (the person answered;
+    /// their answer is the resolution, no evidence ids needed).
+    #[serde(default)]
+    pub resolved_by: Option<ResolvedByParam>,
+}
+
+/// Mirrors [`ResolvedBy`] for the schema.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolvedByParam {
+    Evidence,
+    Person,
+}
+
+impl From<ResolvedByParam> for ResolvedBy {
+    fn from(r: ResolvedByParam) -> Self {
+        match r {
+            ResolvedByParam::Evidence => ResolvedBy::Evidence,
+            ResolvedByParam::Person => ResolvedBy::Person,
+        }
+    }
 }
 
 fn core_unknown_edit(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
@@ -582,11 +621,15 @@ fn core_unknown_edit(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     if p.resolution.is_some() {
         next.resolution = p.resolution;
     }
+    if let Some(r) = p.resolved_by {
+        next.resolved_by = r.into();
+    }
+    let notes = p.suggested_answers.map(|v| next.set_suggested_answers(&v)).unwrap_or_default();
     let u = ctx.session.unknown_mut(&p.unknown_id).ok_or_else(|| ToolError::invalid(format!("No unknown {}", p.unknown_id)))?;
     u.apply_update(p.based_on_revision, next)?;
     let updated = u.clone();
     ctx.session.put_unknown(updated.clone())?;
-    Ok(ToolOutput::Value(serde_json::to_value(updated).unwrap_or(Value::Null)))
+    Ok(ToolOutput::Value(with_notes(serde_json::to_value(updated).unwrap_or(Value::Null), notes)))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -605,7 +648,8 @@ fn core_unknown_verify(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, T
     if u.resolution.as_deref().is_none_or(|r| r.trim().is_empty()) {
         problems.push("no resolution text".to_string());
     }
-    if u.evidence_for.is_empty() {
+    // The person's answer settles it by itself; anything else needs evidence.
+    if u.evidence_for.is_empty() && u.resolved_by != ResolvedBy::Person {
         problems.push("cites no evidence".to_string());
     }
     for id in &u.evidence_for {
@@ -702,6 +746,54 @@ mod tests {
         }
         e.call("core_unknown_add", json!({"question": "Where is the loop?"}), CallOptions::new(Caller::Agent)).unwrap();
         assert_eq!(e.session().unknowns().count(), 1);
+    }
+
+    #[test]
+    fn a_question_keeps_its_suggested_answers_and_says_what_it_changed() {
+        let e = Engine::new(crate::testing::session());
+        let call = |id: &str, p: serde_json::Value| e.call(id, p, CallOptions::new(Caller::Agent)).unwrap().to_json();
+        let plain = call("core_unknown_add", json!({"question": "Which font?", "suggested_answers": [" Inter ", "Roboto", "A system font"]}));
+        assert_eq!(plain["result"]["suggested_answers"], json!(["Inter", "Roboto", "A system font"]));
+        assert!(plain["result"].get("notes").is_none(), "nothing changed, nothing said: {plain}");
+        let id = plain["result"]["id"].as_str().unwrap().to_string();
+        let shown = call("core_unknowns_show", json!({}));
+        assert_eq!(shown["result"]["items"][0]["suggested_answers"][0], "Inter");
+        // Too many and too long: kept as far as they fit, and the answer says so.
+        let long = "x".repeat(300);
+        let capped = call("core_unknown_add", json!({"question": "Logo?", "suggested_answers": ["Keep it", long, "Draw a new one", "Leave it out", ""]}));
+        let kept = capped["result"]["suggested_answers"].as_array().unwrap();
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[1].as_str().unwrap().chars().count(), craft_anything_evidence::Unknown::MAX_ANSWER_CHARS);
+        let notes = capped["result"]["notes"].to_string();
+        assert!(notes.contains("shortened") && notes.contains("kept the first 3") && notes.contains("blank"), "{notes}");
+        // An edit replaces them; one without them keeps them.
+        let edited = call("core_unknown_edit", json!({"unknown_id": id, "based_on_revision": 1, "suggested_answers": ["Inter", "Georgia"]}));
+        assert_eq!(edited["result"]["suggested_answers"], json!(["Inter", "Georgia"]));
+        let kept = call("core_unknown_edit", json!({"unknown_id": id, "based_on_revision": 2, "status": "investigating"}));
+        assert_eq!(kept["result"]["suggested_answers"], json!(["Inter", "Georgia"]));
+        let cleared = call("core_unknown_edit", json!({"unknown_id": id, "based_on_revision": 3, "suggested_answers": []}));
+        assert!(cleared["result"].get("suggested_answers").is_none(), "{cleared}");
+    }
+
+    #[test]
+    fn the_persons_answer_is_a_valid_resolution() {
+        let e = Engine::new(crate::testing::session());
+        let call = |id: &str, p: serde_json::Value| e.call(id, p, CallOptions::new(Caller::Agent)).unwrap().to_json();
+        let u = call("core_unknown_add", json!({"question": "Reuse the logo?", "suggested_answers": ["Use placeholders", "Reuse it"]}));
+        let id = u["result"]["id"].as_str().unwrap().to_string();
+        let by_person =
+            json!({"unknown_id": id, "based_on_revision": 1, "status": "resolved", "resolution": "The person said: use placeholders", "resolved_by": "person"});
+        assert_eq!(call("core_unknown_edit", by_person)["result"]["resolved_by"], "person");
+        let v = call("core_unknown_verify", json!({"unknown_id": id}));
+        assert_eq!(v["result"]["valid"], true, "{v}");
+        // The same without the person is a claim that needs evidence.
+        call("core_unknown_edit", json!({"unknown_id": id, "based_on_revision": 2, "resolved_by": "evidence"}));
+        let v = call("core_unknown_verify", json!({"unknown_id": id}));
+        assert_eq!(v["result"]["valid"], false);
+        assert!(v["result"]["problems"].to_string().contains("cites no evidence"), "{v}");
+        assert!(
+            e.call("core_unknown_edit", json!({"unknown_id": id, "based_on_revision": 3, "resolved_by": "someone"}), CallOptions::new(Caller::Agent)).is_err()
+        );
     }
 
     #[test]

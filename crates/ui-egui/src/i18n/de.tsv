@@ -139,7 +139,6 @@ Android resources	Android-Ressourcen
 Annotate function	Funktion kommentieren
 Another build is working, so this one waits its turn.	Ein anderer Build arbeitet gerade, deshalb muss dieser warten.
 Answer a project's question	Frage eines Projekts beantworten
-Answer any of them in a message below.	Beantworte sie in einer Nachricht unten.
 Answered by {name}	Beantwortet von {name}
 Answers come from {brain}. To build, set up a coding agent in Settings → AI.	Antworten kommen von {brain}. Zum Bauen richtest du unter Einstellungen → KI einen Coding-Agent ein.
 App	App
@@ -1423,3 +1422,10 @@ Add Unreal's Linux C++ toolchain	Unreals Linux-C++-Toolchain hinzufügen
 Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Führe im Engine-Ordner Engine/Build/BatchFiles/Linux/SetupToolchain.sh aus, um die mitgelieferte Clang-Toolchain zu installieren. Bei einem Quellcode-Build lädt Setup.sh stattdessen die native Toolchain herunter. Ein System-Clang passt möglicherweise nicht zur Engine-Version.
 Unreal is here, but it also needs Xcode.	Unreal ist da, braucht aber zusätzlich Xcode.
 About 60 GB, an Epic Games account, and Xcode.	Etwa 60 GB, ein Epic-Games-Konto und Xcode.
+About open question {id} "{q}":	Zur offenen Frage {id} „{q}“:
+Answer sent. The builder reads it next.	Antwort gesendet. Der Builder liest sie als Nächstes.
+Answer to your open question {id} "{q}": {a}	Antwort auf deine offene Frage {id} „{q}“: {a}
+It picks what fits your request best and tells you what it chose.	Er wählt, was am besten zu deinem Wunsch passt, und sagt dir, was er gewählt hat.
+Let the builder decide	Den Builder entscheiden lassen
+Write my own answer	Eigene Antwort schreiben
+you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	entscheide du. Wähle, was dem am nächsten kommt, worum ich gebeten habe, und sag mir, was du gewählt hast.

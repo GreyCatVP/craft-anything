@@ -110,10 +110,31 @@ pub fn tr(s: &str) -> String {
 
 /// Translate, then fill `{name}` placeholders.
 pub fn trf(s: &str, args: &[(&str, &str)]) -> String {
-    let mut out = tr(s);
-    for (k, v) in args {
-        out = out.replace(&format!("{{{k}}}"), v);
+    fill(&tr(s), args)
+}
+
+/// Fill `{name}` placeholders in one pass over `template`, so a value that itself holds a
+/// `{name}` (a question someone typed) is kept as it is, never filled in turn. Braces that name
+/// no argument stay as written.
+fn fill(template: &str, args: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some((before, from)) = rest.find('{').and_then(|i| rest.split_at_checked(i)) {
+        out.push_str(before);
+        // `from` starts at the `{`: a name up to the next `}`, if it's one of the arguments.
+        let named = from.find('}').and_then(|end| from.get(1..end)).and_then(|name| args.iter().find(|(k, _)| *k == name));
+        match named {
+            Some((k, v)) => {
+                out.push_str(v);
+                rest = from.get(k.len().saturating_add(2)..).unwrap_or_default();
+            }
+            None => {
+                out.push('{');
+                rest = from.get(1..).unwrap_or_default();
+            }
+        }
     }
+    out.push_str(rest);
     out
 }
 
@@ -127,6 +148,10 @@ mod tests {
         assert_eq!(m.get("Hello").map(String::as_str), Some("Hola"));
         assert!(!m.contains_key("Empty"));
         assert_eq!(trf("Open {name}", &[("name", "a.exe")]), "Open a.exe");
+        // One pass: a value holding a placeholder is kept as it is; unknown names stay.
+        assert_eq!(fill("\"{q}\": {a}", &[("q", "Use {a}?"), ("a", "yes")]), "\"Use {a}?\": yes");
+        assert_eq!(fill("{n} of {n}, {:.1} {x} {", &[("n", "2")]), "2 of 2, {:.1} {x} {");
+        assert_eq!(fill("中{q}文", &[("q", "{")]), "中{文");
         assert_eq!(tr("Untranslated"), "Untranslated");
     }
 

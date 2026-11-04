@@ -77,6 +77,7 @@ API key (stored in your system keychain)	Ключ API (хранится в си�
 API key, if it needs one	Ключ API, если он нужен
 About 10 GB. Free for personal use with a Unity account.	Около 10 ГБ. Бесплатно для личного использования с аккаунтом Unity.
 About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Около 60 ГБ, аккаунт Epic Games и инструменты C++ Visual Studio.
+About open question {id} "{q}":	Об открытом вопросе {id} «{q}»:
 Add	Добавить
 Add Visual Studio's C++ tools	Добавить инструменты C++ Visual Studio
 Add a brain	Добавить «мозг»
@@ -125,7 +126,8 @@ Android resources	Ресурсы Android
 Annotate function	Аннотировать функцию
 Another build is working, so this one waits its turn.	Выполняется другая сборка, поэтому эта ждёт своей очереди.
 Answer a project's question	Ответить на вопрос проекта
-Answer any of them in a message below.	Ответьте на любой из них сообщением ниже.
+Answer sent. The builder reads it next.	Ответ отправлен. Конструктор прочитает его следующим.
+Answer to your open question {id} "{q}": {a}	Ответ на твой открытый вопрос {id} «{q}»: {a}
 Answered by {name}	Отвечено: {name}
 Answers come from {brain}. To build, set up a coding agent in Settings → AI.	Ответы поступают от {brain}. Чтобы собирать, настройте агент кодирования в Настройки → ИИ.
 App	Приложение
@@ -556,6 +558,7 @@ It closed straight away.	Оно сразу закрылось.
 It closed straight away. It said:	Оно сразу закрылось. Оно сказало:
 It isn't on this computer yet. Craft Anything can download Ghidra {version} and the Java runtime it needs (about {mb} MB), check both against their publishers' checksums, and set them up in its own folder. Nothing else on your computer changes.	Его ещё нет на этом компьютере. Craft Anything может скачать Ghidra {version} и нужную ей среду выполнения Java (около {mb} МБ), проверить обе по контрольным суммам издателей и настроить их в собственной папке. Ничего другого на вашем компьютере не изменится.
 It isn't on this computer yet. Install Ghidra {version} from its release page, then choose its folder.	Его ещё нет на этом компьютере. Установите Ghidra {version} со страницы релиза, затем выберите его папку.
+It picks what fits your request best and tells you what it chose.	Он выберет то, что лучше всего подходит к вашему запросу, и скажет, что выбрал.
 It's already open.	Оно уже открыто.
 It's already open. Right-click it to open another copy.	Оно уже открыто. Щёлкните правой кнопкой, чтобы открыть ещё одну копию.
 It's done	Готово
@@ -601,6 +604,7 @@ Leave a few GB for the rest of your computer.	Оставьте нескольк�
 Leave a path empty to use the managed install. We never need environment variables.	Оставьте путь пустым, чтобы использовать управляемую установку. Переменные среды нам не нужны.
 Leave empty to use the one Craft Anything sets up.	Оставьте пустым, чтобы использовать тот, который настраивает Craft Anything.
 Let a project generate assets	Разрешить проекту генерировать ресурсы
+Let the builder decide	Пусть решит конструктор
 Let's go	Поехали
 Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Позволяет конструктору создавать реалистичные 3D-модели и текстуры для игр, {model} модель, с бюджетом {budget} на проект.
 Library resolution	Разрешение библиотек
@@ -1284,6 +1288,7 @@ Write a project file	Записать файл проекта
 Write a readable report	Написать читаемый отчёт
 Write comment	Написать комментарий
 Write inline comment	Написать встроенный комментарий
+Write my own answer	Написать свой ответ
 Write pseudo-C to a folder	Записать псевдо-C в папку
 Write the brief	Написать краткое описание
 Write the handoff	Написать передачу
@@ -1344,6 +1349,7 @@ the prompt box changed height	поле ввода изменило высоту
 title bar	заголовок
 under $0.01	менее $0.01
 yesterday	вчера
+you decide. Choose what makes it closest to what I asked for, and tell me what you chose.	решай сам. Выбери то, что ближе всего к тому, о чём я просил, и скажи, что ты выбрал.
 your files there are the app, edited in place	ваши файлы там — это приложение, редактируемое на месте
 {:.1} GB	{:.1} ГБ
 {:.1}M	{:.1}M

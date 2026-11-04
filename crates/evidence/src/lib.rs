@@ -16,7 +16,7 @@ mod unknown;
 
 pub use canonical::{canonical_json, sha256_hex};
 pub use error::{ErrorCategory, ErrorCode, ToolError};
-pub use unknown::{Severity, Unknown, UnknownStatus};
+pub use unknown::{ResolvedBy, Severity, Unknown, UnknownStatus};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

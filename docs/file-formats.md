@@ -27,6 +27,12 @@ versions wrote.
 Other JSON in a project (`assets.json`, `inbox/` except `inbox/build-progress.json`, `checks/`,
 evidence records) has no version yet; add one the first time its shape changes.
 
+The open questions in a `.cany` (`unknowns/<id>.json`, `evidence::Unknown`) go by the project's
+`format_version`. Fields added to them since are optional and left out when empty
+(`suggested_answers`; `resolved_by` while it is `evidence`), so older records load as they are and
+an older Craft Anything reads newer ones without the fields it doesn't know (an edit made there
+drops them); that is why the format is still 1.
+
 ## Stand-in cached responses
 
 Version 1 stand-in files retain a recorded 304 when no usable cached body was saved. Those samples
