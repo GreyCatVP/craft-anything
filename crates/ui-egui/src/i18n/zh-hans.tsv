@@ -1129,6 +1129,7 @@ Theme	主题
 There's no /{name} command. You can use {commands}.	没有 /{name} 命令。你可以使用 {commands}。
 There's no AI brain set up yet, so here's what the built-in engines found:	尚未设置 AI 助手，以下是内置引擎的发现：
 There's no picture on the clipboard to paste.	剪贴板中没有可粘贴的图片。
+A picture is still being pasted. Paste the next one once it's in.	图片仍在粘贴中。等它粘贴好后再粘贴下一张。
 They're my app: edit them in place	这些就是我的应用：原位编辑
 Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	程序借用操作系统或库提供的功能，例如“打开文件”或“绘制窗口”。
 Things a program or library offers for other programs to use.	程序或库提供给其他程序使用的功能。

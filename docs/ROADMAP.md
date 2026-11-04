@@ -662,6 +662,8 @@ Gaps found while using the app for real projects.
       picture on hover, decoded on a worker
 - [x] A picture over 20 MB dropped on a prompt box or picked in its dialog is refused when it's
       added, as a paste does (`workspace::attachable_picture`), before anything is copied
+- [x] One paste at a time (another Ctrl+V meanwhile says so), and Make's Start pressed while a
+      picture is still being pasted starts once it's in, as a project's Send does
 - [ ] When the builder decides a question, show the question and its choice as an answered card
       in the feed (the run sees only the tool call today; the builder's words say what it chose)
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running

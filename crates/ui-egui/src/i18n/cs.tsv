@@ -1423,3 +1423,4 @@ Add Unreal's Linux C++ toolchain	Přidat linuxový nástrojový řetězec C++ pr
 Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Ve složce enginu spusťte Engine/Build/BatchFiles/Linux/SetupToolchain.sh a nainstaluje se přibalený nástrojový řetězec Clang. Při sestavení ze zdrojů Setup.sh místo toho stáhne nativní nástrojový řetězec. Systémový Clang nemusí odpovídat verzi enginu.
 Unreal is here, but it also needs Xcode.	Unreal je dostupný, ale potřebuje také Xcode.
 About 60 GB, an Epic Games account, and Xcode.	Přibližně 60 GB, účet Epic Games a Xcode.
+A picture is still being pasted. Paste the next one once it's in.	Obrázek se ještě vkládá. Další vložte, až bude tento vložený.
