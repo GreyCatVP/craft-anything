@@ -492,6 +492,13 @@ Owner: open · Status: in progress
       explicit model/thinking execution (currently refused for chat and builds, locally and over SSH).
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
+- [x] Codex offers its models through the same catalogue (`has_model_catalog`): the models its
+      own `models_cache.json` lists (hidden ones left out, in its order) with the depths it names
+      for each (Low, Medium and High when it doesn't say), in Settings → AI, `ai model … --thinking`
+      and `ai_models_list` / `ai_model_set`. The depth goes to Codex as `-c model_reasoning_effort`
+      only when chosen; a model its list doesn't name yet can still be set by name
+- [ ] Codex over SSH: read its list of models on the remote computer (only a model set by name
+      works there now), and offer Codex's `minimal` level, which isn't one of the five depths
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**

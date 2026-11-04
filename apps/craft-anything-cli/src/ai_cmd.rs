@@ -68,10 +68,11 @@ pub enum AiCommand {
     Model {
         name: String,
         model: Option<String>,
-        /// OpenCode thinking variant; only those offered by the selected model are accepted.
+        /// Thinking depth for an agent with a model list (OpenCode, Copilot, Codex); only those
+        /// offered by the selected model are accepted.
         #[arg(long, value_parser = ["low", "medium", "high", "xhigh", "max"])]
         thinking: Option<String>,
-        /// Use OpenCode's default model and thinking depth.
+        /// Use the agent's own default model and thinking depth (OpenCode, Copilot, Codex).
         #[arg(long, conflicts_with_all = ["model", "thinking"])]
         default: bool,
     },

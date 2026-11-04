@@ -1294,6 +1294,54 @@ fn claude_codes_account_folder_is_set_in_settings() {
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
 }
 
+/// Codex's models are picked with the same picker as the other catalogue agents: its default,
+/// then a model and one of its depths, saved for Codex to be asked for.
+#[test]
+fn codex_s_model_and_depth_are_picked_in_settings() {
+    use craft_anything_ai::{AgentModel, BackendConfig, BackendKind, Effort};
+    use craft_anything_ui_egui::builders::AgentModelPicker;
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.hub
+            .add_backend(
+                BackendConfig { name: "Codex".into(), kind: BackendKind::AgentCli, model: "codex".into(), base_url: None, ssh_host: None, enabled: true },
+                None,
+            )
+            .unwrap();
+        a.backends = a.hub.backends();
+        a.backend_options = a.hub.options();
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Model: Model default");
+    // Its list, as if read from Codex's folder (tests never read the person's ~/.codex).
+    let context = h.state().hub.model_context("Codex").unwrap();
+    h.state_mut().agent_model_picker = Some(AgentModelPicker {
+        request: 1,
+        context,
+        model: None,
+        thinking: None,
+        result: Some(Ok(vec![AgentModel { id: "fake-big".into(), name: "Fake Big".into(), thinking: vec![Effort::Low, Effort::High] }])),
+    });
+    h.run_steps(2);
+    h.get_all_by_label("Model").find(|n| n.value().as_deref() == Some("Model default")).expect("Codex's model picker").click();
+    h.run_steps(2);
+    h.get_by_label("Fake Big · fake-big").click();
+    h.run_steps(2);
+    h.get_all_by_label("Thinking depth").last().unwrap().click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Max").is_none(), "only the model's own depths");
+    h.get_by_label("High").click();
+    h.run_steps(2);
+    h.get_all_by_label("Apply").last().unwrap().click();
+    assert!(wait(&mut h, |a| a
+        .backend_options
+        .get("Codex")
+        .is_some_and(|o| o.cli_model.as_deref() == Some("fake-big") && o.cli_thinking == Some(Effort::High))));
+}
+
 #[test]
 fn settings_window_tabs_draw() {
     let mut h = harness(|| {
