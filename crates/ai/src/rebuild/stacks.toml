@@ -25,8 +25,9 @@
 # (the first in this order wins), so a person's own project can be checked in any language.
 # `build` and `test` are a program and its arguments, run in the project's folder; `no_tests` is
 # what its output says when no tests ran, which isn't a failure (with `test_script`, the
-# package.json script that is its tests, what that script says: whether there are any is read
-# from the file, as a script that runs others can print the same); `local_programs` are the
+# package.json script that is its tests, whole scripts that are only placeholders: whether there
+# are any is read from the file, as a script that runs others can print the same);
+# `local_programs` are the
 # project's own copies of the program, used first when one's there (`.bat`, `.cmd` and `.exe`
 # ones on Windows, the others elsewhere); `windows_program` is its name on Windows, where it
 # differs.
@@ -127,7 +128,7 @@ found_by = ["package.json"]
 build = ["npm", "run", "build", "--if-present"]
 test = ["npm", "test"]
 test_script = "test"
-no_tests = ["no test specified"]
+no_tests = ['echo "Error: no test specified" && exit 1']
 windows_program = "npm.cmd"
 
 [[toolchain]]

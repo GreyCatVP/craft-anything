@@ -76,8 +76,10 @@ pub(super) fn own_tests_check(app: &Path, tool: Option<&stacks::Toolchain>, stop
     let Some(tool) = tool else { return (true, "No tests ran: Craft Anything doesn't know how to test this kind of project.".into()) };
     let says_none = |text: &str| tool.no_tests.iter().find(|n| text.contains(n.as_str())).cloned();
     if let Some(name) = &tool.test_script {
+        // shortcut: `workspaces=true` in .npmrc can give a root with no script tests; they aren't
+        // run, and the note says so. Read .npmrc if that turns up.
         let script = craft_anything_engine::outputs::npm_script(app, name).unwrap_or_default();
-        if script.is_empty() || says_none(&script).is_some() {
+        if script.is_empty() || tool.no_tests.iter().any(|n| n == script.trim()) {
             return (true, format!("No tests ran: package.json has no `{name}` script to run."));
         }
     }
@@ -304,17 +306,18 @@ mod tests {
     #[test]
     fn a_node_project_says_in_its_package_json_whether_it_has_tests() {
         let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
-        let node = stacks::Toolchain {
-            test: vec!["no-such-program-here".into()],
-            test_script: Some("test".into()),
-            no_tests: vec!["no test specified".into()],
-            ..Default::default()
-        };
+        std::fs::write(d.path().join("package.json"), "").unwrap();
+        let table = stacks::toolchain_in(d.path()).expect("the table has Node.js");
+        let node = stacks::Toolchain { test: vec!["no-such-program-here".into()], ..table.clone() };
         for json in [r#"{"name":"x"}"#, r#"{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}"#] {
             std::fs::write(d.path().join("package.json"), json).unwrap();
             let (passed, note) = own_tests_check(d.path(), Some(&node), &stop);
             assert!(passed && note.starts_with("No tests ran"), "nothing is started: {note}");
         }
+        let real = r#"{"scripts":{"test":"jest && echo 'no test specified for integration'"}}"#;
+        std::fs::write(d.path().join("package.json"), real).unwrap();
+        let (passed, note) = own_tests_check(d.path(), Some(&node), &stop);
+        assert!(!passed && note.starts_with("Couldn't run the tests"), "it's started: {note}");
     }
 
     #[test]
