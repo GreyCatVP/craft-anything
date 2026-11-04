@@ -610,6 +610,14 @@ list: scan the folders people keep such things in (`KnownRoot`, by folder name, 
 levels down), and make an install use a copy already found outside our store. Test each layout
 (unzipped, cask, capitalised name) with temp folders, not the machine the test runs on.
 
+**A device check that launched the original.** The Android device check installed the build's
+APK, then launched, drove and read the crash log of the *target's* package (the original app's),
+so a rebuild under its own id was never opened: the original was replayed against its own map
+and scored 100%, whatever the build did. Found by reading the code while setting up a trial
+with distinct package ids; a self-compare trial (the same app as original and build) would have
+hidden it. What a check drives is the thing it built, named by what was built (the APK's own
+manifest), never by the target; and a trial of a check compares two different things.
+
 ## Agent tooling
 
 **Shared CLI efforts reached Claude unchanged.** Keep CLI-only levels available for agents, but
