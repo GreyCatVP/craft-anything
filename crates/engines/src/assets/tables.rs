@@ -25,6 +25,10 @@ pub struct KnownModel {
     /// Shown to the person when the provider's list gives no name.
     pub name: String,
     pub kinds: Vec<AssetKind>,
+    /// Types the provider's own list files the model under that it doesn't make: never listed or
+    /// run for them.
+    #[serde(default)]
+    pub not_kinds: Vec<AssetKind>,
     /// Credits a second of audio costs, for the models whose rate the provider doesn't publish.
     pub credits_per_second: Option<f64>,
     /// The provider's only endpoint for its types, in no live list: offered without asking.
@@ -63,7 +67,8 @@ impl KnownModels {
     }
 
     /// A table from TOML text. An unknown asset type or field, another version, a model with no
-    /// id or no type, a rate that isn't a positive number, or the same model twice is an error.
+    /// id or no type (made or not made), a type both made and not, a rate that isn't a positive
+    /// number, or the same model twice is an error.
     pub fn parse(text: &str) -> Result<KnownModels, String> {
         let file: KnownModelsFile = toml::from_str(text).map_err(|e| e.to_string())?;
         if file.version != VERSION {
@@ -75,8 +80,11 @@ impl KnownModels {
             if m.provider.trim().is_empty() || m.id.trim().is_empty() {
                 return Err(format!("a model has no provider or id ({who:?})"));
             }
-            if m.kinds.is_empty() {
+            if m.kinds.is_empty() && m.not_kinds.is_empty() {
                 return Err(format!("{who} has no asset type"));
+            }
+            if m.kinds.iter().any(|k| m.not_kinds.contains(k)) {
+                return Err(format!("{who} both makes and doesn't make the same type"));
             }
             if m.credits_per_second.is_some_and(|rate| !rate.is_finite() || rate <= 0.0) {
                 return Err(format!("{who} has a credit rate that is not a positive number"));
@@ -100,6 +108,12 @@ impl KnownModels {
     /// The asset types the model makes, or `None` when this table doesn't know it.
     pub fn kinds(&self, provider: &str, model: &str) -> Option<&[AssetKind]> {
         self.find(provider, model).map(|m| m.kinds.as_slice())
+    }
+
+    /// The types the provider's list files the model under that it doesn't make; empty when this
+    /// table says nothing against any.
+    pub fn not_kinds(&self, provider: &str, model: &str) -> &[AssetKind] {
+        self.find(provider, model).map_or(&[], |m| m.not_kinds.as_slice())
     }
 
     /// The provider's fixed models for a type, which no live list names.
@@ -407,6 +421,11 @@ mod tests {
         }
         assert!(KnownModels::parse(&model("").replace("version = 1", "version = 2")).is_err());
         assert!(KnownModels::parse(&model("").replace("kinds = [\"image\"]", "kinds = []")).is_err());
+        // A model that makes none of our types, though a list says it does, is listed by what it isn't.
+        assert!(KnownModels::parse(&model("").replace("kinds = [\"image\"]", "kinds = []\nnot_kinds = [\"model_3d\"]")).is_ok());
+        assert!(KnownModels::parse(&model("").replace("kinds = [\"image\"]", "kinds = [\"image\"]\nnot_kinds = [\"image\"]")).is_err());
+        assert_eq!(KnownModels::built_in().not_kinds("fal", "fal-ai/hunyuan-motion"), [AssetKind::Model3d]);
+        assert!(KnownModels::built_in().not_kinds("fal", "fal-ai/flux/dev").is_empty());
         assert!(KnownModels::parse(&model("").replace("id = \"x\"", "id = \"\"")).is_err());
         let twice = format!("{}{}", model(""), model("").replace("version = 1\n", ""));
         assert!(KnownModels::parse(&twice).unwrap_err().contains("twice"));

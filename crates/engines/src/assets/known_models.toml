@@ -6,6 +6,10 @@
 # for the models this app has always offered. `id` is the provider's own id for the model (fal and
 # Scenario list models by it; ElevenLabs by its `model_id`), never a name of ours.
 #
+# `not_kinds` lists types a provider's own list files a model under but that it doesn't make: the
+# model is never listed or run for them. fal files Hunyuan Motion, which makes character animation,
+# under `text-to-3d`.
+#
 # `fixed = true` marks a model that is the provider's only endpoint for its type and is not in any
 # live list (ElevenLabs sound effects and music): the picker offers it without asking the provider.
 # `credits_per_second` is the credit rate this app keeps for such a fixed model, because
@@ -22,6 +26,13 @@
 # `mureka/api/generate/podcast`, `fal-ai/zonos`). Models Scenario tags `deprecated` are left out too.
 
 version = 1
+
+[[model]]
+provider = "fal"
+id = "fal-ai/hunyuan-motion"
+name = "Hunyuan Motion"
+kinds = []
+not_kinds = ["model_3d"]
 
 # The models the previous fixed table offered (the old `assets.toml`, now removed), under the provider's own ids. Its
 # Scenario 3D model, `model_meshy-img23d` (Meshy 6), is deprecated at Scenario, so the entry here is

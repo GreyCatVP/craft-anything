@@ -81,9 +81,9 @@ starts that kind's count afresh in the new provider's unit; another model of the
 the count. The builder does not choose models: the project's choice for each kind is the only model
 used, and the generation tools take no `model` parameter. A 3D model made from a description gets a
 picture made first, with the project's picture model (counted against the limit for pictures), only
-when the chosen 3D model starts from a picture and pictures are on. A 3D model that takes words is
-given the words directly; one that starts from a picture, with pictures Off, makes the tool stop and
-say so.
+when the chosen 3D model starts from a picture and pictures are on. The words go to the 3D model
+directly only when it takes words and no picture, or takes words and pictures are Off; one that
+starts only from a picture, with pictures Off, makes the tool stop and say so.
 
 ### Units, limits and Ignore budget
 

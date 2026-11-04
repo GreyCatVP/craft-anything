@@ -120,12 +120,13 @@ opens a version 4 project read-only. An old project-wide "Always" answer to the 
 is not carried over, so each type asks once more; "Always" now switches that type's limit off, where
 the person can see it and switch it back on.
 
-The builder's prompts say, for each type, the provider and model the project uses and what it has
-used of its limit, and that these choices are the person's. A type is offered to the builder only when
-its provider has a key. The builder cannot choose models: the generation tools take no model
-parameter. A 3D model made from a description gets a picture made first, with the project's picture
-model (counted against the pictures limit), only when the chosen 3D model starts from a picture and
-pictures are on; a 3D model that takes words is given the words directly.
+The builder's prompts say, for each type, the provider and model the project uses and what it has used
+of its limit, and that these choices are the person's. A type is offered to the builder only when its
+provider has a key. The builder cannot choose models: the generation tools take no model parameter. A
+3D model made from a description gets a picture made first, with the project's picture model (counted
+against the pictures limit), only when the chosen 3D model starts from a picture and pictures are on;
+otherwise the words go directly to a 3D model that takes words (one that takes words and no picture,
+or any that takes words when pictures are Off).
 
 When an AI asks (the builder, or an MCP client), anything that loosens spending needs the person's
 answer on an approval card in the project, and nothing is changed without it: turning generation on,

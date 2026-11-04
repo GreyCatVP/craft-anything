@@ -487,14 +487,19 @@ fn categories(kind: AssetKind) -> Vec<&'static str> {
 
 /// What the model `id` of a fal `category` makes. The category says so where it can; where it
 /// holds several kinds the known-models table does, and a model it does not know makes nothing we
-/// can say. A category this app does not read is left to the known-models table as well.
+/// can say. A category this app does not read is left to the known-models table as well. A type
+/// the table says the model doesn't make (Hunyuan Motion's animations, filed under text-to-3d) is
+/// never one of them.
 fn kinds_of(category: &str, id: &str) -> Vec<AssetKind> {
-    let known = || KnownModels::built_in().kinds(ID, id).unwrap_or_default();
-    match CATEGORIES.iter().find(|(name, _)| *name == category) {
+    let table = KnownModels::built_in();
+    let known = || table.kinds(ID, id).unwrap_or_default();
+    let mut kinds = match CATEGORIES.iter().find(|(name, _)| *name == category) {
         Some((_, Makes::One(one))) => vec![*one],
         Some((_, Makes::OneOf(some))) => known().iter().copied().filter(|kind| some.contains(kind)).collect(),
         None => known().to_vec(),
-    }
+    };
+    kinds.retain(|kind| !table.not_kinds(ID, id).contains(kind));
+    kinds
 }
 
 fn category_of(model: &Value) -> &str {
@@ -1185,6 +1190,7 @@ mod listing_tests {
                     page(
                         vec![
                             model("acme/text-to-3d", "Text to 3D", "text-to-3d", prompt_only()),
+                            model("fal-ai/hunyuan-motion", "Hunyuan Motion", "text-to-3d", prompt_only()),
                             model("tripo3d/p1/image-to-3d", "Tripo again", "text-to-3d", from_picture()),
                         ],
                         None,
@@ -1193,11 +1199,14 @@ mod listing_tests {
             ]
         });
         let list = fal(base).list(None, AssetKind::Model3d).unwrap();
-        assert_eq!(ids(&list), ["tripo3d/p1/image-to-3d", "acme/text-to-3d"]);
+        assert_eq!(ids(&list), ["tripo3d/p1/image-to-3d", "acme/text-to-3d"], "Hunyuan Motion makes animations, not 3D models");
         assert_eq!(list.models[0].name, "Tripo P1");
         assert_eq!(list.models[0].ignores, [AssetOption::Faces, AssetOption::Textured]);
         let seen = seen.lock().unwrap();
         assert!(seen[0].starts_with("GET /v1/models?category=image-to-3d&") && seen[1].starts_with("GET /v1/models?category=text-to-3d&"), "{seen:?}");
+        // Described on its own, it makes none of our types.
+        assert!(kinds_of("text-to-3d", "fal-ai/hunyuan-motion").is_empty());
+        assert_eq!(kinds_of("text-to-3d", "acme/text-to-3d"), [AssetKind::Model3d]);
     }
 
     #[test]

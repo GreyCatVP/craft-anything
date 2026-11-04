@@ -14,7 +14,7 @@ use crate::tools::interaction_tools::{Approval, ask_approval_or_always, inbox, i
 use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, TypeAssets, TypeUsage, Workspace};
 use craft_anything_engines::assets::inputs::map_request;
 use craft_anything_engines::assets::model::{ModelDetail, Unit, amount};
-use craft_anything_engines::assets::tables::InputRoles;
+use craft_anything_engines::assets::tables::{InputRoles, KnownModels};
 use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Generated, Shape, charged_amount, fal, formats, was_charged};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
@@ -66,7 +66,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "assets_model_generate",
             title: "Generate a 3D model",
-            summary: "Make a game-ready, low-poly 3D model (GLB) with the provider and model the project chose for 3D models, and save it inside app/. Give a prompt or an image (a web address, or a picture inside the project such as reference/picture-1.png). From a prompt, a picture is made first with the project's picture model (counted against the limit for pictures) when the 3D model starts from pictures; a 3D model that takes words is given the prompt. faces requests the face count (default 3000): about 500-1500 for small props and pickups, 2000-5000 for weapons, furniture and vehicles, 6000-15000 for main characters; fewer faces run faster, so use the fewest that still look right (the model keeps it within its own range). textured (default true) gives colours and surfaces. Counts against the project's limit for 3D models; it takes a minute or two. Describe one original object per model; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, what it cost and what is left of the limit.",
+            summary: "Make a game-ready, low-poly 3D model (GLB) with the provider and model the project chose for 3D models, and save it inside app/. Give a prompt or an image (a web address, or a picture inside the project such as reference/picture-1.png). From a prompt, a picture is made first with the project's picture model (counted against the limit for pictures) when the 3D model starts from pictures and pictures are on; otherwise the prompt goes to a 3D model that takes words, and one that needs a picture refuses. faces requests the face count (default 3000): about 500-1500 for small props and pickups, 2000-5000 for weapons, furniture and vehicles, 6000-15000 for main characters; fewer faces run faster, so use the fewest that still look right (the model keeps it within its own range). textured (default true) gives colours and surfaces. Counts against the project's limit for 3D models; it takes a minute or two. Describe one original object per model; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, what it cost and what is left of the limit.",
             beginner: "Makes a 3D object for your game, like a crate, a tree or a car.",
             toolset: Toolset::Core,
             effects,
@@ -437,7 +437,10 @@ impl Job {
         provider.validate_key(&key)?;
         self.ws.try_type_usage(kind, &t)?;
         let model = provider.describe(&key, &t.choice.model)?;
-        if !model.kinds.is_empty() && !model.kinds.contains(&kind) {
+        // A model the provider files under this type but that makes something else (fal's Hunyuan
+        // Motion, animations under text-to-3d) is refused as well.
+        let not_made = KnownModels::built_in().not_kinds(provider.id(), &t.choice.model).contains(&kind);
+        if not_made || (!model.kinds.is_empty() && !model.kinds.contains(&kind)) {
             return Err(ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" at {} doesn't make {many}.", model.name, provider.name()))
                 .with_remediation(format!("Ask the person to choose another model for {many} {CHOOSE_AGAIN}.")));
         }
@@ -2263,6 +2266,21 @@ mod tests {
         assert!(v["picture"]["note"].as_str().is_some_and(|n| n.contains("JPEG")), "{v}");
         assert_eq!((&v["saved"], v.get("note")), (&json!("barrel.glb"), None), "{v}");
         assert!(w.app_dir().join("barrel.jpg").is_file() && !w.app_dir().join("barrel.png").exists());
+    }
+
+    /// A model chosen for 3D models that makes animations, though fal files it as a 3D model, is
+    /// refused before anything is spent.
+    #[test]
+    fn a_model_that_makes_no_3d_models_is_refused_for_them() {
+        let (_d, mut w) = ws();
+        let stub = Recording::new("fal", Unit::Usd, 0.4).with(solid_model("fal-ai/hunyuan-motion", false, true, price(Unit::Usd, 0.4)));
+        let (engine, stub) = recording_engine(&mut w, stub);
+        choose(&mut w, AssetKind::Model3d, "fal", "fal-ai/hunyuan-motion", Unit::Usd, price(Unit::Usd, 0.4), 5.0);
+        let error = call(&engine, "assets_model_generate", json!({"prompt": "a dancer", "save_as": "dancer.glb"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::BadSettings, "{error:?}");
+        assert!(error.message.contains("doesn't make 3D models"), "{}", error.message);
+        assert!(stub.calls().is_empty(), "nothing was run");
+        assert!(w.try_assets().unwrap().is_empty(), "nothing was spent");
     }
 
     /// The place a generation goes, from its bytes alone.
