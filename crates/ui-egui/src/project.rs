@@ -1371,11 +1371,14 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
     let running = tools.iter().any(|(_, d)| d.is_none());
     let failed = tools.iter().filter(|(_, d)| *d == Some(false)).count();
     let title = if tools.is_empty() {
-        notes.last().cloned().unwrap_or_default()
+        one_line(notes.last().map(String::as_str).unwrap_or_default())
     } else {
         let n = tools.len().to_string();
         if running { trf("Working… ({n} steps so far)", &[("n", &n)]) } else { trf("Worked through {n} steps", &[("n", &n)]) }
     };
+    // The notes in the body wrap inside the window (#666). A collapsing header's title never wraps
+    // (egui lays it out on one line), so with no tool the title is the note's first line only.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     egui::CollapsingHeader::new(RichText::new(title).color(t.text_dim).size(theme::CAPTION)).default_open(advanced).icon(widgets::disclosure_icon).show(
         ui,
         |ui| {
@@ -1402,6 +1405,18 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
             }
         },
     );
+}
+
+/// A note's first line, cut to a length a header title can show on one line (#666).
+fn one_line(text: &str) -> String {
+    const MAX: usize = 90;
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    if first.chars().count() <= MAX {
+        first.to_string()
+    } else {
+        let cut: String = first.chars().take(MAX).collect();
+        format!("{}…", cut.trim_end())
+    }
 }
 
 /// A question or approval card. Returns the person's answer when they give one.
@@ -2374,5 +2389,24 @@ mod tests {
         apply(&mut feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
         assert!(matches!(feed.last(), Some(FeedItem::Paused)));
         assert_eq!(feed.iter().filter(|f| matches!(f, FeedItem::Error { .. })).count(), 1, "a pause adds no error");
+    }
+}
+
+#[cfg(test)]
+mod one_line_tests {
+    use super::one_line;
+
+    /// #666: a header title is one short line; the first line of a note, cut at 90 characters.
+    #[test]
+    fn a_header_title_is_the_first_line_cut_short() {
+        assert_eq!(one_line("  Reading the code  \nmore"), "Reading the code");
+        assert_eq!(one_line("\n\nSecond\n"), "Second");
+        assert_eq!(one_line(""), "");
+        let long = "x".repeat(200);
+        let cut = one_line(&long);
+        assert_eq!(cut.chars().count(), 91, "90 characters and an ellipsis");
+        assert!(cut.ends_with('…'));
+        let spaced = format!("{} tail", "a".repeat(89));
+        assert_eq!(one_line(&spaced), format!("{}…", "a".repeat(89)), "a cut never leaves a space before the ellipsis");
     }
 }
