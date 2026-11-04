@@ -154,6 +154,12 @@ pub fn npm_dependencies(app: &Path) -> Vec<String> {
     ["dependencies", "devDependencies"].iter().filter_map(|k| pkg.as_ref()?.get(k)?.as_object()).flat_map(|d| d.keys().cloned()).collect()
 }
 
+/// What `app`'s package.json runs for `script`; none without a readable one or that script.
+pub fn npm_script(app: &Path, script: &str) -> Option<String> {
+    let pkg: serde_json::Value = serde_json::from_slice(&std::fs::read(app.join("package.json")).ok()?).ok()?;
+    pkg.get("scripts")?.get(script)?.as_str().map(str::to_string)
+}
+
 /// The crates `app`'s Cargo.toml depends on; none without a readable one.
 pub fn cargo_dependencies(app: &Path) -> Vec<String> {
     let manifest: Option<toml::Table> = std::fs::read_to_string(app.join("Cargo.toml")).ok().and_then(|t| t.parse().ok());

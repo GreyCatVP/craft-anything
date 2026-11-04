@@ -52,6 +52,10 @@ pub struct Toolchain {
     /// What its output says when no tests ran, which isn't a failure.
     #[serde(default)]
     pub no_tests: Vec<String>,
+    /// The package.json script that is its tests. Whether there are any is then read from that
+    /// file, and `no_tests` from the script: what a script prints can be about one it runs.
+    #[serde(default)]
+    pub test_script: Option<String>,
     /// The project's own copies of the program, used first when one's there (`.venv/bin/python`).
     #[serde(default)]
     pub local_programs: Vec<String>,

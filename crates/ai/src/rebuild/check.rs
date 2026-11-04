@@ -74,10 +74,17 @@ fn own_build(app: &Path, tool: &stacks::Toolchain, stop: &CancelToken) -> (bool,
 /// is a project we know no way to test, and the note says so.
 pub(super) fn own_tests_check(app: &Path, tool: Option<&stacks::Toolchain>, stop: &CancelToken) -> (bool, String) {
     let Some(tool) = tool else { return (true, "No tests ran: Craft Anything doesn't know how to test this kind of project.".into()) };
+    let says_none = |text: &str| tool.no_tests.iter().find(|n| text.contains(n.as_str())).cloned();
+    if let Some(name) = &tool.test_script {
+        let script = craft_anything_engine::outputs::npm_script(app, name).unwrap_or_default();
+        if script.is_empty() || says_none(&script).is_some() {
+            return (true, format!("No tests ran: package.json has no `{name}` script to run."));
+        }
+    }
     match run_tool(app, tool, &tool.test, 30, stop) {
         Ok((true, _)) => (true, format!("`{}` passed.", tool.test.join(" "))),
-        Ok((false, out)) => match tool.no_tests.iter().find(|n| out.contains(n.as_str())) {
-            Some(why) => (true, format!("No tests ran: {why}.")),
+        Ok((false, out)) => match says_none(&out).filter(|_| tool.test_script.is_none()) {
+            Some(why) => (true, format!("No tests ran: {}.", why.trim_end_matches('.'))),
             None => (false, format!("The project's tests failed:\n{}", last_lines(&out, 20))),
         },
         Err(e) => (false, format!("Couldn't run the tests: {e}")),
@@ -288,8 +295,26 @@ mod tests {
         assert!(printing(make, "make: *** No rule to make target 'test'.  Stop."));
         assert!(!printing(make, "make: *** No rule to make target `fixture.txt', needed by `test'.  Stop."), "a prerequisite is a failure");
         assert!(!printing(make, "make: *** No rule to make target 'fixture.txt', needed by 'test'.  Stop."));
-        assert!(printing(node, "npm error Missing script: \"test\""));
+        assert!(!printing(make, "make[1]: *** No rule to make target `test'.  Stop."), "a make it runs is a failure");
+        std::fs::write(d.path().join("package.json"), r#"{"scripts":{"test":"npm test --workspaces"}}"#).unwrap();
+        assert!(!printing(node, "npm error Missing script: \"test\""), "one package of several, maybe beside a real failure");
         assert!(!printing(node, "npm error Missing script: \"verify\""), "a script its tests call is a failure");
+    }
+
+    #[test]
+    fn a_node_project_says_in_its_package_json_whether_it_has_tests() {
+        let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
+        let node = stacks::Toolchain {
+            test: vec!["no-such-program-here".into()],
+            test_script: Some("test".into()),
+            no_tests: vec!["no test specified".into()],
+            ..Default::default()
+        };
+        for json in [r#"{"name":"x"}"#, r#"{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}"#] {
+            std::fs::write(d.path().join("package.json"), json).unwrap();
+            let (passed, note) = own_tests_check(d.path(), Some(&node), &stop);
+            assert!(passed && note.starts_with("No tests ran"), "nothing is started: {note}");
+        }
     }
 
     #[test]

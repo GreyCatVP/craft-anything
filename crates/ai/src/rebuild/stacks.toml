@@ -24,7 +24,9 @@
 # A `[[toolchain]]` says how a project builds and tests itself, by the file that names the tool
 # (the first in this order wins), so a person's own project can be checked in any language.
 # `build` and `test` are a program and its arguments, run in the project's folder; `no_tests` is
-# what its output says when no tests ran, which isn't a failure; `local_programs` are the
+# what its output says when no tests ran, which isn't a failure (with `test_script`, the
+# package.json script that is its tests, what that script says: whether there are any is read
+# from the file, as a script that runs others can print the same); `local_programs` are the
 # project's own copies of the program, used first when one's there (`.bat`, `.cmd` and `.exe`
 # ones on Windows, the others elsewhere); `windows_program` is its name on Windows, where it
 # differs.
@@ -124,7 +126,8 @@ name = "Node.js"
 found_by = ["package.json"]
 build = ["npm", "run", "build", "--if-present"]
 test = ["npm", "test"]
-no_tests = ["no test specified", 'Missing script: "test"']
+test_script = "test"
+no_tests = ["no test specified"]
 windows_program = "npm.cmd"
 
 [[toolchain]]
@@ -167,4 +170,4 @@ name = "Make"
 found_by = ["Makefile"]
 build = ["make"]
 test = ["make", "test"]
-no_tests = ["No rule to make target `test'.", "No rule to make target 'test'.", "don't know how to make test."]
+no_tests = ["make: *** No rule to make target `test'.", "make: *** No rule to make target 'test'.", "make: don't know how to make test."]
