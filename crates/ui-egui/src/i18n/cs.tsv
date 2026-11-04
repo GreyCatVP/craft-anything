@@ -1435,8 +1435,8 @@ ignores: {options}	ignoruje: {options}
 price unknown	cena neznámá
 cost known after each run	cena je známa po každém spuštění
 quoted before each run	cena se uvádí před každým spuštěním
-under 0.01	méně než 0,01
-under 0.01 credits	méně než 0,01 kreditu
+under 0.01	méně než 0.01
+under 0.01 credits	méně než 0.01 kreditu
 unreadable	nečitelné
 usage not tracked	spotřeba se nesleduje
 {n} made	vytvořeno: {n}

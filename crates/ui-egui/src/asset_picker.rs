@@ -591,8 +591,9 @@ mod tests {
         assert_eq!(said(Pricing::Unknown, AssetKind::Image), "price unknown");
     }
 
-    /// Every price `Pricing::shown` can make is a fixed sentence or ends with a phrase the catalogs
-    /// hold, so a language can word it.
+    /// Every price `Pricing::shown` can make is a fixed sentence or ends with a phrase in `PER_WORDS`,
+    /// and every one of those phrases, and the words `price_words` puts in an amount, is a key in every
+    /// language's catalog, so a language can word it.
     #[test]
     fn every_price_ends_in_a_phrase_the_catalogs_hold() {
         let fixed = ["quoted before each run", "cost known after each run", "price unknown"];
@@ -613,6 +614,16 @@ mod tests {
             shown.push(Pricing::Unknown.shown(kind));
             for text in shown {
                 assert!(fixed.contains(&text.as_str()) || PER_WORDS.iter().any(|per| text.ends_with(&format!(" {per}"))), "{kind:?}: {text}");
+            }
+        }
+        let keys = |source: &str| -> std::collections::HashSet<String> {
+            source.lines().filter(|l| !l.starts_with('#')).filter_map(|l| l.split_once('\t')).map(|(k, _)| k.to_string()).collect()
+        };
+        let words_of_an_amount = ["credit", "credits", "under 0.01 credits"];
+        for lang in crate::i18n::LANGUAGES.iter().filter(|l| l.code != "en") {
+            let held = keys(lang.source);
+            for phrase in fixed.iter().chain(PER_WORDS.iter()).chain(words_of_an_amount.iter()) {
+                assert!(held.contains(*phrase), "{}: no entry for {phrase:?}", lang.code);
             }
         }
     }

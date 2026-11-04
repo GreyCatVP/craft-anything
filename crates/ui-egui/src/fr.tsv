@@ -892,8 +892,8 @@ ignores: {options}	ignore : {options}
 price unknown	prix inconnu
 cost known after each run	coût connu après chaque exécution
 quoted before each run	prix indiqué avant chaque exécution
-under 0.01	moins de 0,01
-under 0.01 credits	moins de 0,01 crédit
+under 0.01	moins de 0.01
+under 0.01 credits	moins de 0.01 crédit
 unreadable	illisible
 usage not tracked	consommation non suivie
 {n} made	{n} produits

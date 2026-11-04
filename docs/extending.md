@@ -73,9 +73,10 @@ gave. Settings → Builds holds the defaults a new project copies; changing them
 an existing project. Choosing another provider for a kind (Off counts as one) starts that kind's
 count afresh in the new provider's unit; another model of the same provider keeps the count. The
 builder does not choose models: the project's choice for each kind is the only model used, and the
-generation tools take no `model` parameter. A 3D model made from a description first makes a picture
-with the project's picture model, which counts against the limit for pictures; with pictures Off, it
-is made only by a 3D model that takes words directly.
+generation tools take no `model` parameter. A 3D model made from a description gets a picture made
+first, with the project's picture model (counted against the limit for pictures), only when the
+chosen 3D model starts from a picture and pictures are on. A 3D model that takes words is given the
+words directly; one that starts from a picture, with pictures Off, makes the tool stop and say so.
 
 ### Units, limits and Ignore budget
 
@@ -149,8 +150,9 @@ available to your ElevenLabs account):
 The shared tool path saves assets inside the project's `app/` folder and records each generation in
 the project's spending ledger with the amount in the provider's unit. `assets_speech_generate`
 accepts text and a voice id; `assets_sound_generate` and `assets_music_generate` accept a prompt and
-duration. These tools save MP3 audio and are available in the CLI, MCP and builder for generating
-original assets.
+duration. The file name must end in `.mp3`. ElevenLabs is asked for MP3; audio from other providers
+is saved as the provider returns it, under the name given, and nothing converts or checks it. These
+tools are available in the CLI, MCP and builder for generating original assets.
 
 ### The spending ledger
 

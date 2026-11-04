@@ -1435,8 +1435,8 @@ ignores: {options}	ignoriert: {options}
 price unknown	Preis unbekannt
 cost known after each run	Kosten erst nach jedem Lauf bekannt
 quoted before each run	Preis vor jedem Lauf angegeben
-under 0.01	unter 0,01
-under 0.01 credits	unter 0,01 Credits
+under 0.01	unter 0.01
+under 0.01 credits	unter 0.01 Credits
 unreadable	nicht lesbar
 usage not tracked	Verbrauch wird nicht gezählt
 {n} made	{n} erzeugt

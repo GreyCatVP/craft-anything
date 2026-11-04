@@ -1435,8 +1435,8 @@ ignores: {options}	игнорирует: {options}
 price unknown	цена неизвестна
 cost known after each run	стоимость известна после каждого запуска
 quoted before each run	цена называется перед каждым запуском
-under 0.01	меньше 0,01
-under 0.01 credits	меньше 0,01 кредита
+under 0.01	меньше 0.01
+under 0.01 credits	меньше 0.01 кредита
 unreadable	не читается
 usage not tracked	расход не учитывается
 {n} made	создано: {n}

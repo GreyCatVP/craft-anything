@@ -144,6 +144,29 @@ fn chinese_startup_language_menu_and_saved_selection() {
         for fixed in [Pricing::Unknown, Pricing::After { unit: Unit::Usd }, Pricing::Before { unit: Unit::Usd, rate: Rate::Quoted { typical: None } }] {
             assert_ne!(asset_picker::price_words(&fixed, AssetKind::Image), fixed.shown(AssetKind::Image), "{code}");
         }
+        // Every kind with every shape of price, in both units: worded in the language, the number as it is.
+        let rates = [
+            Rate::PerRequest(0.15),
+            Rate::PerRequest(0.001),
+            Rate::PerRequest(1.0),
+            Rate::PerMegapixel(0.003),
+            Rate::PerSecond(2.5),
+            Rate::PerCharacter(0.0001),
+            Rate::Quoted { typical: Some(20.0) },
+            Rate::Quoted { typical: Some(0.001) },
+        ];
+        for kind in AssetKind::ALL {
+            for unit in [Unit::Usd, Unit::Credits] {
+                for rate in &rates {
+                    let pricing = Pricing::Before { unit, rate: rate.clone() };
+                    let english = pricing.shown(kind);
+                    let said = asset_picker::price_words(&pricing, kind);
+                    assert_ne!(said, english, "{code}: {kind:?} {english}");
+                    let number = english.split(' ').find(|word| word.chars().any(|c| c.is_ascii_digit())).unwrap_or_default();
+                    assert!(!number.is_empty() && said.contains(number), "{code}: {kind:?} {english:?} became {said:?}, which lost {number:?}");
+                }
+            }
+        }
         for kind in AssetKind::ALL {
             assert_ne!(i18n::tr(asset_picker::type_title(kind)), asset_picker::type_title(kind), "{code}: {kind:?}");
         }
