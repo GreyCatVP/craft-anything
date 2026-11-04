@@ -554,6 +554,7 @@ Owner: open · Status: in progress
       stack picks the kind's default (`kinds.choose`); `stacks::used_in` reads only package.json,
       after the first turn. Read the stack from the folder's own files first (`project.godot`,
       `Cargo.toml`, `pyproject.toml`, `package.json`…)
+      — claimed: xerenon, branch bugfix/r2.7-stack-from-files
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
