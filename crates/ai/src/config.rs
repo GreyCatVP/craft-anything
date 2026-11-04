@@ -113,6 +113,34 @@ pub struct BackendOptions {
     /// per conversation (on for Copilot, off for other agents unless set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acp: Option<bool>,
+    /// Agent CLIs that keep their sign-in, settings and sessions in a folder of their own (Claude
+    /// Code's `CLAUDE_CONFIG_DIR`): the folder to use instead of their usual one, so each AI can be
+    /// another account. `~/` is the home folder; over SSH it's a folder on that computer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+}
+
+impl BackendOptions {
+    /// [`config_dir`](BackendOptions::config_dir) as written, if any (for another computer).
+    pub fn config_dir_text(&self) -> Option<&str> {
+        self.config_dir.as_deref().map(str::trim).filter(|d| !d.is_empty())
+    }
+
+    /// [`config_dir`](BackendOptions::config_dir) on this computer, with `~` as the home folder.
+    pub fn config_dir_here(&self) -> Option<std::path::PathBuf> {
+        config_dir_in(self.config_dir_text()?, dirs::home_dir())
+    }
+}
+
+/// `dir` with a leading `~` as `home`; `None` when it needs a home folder there isn't.
+pub(crate) fn config_dir_in(dir: &str, home: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    if dir == "~" {
+        return home;
+    }
+    match dir.strip_prefix("~/").or_else(|| dir.strip_prefix("~\\")) {
+        Some(rest) => home.map(|h| h.join(rest)),
+        None => Some(std::path::PathBuf::from(dir)),
+    }
 }
 
 /// A provider's context tier, not a guessed token count. Copilot reports each model's limits.

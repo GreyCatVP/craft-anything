@@ -299,6 +299,16 @@ impl CraftApp {
         });
     }
 
+    /// Keep an agent app's sign-in, settings and sessions in this folder, so the AI is another
+    /// account (`None`: its usual folder again).
+    pub fn set_agent_folder(&mut self, name: &str, folder: Option<String>) {
+        let (hub, name) = (self.hub.clone(), name.to_string());
+        self.jobs.spawn(tr("Set an AI's folder"), false, move |_| {
+            hub.set_config_dir(&name, folder.as_deref()).map_err(|e| e.message)?;
+            Ok(crate::backends(&hub))
+        });
+    }
+
     /// Remove an AI and its stored key.
     pub fn remove_backend(&mut self, name: &str) {
         let (hub, name) = (self.hub.clone(), name.to_string());
