@@ -582,6 +582,7 @@ Owner: open · Status: in progress
       so a website or a Python tool whose request doesn't say so is an app, and the app check then
       fails with "There's no built program to start yet" (read in the code, not run). Let the
       folder's stack decide the kind too, and say what "ready" means for a person's own project
+      — claimed: xerenon, branch feature/r2.7-own-project-checks
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
