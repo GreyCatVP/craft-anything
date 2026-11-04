@@ -212,21 +212,42 @@ Every round spends the person's money or quota. One that can't do anything shoul
       9.4M tokens in 19 minutes of the first stage, never compiled). Try again carries on
 - [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds and that
       stop (#399): a model that changes code without ever running a build isn't caught by it
-- [ ] Check live that the stop fires on a real API-backend build and the message reads well
+- [ ] Check live that the stop fires on a real API-backend build and the message reads well. It
+      fired on a local Ollama build (the same built-in loop) after two turns that changed nothing
+      in `app/` ("The build stopped after two builder turns changed no files in app/…"); an
+      API-key build is still owed
 
 ### R5.4 Local models can build
 Owner: open · Status: todo
 The built-in agent loop assumes a capable tool-calling model. Reports #24, #44, #110, #403, #417 and
 #498 say otherwise (#44's backend is a guess; #116 may be the same), and no local model build has
 been run live.
-- [ ] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
-      STATUS.md which models it worked with. Do this first: it shows which of the lines below matter
+- [x] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
+      STATUS.md which models it worked with: Ollama 0.40.7 with `qwen2.5-coder:14b` on Windows
+      (RTX 5090, 32k context, no prompt cut) stops clearly at "No project to build found in app/
+      yet", twice. The lines below say why
 - [x] A builder on a local model is offered 13 tools (about 10,000 characters of descriptions)
       instead of 33-41 (23,000-30,000): the Build tools and the Core tools the brief names, not the
       study set a model explores with instead of writing (#417, `LOCAL_BUILDER_CORE`). Measured as
       text, not on a model; Ollama's default context (4k) was too small for the old list alone
 - [ ] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
-      after this: does it call `build_file_write` now? If it still doesn't, the model can't build
+      after this: does it call `build_file_write` now? If it still doesn't, the model can't build.
+      Run so far: with the lean list it calls `build_checklist`, `build_command_run` and
+      `build_file_edit` (as JSON text, which #554 runs), but not `build_file_write` yet; the two
+      lines below stop it first
+- [x] The system prompt told every model to call `core_brief_write` and `core_plan_update` first and
+      `core_handoff_write` last, tools a lean local builder isn't offered, so the model asked only
+      for `core_brief_write` and did nothing else for three checks. A lean builder's prompt leaves
+      the memory steps out; live, the same model then used the Build tools
+- [ ] A call written after a sentence ("Let's list the files.\n```json {…}```") isn't run: #554
+      reads a reply that is only the JSON. Half the model's calls came this way and the turn ended
+      with nothing done. Run a reply that ends in one fenced call to an offered tool, and say in
+      the transcript that it was read from text
+- [ ] The model ran `cargo new app` in `app/` (commands run there), so the project landed in
+      `app/app/` and every check said "No project to build found in app/ yet". Say in that check
+      where a project was found one folder down, and have the Rust brief say `cargo init`
+- [ ] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
+      Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out
 - [x] An assistant turn with no text sends an empty string, not `content: null`, which Ollama
       refused as `invalid message content type: <nil>` (#403, #536)
 - [x] Understand a tool call a model writes as JSON in its text (#417; implementation `dfe9a4db2dcb3e27edbd67311cbb4202584e7af6`). The fallback protocol reads
@@ -254,6 +275,9 @@ been run live.
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
+- [ ] `rebuild --backend <an API backend>` still adds the first agent app it finds to the person's
+      settings and prints "Using Claude Code (…)": `ensure_agent` (`rebuild_cmd.rs`) runs whenever no
+      agent app is set up, though this run won't use one. Run it only when the build needs one
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103

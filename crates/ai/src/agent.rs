@@ -356,7 +356,8 @@ impl AgentLoop {
         if self.system.is_none() {
             self.emit(AgentEvent::Status { text: "Reading the investigation so far…".into() });
             let inv = self.host.investigation();
-            self.system = Some(prompt::system_prompt(self.cfg.beginner, self.host.clean_room(), &inv));
+            let memory = !(self.cfg.lean_for_local && self.chain.get(self.current).is_some_and(|s| s.local));
+            self.system = Some(prompt::system_prompt(self.cfg.beginner, self.host.clean_room(), &inv, memory));
         }
         if let Some(text) = text {
             context::push_user_text(&mut self.history, text);
