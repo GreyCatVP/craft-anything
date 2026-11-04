@@ -113,7 +113,12 @@ fn classify_riff(data: &[u8]) -> Option<(String, String, Confidence)> {
 }
 
 /// Is the data printable text (ASCII or valid UTF-8)?
-fn looks_like_text(data: &[u8]) -> bool {
+///
+/// `whole` tells whether `data` covers the entire file or just a sampled prefix.
+/// When `whole` is false and the sample ends mid-UTF-8-sequence, the truncation
+/// is tolerated because more bytes may follow. When `whole` is true, truncation
+/// and malformed bytes are rejected.
+fn looks_like_text(data: &[u8], whole: bool) -> bool {
     if data.is_empty() {
         return false;
     }
@@ -131,43 +136,57 @@ fn looks_like_text(data: &[u8]) -> bool {
             if i + 1 < sample && (0x80..=0xBF).contains(&data[i + 1]) {
                 valid_utf8 += 2;
                 i += 2;
+            } else if !whole && i + 1 == sample {
+                // Truncated at end of incomplete file: tolerate, more bytes may follow
+                valid_utf8 += 1;
+                i += 1;
             } else {
                 return false;
             }
         } else if (0xE0..=0xEF).contains(&b) {
             // 3-byte UTF-8: U+0800 to U+FFFF, with scalar range restrictions
-            if i + 2 >= sample {
-                return false;
-            }
-            let b2 = data[i + 1];
-            let b3 = data[i + 2];
-            let valid = match b {
-                0xE0 => (0xA0..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3),
-                0xED => (0x80..=0x9F).contains(&b2) && (0x80..=0xBF).contains(&b3),
-                _ => (0x80..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3),
-            };
-            if valid {
-                valid_utf8 += 3;
-                i += 3;
+            if i + 3 <= sample {
+                let b2 = data[i + 1];
+                let b3 = data[i + 2];
+                let valid = match b {
+                    0xE0 => (0xA0..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3),
+                    0xED => (0x80..=0x9F).contains(&b2) && (0x80..=0xBF).contains(&b3),
+                    _ => (0x80..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3),
+                };
+                if valid {
+                    valid_utf8 += 3;
+                    i += 3;
+                } else {
+                    return false;
+                }
+            } else if !whole {
+                // Truncated at end of incomplete file: tolerate
+                valid_utf8 += sample - i;
+                i = sample;
             } else {
                 return false;
             }
         } else if (0xF0..=0xF4).contains(&b) {
             // 4-byte UTF-8: U+10000 to U+10FFFF, with scalar range restrictions
-            if i + 3 >= sample {
-                return false;
-            }
-            let b2 = data[i + 1];
-            let b3 = data[i + 2];
-            let b4 = data[i + 3];
-            let valid = match b {
-                0xF0 => (0x90..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
-                0xF4 => (0x80..=0x8F).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
-                _ => (0x80..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
-            };
-            if valid {
-                valid_utf8 += 4;
-                i += 4;
+            if i + 4 <= sample {
+                let b2 = data[i + 1];
+                let b3 = data[i + 2];
+                let b4 = data[i + 3];
+                let valid = match b {
+                    0xF0 => (0x90..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
+                    0xF4 => (0x80..=0x8F).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
+                    _ => (0x80..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
+                };
+                if valid {
+                    valid_utf8 += 4;
+                    i += 4;
+                } else {
+                    return false;
+                }
+            } else if !whole {
+                // Truncated at end of incomplete file: tolerate
+                valid_utf8 += sample - i;
+                i = sample;
             } else {
                 return false;
             }
@@ -231,7 +250,11 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         .summary(summary)
         .confidence(confidence)
         .coverage(Coverage {
-            status: craft_anything_evidence::CoverageStatus::Partial,
+            status: if input.whole {
+                craft_anything_evidence::CoverageStatus::Complete
+            } else {
+                craft_anything_evidence::CoverageStatus::Partial
+            },
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
             next_offset: None,
@@ -267,7 +290,11 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         .summary(summary)
         .confidence(confidence)
         .coverage(Coverage {
-            status: craft_anything_evidence::CoverageStatus::Partial,
+            status: if input.whole {
+                craft_anything_evidence::CoverageStatus::Complete
+            } else {
+                craft_anything_evidence::CoverageStatus::Partial
+            },
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
             next_offset: None,
@@ -283,7 +310,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
     }
 
     // Fallback: text or unknown binary
-    if looks_like_text(data) {
+    if looks_like_text(data, input.whole) {
         let file_type = "Plain text";
         let mime = "text/plain";
         let confidence = Confidence::Derived;
@@ -306,7 +333,11 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         .summary(summary)
         .confidence(confidence)
         .coverage(Coverage {
-            status: craft_anything_evidence::CoverageStatus::Partial,
+            status: if input.whole {
+                craft_anything_evidence::CoverageStatus::Complete
+            } else {
+                craft_anything_evidence::CoverageStatus::Partial
+            },
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
             next_offset: None,
@@ -343,7 +374,11 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         .summary(summary)
         .confidence(confidence)
         .coverage(Coverage {
-            status: craft_anything_evidence::CoverageStatus::Partial,
+            status: if input.whole {
+                craft_anything_evidence::CoverageStatus::Complete
+            } else {
+                craft_anything_evidence::CoverageStatus::Partial
+            },
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
             next_offset: None,
@@ -403,19 +438,19 @@ mod tests {
     #[test]
     fn text_detection() {
         let data = b"Hello, world!\nThis is text.";
-        assert!(looks_like_text(data));
+        assert!(looks_like_text(data, true));
     }
 
     #[test]
     fn arabic_text_detection() {
         let data = "مرحبا بالعالم".as_bytes();
-        assert!(looks_like_text(data));
+        assert!(looks_like_text(data, true));
     }
 
     #[test]
     fn binary_not_text() {
         let data = b"\x00\x01\x02\x03\xFF\xFE\xFD";
-        assert!(!looks_like_text(data));
+        assert!(!looks_like_text(data, true));
     }
 
     #[test]
