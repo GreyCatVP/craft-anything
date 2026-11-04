@@ -85,8 +85,9 @@ impl ProjectAssets {
         if !allowed {
             choice = AssetChoice::off();
         }
+        // A budget from an old or hand-edited file is believed only where a limit could be set to it.
         let limit = match (choice.unit, self.legacy_budget_usd) {
-            (Unit::Usd, Some(budget)) => budget,
+            (Unit::Usd, Some(budget)) if Unit::Usd.accepts(budget) => budget,
             (unit, _) => s.default_limit(unit),
         };
         TypeAssets { choice, limit, limit_on: true, since_ms: 0 }
@@ -428,6 +429,33 @@ mod tests {
         roomy.usd_limit = 9.0;
         roomy.credit_limit = 40.0;
         assert_eq!((plain.assets.effective(AssetKind::Image, &roomy).limit, plain.assets.effective(AssetKind::Music, &roomy).limit), (9.0, 40.0));
+    }
+
+    /// A budget from an old or hand-edited file is not a limit when no limit could be set to it, and
+    /// storing the defaults ([`ProjectAssets::keep_effective`]) must not make it one for good.
+    #[test]
+    fn an_old_budget_that_is_not_an_amount_gives_the_settings_default() {
+        let s = settings();
+        let above = crate::workspace::MAX_ASSET_BUDGET_USD + 1.0;
+        // JSON has no NaN or infinity, so those are set on the field directly.
+        for bad in [-1.0, above, f64::INFINITY, f64::NAN] {
+            let mut m = read_manifest(&v3("")).unwrap();
+            m.assets.legacy_budget_usd = Some(bad);
+            let image = m.assets.effective(AssetKind::Image, &s);
+            assert_eq!((image.choice.provider.as_deref(), image.limit), (Some("fal"), 5.0), "{bad}");
+            assert!(m.assets.keep_effective(&s), "{bad}");
+            assert_eq!(m.assets.types[&AssetKind::Image].limit, 5.0, "{bad}: what is stored is the default");
+            assert_eq!(m.assets.legacy_budget_usd, None, "{bad}");
+        }
+        // What a file can hold: the same through the version 3 reader, and the edges stay limits.
+        for (text, want) in [("-1.0", 5.0), ("10001.0", 5.0), ("0.0", 0.0), ("10000.0", 10_000.0)] {
+            let m = read_manifest(&v3(&format!(r#","asset_budget_usd":{text}"#))).unwrap();
+            assert_eq!(m.assets.effective(AssetKind::Image, &s).limit, want, "{text}");
+        }
+        let mut roomy = settings();
+        roomy.usd_limit = 9.0;
+        let m = read_manifest(&v3(r#","asset_budget_usd":-1.0"#)).unwrap();
+        assert_eq!(m.assets.effective(AssetKind::Image, &roomy).limit, 9.0, "Settings' own default, not the built-in one");
     }
 
     #[test]
