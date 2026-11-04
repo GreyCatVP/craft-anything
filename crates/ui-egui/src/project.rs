@@ -1759,11 +1759,14 @@ fn ask_card(app: &mut CraftApp, ui: &mut Ui, r: &Request, answered: Option<&str>
                     .size(theme::CAPTION),
             );
             ui.add_space(4.0);
+            // A card whose "Always" would remember nothing (each loosening of spending is asked about
+            // on its own) offers only once or not.
+            let remembers = r.action.as_deref() != Some(craft_anything_engine::tools::project_tools::LOOSEN_CARD);
             ui.horizontal(|ui| {
                 if widgets::primary(ui, "Allow once").clicked() {
                     out = Some((r.id.clone(), Answer { allow: Some(true), ..Default::default() }, tr("Allowed once")));
                 }
-                if widgets::secondary(ui, None, "Always for this project").clicked() {
+                if remembers && widgets::secondary(ui, None, "Always for this project").clicked() {
                     out = Some((r.id.clone(), Answer { allow: Some(true), always: true, ..Default::default() }, tr("Allowed for this project")));
                 }
                 if widgets::secondary(ui, None, "Don't allow").clicked() {

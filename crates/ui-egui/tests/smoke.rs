@@ -1441,6 +1441,38 @@ fn a_provider_whose_key_was_just_removed_is_not_offered_while_the_lists_are_aske
     assert!(!has_fal(h.state()), "and the answer agrees");
 }
 
+/// The card that asks to loosen a project's asset spending offers "Allow once" and "Don't allow" but
+/// not "Always for this project", which would remember nothing; other approval cards keep it.
+#[test]
+fn the_loosen_card_offers_no_always() {
+    use craft_anything_engine::inbox::{Request, RequestKind};
+    use craft_anything_ui_egui::state::FeedItem;
+    let mut h = harness_sized(egui::vec2(1280.0, 1400.0), || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::fill_project(&mut a);
+        a
+    });
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Always for this project").count(), 1, "the demo's command card offers it");
+    let loosen = Request {
+        id: "1-1-2".into(),
+        kind: RequestKind::Approval,
+        title: "Let the assistant loosen this project's asset spending?".into(),
+        detail: "The assistant asks to: Switch the limit for music off.".into(),
+        choices: vec![],
+        allow_text: false,
+        action: Some(craft_anything_engine::tools::project_tools::LOOSEN_CARD.into()),
+        created_ms: 0,
+    };
+    let feed = &mut h.state_mut().state.feed;
+    feed.retain(|item| !matches!(item, FeedItem::Ask { request, .. } if request.kind == RequestKind::Approval));
+    feed.push(FeedItem::Ask { request: loosen, answer: None });
+    h.run_steps(3);
+    h.get_by_label("Allow once");
+    h.get_by_label("Don't allow");
+    assert!(h.query_by_label("Always for this project").is_none(), "nothing to remember");
+}
+
 /// A request for the model lists doesn't hold the engine: a Settings default changed while the
 /// providers are asked is in the app at once, and reaches the engine's settings and the file without
 /// waiting for the lists. (In a child process with a config folder of its own: the app saves to the

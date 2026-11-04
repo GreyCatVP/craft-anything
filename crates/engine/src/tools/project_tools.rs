@@ -301,8 +301,9 @@ fn project_assets_allow(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
     Ok(ToolOutput::Value(assets_report(&ws, &settings, &ws.try_assets())))
 }
 
-/// The kind of approval card that asks about a loosening change.
-const LOOSEN_CARD: &str = "assets:loosen";
+/// The kind of approval card that asks about a loosening change. Its "Always" would remember nothing
+/// (each loosening is asked about on its own), so the app offers only "Allow once" and "Don't allow".
+pub const LOOSEN_CARD: &str = "assets:loosen";
 
 /// What a change from `before` to `after` loosens in what the project may spend, in sentences for the
 /// person; empty when it only tightens or leaves things as they are. Loosening is turning generation
