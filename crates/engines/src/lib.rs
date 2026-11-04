@@ -46,9 +46,27 @@ pub fn display_name(id: &str) -> &'static str {
     engine(id).map(|e| e.name).unwrap_or("an external tool")
 }
 
-/// Find an engine: user override, then the managed store (`<store>/<id>/bin/<exe>`), then PATH,
-/// then its standard install folders, then the folders where an unpacked copy is usually kept.
+/// Engine executables the environment can pin, before every other tier: the REA-style names
+/// operators already know (`KUNA_COMMAND`). The value wins even when it does not exist, so a
+/// stale override fails loudly at spawn instead of silently running whatever PATH finds.
+fn exe_env_var(id: &str) -> Option<&'static str> {
+    match id {
+        "kuna" => Some("KUNA_COMMAND"),
+        _ => None,
+    }
+}
+
+fn exe_env_override(id: &str) -> Option<PathBuf> {
+    std::env::var_os(exe_env_var(id)?).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// Find an engine: its environment override (`KUNA_COMMAND`), then the user override, then the
+/// managed store (`<store>/<id>/bin/<exe>`), then PATH, then its standard install folders, then
+/// the folders where an unpacked copy is usually kept.
 pub fn locate(id: &str, overrides: &dyn ToolPathLookup, store: &Path) -> Option<PathBuf> {
+    if let Some(p) = exe_env_override(id) {
+        return Some(p);
+    }
     locate_configured(id, overrides, store).or_else(|| {
         let e = engine(id)?;
         find_on_path(e.host_exes())
@@ -57,9 +75,13 @@ pub fn locate(id: &str, overrides: &dyn ToolPathLookup, store: &Path) -> Option<
     })
 }
 
-/// Find an engine where the settings or the managed store say only: what [`locate`] finds before
-/// it looks around the computer (PATH and standard install folders).
+/// Find an engine where the settings or the managed store say only: the environment override
+/// (`KUNA_COMMAND`), then what [`locate`] finds before it looks around the computer (PATH and
+/// standard install folders).
 pub fn locate_configured(id: &str, overrides: &dyn ToolPathLookup, store: &Path) -> Option<PathBuf> {
+    if let Some(p) = exe_env_override(id) {
+        return Some(p);
+    }
     if let Some(p) = overrides.override_for(id)
         && p.exists()
     {
@@ -150,6 +172,16 @@ mod tests {
     fn unknown_engine_is_none() {
         assert!(locate("definitely-not-an-engine", &NoOverrides, Path::new("/nonexistent")).is_none());
         assert_eq!(display_name("adb"), "Android platform tools (adb)");
+    }
+
+    /// The env tier maps engine ids to their REA-style variable names and pins only those; the
+    /// value is used without an existence check, so a stale pin fails at spawn, not silently
+    /// falling through to PATH.
+    #[test]
+    fn kuna_env_override_var_mapping() {
+        assert_eq!(exe_env_var("kuna"), Some("KUNA_COMMAND"));
+        assert_eq!(exe_env_var("ghidra"), None);
+        assert_eq!(exe_env_var("definitely-not-an-engine"), None);
     }
 
     /// Ghidra's zip unpacks into `<store>/ghidra/ghidra_<version>_PUBLIC/`, with the launcher in
