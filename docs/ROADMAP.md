@@ -552,6 +552,11 @@ Owner: open · Status: in progress
 - [ ] #105, #135, #259, #385 and #423 predate 0.3.0, which looks in more places, and came through
       the ticket relay, so nobody can ask them for `doctor` output. Close them pointing at 0.3.0,
       and add search paths only for a new report that has that output
+- [ ] #423: an agent that is set up but switched off is never offered again, so "No coding agent was
+      found" stays on screen with Claude installed: the setup card and "Look again" leave out every saved
+      AI by name, on or off. Offer a switched-off agent as found and turn it on, keeping its options.
+      Cause is not confirmed on the reporter's machine (needs their config.toml). — claimed: fabox-os,
+      branch bugfix/423-disabled-agent-not-offered
 - [ ] Say plainly when what's found is the Claude desktop app rather than the `claude` program
       (#259, a guess at its cause)
 - [ ] macOS: `/Applications/Antigravity.app` ended up as the agent's command (#467); find what
