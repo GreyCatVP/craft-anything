@@ -21,9 +21,13 @@ pub struct Stack {
     /// the generic instruction.
     #[serde(default)]
     pub steps: Option<String>,
-    /// package.json dependencies that show a build uses this stack (`next`, `vite`).
+    /// package.json or Cargo.toml dependencies that show a build uses this stack (`next`, `eframe`).
     #[serde(default)]
     pub uses: Vec<String>,
+    /// Files, relative to a folder, that show a person's own project is built with this stack
+    /// (`project.godot`); a leading `*` matches by the name's ending (`*.uproject`).
+    #[serde(default)]
+    pub found_by: Vec<String>,
 }
 
 /// The stack that leaves the choice to the builder (a website's default); [`used_in`] then
@@ -90,11 +94,27 @@ pub fn asked_for(words: &str) -> Option<&'static Stack> {
     catalogue().iter().find(|s| s.asked_by.iter().any(|p| words.contains(p.as_str())))
 }
 
-/// The stack a build in `app` uses, from its package.json dependencies (the first stack in table
-/// order whose `uses` it lists); None when it has none or names no stack in the table.
+/// The stack a build in `app` uses, from its package.json and Cargo.toml dependencies (the first
+/// stack in table order whose `uses` it lists); None when it has none or names no stack in the
+/// table.
 pub fn used_in(app: &std::path::Path) -> Option<&'static Stack> {
-    let deps = craft_anything_engine::outputs::npm_dependencies(app);
+    let mut deps = craft_anything_engine::outputs::npm_dependencies(app);
+    deps.extend(craft_anything_engine::outputs::cargo_dependencies(app));
     catalogue().iter().find(|s| s.uses.iter().any(|d| deps.contains(d)))
+}
+
+/// The stack a folder of the person's own files is built with: an engine's project file says
+/// most, then the dependencies, then the other files that name a stack. None when nothing does.
+pub fn found_in(dir: &std::path::Path) -> Option<&'static Stack> {
+    let by_file = |engine: bool| catalogue().iter().filter(|s| s.engine.is_some() == engine).find(|s| s.found_by.iter().any(|f| has_file(dir, f)));
+    by_file(true).or_else(|| used_in(dir)).or_else(|| by_file(false))
+}
+
+fn has_file(dir: &std::path::Path, name: &str) -> bool {
+    match name.strip_prefix('*') {
+        Some(ending) => std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().ends_with(ending)),
+        None => dir.join(name).is_file(),
+    }
 }
 
 /// The libraries `request` asks for that work with `stack`, in table order.
@@ -126,6 +146,37 @@ pub fn steps(stack: &str, editor: Option<&std::path::Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_says_what_it_is_built_with() {
+        // Each case in a folder of its own.
+        let found = |files: &[(&str, &str)]| {
+            let d = tempfile::tempdir().unwrap();
+            for (name, text) in files {
+                let path = d.path().join(name);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, text).unwrap();
+            }
+            found_in(d.path()).map(|s| s.name.as_str())
+        };
+        let vite = r#"{"dependencies":{"vite":"5"}}"#;
+        assert_eq!(found(&[("project.godot", "")]), Some("Godot"));
+        assert_eq!(found(&[("ProjectSettings/ProjectVersion.txt", "")]), Some("Unity"));
+        assert_eq!(found(&[("Game.uproject", "{}")]), Some("Unreal Engine"));
+        assert_eq!(found(&[("project.godot", ""), ("package.json", vite)]), Some("Godot"), "an engine's file says most");
+        assert_eq!(found(&[("package.json", vite), ("index.html", "")]), Some("React + TypeScript (Vite)"));
+        assert_eq!(found(&[("package.json", r#"{"dependencies":{"svelte":"5"}}"#), ("index.html", "")]), Some(BUILDERS_CHOICE));
+        assert_eq!(found(&[("Cargo.toml", "[dependencies]\neframe = \"0.30\"\n")]), Some("Rust + egui (eframe)"));
+        assert_eq!(found(&[("Cargo.toml", "[dependencies]\nmacroquad = \"0.4\"\n")]), Some("Rust + macroquad"));
+        assert_eq!(found(&[("Cargo.toml", "[dependencies]\niced = \"0.13\"\n")]), Some(BUILDERS_CHOICE));
+        assert_eq!(found(&[("Cargo.toml", "not [ toml")]), Some(BUILDERS_CHOICE));
+        assert_eq!(found(&[("pyproject.toml", "")]), Some("Python"));
+        assert_eq!(found(&[("requirements.txt", "")]), Some("Python"));
+        assert_eq!(found(&[("go.mod", "")]), Some(BUILDERS_CHOICE));
+        assert_eq!(found(&[("App.csproj", "")]), Some(BUILDERS_CHOICE));
+        assert_eq!(found(&[("index.html", "")]), Some("Plain HTML and CSS"));
+        assert_eq!(found(&[("notes.md", "")]), None);
+    }
 
     #[test]
     fn the_table_parses_and_covers_every_engine() {

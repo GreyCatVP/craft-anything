@@ -170,6 +170,9 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [ ] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes fails when several crates'
       tests run at once and passes alone: it writes a script and runs it straight away, which a
       busy machine can refuse while another test's child still holds the file open
+- [ ] `a_remote_query_expands_only_the_remote_working_directory` (ai crate) fails on a Mac: the
+      temp folder is `/var/…`, a link to `/private/var/…`, and the shell's `$PWD` gives the second.
+      Compare with the folder's canonical path
 - [ ] Revisit the two advisory exceptions in `deny.toml`: `rsa` (no fix; we only verify with public
       keys) when rsa 0.10 lands, and unmaintained `zbus_names`/`zvariant` (Linux-only via keyring
       and accesskit) when those move on. `deny.toml`'s comments say this is tracked in R0.3: point
@@ -548,13 +551,16 @@ Owner: open · Status: in progress
 - [x] The website check's missing-site note names every place `site_dir` accepts (dist/, build/,
       out/, or a plain index.html with no package.json) and the app's real place, "app/" or "the
       project folder" (#494)
-- [ ] A project edited in place (Work on my project, or `rebuild --existing edit`) gets its stack
-      from the request's words, as a new one does: a request that reads as a game asks for Unity
-      unless it names another engine, even when the folder is a Godot project, and a run with no
-      stack picks the kind's default (`kinds.choose`); `stacks::used_in` reads only package.json,
-      after the first turn. Read the stack from the folder's own files first (`project.godot`,
-      `Cargo.toml`, `pyproject.toml`, `package.json`…)
+- [x] A project edited in place (Work on my project, or `rebuild --existing edit`) keeps what its
+      files are built with, unless the request names another stack: an engine's project file, then
+      package.json and Cargo.toml dependencies, then `found_by` in `stacks.toml`, and a project
+      whose dependencies name no stack there is left to the builder. A request that read as a game
+      used to ask for Unity even in a Godot project, and an app got the kind's default
       — claimed: xerenon, branch bugfix/r2.7-stack-from-files
+- [ ] What a project edited in place is checked by: its kind still comes from the request's words,
+      so a website or a Python tool whose request doesn't say so is an app, and the app check then
+      fails with "There's no built program to start yet" (read in the code, not run). Let the
+      folder's stack decide the kind too, and say what "ready" means for a person's own project
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress

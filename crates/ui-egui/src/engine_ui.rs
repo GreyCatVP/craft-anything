@@ -594,12 +594,15 @@ pub fn assets_settings(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
-/// The engine to build this draft with: the person's pick, else the one the request names, else
-/// none when the request names another way to build ("…in Electron"), else the original's own
-/// or Unity.
+/// The engine to build this draft with: the person's pick, else the one their own files use, else
+/// the one the request names, else none when the request names another way to build ("…in
+/// Electron"), else the original's own or Unity.
 pub fn chosen(kinds: &KindRegistry, d: &MakeDraft) -> Option<Builder> {
     if d.builder.is_some() {
         return d.builder;
+    }
+    if let Some(stack) = crate::make::own_stack(kinds, d) {
+        return Builder::from_stack(stack);
     }
     match kinds.named(&d.request, &crate::make::resolve_target(d)) {
         Some(stack) => Builder::from_stack(stack),

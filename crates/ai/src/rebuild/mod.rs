@@ -627,8 +627,7 @@ impl Worker {
         };
         if ws.manifest.stack.is_empty() {
             let deep = !self.engine.session().clean_room();
-            let (_, stack) = opts.kinds.choose(&ws.manifest.request, &ws.manifest.target, deep).ok_or_else(no_kind)?;
-            ws.manifest.stack = stack.to_string();
+            ws.manifest.stack = project::first_stack(&opts.kinds, ws, deep).ok_or_else(no_kind)?.to_string();
             ws.save()?;
         }
         let kind = opts.kinds.detect(&ws.manifest.request, &ws.manifest.target, &ws.manifest.stack).ok_or_else(no_kind)?;

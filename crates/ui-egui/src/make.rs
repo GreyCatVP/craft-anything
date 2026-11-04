@@ -57,9 +57,19 @@ pub fn resolve_target(d: &MakeDraft) -> TargetRef {
 /// A game is being copied or made, so it's built with a game engine ("Build with").
 pub fn is_game(kinds: &craft_anything_ai::rebuild::KindRegistry, d: &MakeDraft) -> bool {
     use craft_anything_ai::rebuild::GameKind;
+    if let Some(stack) = own_stack(kinds, d) {
+        return craft_anything_engines::game::Builder::from_stack(stack).is_some();
+    }
     d.found.is_some()
         || (d.game && matches!(d.target, TargetRef::Local { .. }))
         || kinds.choose(&d.request, &resolve_target(d), false).is_some_and(|(k, _)| k.id() == GameKind::ID)
+}
+
+/// What the person's own files are built with, when they're the app and the request names no
+/// other stack (the run decides the same way: `project::first_stack`).
+pub fn own_stack<'a>(kinds: &craft_anything_ai::rebuild::KindRegistry, d: &'a MakeDraft) -> Option<&'a str> {
+    let own = d.existing == Some(ExistingFiles::Edit) && kinds.named(&d.request, &resolve_target(d)).is_none();
+    d.folder_stack.as_deref().filter(|_| own)
 }
 
 /// The front door: make your own version of something, work on a project you already have, or
@@ -511,6 +521,27 @@ mod tests {
         for bad in ["example", "https://", "two words.com", "ftp://x.y", "https://.com", "x."] {
             assert!(url_problem(bad).is_some(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_persons_own_files_say_whether_it_is_a_game() {
+        use crate::engine_ui::chosen;
+        use craft_anything_engines::game::Builder;
+        let kinds = craft_anything_ai::rebuild::KindRegistry::built_in();
+        let own = |stack: Option<&str>, request: &str| MakeDraft {
+            folder_stack: stack.map(str::to_string),
+            existing: Some(ExistingFiles::Edit),
+            request: request.into(),
+            ..Default::default()
+        };
+        let godot = own(Some("Godot"), "Fix the jump");
+        assert!(is_game(&kinds, &godot), "whatever the request's words say");
+        assert_eq!(chosen(&kinds, &godot), Some(Builder::Godot));
+        assert!(!is_game(&kinds, &own(Some("Python"), "Fix my game")), "no engine to get for a Python game");
+        assert_eq!(chosen(&kinds, &own(Some("Python"), "Fix my game with Godot")), Some(Builder::Godot), "the person's words come first");
+        assert!(is_game(&kinds, &own(None, "Fix my game")), "nothing read from the folder: the words decide");
+        let start_from = MakeDraft { existing: Some(ExistingFiles::StartFrom), ..own(Some("Python"), "Fix my game") };
+        assert!(is_game(&kinds, &start_from), "material to start from doesn't decide");
     }
 
     #[test]

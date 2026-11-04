@@ -2023,6 +2023,31 @@ fn the_front_door_works_on_a_project_the_person_already_has() {
     h.run_steps(2);
 }
 
+/// A Godot project's files decide its engine: Start gets Godot, never the Unity that a request
+/// reading as a game would.
+#[test]
+fn work_on_my_project_builds_with_the_engine_its_folder_uses() {
+    use craft_anything_engines::game::{Builder, Inventory};
+    use craft_anything_ui_egui::state::Modal;
+    let mine = tempfile::tempdir().unwrap();
+    std::fs::write(mine.path().join("project.godot"), "").unwrap();
+    let mut h = harness_sized(egui::vec2(1280.0, 1120.0), || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.game_engines = Some(Inventory::default());
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.state_mut().state.make.request = "Fix my game's jump".into();
+    h.run_steps(3);
+    assert_eq!(h.state().state.make.folder_stack.as_deref(), Some("Godot"));
+    h.get_by_label("Start").click();
+    h.run_steps(4);
+    assert_eq!(h.state().state.modal, Some(Modal::Engine(Builder::Godot)));
+}
+
 #[test]
 fn settings_list_projects_from_more_folders_and_remove_them_from_the_list_only() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
