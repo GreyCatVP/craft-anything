@@ -194,6 +194,17 @@ pub fn default_builder<'a>(backends: &'a [BackendConfig], chosen: Option<&str>) 
         .or_else(|| on().find(|b| b.kind != BackendKind::AgentCli))
 }
 
+/// Whether `name` is a saved AI that is switched on. One saved but switched off is not set up:
+/// it's offered again when found, so it can be turned on (#423).
+pub fn is_on(backends: &[BackendConfig], name: &str) -> bool {
+    backends.iter().any(|b| b.enabled && b.name == name)
+}
+
+/// The found AIs that aren't already set up and on.
+pub fn leave_out_set_up(found: Vec<Detected>, backends: &[BackendConfig]) -> Vec<Detected> {
+    found.into_iter().filter(|d| !is_on(backends, &d.suggestion.name)).collect()
+}
+
 /// What a backend does in a crew.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -408,8 +419,7 @@ impl AiHub {
     /// Look for keys, local servers and agent CLIs (runs quickly; network probes are bounded).
     /// Things already configured (by name) are left out.
     pub fn detect(&self) -> Vec<Detected> {
-        let have: Vec<String> = self.backends().into_iter().map(|b| b.name).collect();
-        detect::detect_all().into_iter().filter(|d| !have.contains(&d.suggestion.name)).collect()
+        leave_out_set_up(detect::detect_all(), &self.backends())
     }
 
     /// Host aliases from `~/.ssh/config`, for the "run on another machine" picker.
