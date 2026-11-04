@@ -103,6 +103,11 @@ same temp directory, and game detection walked up and found the game. Give each 
 For a refactor that must keep output identical, dump the outputs for every combination before and
 after and compare them byte for byte (done for every brief across 162 combinations in R1.1).
 
+**A step moved to a worker, its test still counting frames.** #720 moved the picture size check
+off the UI thread; a UI test that added pictures, ran three frames and then looked kept passing on
+fast machines and failed in CI on unrelated PRs. When work moves to a worker, grep the tests that
+call it and make them `wait` for the result, not `run_steps(n)`.
+
 ## Building and running
 
 **A model catalogue queried in the wrong project.** OpenCode V2's raw `api get /api/model` does

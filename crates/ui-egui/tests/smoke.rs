@@ -505,7 +505,8 @@ fn pictures_of_the_original_go_with_the_draft_then_into_the_project() {
     // "Nothing — start fresh" is picked: the request box offers pictures (not for websites).
     h.get_by_label("Add pictures of the original (optional: screenshots help it look right)");
     h.state_mut().add_pictures(vec![pic.clone(), notes, pic.clone()]);
-    h.run_steps(3);
+    // Their sizes are checked on a worker first (#720).
+    assert!(wait(&mut h, |a| !a.state.make.pictures.is_empty()), "checked on a worker, then added");
     assert_eq!(h.state().state.make.pictures, vec![pic.clone()], "pictures only, once each");
     h.get_by_label("original.webp");
     h.get_by_label("Remove original.webp").click();

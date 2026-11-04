@@ -97,17 +97,19 @@ Owner: maintainers · Status: todo
 Two reported failures, the Windows start-up crash (#414) and a builder resuming another's
 session (#471), are fixed on `main` and still broken for everyone on 0.3.0. This is the
 cheapest help we can give anyone, so nothing below should hold it up for long.
-- [ ] #490 has changes requested: a JSON object given to `--left` or `--right` becomes text, and
-      its new test passes without the fix. Merge it once that's fixed, or decline it; it doesn't
-      hold up the release. What it reports is 0.2.0's, fixed by #93 (`f6725c2`): on Windows the
+- [x] #490 merged (`549ae5e`) with the CLI fix the review asked for: a string-or-object input is
+      `any`, so a JSON object given to `--left` stays an object (tested both ways). What it reports
+      is 0.2.0's, fixed by #93 (`f6725c2`): on Windows the
       published 0.3.0 CLI with Claude Code 2.1.179 mounted 314 of 315 tools (the 315th is the
       approval tool, which Claude Code doesn't list but calls), and a real Deep build reached Ready
       with `core_action_approve` answering five prompts. The reporter was asked for `--version`.
       macOS is still owed (R5.7)
-- [ ] Cut the next release (`docs/releasing.md`). 0.3.0 lacks `0748ef1` (#414: Windows starts DX12
-      only, the crash behind "it won't open"), `1e8f661` (#471: a builder never continues another
-      builder's session) and `3357daf` (#430: Claude Code's message on stdin). Take #357 (R5.2) too
-      if it's ready
+- [ ] Cut the next release (`docs/releasing.md`). The version is 0.4.0 (#526) and `main` at
+      `fb7ac86` is green, but pushing `release` is refused: its ruleset blocks every update and
+      lists no one who may bypass it. A maintainer who can push it (or adds a bypass) goes next.
+      0.3.0 lacks `0748ef1` (#414: Windows starts DX12 only, the crash behind "it won't open"),
+      `1e8f661` (#471: a builder never continues another builder's session) and `3357daf` (#430:
+      Claude Code's message on stdin)
 - [ ] See that the launcher offers the new version: #74, #104 and #420 installed through it, and
       nothing in this repository says how it picks one
 - [ ] After it ships, close what it fixes: #166, #346, #420, #478. #74, #104 and #222 give no
@@ -155,11 +157,10 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       fails on a Mac for that. `real_binary_end_to_end_if_present` fails there too, expecting
       `/bin/ls` to be Linux: both fixed (#357)
 - [ ] **decision** First-time contributors' CI: GitHub holds their runs for approval, so their PRs
-      show no `gate` run (#490 and #413 among them, and #413 holds up #455). Approve each push, or
+      show no `gate` run (#490 and #413 were among them). Approve each push, or
       change the repository's approval setting
-- [ ] Merge order the PR list doesn't show: #413 before #455; #193 before #482 and #486 (all change
-      the language list); #491 before #492 (same file). #433 and #468 look redundant with #421 and
-      #500: ask their authors
+- [ ] #193 changes the language list that #486 (merged) changed too: it needs a rebase. #468 looks
+      redundant with #500: ask its author
 - [ ] **decision** Wide PRs with no roadmap line: #416 (project goals, 34 files, cites an R2.11 that
       doesn't exist; that id stays free for it) and #503 (two asset providers and spending controls,
       37 files, cites the finished R1.4). Decide whether we want them before more is built on them
@@ -211,23 +212,44 @@ Every round spends the person's money or quota. One that can't do anything shoul
       9.4M tokens in 19 minutes of the first stage, never compiled). Try again carries on
 - [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds and that
       stop (#399): a model that changes code without ever running a build isn't caught by it
-- [ ] Check live that the stop fires on a real API-backend build and the message reads well
+- [ ] Check live that the stop fires on a real API-backend build and the message reads well. It
+      fired on a local Ollama build (the same built-in loop) after two turns that changed nothing
+      in `app/` ("The build stopped after two builder turns changed no files in app/…"); an
+      API-key build is still owed
 
 ### R5.4 Local models can build
 Owner: open · Status: todo
 The built-in agent loop assumes a capable tool-calling model. Reports #24, #44, #110, #403, #417 and
 #498 say otherwise (#44's backend is a guess; #116 may be the same), and no local model build has
 been run live.
-- [ ] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
-      STATUS.md which models it worked with. Do this first: it shows which of the lines below matter
+- [x] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
+      STATUS.md which models it worked with: Ollama 0.40.7 with `qwen2.5-coder:14b` on Windows
+      (RTX 5090, 32k context, no prompt cut) stops clearly at "No project to build found in app/
+      yet", twice. The lines below say why
 - [x] A builder on a local model is offered 13 tools (about 10,000 characters of descriptions)
       instead of 33-41 (23,000-30,000): the Build tools and the Core tools the brief names, not the
       study set a model explores with instead of writing (#417, `LOCAL_BUILDER_CORE`). Measured as
       text, not on a model; Ollama's default context (4k) was too small for the old list alone
 - [ ] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
-      after this: does it call `build_file_write` now? If it still doesn't, the model can't build
-- [ ] An assistant turn with no text sends `content: null` (`openai.rs`), which likely causes #403's
-      `invalid message content type: <nil>`: send an empty string
+      after this: does it call `build_file_write` now? If it still doesn't, the model can't build.
+      Run so far: with the lean list it calls `build_checklist`, `build_command_run` and
+      `build_file_edit` (as JSON text, which #554 runs), but not `build_file_write` yet; the two
+      lines below stop it first
+- [x] The system prompt told every model to call `core_brief_write` and `core_plan_update` first and
+      `core_handoff_write` last, tools a lean local builder isn't offered, so the model asked only
+      for `core_brief_write` and did nothing else for three checks. A lean builder's prompt leaves
+      the memory steps out; live, the same model then used the Build tools
+- [ ] A call written after a sentence ("Let's list the files.\n```json {…}```") isn't run: #554
+      reads a reply that is only the JSON. Half the model's calls came this way and the turn ended
+      with nothing done. Run a reply that ends in one fenced call to an offered tool, and say in
+      the transcript that it was read from text
+- [ ] The model ran `cargo new app` in `app/` (commands run there), so the project landed in
+      `app/app/` and every check said "No project to build found in app/ yet". Say in that check
+      where a project was found one folder down, and have the Rust brief say `cargo init`
+- [ ] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
+      Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out
+- [x] An assistant turn with no text sends an empty string, not `content: null`, which Ollama
+      refused as `invalid message content type: <nil>` (#403, #536)
 - [x] Understand a tool call a model writes as JSON in its text (#417; implementation `dfe9a4db2dcb3e27edbd67311cbb4202584e7af6`). The fallback protocol reads
       only `Action:` and `Action Input:` lines, so anything else ends the turn with nothing done
 - [x] Preserve `length` and `content_filter` stop reasons on native tool-call streams; a parsed
@@ -253,6 +275,9 @@ been run live.
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
+- [ ] `rebuild --backend <an API backend>` still adds the first agent app it finds to the person's
+      settings and prints "Using Claude Code (…)": `ensure_agent` (`rebuild_cmd.rs`) runs whenever no
+      agent app is set up, though this run won't use one. Run it only when the build needs one
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
