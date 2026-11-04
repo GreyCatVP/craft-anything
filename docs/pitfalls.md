@@ -650,8 +650,9 @@ extra arguments (as Copilot does) and do not put them on argv.
 
 **ACP marked a session ready from its id while MCP never started.** Cursor CLI 2026.06.04 accepted
 `session/new.mcpServers` and then ran without those tools. If the session reports MCP status, fail
-when ours is missing; for Cursor, refuse versions before 2026.06.05. Don't fail agents that never
-report MCP status.
+when ours is missing, including an explicit empty `mcpServers` list. A missing field, or an entry
+with no status, is not a report. Questions send no server, so an empty list there is expected.
+For Cursor, refuse versions before 2026.06.05.
 
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were
 mangled by the shell several times. Write multi-line edit scripts to a file and run the file.

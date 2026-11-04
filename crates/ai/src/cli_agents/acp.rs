@@ -338,7 +338,11 @@ impl AcpCore {
                 if self.session.is_none() {
                     return self.fail(format!("{} started no session", self.agent_name), None);
                 }
-                if let Some(why) = mcp_not_started(result, super::MCP_NAME) {
+                // Questions send no MCP server, so an empty report there is expected. A build or
+                // analysis that asked for one must not continue when the agent says none started.
+                if !self.question
+                    && let Some(why) = mcp_not_started(result, super::MCP_NAME)
+                {
                     return self.fail(format!("{} started no Craft Anything tools.", self.agent_name), Some(why));
                 }
                 self.ready = true;
@@ -484,8 +488,12 @@ fn agent_version_too_old(result: &Value, min: (u16, u8, u8)) -> bool {
 }
 
 /// When the session result reports MCP startup, why our server is missing or failed.
+/// A missing field is not a report. An empty list is: the agent named no server at all.
 fn mcp_not_started(result: &Value, name: &str) -> Option<String> {
     let servers = result.get("mcpServers").or_else(|| result.pointer("/_meta/mcpServers"))?.as_array()?;
+    if servers.is_empty() {
+        return Some("It reported no MCP servers. Update the agent so it starts the MCP server sent with the session, then try again.".into());
+    }
     let statuses: Vec<(&str, &str)> = servers
         .iter()
         .filter_map(|server| {
@@ -1277,6 +1285,42 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
         let failed = events(c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1","mcpServers":[{"name":"craft-anything","status":"failed"}]}}"#));
         assert!(matches!(&failed[0], AgentEvent::Error { message, .. } if message.contains("started no Craft Anything tools")));
         assert!(!c.ready);
+    }
+
+    #[test]
+    fn an_explicit_empty_mcp_report_is_not_ready_and_an_omitted_one_still_is() {
+        let mut c = core(None);
+        c.start();
+        c.prompt("What does it do?");
+        c.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        let failed = events(c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1","mcpServers":[]}}"#));
+        assert!(matches!(&failed[0], AgentEvent::Error { message, .. } if message.contains("started no Craft Anything tools")));
+        assert!(!c.ready);
+        assert!(c.line(r#"{"jsonrpc":"2.0","id":9,"result":{"stopReason":"end_turn"}}"#).is_empty(), "the prompt was never sent");
+
+        let mut c = core(None);
+        c.start();
+        c.prompt("What does it do?");
+        c.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        let prompt = sent(&c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1"}}"#));
+        assert_eq!(prompt[0]["method"], "session/prompt");
+        assert!(c.ready);
+
+        let mut unnamed = core(None);
+        unnamed.start();
+        unnamed.prompt("What does it do?");
+        unnamed.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        let prompt = sent(&unnamed.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1","mcpServers":[{"name":"craft-anything"}]}}"#));
+        assert_eq!(prompt[0]["method"], "session/prompt", "an entry with no status is not a failure report");
+
+        let mut question = core(None);
+        question.question = true;
+        question.start();
+        question.prompt("Just a question.");
+        question.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        let prompt = sent(&question.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1","mcpServers":[]}}"#));
+        assert_eq!(prompt[0]["method"], "session/prompt", "a question sends no MCP server");
+        assert!(question.ready);
     }
 
     #[test]
