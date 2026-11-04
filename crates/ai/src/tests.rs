@@ -1322,3 +1322,22 @@ fn a_comfyui_server_lets_builds_make_assets_without_a_key() {
     h.engine.session().settings.assets.image_model = Some("flux-dev".into());
     assert!(!h.can_make_assets(), "an address alone doesn't count when another model is picked");
 }
+
+/// A run started by a tool asks while that tool holds the session: the answer never waits for it.
+#[test]
+fn asking_whether_builds_can_make_assets_never_waits_for_the_session() {
+    if std::env::var_os("FAL_KEY").is_some() {
+        return; // a real key in the environment answers yes on its own
+    }
+    let (h, _d) = hub();
+    let h = Arc::new(h);
+    let held = h.engine.session();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let asker = h.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(asker.can_make_assets());
+    });
+    let answer = rx.recv_timeout(std::time::Duration::from_secs(5));
+    drop(held);
+    assert_eq!(answer, Ok(false), "answered from the saved settings while the session was busy");
+}

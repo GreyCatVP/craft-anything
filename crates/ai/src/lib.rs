@@ -723,10 +723,13 @@ impl AiHub {
     /// Builds can generate assets: some built-in asset provider has a key, or pictures come from
     /// the person's own ComfyUI server (the picture model, with an address), which needs none.
     pub fn can_make_assets(&self) -> bool {
-        let comfy = {
-            let s = self.engine.session();
-            let a = &s.settings.assets;
+        let is_comfy = |a: &craft_anything_engine::settings::AssetSettings| {
             a.image_model.as_deref() == Some(craft_anything_engines::assets::comfyui::ID) && !a.comfyui.address.trim().is_empty()
+        };
+        // Never wait for the session: a run started by a tool is called while that tool holds it.
+        let comfy = match self.engine.try_session() {
+            Some(s) => is_comfy(&s.settings.assets),
+            None => is_comfy(&Settings::load_from(&self.settings_path()).assets),
         };
         let providers = craft_anything_engines::assets::AssetProviders::built_in();
         comfy || providers.ids().into_iter().any(|id| self.has_asset_key(&providers, id))
