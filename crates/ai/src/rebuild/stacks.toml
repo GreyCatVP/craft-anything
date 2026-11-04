@@ -124,7 +124,7 @@ name = "Node.js"
 found_by = ["package.json"]
 build = ["npm", "run", "build", "--if-present"]
 test = ["npm", "test"]
-no_tests = ["no test specified", "Missing script"]
+no_tests = ["no test specified", 'Missing script: "test"']
 windows_program = "npm.cmd"
 
 [[toolchain]]

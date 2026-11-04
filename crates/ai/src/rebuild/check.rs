@@ -269,21 +269,27 @@ mod tests {
         assert!(!passed && note.contains("from its own copy"), "{note}");
     }
 
-    /// The table's own words for Make, on what the real make prints (3.81 here; 4.x quotes alike).
+    /// The table's own words, on what the real make (3.81; 4.x quotes alike) and npm (11) print.
     #[cfg(unix)]
     #[test]
-    fn only_a_missing_test_target_means_no_tests() {
+    fn only_the_tests_own_absence_means_no_tests() {
         let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
-        std::fs::write(d.path().join("Makefile"), "").unwrap();
-        let make = stacks::toolchain_in(d.path()).expect("the table has Make");
-        let printing = |line: &str| {
-            let test = ["sh", "-c", "printf '%s\\n' \"$1\"; exit 2", "sh", line].map(String::from).to_vec();
-            own_tests_check(d.path(), Some(&stacks::Toolchain { test, ..make.clone() }), &stop)
+        let named_by = |file: &str| {
+            let f = tempfile::tempdir().unwrap();
+            std::fs::write(f.path().join(file), "").unwrap();
+            stacks::toolchain_in(f.path()).expect("the table has it")
         };
-        assert!(printing("make: *** No rule to make target `test'.  Stop.").0);
-        assert!(printing("make: *** No rule to make target 'test'.  Stop.").0);
-        assert!(!printing("make: *** No rule to make target `fixture.txt', needed by `test'.  Stop.").0, "a prerequisite is a failure");
-        assert!(!printing("make: *** No rule to make target 'fixture.txt', needed by 'test'.  Stop.").0);
+        let printing = |tool: &stacks::Toolchain, line: &str| {
+            let test = ["sh", "-c", "printf '%s\\n' \"$1\"; exit 2", "sh", line].map(String::from).to_vec();
+            own_tests_check(d.path(), Some(&stacks::Toolchain { test, ..tool.clone() }), &stop).0
+        };
+        let (make, node) = (named_by("Makefile"), named_by("package.json"));
+        assert!(printing(make, "make: *** No rule to make target `test'.  Stop."));
+        assert!(printing(make, "make: *** No rule to make target 'test'.  Stop."));
+        assert!(!printing(make, "make: *** No rule to make target `fixture.txt', needed by `test'.  Stop."), "a prerequisite is a failure");
+        assert!(!printing(make, "make: *** No rule to make target 'fixture.txt', needed by 'test'.  Stop."));
+        assert!(printing(node, "npm error Missing script: \"test\""));
+        assert!(!printing(node, "npm error Missing script: \"verify\""), "a script its tests call is a failure");
     }
 
     #[test]
