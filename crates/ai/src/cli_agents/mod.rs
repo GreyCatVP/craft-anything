@@ -216,27 +216,46 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool 
 /// The fix for a sign-in failure, in plain words. Sign-in always happens in Claude Code itself;
 /// we never see or handle the account.
 pub fn sign_in_hint(message: &str) -> Option<String> {
-    sign_in_hint_in(message, adapters::in_flatpak())
+    sign_in_hint_in(message, adapters::in_flatpak(), None)
 }
 
-/// [`sign_in_hint`] for a Flatpak or not. In a Flatpak, Claude Code keeps its sign-in and
-/// conversations in a folder of the app's own (#506), so signing in from a normal terminal signs
-/// in the other copy: it's done through the sandbox, with that folder.
-fn sign_in_hint_in(message: &str, flatpak: bool) -> Option<String> {
+/// [`sign_in_hint`] for a Flatpak or not, and for Claude Code in a folder chosen for it
+/// (`folder`), whose sign-in is its own: the command signs in there. In a Flatpak, Claude Code
+/// keeps its sign-in and conversations in a folder of the app's own (#506), so signing in from a
+/// normal terminal signs in the other copy: it's done through the sandbox, with that folder.
+pub(crate) fn sign_in_hint_in(message: &str, flatpak: bool, folder: Option<&Path>) -> Option<String> {
     let m = message.to_ascii_lowercase();
     let wants_sign_in = ["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"].iter().any(|w| m.contains(w));
     if !wants_sign_in {
         return None;
     }
-    Some(if flatpak {
-        format!("Sign in to Claude Code inside this app's sandbox: open a terminal and run `{FLATPAK_SIGN_IN}`, then try again.")
-    } else {
-        "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string()
+    let folder = folder.map(|f| f.to_string_lossy().into_owned());
+    Some(match (flatpak, folder) {
+        (true, None) => format!("Sign in to Claude Code inside this app's sandbox: open a terminal and run `{FLATPAK_SIGN_IN}`, then try again."),
+        (true, Some(f)) => format!(
+            "Sign in to Claude Code inside this app's sandbox, in the folder chosen for it: open a terminal and run `{}`, then try again.",
+            flatpak_sign_in(&crate::ssh::shell_quote(&f))
+        ),
+        (false, None) => "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string(),
+        (false, Some(f)) if cfg!(windows) => format!(
+            "Sign in to Claude Code in the folder chosen for it: open PowerShell and run `$env:CLAUDE_CONFIG_DIR='{}'; claude auth login`, then try again.",
+            f.replace('\'', "''")
+        ),
+        (false, Some(f)) => format!(
+            "Sign in to Claude Code in the folder chosen for it: open a terminal and run `CLAUDE_CONFIG_DIR={} claude auth login`, then try again.",
+            crate::ssh::shell_quote(&f)
+        ),
     })
 }
 
 /// Signing in for the Claude Code that a Flatpak build starts: the same folder it will use.
 const FLATPAK_SIGN_IN: &str = "flatpak run --command=sh ai.storyteller.craft-anything -c 'CLAUDE_CONFIG_DIR=\"$XDG_DATA_HOME/craft-anything/claude\" \"$HOME/.local/bin/claude\" auth login'";
+
+/// [`FLATPAK_SIGN_IN`] for a chosen folder, already quoted for the sandbox's shell.
+fn flatpak_sign_in(quoted: &str) -> String {
+    let inner = format!("CLAUDE_CONFIG_DIR={quoted} \"$HOME/.local/bin/claude\" auth login");
+    format!("flatpak run --command=sh ai.storyteller.craft-anything -c {}", crate::ssh::shell_quote(&inner))
+}
 
 /// Words in an API's answer when the installed Claude Code is older than the model it was asked
 /// to use (#165).
@@ -245,6 +264,12 @@ pub const TOO_OLD_FOR_MODEL: &str = "does not support this model";
 /// Claude Code's failure in plain words, and its fix when the person can make one: a version too
 /// old for the model (#165), or a sign-in.
 pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
+    claude_code_failure_in(why, None)
+}
+
+/// [`claude_code_failure`] for Claude Code in a folder chosen for it (`folder`), whose sign-in is
+/// its own.
+pub(crate) fn claude_code_failure_in(why: &str, folder: Option<&Path>) -> (String, Option<String>) {
     if why.to_ascii_lowercase().contains(TOO_OLD_FOR_MODEL) {
         return (
             format!("Claude Code is too old for the model it was asked to use ({}).", why.chars().take(200).collect::<String>()),
@@ -254,7 +279,7 @@ pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
             ),
         );
     }
-    (format!("Claude Code stopped: {why}"), sign_in_hint(why))
+    (format!("Claude Code stopped: {why}"), sign_in_hint_in(why, adapters::in_flatpak(), folder))
 }
 
 /// Variables a Claude Code session sets for its own child processes. When Craft Anything itself
@@ -644,13 +669,17 @@ fn agent_env(builder: bool, effort: Option<crate::model::Effort>) -> Vec<(&'stat
 }
 
 /// The command run on another computer over SSH. ssh passes on none of our environment, so it is
-/// set there with `env`.
-fn remote_command(program: &str, args: Vec<String>, env: &[(&'static str, String)]) -> Vec<String> {
-    let mut cmd = vec!["env".to_string()];
-    cmd.extend(env.iter().map(|(k, v)| format!("{k}={v}")));
-    cmd.push(program.to_string());
-    cmd.extend(args);
-    cmd
+/// set there with `env`. The result is the line for the remote shell, every word quoted, except
+/// that a value starting with `~/` gets that computer's home folder (a quoted `~` is just a name).
+fn remote_command(program: &str, args: Vec<String>, env: &[(&'static str, String)]) -> String {
+    use crate::ssh::shell_quote;
+    let set = env.iter().map(|(k, v)| match v.strip_prefix("~/") {
+        Some(rest) => format!("{k}=\"$HOME\"/{}", shell_quote(rest)),
+        None if v == "~" => format!("{k}=\"$HOME\""),
+        None => shell_quote(&format!("{k}={v}")),
+    });
+    let words = std::iter::once(program.to_string()).chain(args).map(|a| shell_quote(&a));
+    std::iter::once("env".to_string()).chain(set).chain(words).collect::<Vec<_>>().join(" ")
 }
 
 /// The run's shared state: the session it continues and reports, whether the agent's flags were
@@ -686,7 +715,11 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let agent = spec.config.model.clone();
     let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
-    let mut adapter = spec.adapters.for_agent(&agent);
+    // A folder chosen for it is on the computer it runs on: on another one, it's set below.
+    let mut adapter = match remote {
+        None => spec.adapters.for_backend(&agent, &spec.options),
+        Some(_) => spec.adapters.for_agent(&agent),
+    };
     if adapter.requires_acp() {
         let sign_in = adapter.sign_in_fix().map(|fix| format!(" {fix}")).unwrap_or_default();
         let _ = tx.send(AgentEvent::Error {
@@ -753,16 +786,15 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     // 30 minutes and a background build at 10).
     let (turn, quiet) = if builder { (24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60) };
     let mut env = agent_env(builder, spec.options.effort);
-    // Under a Flatpak, Claude Code gets a folder it can write its conversations to (#506); on
-    // another computer over SSH it keeps its own.
-    if remote.is_none()
-        && let Some(dir) = adapters::flatpak_claude_dir()
+    // Here the adapter's process runs the agent in its folder (`AgentAdapter::in_folder`); on
+    // another computer over SSH it's the folder chosen there, else the agent keeps its own.
+    if remote.is_some()
+        && let (Some(var), Some(dir)) = (adapter.folder_var(), spec.options.config_dir_text())
     {
-        let _ = std::fs::create_dir_all(&dir);
-        env.push(("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned()));
+        env.push((var, dir.to_string()));
     }
     let (prog, argv) = match &remote {
-        Some(host) => ("ssh".to_string(), crate::ssh::ssh_args(host, &remote_command(&program, args, &env))),
+        Some(host) => ("ssh".to_string(), crate::ssh::ssh_line_args(host, remote_command(&program, args, &env))),
         None => (program.clone(), args),
     };
     let _ =
@@ -1085,10 +1117,27 @@ mod tests {
         assert_eq!(adapters::flatpak_claude_dir_in(true, true, data()), None, "their own choice stays");
         assert_eq!(adapters::flatpak_claude_dir_in(false, false, data()), None, "a normal install keeps ~/.claude");
         assert_eq!(adapters::flatpak_claude_dir_in(true, false, None), None);
-        let hint = sign_in_hint_in("Not logged in", true).unwrap();
+        let hint = sign_in_hint_in("Not logged in", true, None).unwrap();
         assert!(hint.contains("flatpak run") && hint.contains("CLAUDE_CONFIG_DIR") && hint.contains("auth login"), "{hint}");
-        assert!(sign_in_hint_in("Not logged in", false).unwrap().contains("`claude auth login`"));
-        assert_eq!(sign_in_hint_in("all fine", true), None);
+        assert!(sign_in_hint_in("Not logged in", false, None).unwrap().contains("`claude auth login`"));
+        assert_eq!(sign_in_hint_in("all fine", true, None), None);
+    }
+
+    /// Claude Code in a folder chosen for it signs in there: the fix names that folder, quoted.
+    #[test]
+    fn signing_in_claude_code_in_its_chosen_folder_names_the_folder() {
+        let folder = Path::new("/Users/someone/Claude work");
+        let hint = sign_in_hint_in("Not logged in", false, Some(folder)).unwrap();
+        if cfg!(windows) {
+            assert!(hint.contains("$env:CLAUDE_CONFIG_DIR='/Users/someone/Claude work'; claude auth login"), "{hint}");
+        } else {
+            assert!(hint.contains("`CLAUDE_CONFIG_DIR='/Users/someone/Claude work' claude auth login`"), "{hint}");
+        }
+        let hint = sign_in_hint_in("Not logged in", true, Some(folder)).unwrap();
+        assert!(hint.starts_with("Sign in to Claude Code inside this app's sandbox, in the folder") && hint.contains("Claude work"), "{hint}");
+        assert!(!hint.contains("XDG_DATA_HOME"), "the chosen folder, not the sandbox's own: {hint}");
+        let (_, fix) = claude_code_failure_in("Invalid API key · Please run /login", Some(folder));
+        assert!(fix.is_some_and(|f| f.contains("Claude work")));
     }
 
     /// Over SSH our environment doesn't reach the other computer, so the chosen effort (and Claude
@@ -1098,13 +1147,65 @@ mod tests {
         let env = agent_env(true, Some(crate::model::Effort::Max));
         assert!(env.contains(&("CLAUDE_CODE_EFFORT_LEVEL", "max".to_string())));
         assert!(env.contains(&("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS", "0".to_string())));
-        let cmd = remote_command("claude", vec!["-p".into(), "hi".into()], &env);
-        assert_eq!(cmd.first().map(String::as_str), Some("env"));
-        assert!(cmd.contains(&"CLAUDE_CODE_EFFORT_LEVEL=max".to_string()));
-        assert_eq!(cmd[cmd.len() - 3..], ["claude", "-p", "hi"]);
-        let line = crate::ssh::ssh_args("box", &cmd).pop().unwrap_or_default();
-        assert!(line.starts_with("env ") && line.contains("CLAUDE_CODE_EFFORT_LEVEL=max") && line.ends_with("claude -p hi"), "{line}");
+        let line = remote_command("claude", vec!["-p".into(), "it's".into()], &env);
+        assert!(line.starts_with("env ") && line.contains(" CLAUDE_CODE_EFFORT_LEVEL=max ") && line.ends_with(" claude -p 'it'\\''s'"), "{line}");
+        assert_eq!(crate::ssh::ssh_line_args("box", line.clone()).pop(), Some(line));
         assert!(agent_env(false, None).contains(&("CLAUDE_CODE_EFFORT_LEVEL", "high".to_string())), "high unless chosen");
+    }
+
+    /// A folder under `~/` is in the other computer's home: its shell expands it, which it won't
+    /// do for a quoted `~`. Anything else stays quoted.
+    #[test]
+    fn a_folder_over_ssh_is_in_the_other_computers_home() {
+        let set = |v: &str| remote_command("claude", vec![], &[("CLAUDE_CONFIG_DIR", v.to_string())]);
+        assert_eq!(set("~/.claude-work"), "env CLAUDE_CONFIG_DIR=\"$HOME\"/.claude-work claude");
+        assert_eq!(set("~/Claude work"), "env CLAUDE_CONFIG_DIR=\"$HOME\"/'Claude work' claude");
+        assert_eq!(set("~"), "env CLAUDE_CONFIG_DIR=\"$HOME\" claude");
+        assert_eq!(set("/srv/claude/a b"), "env 'CLAUDE_CONFIG_DIR=/srv/claude/a b' claude");
+        assert_eq!(set("/x/~/$(rm)"), "env 'CLAUDE_CONFIG_DIR=/x/~/$(rm)' claude");
+    }
+
+    /// A sign-in that stopped working is told apart from none by the account `.claude.json` still
+    /// names; anything else there names none.
+    #[test]
+    fn claude_code_was_signed_in_when_its_settings_name_an_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".claude.json");
+        let names = |text: &[u8]| {
+            std::fs::write(&file, text).unwrap();
+            adapters::claude_names_account(&file)
+        };
+        assert!(names(br#"{"numStartups":3,"oauthAccount":{"accountUuid":"0000","emailAddress":"someone@example.com"}}"#));
+        for none in [&br#"{"numStartups":3}"#[..], br#"{"oauthAccount":null}"#, br#"{"oauthAccount":"x"}"#, b"not json", b"", b"[1,2]"] {
+            assert!(!names(none), "{}", String::from_utf8_lossy(none));
+        }
+        assert!(!adapters::claude_names_account(&dir.path().join("missing.json")));
+        assert!(!adapter_for("codex").signed_in_before());
+    }
+
+    /// Claude Code in a chosen folder runs, checks its sign-in and keeps its sessions there; an
+    /// agent without such a folder is the same as before.
+    #[test]
+    fn claude_code_uses_the_folder_chosen_for_it() {
+        let config = tempfile::tempdir().unwrap();
+        let id = "0e4a6b1c-1111-4222-8333-944455556666";
+        let folder = config.path().join("projects").join("-somewhere");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(format!("{id}.jsonl")), "{}\n").unwrap();
+        let options = crate::BackendOptions { config_dir: Some(config.path().display().to_string()), ..Default::default() };
+        let claude = AgentAdapters::built_in().for_backend("claude-code", &options);
+        assert_eq!(claude.session_file(id), Some(folder.join(format!("{id}.jsonl"))));
+        assert!(claude.sign_in_fix().is_some_and(|f| f.contains(&config.path().display().to_string())), "signs in there");
+        assert_eq!(claude.folder_var(), Some("CLAUDE_CONFIG_DIR"));
+        assert!(!claude.signed_in_before(), "nothing there names an account");
+        std::fs::write(config.path().join(".claude.json"), r#"{"oauthAccount":{"accountUuid":"0000"},"projects":{}}"#).unwrap();
+        assert!(claude.signed_in_before(), "its own folder's .claude.json, not the usual one");
+        let codex = AgentAdapters::built_in().for_backend("codex", &options);
+        assert_eq!((codex.folder_var(), codex.ids()), (None, adapter_for("codex").ids()));
+        assert_eq!(crate::config::config_dir_in("~/a/b", Some("/home/u".into())), Some(std::path::PathBuf::from("/home/u/a/b")));
+        assert_eq!(crate::config::config_dir_in("~", Some("/home/u".into())), Some(std::path::PathBuf::from("/home/u")));
+        assert_eq!(crate::config::config_dir_in("~/a", None), None, "no home to put it in");
+        assert_eq!(crate::config::config_dir_in("/srv/c", None), Some(std::path::PathBuf::from("/srv/c")));
     }
     use crate::BackendKind;
 

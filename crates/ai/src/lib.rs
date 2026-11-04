@@ -175,6 +175,13 @@ pub fn model_in_use(config: &BackendConfig, options: Option<&BackendOptions>) ->
     }
 }
 
+/// The variable that moves an agent app's own folder (its sign-in, settings and sessions), when
+/// it has one: Claude Code's `CLAUDE_CONFIG_DIR`. `None` for the others, which
+/// [`BackendOptions::config_dir`] doesn't apply to.
+pub fn folder_var(config: &BackendConfig) -> Option<&'static str> {
+    (config.kind == BackendKind::AgentCli).then(|| cli_agents::adapter_for(&config.model).folder_var()).flatten()
+}
+
 /// The backend that builds when none is named: the Builder role's choice while it's on, else an
 /// agent app, else an API backend. The same rule as [`AiConfig::backend_for`] for
 /// [`Role::Builder`], for a client that holds only the list (the app decides "can it build?"
@@ -518,6 +525,30 @@ impl AiHub {
         let mut cfg = self.config_to_change()?;
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
         b.options.command = command.map(str::trim).filter(|c| !c.is_empty()).map(str::to_string);
+        self.save_config(&cfg)?;
+        Ok(true)
+    }
+
+    /// The folder an agent app keeps its sign-in, settings and sessions in ([`folder_var`]), so
+    /// each AI can be another account (`None` or empty: its usual one). A full path or one under
+    /// `~/`; over SSH it's a folder on that computer. Returns false when there was no such backend.
+    pub fn set_config_dir(&self, name: &str, dir: Option<&str>) -> Result<bool, ToolError> {
+        let dir = dir.map(str::trim).filter(|d| !d.is_empty());
+        let mut cfg = self.config_to_change()?;
+        let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
+        if let Some(d) = dir {
+            if folder_var(&b.config).is_none() {
+                return Err(ToolError::invalid(format!("{name} doesn't keep a folder of its own.")).with_remediation("A folder is for Claude Code."));
+            }
+            // A relative folder would move with whatever folder the agent is started in.
+            let remote = b.config.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty());
+            let full = d == "~" || d.starts_with("~/") || if remote { d.starts_with('/') } else { std::path::Path::new(d).is_absolute() };
+            if !full {
+                return Err(ToolError::invalid(format!("{d:?} isn't a full path."))
+                    .with_remediation("Give the whole path, or one starting with ~/ for the home folder."));
+            }
+        }
+        b.options.config_dir = dir.map(str::to_string);
         self.save_config(&cfg)?;
         Ok(true)
     }

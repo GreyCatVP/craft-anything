@@ -331,6 +331,9 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
+    let mut save_folder = None;
+    // Taken out while the rows borrow the app, and put back after them.
+    let mut folder_drafts = std::mem::take(&mut app.folder_inputs);
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
     let mut chosen_effort = None;
     let (mut pick_agent_model, mut chosen_agent_model, mut remote_program) = (None, None, None);
@@ -369,6 +372,41 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                 usual_program = Some(b.name.clone());
                             }
                         });
+                    }
+                    // The folder it keeps its sign-in in (Claude Code's CLAUDE_CONFIG_DIR), typed
+                    // so `~/` and hidden folders work, here or over SSH: another folder is another
+                    // account. Saved on Enter or when the field is left; empty is its usual one.
+                    if craft_anything_ai::folder_var(b).is_some() {
+                        let saved = app.backend_options.get(&b.name).and_then(|o| o.config_dir.clone()).unwrap_or_default();
+                        let id = egui::Id::new(("agent-folder", &b.name));
+                        // What was typed stays until it's saved (or refused, so it can be fixed).
+                        if folder_drafts.get(&b.name).is_some_and(|d| d.trim() == saved) && !ui.memory(|m| m.has_focus(id)) {
+                            folder_drafts.remove(&b.name);
+                        }
+                        let mut text = folder_drafts.get(&b.name).cloned().unwrap_or_else(|| saved.clone());
+                        ui.add_space(4.0);
+                        let label = ui.label(RichText::new(tr("Claude Code folder (CLAUDE_CONFIG_DIR)")).size(theme::CAPTION).color(t.text_dim));
+                        ui.label(
+                            RichText::new(tr("Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder."))
+                                .color(t.text_faint)
+                                .size(theme::CAPTION),
+                        );
+                        let r = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut text)
+                                    .id(id)
+                                    .hint_text("~/.claude")
+                                    .desired_width(260.0)
+                                    .frame(widgets::text_field_frame_compact(&t)),
+                            )
+                            .labelled_by(label.id);
+                        if r.changed() {
+                            folder_drafts.insert(b.name.clone(), text.clone());
+                        }
+                        if r.lost_focus() && text.trim() != saved {
+                            save_folder = Some((b.name.clone(), text.trim().to_string()));
+                        }
+                        ui.add_space(4.0);
                     }
                     // How hard it thinks: the Claude API and Claude Code take every Claude level.
                     let effort = craft_anything_ai::effort_in_use(b, app.backend_options.get(&b.name));
@@ -567,6 +605,10 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if let Some(name) = usual_program {
         app.set_agent_program(&name, None);
     }
+    app.folder_inputs = folder_drafts;
+    if let Some((name, folder)) = save_folder {
+        app.set_agent_folder(&name, Some(folder));
+    }
     if let Some(name) = pick_model {
         app.pick_model(&name);
     }
@@ -649,6 +691,15 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if configured {
                         widgets::pill(ui, "Added", t.success, t.raised);
+                        // Claude Code once more, to give it another account's folder.
+                        if craft_anything_ai::folder_var(&d.suggestion).is_some()
+                            && widgets::link(ui, "Add another").on_hover_text(tr("Add it again, to choose another account's folder for it.")).clicked()
+                        {
+                            let taken = |n: &String| app.backends.iter().any(|b| &b.name == n);
+                            if let Some(name) = (2..100).map(|i| format!("{} {i}", d.suggestion.name)).find(|n| !taken(n)) {
+                                app.add_backend(craft_anything_ai::BackendConfig { name, ..d.suggestion.clone() }, None);
+                            }
+                        }
                     } else if !d.needs_key && widgets::primary(ui, "Add").clicked() {
                         app.add_backend(d.suggestion.clone(), None);
                     }

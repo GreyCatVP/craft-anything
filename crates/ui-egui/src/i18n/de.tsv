@@ -99,6 +99,8 @@ Add a folder…	Ordner hinzufügen …
 Add a plugin	Plugin hinzufügen
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Füge eine KI hinzu, dann lese ich diese Belege für dich, beantworte Anschlussfragen und zeige auf die Beweise.
 Add an AI by its address	KI über ihre Adresse hinzufügen
+Add another	Noch einen hinzufügen
+Add it again, to choose another account's folder for it.	Füge ihn noch einmal hinzu, um für ihn den Ordner eines anderen Kontos zu wählen.
 Add more info. The builder reads it at its next step.	Weitere Infos hinzufügen. Der Builder liest sie bei seinem nächsten Schritt.
 Add pictures	Bilder hinzufügen
 Add pictures of the original	Bilder des Originals hinzufügen
@@ -245,6 +247,7 @@ Choose what the builder's questions get	Wähle, was mit den Fragen des Builders 
 Choose what to recreate, say what you want, then press Start.	Wähle, was nachgebaut werden soll, sag, was du willst, und drücke dann Start.
 Choose…	Auswählen …
 Classes	Klassen
+Claude Code folder (CLAUDE_CONFIG_DIR)	Claude-Code-Ordner (CLAUDE_CONFIG_DIR)
 Clean room	Clean Room
 Clean room / Deep	Clean Room / Deep
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Clean Room liest nie den Code, die Dateien oder den Seitenquelltext des Originals. Der Deep-Modus liest sie mit allen Werkzeugen, die Craft Anything hat.
@@ -572,6 +575,7 @@ It's mine, or I'm allowed to look	Es gehört mir, oder ich darf hineinsehen
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	Seine Kopie wird gelöscht, samt allem, was es dort gespeichert hat. Das Projekt selbst bleibt unverändert.
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	Sein Ordner wird mit allem darin gelöscht: dem Gebauten, den Prüfungen und dem Gespräch.
 Its own code	Sein eigener Code
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Eigene Anmeldung, Einstellungen und Gespräche: Ein anderer Ordner ist ein anderes Konto. Leer: sein üblicher Ordner.
 Java archive overview	Java-Archiv-Übersicht
 Java class	Java-Klasse
 Java method bytecode and pseudo-Java	Java-Methoden-Bytecode und Pseudo-Java
@@ -1006,6 +1010,7 @@ Send now	Jetzt senden
 Server address	Serveradresse
 Session status	Sitzungsstatus
 Set a project's asset budget	Das Asset-Budget eines Projekts festlegen
+Set an AI's folder	Den Ordner einer KI festlegen
 Set an AI's program	Das Programm einer KI festlegen
 Set model options	Modelloptionen festlegen
 Set one up	Eine einrichten

@@ -85,6 +85,8 @@ Add a folder…	Добавить папку…
 Add a plugin	Добавить плагин
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Добавьте «мозг» ИИ, и я прочитаю для вас эти доказательства, отвечу на дополнительные вопросы и укажу на доказательства.
 Add an AI by its address	Добавить ИИ по адресу
+Add another	Добавить ещё
+Add it again, to choose another account's folder for it.	Добавить ещё раз, чтобы выбрать для него папку другой учётной записи.
 Add more info. The builder reads it at its next step.	Добавьте больше информации. Конструктор прочитает её на следующем шаге.
 Add pictures	Добавить изображения
 Add pictures of the original	Добавить изображения оригинала
@@ -233,6 +235,7 @@ Choose what the builder's questions get	Выберите, что получаю�
 Choose what to recreate, say what you want, then press Start.	Выберите, что пересоздать, скажите, что хотите, затем нажмите «Старт».
 Choose…	Выбрать…
 Classes	Классы
+Claude Code folder (CLAUDE_CONFIG_DIR)	Папка Claude Code (CLAUDE_CONFIG_DIR)
 Clean room	Чистая комната
 Clean room / Deep	Чистая комната / Глубокий
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Режим «Чистая комната» никогда не читает код, файлы или исходник страницы оригинала. Режим «Глубокий» читает их всеми инструментами Craft Anything.
@@ -560,6 +563,7 @@ It's mine, or I'm allowed to look	Это моё, или мне разрешен�
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	Его копия удалена вместе со всем, что там было сохранено. Сам проект остаётся как есть.
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	Его папка удалена со всем содержимым: тем, что было собрано, проверками и перепиской.
 Its own code	Его собственный код
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Свой вход, настройки и разговоры: другая папка — другая учётная запись. Пусто: обычная папка.
 Java archive overview	Обзор архива Java
 Java class	Класс Java
 Java method bytecode and pseudo-Java	Байт-код метода Java и псевдо-Java
@@ -1003,6 +1007,7 @@ Send now	Отправить сейчас
 Server address	Адрес сервера
 Session status	Состояние сессии
 Set a project's asset budget	Установить бюджет ресурсов проекта
+Set an AI's folder	Установить папку ИИ
 Set an AI's program	Установить программу ИИ
 Set model options	Задать параметры модели
 Set one up	Настроить
