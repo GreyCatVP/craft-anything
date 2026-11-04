@@ -1147,13 +1147,16 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
     });
 }
 
-/// A caption on the left and its value on the right.
+/// A caption on the left and its value on the right. The value is placed first and the caption
+/// wraps in what's left, so a long caption (in German, say) never runs into the value.
 fn stat_row(ui: &mut Ui, label: &str, value: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        widgets::caption(ui, label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new(value).font(theme::mono(13.0)).color(t.text));
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(theme::label_text(&tr(label), 12.0).color(t.text_faint)).wrap());
+            });
         });
     })
     .response
@@ -1634,7 +1637,7 @@ fn claims_list(ui: &mut Ui, c: &CheckResult, t: &Tokens) {
         });
     };
     for claim in c.claims.iter().filter(|x| !x.passed) {
-        let text = if claim.detail.is_empty() { claim.title.clone() } else { format!("{} — {}", claim.title, claim.detail) };
+        let text = if claim.detail.is_empty() { claim.title.clone() } else { format!("{}: {}", claim.title, claim.detail) };
         row(ui, "triangle-alert", t.warning, text);
     }
     for u in &c.unknowns {
@@ -1866,8 +1869,15 @@ fn questions_switch(app: &mut CraftApp, ui: &mut Ui) {
         if let Some(i) = widgets::segmented(ui, &["Change it", "Just ask"], usize::from(app.state.just_ask), 24.0) {
             app.state.just_ask = i == 1;
         }
-        ui.label(RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| questions_controls(app, ui, now, &root, &t));
+        // The hint goes in the space the questions switch leaves, and only when it fits whole.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            questions_controls(app, ui, now, &root, &t);
+            let hint = RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL);
+            let fits = widgets::label_galley(ui, hint.text(), theme::SMALL, t.text_faint).size().x + 2.0 * ui.spacing().item_spacing.x <= ui.available_width();
+            if fits {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| ui.label(hint));
+            }
+        });
     });
 }
 

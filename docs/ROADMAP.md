@@ -762,7 +762,7 @@ Gaps found while using the app for real projects.
       Simple / Advanced, Clean room / Deep, the command palette, help); the system's menu bar
       showed only the app menu
       — claimed: sanketdofe, branch feature/r2.9-macos-menu-bar
-- [ ] Choice tiles in a row keep every title on one line and the same height as their neighbours
+- [x] Choice tiles in a row keep every title on one line and the same height as their neighbours
       (the start-fresh tile wrapped to two lines beside one-line tiles), in every language
       (claimed: ghzgod, branch bugfix/r2.9-sibling-tiles-one-line)
 - [ ] macOS: an Edit menu (Undo, Cut, Copy, Paste, Select All). The keys work in text boxes, but
