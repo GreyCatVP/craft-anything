@@ -2731,7 +2731,11 @@ fn an_off_type_is_not_offered_to_the_builder() {
     let game = super::assets_note(&cx);
     assert!(!game.contains("assets_image_generate") && !game.contains("assets_speech_generate") && !game.contains("assets_sound_generate"), "{game}");
     assert!(game.contains("assets_model_generate") && game.contains("assets_music_generate"), "{game}");
-    assert!(game.contains("new picture precursors are not permitted"), "pictures are off, so a 3D model can start only from one that exists: {game}");
+    // Pictures are off, so no picture is made first: a 3D model starts from a picture that exists,
+    // or from a description only when the chosen 3D model takes one (the tool's own rule).
+    assert!(game.contains("from an existing picture (pass it as image)"), "{game}");
+    assert!(game.contains("from a description only if the project's 3D model takes one"), "{game}");
+    assert!(!game.contains("a description or an existing picture"), "{game}");
     let full = brief(&ws, "game", false, false, None, true, None);
     assert!(!full.contains("assets_image_generate") && !full.contains("assets_sound_generate"), "{full}");
 

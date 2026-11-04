@@ -252,7 +252,13 @@ pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
         note.push_str(" assets_image_generate makes a picture for textures, skies, backgrounds and menu art.");
     }
     if models {
-        let source = if images { "a description or an existing picture" } else { "an existing picture; new picture precursors are not permitted" };
+        // The tool's own rule: with pictures Off no picture is made first, so a description works
+        // only for a 3D model that takes words; the tool says so when this one doesn't.
+        let source = if images {
+            "a description or an existing picture"
+        } else {
+            "an existing picture (pass it as image), or from a description only if the project's 3D model takes one (pictures are off, so none is made first; the tool says when the model needs a picture)"
+        };
         note.push_str(&format!(" assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from {source}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast."));
     }
     if images || models {
