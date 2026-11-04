@@ -108,6 +108,12 @@ same temp directory, and game detection walked up and found the game. Give each 
 For a refactor that must keep output identical, dump the outputs for every combination before and
 after and compare them byte for byte (done for every brief across 162 combinations in R1.1).
 
+**A Windows-only test that no check ran.** #748 added a second Antigravity folder to the search
+path; the Windows test that counts those folders wasn't updated, and `main` stayed green because CI
+runs on Ubuntu, where `cfg(windows)` tests don't compile. When a change touches a list a
+`cfg(windows)` (or macOS) test checks, grep for it and run it on that system, or say in the PR that
+you couldn't.
+
 **A step moved to a worker, its test still counting frames.** #720 moved the picture size check
 off the UI thread; a UI test that added pictures, ran three frames and then looked kept passing on
 fast machines and failed in CI on unrelated PRs. When work moves to a worker, grep the tests that

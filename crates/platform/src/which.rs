@@ -401,10 +401,12 @@ mod tests {
         let path = OsString::from(r"C:\Windows;C:\Users\u\.local\bin");
         let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone()), None).unwrap()).collect();
         assert_eq!(dirs[..3], [PathBuf::from(r"C:\Windows"), home.join(r".local\bin"), home.join(r"AppData\Roaming\npm")]);
-        // (Plus npm's prefix where the environment sets one.)
+        // PATH's two less `.local\bin`, which is a usual one too; Antigravity's two folders (plus
+        // npm's prefix where the environment sets one).
         let npm = usize::from(npm_global_bin(&home).is_some());
-        assert_eq!(dirs.len(), 2 + USUAL_HOME_DIRS.len() + USUAL_DIRS.len() + npm, "nothing twice");
+        assert_eq!(dirs.len(), 1 + USUAL_HOME_DIRS.len() + 2 + USUAL_DIRS.len() + npm, "nothing twice");
         assert!(dirs.contains(&home.join("AppData").join("Local").join("agy").join("bin")));
+        assert!(dirs.contains(&home.join("AppData").join("Local").join("Antigravity")));
         // Each way Claude Code installs on Windows: native, npm, WinGet (per user and machine-wide).
         assert!(dirs.contains(&home.join(r"AppData\Local\Microsoft\WinGet\Links")));
         assert!(dirs.contains(&PathBuf::from(r"C:\Program Files\WinGet\Links")));
