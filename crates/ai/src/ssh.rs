@@ -8,11 +8,16 @@ pub const SSH_OPTIONS: &[&str] = &["-o", "BatchMode=yes", "-o", "ConnectTimeout=
 /// `ssh` argv (without the program) that runs `remote` on `host`. Each remote argument is quoted
 /// for the remote POSIX shell.
 pub fn ssh_args(host: &str, remote: &[String]) -> Vec<String> {
+    ssh_line_args(host, remote.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" "))
+}
+
+/// [`ssh_args`] for a command line already quoted for the remote shell.
+pub fn ssh_line_args(host: &str, line: String) -> Vec<String> {
     let mut v: Vec<String> = SSH_OPTIONS.iter().map(|s| s.to_string()).collect();
     v.push("-T".into());
     v.push(host.to_string());
     v.push("--".into());
-    v.push(remote.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" "));
+    v.push(line);
     v
 }
 

@@ -431,8 +431,7 @@ fn the_prompt_box_sends_on_enter_with_its_pictures() {
     });
     h.run_steps(3);
     h.state_mut().attach(vec![pic.clone(), d.path().join("notes.txt"), pic]);
-    h.run_steps(2);
-    assert_eq!(h.state().state.project_attachments.len(), 1, "pictures only, once each");
+    assert!(wait(&mut h, |a| a.state.project_attachments.len() == 1), "pictures only, once each: {:?}", h.state().state.project_attachments);
     h.get_by_label("shot.png");
     h.get_by_label("Ask for a change").focus();
     h.run_steps(2);
@@ -459,6 +458,41 @@ fn the_prompt_box_sends_on_enter_with_its_pictures() {
         "{:?}",
         h.state().state.feed
     );
+}
+
+#[test]
+fn an_oversized_picture_is_refused_when_attached() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let small = d.path().join("ok.png");
+    std::fs::write(&small, b"png").unwrap();
+    let big = d.path().join("huge.png");
+    std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+    let ws = Workspace::create(&d.path().join("projects"), "Game", "Recreate this game", TargetRef::None).unwrap();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.workspace = Some(ws);
+        a.state.screen = Screen::Project;
+        a
+    });
+    h.run_steps(3);
+    h.state_mut().attach(vec![small, big]);
+    assert!(wait(&mut h, |a| a.state.toasts.iter().any(|(t, err)| *err && t.contains("20 MB"))), "{:?}", h.state().state.toasts);
+    assert!(h.state().state.project_attachments.is_empty(), "the valid picture is not half-attached");
+}
+
+#[test]
+fn an_oversized_picture_is_refused_in_the_make_draft() {
+    let d = tempfile::tempdir().unwrap();
+    let small = d.path().join("ok.png");
+    std::fs::write(&small, b"png").unwrap();
+    let big = d.path().join("huge.png");
+    std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, true)));
+    h.run_steps(2);
+    h.state_mut().add_pictures(vec![small, big]);
+    assert!(wait(&mut h, |a| a.state.toasts.iter().any(|(t, err)| *err && t.contains("20 MB"))), "{:?}", h.state().state.toasts);
+    assert!(h.state().state.make.pictures.is_empty(), "the valid picture is not half-added");
 }
 
 #[test]
@@ -496,7 +530,8 @@ fn pictures_of_the_original_go_with_the_draft_then_into_the_project() {
     // "Nothing — start fresh" is picked: the request box offers pictures (not for websites).
     h.get_by_label("Add pictures of the original (optional: screenshots help it look right)");
     h.state_mut().add_pictures(vec![pic.clone(), notes, pic.clone()]);
-    h.run_steps(3);
+    // Their sizes are checked on a worker first (#720).
+    assert!(wait(&mut h, |a| !a.state.make.pictures.is_empty()), "checked on a worker, then added");
     assert_eq!(h.state().state.make.pictures, vec![pic.clone()], "pictures only, once each");
     h.get_by_label("original.webp");
     h.get_by_label("Remove original.webp").click();
@@ -1182,6 +1217,56 @@ fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
     h.get_by_label("Low");
     assert!(h.query_by_label("Max").is_none());
     assert!(h.query_by_label("Xhigh").is_none());
+}
+
+/// Claude Code's folder (its sign-in, so its account) is chosen in Settings → AI, and a second
+/// Claude Code can be added for a second account.
+#[test]
+fn claude_codes_account_folder_is_set_in_settings() {
+    use craft_anything_ai::{BackendConfig, BackendKind};
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        let cfg = BackendConfig {
+            name: "Claude Code".into(),
+            kind: BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        a.hub.add_backend(cfg, None).unwrap();
+        a.detected = Some(demo::detected());
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code")));
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    // Typed, `~/` and all, and saved on Enter.
+    let field = "Claude Code folder (CLAUDE_CONFIG_DIR)";
+    h.get_by_label(field).focus();
+    h.run_steps(2);
+    h.get_by_label(field).type_text("~/.claude-work");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    let chosen = |a: &CraftApp| a.backend_options.get("Claude Code").and_then(|o| o.config_dir.clone());
+    assert!(wait(&mut h, |a| chosen(a).as_deref() == Some("~/.claude-work")));
+    h.run_steps(2);
+    assert_eq!(h.get_by_label(field).value().as_deref(), Some("~/.claude-work"), "shows what's saved");
+    assert!(h.state().folder_inputs.is_empty(), "nothing left being typed");
+    // A relative folder is refused; the saved one stays.
+    h.state_mut().set_agent_folder("Claude Code", Some("claude-work".into()));
+    h.run_steps(4);
+    assert_eq!(chosen(h.state()).as_deref(), Some("~/.claude-work"));
+    // Emptied, it's the usual folder again.
+    h.state_mut().set_agent_folder("Claude Code", Some(String::new()));
+    assert!(wait(&mut h, |a| chosen(a).is_none()));
+    // Added already, so it's offered again under the next free name, on the coding agents' tab.
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Harnesses);
+    h.run_steps(2);
+    h.get_by_label("Add another").click();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
 }
 
 #[test]

@@ -147,6 +147,11 @@ pub trait AgentAdapter: Send + Sync {
     }
     /// Whether it's signed in, checked before a build starts. `None`: can't tell (the run itself
     /// reports any sign-in problem).
+    /// Whether it still names an account it was signed in to, so a sign-in that doesn't work any
+    /// more has expired (or was signed out) rather than never happened.
+    fn signed_in_before(&self) -> bool {
+        false
+    }
     fn signed_in(&self, _program: &str) -> Option<bool> {
         None
     }
@@ -177,6 +182,17 @@ pub trait AgentAdapter: Send + Sync {
     fn restore_session(&self, _id: &str, _saved: &[u8], _cwd: &std::path::Path) -> Result<bool, ToolError> {
         Ok(false)
     }
+    /// The environment variable that moves the agent's own folder (its sign-in, settings and
+    /// sessions), for [`BackendOptions::config_dir`]. `None`: it has none, and the setting is
+    /// ignored.
+    fn folder_var(&self) -> Option<&'static str> {
+        None
+    }
+    /// This adapter for the agent kept in `folder` on this computer: it runs there, checks the
+    /// sign-in there and keeps its sessions there. `None` when it has no such folder.
+    fn in_folder(&self, _folder: std::path::PathBuf) -> Option<Arc<dyn AgentAdapter>> {
+        None
+    }
 }
 
 /// The adapters a run can use.
@@ -202,7 +218,7 @@ impl AgentAdapters {
     pub fn built_in() -> AgentAdapters {
         AgentAdapters {
             adapters: vec![
-                Arc::new(ClaudeCode),
+                Arc::new(ClaudeCode::default()),
                 Arc::new(Codex),
                 Arc::new(GeminiCli),
                 Arc::new(OpenCode),
@@ -223,6 +239,13 @@ impl AgentAdapters {
     /// The adapter for an agent id; one it doesn't know gets the plain adapter.
     pub fn for_agent(&self, agent: &str) -> Arc<dyn AgentAdapter> {
         self.adapters.iter().find(|a| a.ids().contains(&agent)).cloned().unwrap_or_else(|| Arc::new(Plain))
+    }
+
+    /// The adapter for an agent with a backend's options: in the folder they choose for it, when
+    /// it keeps one ([`AgentAdapter::in_folder`]).
+    pub fn for_backend(&self, agent: &str, options: &BackendOptions) -> Arc<dyn AgentAdapter> {
+        let adapter = self.for_agent(agent);
+        options.config_dir_here().and_then(|dir| adapter.in_folder(dir)).unwrap_or(adapter)
     }
 }
 
@@ -300,7 +323,18 @@ fn no_such_session(v: &Value) -> bool {
 }
 
 /// Claude Code in headless mode (flags checked against `claude --help`).
-pub struct ClaudeCode;
+#[derive(Default)]
+pub struct ClaudeCode {
+    /// The folder chosen for it ([`BackendOptions::config_dir`]); `None`: its usual one.
+    folder: Option<std::path::PathBuf>,
+}
+
+impl ClaudeCode {
+    /// The folder it keeps its sign-in and sessions in: the chosen one, else its usual one.
+    fn config_dir(&self) -> Option<std::path::PathBuf> {
+        self.folder.clone().or_else(claude_config_dir)
+    }
+}
 
 impl AgentAdapter for ClaudeCode {
     fn ids(&self) -> &'static [&'static str] {
@@ -398,7 +432,7 @@ impl AgentAdapter for ClaudeCode {
                     let failure = TurnFailure::claude(code);
                     p.failure = Some(failure);
                     let why = v.pointer("/message/content").map(content_text).unwrap_or_else(|| code.to_string());
-                    let (message, hint) = claude_code_failure(&why);
+                    let (message, hint) = claude_code_failure_in(&why, self.folder.as_deref());
                     let remediation = hint.or_else(|| match failure.kind {
                         FailureKind::Authentication => self.sign_in_fix(),
                         FailureKind::Billing => Some("Check the account's credits, plan and spending limit before trying again.".into()),
@@ -453,7 +487,7 @@ impl AgentAdapter for ClaudeCode {
                 } else if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
                     p.failure.get_or_insert(TurnFailure::new(FailureKind::Unknown));
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
-                    let (message, remediation) = claude_code_failure(&why);
+                    let (message, remediation) = claude_code_failure_in(&why, self.folder.as_deref());
                     out.push(AgentEvent::Error { message, remediation, log: None });
                 }
             }
@@ -466,24 +500,50 @@ impl AgentAdapter for ClaudeCode {
         true
     }
 
-    /// The person's own standalone Claude Code (see [`host_session_vars`]).
+    /// The person's own standalone Claude Code (see [`host_session_vars`]), in its chosen folder.
+    /// Under a Flatpak without one, it gets a folder it can write its conversations to (#506).
     fn process(&self, program: &str) -> Process {
-        standalone(program)
+        let proc = standalone(program);
+        if let Some(dir) = &self.folder {
+            return proc.env("CLAUDE_CONFIG_DIR", dir);
+        }
+        match flatpak_claude_dir() {
+            Some(dir) => {
+                let _ = std::fs::create_dir_all(&dir);
+                proc.env("CLAUDE_CONFIG_DIR", dir)
+            }
+            None => proc,
+        }
     }
 
     fn signed_in(&self, program: &str) -> Option<bool> {
-        let out = standalone(program).args(["auth", "status", "--json"]).timeout(Duration::from_secs(15)).stdout_cap(64 * 1024).run().ok()?;
+        let out = self.process(program).args(["auth", "status", "--json"]).timeout(Duration::from_secs(15)).stdout_cap(64 * 1024).run().ok()?;
         let v: Value = serde_json::from_str(out.stdout_text().trim()).ok()?;
         v.get("loggedIn").and_then(Value::as_bool)
     }
 
+    /// The account its `.claude.json` names (`oauthAccount`), kept there while the sign-in itself
+    /// is in the system's keychain. In a chosen folder the file is inside it; with its usual
+    /// `~/.claude`, it's beside it in the home folder.
+    fn signed_in_before(&self) -> bool {
+        let set = self.folder.clone().or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from));
+        let file = match set.or_else(flatpak_claude_dir) {
+            Some(dir) => dir.join(".claude.json"),
+            None => match dirs::home_dir() {
+                Some(home) => home.join(".claude.json"),
+                None => return false,
+            },
+        };
+        claude_names_account(&file)
+    }
+
     fn sign_in_fix(&self) -> Option<String> {
-        sign_in_hint("login")
+        sign_in_hint_in("login", in_flatpak(), self.folder.as_deref())
     }
 
     /// The session under Claude Code's own folder (see [`claude_session_file`]).
     fn session_file(&self, id: &str) -> Option<std::path::PathBuf> {
-        claude_session_file(&claude_config_dir()?, id)
+        claude_session_file(&self.config_dir()?, id)
     }
 
     /// The kept session's requests and replies (see [`claude_handoff`]).
@@ -494,8 +554,16 @@ impl AgentAdapter for ClaudeCode {
     /// Back under Claude Code's own folder (see [`claude_restore`]); without one there's nowhere
     /// to put it, which is said.
     fn restore_session(&self, id: &str, saved: &[u8], cwd: &std::path::Path) -> Result<bool, ToolError> {
-        let config = claude_config_dir().ok_or_else(|| ToolError::new(ErrorCode::BadSettings, "Couldn't find Claude Code's folder on this computer."))?;
+        let config = self.config_dir().ok_or_else(|| ToolError::new(ErrorCode::BadSettings, "Couldn't find Claude Code's folder on this computer."))?;
         claude_restore(&config, id, saved, cwd)
+    }
+
+    fn folder_var(&self) -> Option<&'static str> {
+        Some("CLAUDE_CONFIG_DIR")
+    }
+
+    fn in_folder(&self, folder: std::path::PathBuf) -> Option<Arc<dyn AgentAdapter>> {
+        Some(Arc::new(ClaudeCode { folder: Some(folder) }))
     }
 }
 
@@ -564,6 +632,20 @@ pub fn claude_session_file(config: &std::path::Path, id: &str) -> Option<std::pa
     }
     let name = format!("{id}.jsonl");
     std::fs::read_dir(config.join("projects")).ok()?.flatten().take(SESSION_FOLDERS).map(|e| e.path().join(&name)).find(|p| p.is_file())
+}
+
+/// Whether Claude Code's `.claude.json` names the account it was signed in to (`oauthAccount`).
+/// It also keeps every project's history, so up to 32 MB is read; a bigger or unreadable file
+/// names none.
+pub fn claude_names_account(file: &std::path::Path) -> bool {
+    use std::io::Read;
+    const CAP: u64 = 32 << 20;
+    let mut text = Vec::new();
+    let read = std::fs::File::open(file).and_then(|f| f.take(CAP + 1).read_to_end(&mut text));
+    if read.is_err() || text.len() as u64 > CAP {
+        return false;
+    }
+    serde_json::from_slice::<Value>(&text).ok().is_some_and(|v| v.get("oauthAccount").is_some_and(Value::is_object))
 }
 
 /// Longest single request or reply in a handoff; a first brief runs to many thousands.

@@ -151,7 +151,7 @@ fn bring_back_session(ws: &Workspace, entry: &crate::BackendEntry, id: &str) {
         return;
     }
     if let Some(saved) = super::kept_session_bytes(ws) {
-        let adapter = crate::cli_agents::AgentAdapters::default().for_agent(&entry.config.model);
+        let adapter = crate::cli_agents::AgentAdapters::default().for_backend(&entry.config.model, &entry.options);
         let _ = adapter.restore_session(id, &saved, &ws.root);
     }
 }

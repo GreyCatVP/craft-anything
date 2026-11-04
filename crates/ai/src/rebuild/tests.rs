@@ -2801,3 +2801,11 @@ fn the_builders_conversation_travels_with_the_project() {
     let said: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Agent(AgentEvent::Status { text }) = e { Some(text) } else { None }).collect();
     assert!(said.iter().any(|t| t.contains("Couldn't keep a copy")), "{said:?}");
 }
+
+/// A coding agent that was signed in once and no longer is says so, rather than "isn't signed in",
+/// which reads as if the person never did.
+#[test]
+fn a_sign_in_that_stopped_working_is_called_that() {
+    assert_eq!(not_signed_in("claude-code", false), "Claude Code isn't signed in on this computer.");
+    assert_eq!(not_signed_in("claude-code", true), "Claude Code's sign-in on this computer has expired or was signed out.");
+}

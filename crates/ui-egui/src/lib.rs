@@ -10,6 +10,7 @@
 pub mod builders;
 pub mod chat;
 pub mod demo;
+pub mod detect_tabs;
 pub mod engine_ui;
 pub mod evidence_ui;
 pub mod first_run;
@@ -191,6 +192,14 @@ pub enum Done {
     Pasted {
         project: Option<PathBuf>,
         files: Vec<PathBuf>,
+        /// The first picture over 20 MB, if any (checked on the worker that read the paste).
+        refused: Option<String>,
+    },
+    /// Picture sizes were checked on a worker, before the UI attaches them.
+    PicturesChecked {
+        files: Vec<PathBuf>,
+        refused: Option<String>,
+        target: crate::project::PictureTarget,
     },
     /// The game engines on this computer were listed.
     GameEngines(craft_anything_engines::game::Inventory),
@@ -427,6 +436,8 @@ pub struct CraftApp {
     pub model_tuning: std::collections::BTreeMap<String, ModelTuningDraft>,
     /// The agent app whose program the file dialog is choosing.
     pub picking_program_for: Option<String>,
+    /// Claude Code folders being typed in Settings → AI, by AI, until they're saved.
+    pub folder_inputs: std::collections::BTreeMap<String, String>,
     /// The backend the person chose to build with (Settings → AI), if any.
     pub builder: Option<String>,
     /// The backend chosen to take a game's files out in Deep mode, if any.
@@ -536,6 +547,7 @@ impl CraftApp {
             model_request: 0,
             model_tuning: Default::default(),
             picking_program_for: None,
+            folder_inputs: Default::default(),
             builder: None,
             extractor: None,
             detected: None,
@@ -1545,15 +1557,15 @@ impl CraftApp {
                             if let Some(name) = self.picking_program_for.take() {
                                 self.set_agent_program(&name, Some(path.display().to_string()));
                             }
-                        }
-                        // Several files: these come back as Done::Pictures / Done::ToAttach.
+                        } // Several files: these come back as Done::Pictures / Done::ToAttach.
                         Pick::Pictures | Pick::Attach => {}
                     }
                 }
             }
             Done::Pictures(files) => self.add_pictures(files),
             Done::ToAttach(files) => self.attach(files),
-            Done::Pasted { project, files } => self.pasted(project, files),
+            Done::Pasted { project, files, refused } => self.pasted(project, files, refused),
+            Done::PicturesChecked { files, refused, target } => self.pictures_checked(files, refused, target),
             Done::Attached { root, text, attachments, files } => self.deliver(root, text, attachments, files),
             Done::GameEngines(inv) => self.engines_found(inv),
             Done::GameFound { path, found } => {

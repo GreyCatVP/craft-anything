@@ -611,12 +611,11 @@ impl Worker {
         // Fail before any work when the agent's tools are missing or it can't sign in.
         let remote = entry.config.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty());
         if !remote && api.is_none() {
-            let adapter = opts.adapters.for_agent(&entry.config.model);
+            let adapter = opts.adapters.for_backend(&entry.config.model, &entry.options);
             crate::cli_agents::check_builder_tools(adapter.as_ref(), &entry.config.model, &entry.options, &self.stop)?;
             let program = entry.options.command.clone().unwrap_or_else(|| crate::cli_agents::program_for(&entry.config.model));
             if adapter.signed_in(&program) == Some(false) {
-                let who = crate::cli_agents::display_for(&entry.config.model);
-                return Err(ToolError::new(ErrorCode::BadSettings, format!("{who} isn't signed in on this computer."))
+                return Err(ToolError::new(ErrorCode::BadSettings, not_signed_in(&entry.config.model, adapter.signed_in_before()))
                     .with_remediation(adapter.sign_in_fix().unwrap_or_default()));
             }
         }
@@ -654,7 +653,7 @@ impl Worker {
             ws.save()?;
         }
         // A coding agent on this computer whose session the project keeps a copy of (#451).
-        let keeper = (!api_loop && !remote).then(|| opts.adapters.for_agent(&entry.config.model));
+        let keeper = (!api_loop && !remote).then(|| opts.adapters.for_backend(&entry.config.model, &entry.options));
         if let Some(a) = &keeper {
             self.restore_session(ws, a.as_ref());
         }
@@ -1133,6 +1132,13 @@ impl Worker {
 fn no_build_progress(ws: &Workspace) -> ToolError {
     ToolError::new(ErrorCode::OverLimit, format!("The build stopped after two builder turns changed no files in {}.", ws.app_place()))
         .with_remediation("Send a new request with a concrete correction, or edit the app's files before trying again.")
+}
+
+/// Why a coding agent can't build: never signed in, or signed in `before` with a sign-in that no
+/// longer works (expired, or signed out), which the person may not expect.
+fn not_signed_in(agent: &str, before: bool) -> String {
+    let who = crate::cli_agents::display_for(agent);
+    if before { format!("{who}'s sign-in on this computer has expired or was signed out.") } else { format!("{who} isn't signed in on this computer.") }
 }
 
 /// Largest builder session the project keeps a copy of.

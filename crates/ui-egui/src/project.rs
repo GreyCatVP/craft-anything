@@ -341,7 +341,7 @@ impl CraftApp {
     }
 
     /// Pictures of the original: straight into the open project, else kept with the draft until
-    /// Start.
+    /// Start. The size check runs on a worker.
     pub fn add_pictures(&mut self, files: Vec<PathBuf>) {
         if files.is_empty() {
             return;
@@ -349,14 +349,67 @@ impl CraftApp {
         if self.state.screen == Screen::Project
             && let Some(ws) = self.workspace.clone()
         {
-            // Copied on a worker; `pictures_added` says how it went.
-            self.jobs.spawn(tr("Add pictures"), false, move |_| Ok(Done::PicturesAdded(ws.add_references(&files).map_err(|e| e.message))));
+            self.check_pictures(files, PictureTarget::Project(ws.root));
             return;
         }
+        self.check_pictures(files, PictureTarget::Make);
+    }
+
+    /// Read picture sizes off the UI thread, then apply the result on it.
+    fn check_pictures(&mut self, files: Vec<PathBuf>, target: PictureTarget) {
+        self.jobs.spawn(tr("Add pictures"), false, move |_| {
+            let refused = oversized_picture_name(&files);
+            Ok(Done::PicturesChecked { files, refused, target })
+        });
+    }
+
+    /// Add pictures that already passed the worker check to the project prompt box.
+    fn attach_checked(&mut self, files: Vec<PathBuf>) {
+        let list = &mut self.state.project_attachments;
+        for f in files {
+            if craft_anything_engine::workspace::is_picture(&f) && !list.contains(&f) {
+                list.push(f);
+            }
+        }
+    }
+
+    /// Add pictures that already passed the worker check to Make's draft.
+    fn add_pictures_checked(&mut self, files: Vec<PathBuf>) {
         let d = &mut self.state.make.pictures;
         for f in files {
             if craft_anything_engine::workspace::is_picture(&f) && !d.contains(&f) {
                 d.push(f);
+            }
+        }
+    }
+
+    /// Show the same refusal paste uses.
+    fn show_picture_refused(&mut self, name: &str) {
+        self.toast(trf("{name} can't be attached: a message takes pictures up to 20 MB.", &[("name", name)]), true);
+    }
+
+    /// The worker checked the pictures: refuse them, attach them, keep them for Make, or copy
+    /// them into the project that is still open.
+    pub(crate) fn pictures_checked(&mut self, files: Vec<PathBuf>, refused: Option<String>, target: PictureTarget) {
+        if let Some(name) = refused {
+            self.show_picture_refused(&name);
+            return;
+        }
+        match target {
+            PictureTarget::Attach(root) => {
+                let showing = root.as_ref().is_none_or(|r| self.workspace.as_ref().is_some_and(|w| &w.root == r));
+                if showing {
+                    self.attach_checked(files);
+                }
+            }
+            PictureTarget::Make => self.add_pictures_checked(files),
+            PictureTarget::Project(root) => {
+                let showing = self.state.screen == Screen::Project;
+                let ws = self.workspace.clone().filter(|w| w.root == root);
+                let Some(ws) = ws.filter(|_| showing) else {
+                    return self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true);
+                };
+                self.jobs.spawn(tr("Add pictures"), false, move |_| Ok(Done::PicturesAdded(ws.add_references(&files).map_err(|e| e.message))));
             }
         }
     }
@@ -1685,6 +1738,24 @@ pub struct PendingPaste {
     pub job: u64,
     pub root: PathBuf,
     pub send: bool,
+    /// The pasted picture was actually attached (false when it was refused, e.g. over 20 MB).
+    pub attached: bool,
+}
+
+/// Where pictures that passed the worker check go.
+pub enum PictureTarget {
+    /// `Some(root)`: only attach while that project is still open.
+    Attach(Option<PathBuf>),
+    Make,
+    Project(PathBuf),
+}
+
+/// The first picture over 20 MB, by display name. Reads file sizes, so run it on a worker.
+fn oversized_picture_name(files: &[PathBuf]) -> Option<String> {
+    files
+        .iter()
+        .find(|f| craft_anything_engine::workspace::picture_too_large(f))
+        .map(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string()))
 }
 
 /// What was typed for a note while its project's builder worked.
@@ -1695,12 +1766,20 @@ pub struct Draft {
 }
 
 impl CraftApp {
-    /// Pictures for the next message on the open project (pictures only, once each).
+    /// Pictures for the next message on the open project (pictures only, once each). The size
+    /// check runs on a worker.
     pub fn attach(&mut self, files: Vec<PathBuf>) {
-        let list = &mut self.state.project_attachments;
+        if !files.is_empty() {
+            let root = self.workspace.as_ref().map(|w| w.root.clone());
+            self.check_pictures(files, PictureTarget::Attach(root));
+        }
+    }
+
+    /// Put saved attachments back without checking their size again; sending checks it.
+    fn restore_attachments(&mut self, files: Vec<PathBuf>) {
         for f in files {
-            if craft_anything_engine::workspace::is_picture(&f) && !list.contains(&f) {
-                list.push(f);
+            if !self.state.project_attachments.contains(&f) {
+                self.state.project_attachments.push(f);
             }
         }
     }
@@ -1739,11 +1818,12 @@ impl CraftApp {
                 if files.is_empty() {
                     return Err(tr("There's no picture on the clipboard to paste."));
                 }
-                Ok(Done::Pasted { project, files })
+                let refused = oversized_picture_name(&files);
+                Ok(Done::Pasted { project, files, refused })
             });
             // A message sent before the picture is in waits for it (`send_message`).
             if let Some(root) = root {
-                self.pending_paste = Some(PendingPaste { job, root, send: false });
+                self.pending_paste = Some(PendingPaste { job, root, send: false, attached: false });
             }
         }
     }
@@ -1753,22 +1833,40 @@ impl CraftApp {
         self.pending_paste.as_ref().filter(|p| self.jobs.running().any(|j| j.id == p.job))
     }
 
-    /// A job finished: when it was the paste a message is waiting for, the message goes now, with
-    /// its picture. If the paste failed, what was typed stays in the box to send again.
+    /// A job finished: when it was the paste a message is waiting for and the picture was attached,
+    /// the message goes now, with it. If the paste failed or its picture was refused, what was
+    /// typed stays in the box to send again.
     pub(crate) fn paste_done(&mut self, job: u64, ok: bool) {
         let Some(p) = self.pending_paste.take_if(|p| p.job == job) else { return };
-        if p.send && ok && self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| w.root == p.root) {
+        if p.send && ok && p.attached && self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| w.root == p.root) {
             self.send_message();
         }
     }
 
     /// Pasted pictures were read: attached to the project they were pasted in while its screen is
     /// still showing, or added to Make's pictures while Make is still showing.
-    pub(crate) fn pasted(&mut self, project: Option<PathBuf>, files: Vec<PathBuf>) {
+    pub(crate) fn pasted(&mut self, project: Option<PathBuf>, files: Vec<PathBuf>, refused: Option<String>) {
         let showing = |root: &PathBuf| self.state.screen == Screen::Project && self.workspace.as_ref().is_some_and(|w| &w.root == root);
         match project {
-            Some(root) if showing(&root) => self.attach(files),
-            None if self.state.screen == Screen::Home => self.add_pictures(files),
+            Some(root) if showing(&root) => {
+                let attached = match refused {
+                    Some(name) => {
+                        self.show_picture_refused(&name);
+                        false
+                    }
+                    None => {
+                        self.attach_checked(files);
+                        true
+                    }
+                };
+                if let Some(p) = self.pending_paste.as_mut() {
+                    p.attached = attached;
+                }
+            }
+            None if self.state.screen == Screen::Home => match refused {
+                Some(name) => self.show_picture_refused(&name),
+                None => self.add_pictures_checked(files),
+            },
             _ => self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true),
         }
     }
@@ -1839,7 +1937,9 @@ impl CraftApp {
         let (text, attachments) = self.drafts.remove(&id).map_or((note.shown, Vec::new()), |d| (d.text, d.attachments));
         let input = &mut self.state.project_input;
         *input = if input.trim().is_empty() { text } else { format!("{text}\n{input}") };
-        self.attach(attachments);
+        // These were saved with the note, so put them back as they were. Size is checked again
+        // only when the message is sent.
+        self.restore_attachments(attachments);
     }
 
     /// Start another run on the open project: with a message (already shown in the app's feed;
@@ -1893,9 +1993,9 @@ mod tests {
         let (project, files) = (Some(root.clone()), vec![shot.clone()]);
         let job = app.jobs.spawn("Paste pictures", false, move |_| {
             let _ = wait.recv_timeout(std::time::Duration::from_secs(10));
-            Ok(Done::Pasted { project, files })
+            Ok(Done::Pasted { project, files, refused: None })
         });
-        app.pending_paste = Some(PendingPaste { job, root, send: false });
+        app.pending_paste = Some(PendingPaste { job, root, send: false, attached: false });
         // While it's read, it's the one paste: another Ctrl+V waits (`paste_pictures` checks this).
         assert!(app.pasting().is_some_and(|p| p.job == job));
         app.state.project_input = "Like this".into();
@@ -1912,6 +2012,63 @@ mod tests {
         assert!(app.pasting().is_none(), "a next paste can start");
     }
 
+    /// Checking a Make picture finishes after the person opened a project: it still belongs to the
+    /// Make draft, not the project.
+    #[test]
+    fn a_make_picture_checked_after_opening_a_project_stays_in_the_draft() {
+        let pic = PathBuf::from("shot.png");
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.state.screen = Screen::Project;
+        app.pictures_checked(vec![pic.clone()], None, PictureTarget::Make);
+        assert_eq!(app.state.make.pictures, vec![pic]);
+    }
+
+    /// Taking a note back restores the pictures saved with it, even if they have since grown past
+    /// the size a new attachment may be; sending checks the size again.
+    #[test]
+    fn a_taken_back_note_restores_its_saved_pictures_without_the_size_guard() {
+        let d = tempfile::tempdir().unwrap();
+        let big = d.path().join("big.png");
+        std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.restore_attachments(vec![big.clone()]);
+        assert_eq!(app.state.project_attachments, vec![big]);
+    }
+
+    /// A refused paste (over 20 MB) must not send the message waiting for it.
+    #[test]
+    fn a_refused_paste_does_not_send_the_waiting_message() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let root = ws.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        app.state.screen = Screen::Project;
+        let big = d.path().join("big.png");
+        std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (project, files) = (Some(root.clone()), vec![big]);
+        let job = app.jobs.spawn("Paste pictures", false, move |_| {
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(10));
+            Ok(Done::Pasted { project, files, refused: Some("big.png".into()) })
+        });
+        app.pending_paste = Some(PendingPaste { job, root, send: false, attached: false });
+        app.state.project_input = "Like this".into();
+        app.send_message();
+        assert_eq!(app.state.project_input, "Like this", "it waits for the picture");
+        go.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.pending_paste.is_some() && std::time::Instant::now() < deadline {
+            app.take_finished_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(app.state.project_input, "Like this", "the refused picture leaves the message in the box");
+        assert!(app.state.project_attachments.is_empty());
+        assert!(app.pasting().is_none(), "a next paste can start");
+        assert!(app.state.toasts.iter().any(|(t, error)| *error && t.contains("20 MB")), "{:?}", app.state.toasts);
+        assert!(!app.jobs.running().any(|j| j.title == "Attach pictures"), "nothing was sent");
+    }
+
     /// A paste read while the person went Home goes nowhere, though the project is still the
     /// open one: it would land in a prompt box nobody can see.
     #[test]
@@ -1923,11 +2080,11 @@ mod tests {
         app.open_workspace(ws);
         let shot = vec![PathBuf::from("pasted-1.png")];
         app.state.screen = Screen::Home;
-        app.pasted(Some(root.clone()), shot.clone());
+        app.pasted(Some(root.clone()), shot.clone(), None);
         assert!(app.state.project_attachments.is_empty());
         assert!(app.state.toasts.iter().any(|(t, error)| *error && t.contains("another screen")), "{:?}", app.state.toasts);
         app.state.screen = Screen::Project;
-        app.pasted(Some(root), shot.clone());
+        app.pasted(Some(root), shot.clone(), None);
         assert_eq!(app.state.project_attachments, shot);
     }
 
