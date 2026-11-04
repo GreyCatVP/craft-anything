@@ -2,6 +2,24 @@
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
 OpenCode default	OpenCode-ის ნაგულისხმევი
 Model default	მოდელის ნაგულისხმევი
+Add another	კიდევ ერთის დამატება
+Add it again, to choose another account's folder for it.	ხელახლა დაამატეთ, რომ მისთვის სხვა ანგარიშის საქაღალდე აირჩიოთ.
+Another model	სხვა მოდელი
+Choose your project's folder…	თქვენი პროექტის საქაღალდის არჩევა…
+Claude Code folder (CLAUDE_CONFIG_DIR)	Claude Code-ის საქაღალდე (CLAUDE_CONFIG_DIR)
+Context window	კონტექსტის ფანჯარა
+Default	ნაგულისხმევი
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	საკუთარი შესვლა, პარამეტრები და საუბრები: სხვა საქაღალდე სხვა ანგარიშია. ცარიელი: მისი ჩვეული საქაღალდე.
+Load model options	მოდელის პარამეტრების ჩატვირთვა
+No chat models are visible in {agent}. Check its setup, then reload.	{agent}-ში ჩატის მოდელები არ ჩანს. შეამოწმეთ მისი დაყენება, შემდეგ ხელახლა ჩატვირთეთ.
+Nothing of this kind was found.	ამ ტიპის არაფერი მოიძებნა.
+Pick its folder, say what you want, then press Start.	აირჩიეთ მისი საქაღალდე, თქვით, რა გინდათ, შემდეგ დააჭირეთ „დაწყებას“.
+Pick your project's folder	აირჩიეთ თქვენი პროექტის საქაღალდე
+Pick your project's folder first.	ჯერ აირჩიეთ თქვენი პროექტის საქაღალდე.
+Set an AI's folder	AI-ის საქაღალდის მითითება
+Set model options	მოდელის პარამეტრების დაყენება
+That folder is empty. Pick the folder your project's files are in.	ეს საქაღალდე ცარიელია. აირჩიეთ საქაღალდე, სადაც თქვენი პროექტის ფაილებია.
+The saved model is no longer visible. Choose another model or the {agent} default.	შენახული მოდელი აღარ ჩანს. აირჩიეთ სხვა მოდელი ან {agent}-ის ნაგულისხმევი.
 Thinking depth	ფიქრის სიღრმე
 OpenCode model	OpenCode-ის მოდელი
 Remote program	დისტანციური პროგრამა
@@ -1152,6 +1170,7 @@ Unreal IoStore	Unreal IoStore
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal თამაშებს Apple-ის Xcode-ით აწყობს, რომელიც App Store-ში უფასოა.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal აქ არის, მაგრამ მას Visual Studio-ს C++ ხელსაწყოებიც სჭირდება.
 Unreal pak	Unreal pak
+Update a finding	მიგნების განახლება
 Update a hypothesis	ჰიპოთეზის განახლება
 Update an open question	პასუხგაუცემელი კითხვის განახლება
 Update the checklist	საკონტროლო სიის განახლება
@@ -1242,6 +1261,8 @@ Window / focus info	ფანჯრის / ფოკუსის ინფო�
 Windows resources	Windows რესურსები
 Wireshark tools check	Wireshark ხელსაწყოების შემოწმება
 Without it, Deep mode uses Craft Anything's own decompiler, which is rougher.	მის გარეშე ღრმა რეჟიმი Craft Anything-ის საკუთარ დეკომპილატორს იყენებს, რომელიც უფრო უხეშია.
+Work on a project you already have	მუშაობა პროექტზე, რომელიც უკვე გაქვთ
+Work on my project	ჩემს პროექტზე მუშაობა
 Work out a copy's size	ასლის ზომის გამოთვლა
 Work out what an installed app is built on	იმის გარკვევა, რაზეა აგებული დაინსტალირებული აპი
 Workbench	სამუშაო მაგიდა
