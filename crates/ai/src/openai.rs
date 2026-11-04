@@ -495,14 +495,19 @@ fn json_action(text: &str) -> Option<ReactStep> {
 /// The calls in a reply that ends in fenced JSON calls after a sentence or between them
 /// ("Let's list the files." then a ```json fence), as small local models write them (#417).
 /// Every fence must be a complete `json` (or unlabelled) call, and nothing but blank lines may
-/// follow the last one; anything else (other code, an unclosed fence, words after the call, a
-/// JSON object quoted inline) means the reply is text, as before.
+/// follow the last one; anything else (other code, a `~~~` fence, a fence inside a fence, an
+/// unclosed fence, words after the call, a JSON object quoted inline) means the reply is text,
+/// as before.
 fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
     let mut calls = Vec::new();
     let mut lines = text.lines();
     let mut words_after = false;
     while let Some(line) = lines.next() {
         let opening = line.trim();
+        // Anything in a tilde fence is an example, whatever it holds.
+        if opening.starts_with("~~~") {
+            return None;
+        }
         let length = opening.bytes().take_while(|byte| *byte == b'`').count();
         if length < 3 {
             words_after |= !opening.is_empty() && !calls.is_empty();
@@ -522,7 +527,8 @@ fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
             body.push('\n');
         }
         let language = opening.get(length..)?.trim();
-        if !matches!(language, "" | "json") {
+        // The body is the call itself: a fence inside it is a quoted example.
+        if !matches!(language, "" | "json") || body.trim_start().starts_with(['`', '~']) {
             return None;
         }
         let Some(ReactStep::Action { tool, input }) = json_action(&body) else { return None };
@@ -573,9 +579,15 @@ fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
     let text = r.message.text();
     let json_call = json_action(&text);
     let from_json = json_call.is_some();
-    // Calls after a sentence run only when every one names a tool the model was offered.
+    // Calls after a sentence run only when every one names a tool the model was offered, and
+    // never in a reply that uses the text protocol's own markers (a final answer that ends in an
+    // example is still the answer).
     let offered = |tool: &str| tools.iter().any(|definition| definition.name == tool);
-    if !from_json && let Some(calls) = fenced_calls(&text).filter(|calls| calls.iter().all(|(tool, _)| offered(tool))) {
+    let protocol = ["Final Answer:", "Action:"].into_iter().any(|marker| text.contains(marker));
+    if !from_json
+        && !protocol
+        && let Some(calls) = fenced_calls(&text).filter(|calls| calls.iter().all(|(tool, _)| offered(tool)))
+    {
         for (tool, input) in calls {
             let n = REACT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             r.message.blocks.push(Block::ToolUse { id: format!("react_{n}"), name: tool, input });
@@ -618,6 +630,10 @@ mod tests {
             "```json\n{\"name\":\"look\",\"arguments\":{},\"description\":\"x\"}\n```".to_string(),
             "```json\n[{\"name\":\"look\",\"arguments\":{}}]\n```".to_string(),
             "No calls here.".to_string(),
+            // An example in a tilde fence, then a real-looking call.
+            format!("~~~markdown\n{}\n~~~\n{}", call("write"), call("look")),
+            // A four-backtick fence quoting a three-backtick call.
+            format!("Like this:\n````\n{}\n````", call("write")),
         ] {
             assert_eq!(names(&text), None, "{text}");
         }
@@ -637,6 +653,13 @@ mod tests {
         let mut r = turn(&several);
         react_postprocess(&mut r, &[tool("look")], false);
         assert!(r.message.tool_uses().is_empty() && r.stop == StopReason::EndTurn, "one isn't offered: none run");
+        // A final answer that ends in an example stays the answer.
+        let answer = format!("Final Answer: it's built. To list the files again:\n{}", call("look"));
+        for react in [false, true] {
+            let mut r = turn(&answer);
+            react_postprocess(&mut r, &[tool("look")], react);
+            assert!(r.message.tool_uses().is_empty() && r.stop == StopReason::EndTurn, "react={react}");
+        }
     }
 
     /// Only the real OpenCode Go base gets its session header: not a look-alike host, path or scheme.

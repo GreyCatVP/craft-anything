@@ -234,7 +234,7 @@ been run live.
       after this: does it call `build_file_write` now? If it still doesn't, the model can't build.
       Yes, with the three fixes below: it wrote and edited `app/Cargo.toml` and `app/src/main.rs`
       over about 50 calls, fixed two compile errors the checks reported, and check 3 said "Build
-      succeeded". It stopped at the round limit without the `--screenshot` option
+      succeeded". It stopped at the round limit without the `--screenshot` option (#753)
 - [x] The system prompt told every model to call `core_brief_write` and `core_plan_update` first and
       `core_handoff_write` last, tools a lean local builder isn't offered, so the model asked only
       for `core_brief_write` and did nothing else for three checks. A lean builder's prompt leaves
@@ -244,7 +244,7 @@ been run live.
       with nothing done. A reply that ends in complete `json` fences, each a call to an offered
       tool, with only words before or between them, now runs them all (`fenced_calls`, ids
       `react_N` as other text calls); words after the last fence, other code, an unclosed fence or
-      a tool that wasn't offered keep it text
+      a tool that wasn't offered keep it text (#753)
 - [ ] A local builder doesn't add the `--screenshot` option the check needs before the round limit:
       run 4 compiled at check 3, its last. See whether more rounds get there, or whether a small
       model needs the option written for it (a template in the Rust steps)
