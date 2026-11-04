@@ -230,19 +230,24 @@ been run live.
       instead of 33-41 (23,000-30,000): the Build tools and the Core tools the brief names, not the
       study set a model explores with instead of writing (#417, `LOCAL_BUILDER_CORE`). Measured as
       text, not on a model; Ollama's default context (4k) was too small for the old list alone
-- [ ] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
+- [x] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
       after this: does it call `build_file_write` now? If it still doesn't, the model can't build.
-      Run so far: with the lean list it calls `build_checklist`, `build_command_run` and
-      `build_file_edit` (as JSON text, which #554 runs), but not `build_file_write` yet; the two
-      lines below stop it first
+      Yes, with the three fixes below: it wrote and edited `app/Cargo.toml` and `app/src/main.rs`
+      over about 50 calls, fixed two compile errors the checks reported, and check 3 said "Build
+      succeeded". It stopped at the round limit without the `--screenshot` option
 - [x] The system prompt told every model to call `core_brief_write` and `core_plan_update` first and
       `core_handoff_write` last, tools a lean local builder isn't offered, so the model asked only
       for `core_brief_write` and did nothing else for three checks. A lean builder's prompt leaves
       the memory steps out; live, the same model then used the Build tools
-- [ ] A call written after a sentence ("Let's list the files.\n```json {…}```") isn't run: #554
+- [x] A call written after a sentence ("Let's list the files.\n```json {…}```") isn't run: #554
       reads a reply that is only the JSON. Half the model's calls came this way and the turn ended
-      with nothing done. Run a reply that ends in one fenced call to an offered tool, and say in
-      the transcript that it was read from text
+      with nothing done. A reply that ends in complete `json` fences, each a call to an offered
+      tool, with only words before or between them, now runs them all (`fenced_calls`, ids
+      `react_N` as other text calls); words after the last fence, other code, an unclosed fence or
+      a tool that wasn't offered keep it text
+- [ ] A local builder doesn't add the `--screenshot` option the check needs before the round limit:
+      run 4 compiled at check 3, its last. See whether more rounds get there, or whether a small
+      model needs the option written for it (a template in the Rust steps)
 - [x] The model ran `cargo new app` in `app/` (commands run there), so the project landed in
       `app/app/` and every check said "No project to build found in app/ yet". The check now says
       where a cargo or npm project one folder down is, and the Rust steps say `app/Cargo.toml`,
