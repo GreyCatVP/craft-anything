@@ -714,6 +714,7 @@ fn defaults_table(app: &mut CraftApp, ui: &mut Ui) -> bool {
     let t = Tokens::get(ui.ctx());
     let mut changed = false;
     let ignore_budget = app.settings.assets.ignore_budget;
+    let mut opened = None;
     egui::Grid::new("asset-defaults").num_columns(4).spacing([8.0, 8.0]).show(ui, |ui| {
         for heading in ["Type", "Provider · model", "Default limit", "Limit"] {
             widgets::caption(ui, heading);
@@ -726,7 +727,11 @@ fn defaults_table(app: &mut CraftApp, ui: &mut Ui) -> bool {
             let title = tr(type_title(kind));
             ui.label(RichText::new(&title).font(theme::medium(theme::SMALL)));
             ui.vertical(|ui| {
-                if let Some(picked) = asset_picker(ui, egui::Id::new(("asset-default", kind.id())), kind, &choice, view) {
+                let picker = asset_picker(ui, egui::Id::new(("asset-default", kind.id())), kind, &choice, view);
+                if picker.opened {
+                    opened = Some(kind);
+                }
+                if let Some(picked) = picker.choice {
                     app.settings.assets.defaults.insert(kind, picked);
                     changed = true;
                 }
@@ -766,6 +771,10 @@ fn defaults_table(app: &mut CraftApp, ui: &mut Ui) -> bool {
             ui.end_row();
         }
     });
+    // A list opened after the page has been open a while is asked for again.
+    if let Some(kind) = opened {
+        app.refresh_asset_models_if_stale(kind);
+    }
     ui.add(
         egui::Label::new(
             RichText::new(tr(

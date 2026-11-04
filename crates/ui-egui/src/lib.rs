@@ -446,9 +446,6 @@ pub struct CraftApp {
     /// Settings was on the Builds page when the last frame was drawn (the lists are asked for again
     /// when it opens).
     pub(crate) builds_page_open: bool,
-    /// The Project screen was showing when the last frame was drawn (the lists are asked for again
-    /// when it opens).
-    project_page_open: bool,
     /// What the open project's files say (built result, pictures, assets, open questions), read
     /// on a worker.
     pub facts: project::Facts,
@@ -541,7 +538,6 @@ impl CraftApp {
             asset_models: Default::default(),
             asset_model_jobs: Default::default(),
             builds_page_open: false,
-            project_page_open: false,
             facts: Default::default(),
             facts_reader: Default::default(),
             asset_change_job: None,
@@ -1604,7 +1600,6 @@ impl CraftApp {
             self.refresh_side_panel();
         }
         self.read_facts(ctx);
-        self.watch_project_page();
         self.flush_settings(ctx);
         // A build asked something while the window is behind others: flash it in the taskbar.
         if std::mem::take(&mut self.attention) && !ctx.input(|i| i.viewport().focused.unwrap_or(true)) {

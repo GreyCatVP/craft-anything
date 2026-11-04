@@ -53,7 +53,11 @@ the price it gives for each. The lists are kept in `asset-models.json` in the co
 again for ten minutes (`max_age_minutes`); a provider that can't be asked keeps its earlier list, with
 the reason beside it. The pickers in Settings → Builds and in each project's panel only draw what was
 fetched: they never wait for a provider. Settings → Builds asks again when it opens with lists older
-than ten minutes, and its **Refresh** button asks every provider at once.
+than ten minutes, and its **Refresh** button asks every provider at once; a picker asks again for its
+own kind when it opens with a list older than that. Opening a project asks no provider. The app asks
+through the same function the tool runs (`asset_models::list_models`), on a worker and without holding
+the engine, so the panel's other tools run meanwhile; listings of several kinds at once each keep
+their own lists in the file.
 
 A model is offered only when the app can fill every input it requires from its request (a prompt, a
 picture, a shape, a number of faces, a duration, a voice…). `input_roles.toml` says which input names

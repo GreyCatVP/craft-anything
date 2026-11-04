@@ -3,20 +3,21 @@
 //! the config folder for a few minutes, so a picker that is opened again does not ask every
 //! provider again, and a provider that cannot be reached still shows the list it gave last time.
 
-use crate::key_tools::providers;
 use crate::keys::{self, KeyStore};
-use craft_anything_engine::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
+use craft_anything_engine::Session;
+use craft_anything_engine::tool::{CancelToken, Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
 use craft_anything_engine::tools::asset_tools::type_words;
 use craft_anything_engines::assets::model::ListedModel;
-use craft_anything_engines::assets::{AssetKind, AssetProvider};
+use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders};
 use craft_anything_evidence::ToolError;
 use craft_anything_platform::fs::write_atomic;
+use craft_anything_platform::sync::Mutex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The cache file, in the config folder.
 const FILE: &str = "asset-models.json";
@@ -128,10 +129,30 @@ impl Cache {
         write_atomic(&dir.join(FILE), &bytes)
     }
 
-    /// Keep the lists when `changed`. A cache that cannot be kept does not stop the listing; it is said.
-    fn keep(&self, ctx: &Ctx<'_>, dir: &Path, changed: bool) {
-        if changed && let Err(e) = self.save(dir) {
-            ctx.report(None, format!("Couldn't keep the model lists for next time: {}", e.for_people()));
+    /// Keep what this listing changed (`changed`: the slots it asked about, with their new list, or
+    /// none for a slot it dropped) in the file as it is now, so listings for other types running at
+    /// the same time (the app asks for all five at once) keep theirs. A cache that cannot be kept does
+    /// not stop the listing; it is said.
+    fn keep(dir: &Path, changed: &BTreeMap<String, Option<Cached>>, report: &dyn Fn(String)) {
+        if changed.is_empty() {
+            return;
+        }
+        // One writer of the file at a time in this process; reading it again is quick.
+        static WRITING: Mutex<()> = Mutex::new(());
+        let _writing = WRITING.lock();
+        let mut now = Cache::read(dir);
+        for (slot, list) in changed {
+            match list {
+                Some(list) => {
+                    now.lists.insert(slot.clone(), list.clone());
+                }
+                None => {
+                    now.lists.remove(slot);
+                }
+            }
+        }
+        if let Err(e) = now.save(dir) {
+            report(format!("Couldn't keep the model lists for next time: {}", e.for_people()));
         }
     }
 }
@@ -170,48 +191,89 @@ fn fetch(provider: &dyn AssetProvider, key: &str, kind: AssetKind, kept: Option<
     }
 }
 
-fn assets_models_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
-    let p: ListParams = parse_params(params)?;
-    let all = providers(ctx);
-    // A fork or a test can put its own key store in the session; the person's is the system's.
-    let store = ctx.session.ext.get::<KeyStore>().map_or_else(KeyStore::system, |k| k.as_ref().clone());
-    let dir = ctx.session.config_dir();
-    let mut cache = Cache::read(&dir);
+/// What listing the models needs: the registered providers, where their keys are kept, and the
+/// config folder the lists are kept in. Read once, under one short hold of the session, so the
+/// providers are asked without holding it (the app's pickers do that on a worker while the engine
+/// runs other tools).
+#[derive(Clone)]
+pub struct ListSources {
+    pub providers: AssetProviders,
+    pub keys: KeyStore,
+    pub config_dir: PathBuf,
+}
+
+impl ListSources {
+    /// The session's: its providers (a fork's or a test's, else the built-in ones), the key store a
+    /// fork or a test put in it (else the person's, the system's), and its config folder.
+    pub fn of(session: &Session) -> ListSources {
+        ListSources {
+            providers: session.ext.get::<AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default(),
+            keys: session.ext.get::<KeyStore>().map_or_else(KeyStore::system, |k| k.as_ref().clone()),
+            config_dir: session.config_dir(),
+        }
+    }
+}
+
+/// The models each provider with a saved key offers for `kind`, and what each costs: what
+/// `assets_models_list` returns (`{"kind", "providers": [...]}`). A list kept younger than
+/// `max_age_minutes` (default 10) is used again unless `refresh`; what was asked before `cancel`
+/// is kept. `report` hears which provider is being asked. It asks the providers over the network
+/// and can take minutes: call it on a worker, never while holding the session.
+pub fn list_models(
+    src: &ListSources,
+    kind: AssetKind,
+    refresh: bool,
+    max_age_minutes: Option<u32>,
+    cancel: &CancelToken,
+    report: &dyn Fn(String),
+) -> Result<Value, ToolError> {
+    let dir = &src.config_dir;
+    let cache = Cache::read(dir);
     let now = craft_anything_engine::inbox::now_ms();
-    let reuse_ms = (!p.refresh).then(|| u64::from(p.max_age_minutes.unwrap_or(DEFAULT_MAX_AGE_MINUTES)).saturating_mul(60_000));
-    let (many, _) = type_words(p.kind);
-    let mut changed = false;
+    let reuse_ms = (!refresh).then(|| u64::from(max_age_minutes.unwrap_or(DEFAULT_MAX_AGE_MINUTES)).saturating_mul(60_000));
+    let (many, _) = type_words(kind);
+    let mut changed: BTreeMap<String, Option<Cached>> = BTreeMap::new();
     let mut listed = Vec::new();
+    let all = &src.providers;
     for provider in all.ids().into_iter().filter_map(|id| all.get(id)) {
         // What was asked of the providers before a cancel is kept.
-        if ctx.cancel.is_cancelled() {
-            cache.keep(ctx, &dir, changed);
+        if cancel.is_cancelled() {
+            Cache::keep(dir, &changed, report);
             return Err(ToolError::cancelled());
         }
         // Only the providers whose key the person saved are asked.
-        let Some(key) = keys::asset_key(&store, provider.as_ref()) else { continue };
-        let slot = format!("{}/{}", provider.id(), p.kind.id());
+        let Some(key) = keys::asset_key(&src.keys, provider.as_ref()) else { continue };
+        let slot = format!("{}/{}", provider.id(), kind.id());
         let kept = cache.lists.get(&slot).cloned();
         let list = match kept {
             Some(kept) if reusable(&kept, now, reuse_ms) => kept,
             kept => {
-                ctx.report(None, format!("Asking {} which models make {many}…", provider.name()));
-                let list = fetch(provider.as_ref(), &key, p.kind, kept, now);
+                report(format!("Asking {} which models make {many}…", provider.name()));
+                let had = kept.is_some();
+                let list = fetch(provider.as_ref(), &key, kind, kept, now);
                 // A provider that lists nothing and has no complaint does not make this type: it is
                 // not shown, and nothing is kept of it.
                 if list.makes_nothing() {
-                    changed |= cache.lists.remove(&slot).is_some();
+                    if had {
+                        changed.insert(slot, None);
+                    }
                     continue;
                 }
-                cache.lists.insert(slot, list.clone());
-                changed = true;
+                changed.insert(slot, Some(list.clone()));
                 list
             }
         };
         listed.push(json!({"provider": provider.id(), "name": provider.name(), "unit": provider.unit(), "fetched_ms": list.fetched_ms, "models": list.models, "error": list.error}));
     }
-    cache.keep(ctx, &dir, changed);
-    Ok(ToolOutput::Value(json!({"kind": p.kind, "providers": listed})))
+    Cache::keep(dir, &changed, report);
+    Ok(json!({"kind": kind, "providers": listed}))
+}
+
+fn assets_models_list(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: ListParams = parse_params(params)?;
+    let src = ListSources::of(ctx.session);
+    let report = |message: String| ctx.report(None, message);
+    list_models(&src, p.kind, p.refresh, p.max_age_minutes, &ctx.cancel, &report).map(ToolOutput::Value)
 }
 
 #[cfg(test)]
@@ -745,6 +807,70 @@ mod tests {
     fn the_tool_is_one_of_the_ai_layers_and_runs_in_clean_room() {
         assert_eq!(crate::tools().iter().filter(|t| t.id == "assets_models_list").count(), 1);
         assert!(craft_anything_engine::clean_room::allows("assets_models_list"), "it reads no target");
+    }
+
+    /// A provider whose 3D list waits until the test lets it answer; its picture list answers at once.
+    struct Gated {
+        open: Arc<std::sync::atomic::AtomicBool>,
+        waiting: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl AssetProvider for Gated {
+        fn id(&self) -> &'static str {
+            "gated"
+        }
+        fn name(&self) -> &'static str {
+            "Gated"
+        }
+        fn unit(&self) -> Unit {
+            Unit::Usd
+        }
+        fn list_models(&self, _key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
+            if kind == AssetKind::Model3d {
+                self.waiting.store(true, Ordering::SeqCst);
+                let started = std::time::Instant::now();
+                while !self.open.load(Ordering::SeqCst) && started.elapsed() < std::time::Duration::from_secs(10) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+            let mut m = model("gated", &format!("{}-model", kind.id()), per_picture(0.1));
+            m.kinds = vec![kind];
+            listed(vec![m])
+        }
+        fn describe(&self, _key: &str, _model: &str) -> Result<ModelDetail, ToolError> {
+            Err(ToolError::invalid("not here"))
+        }
+        fn generate(&self, _key: &str, _model: &ModelDetail, _req: &AssetRequest) -> Result<Generated, ToolError> {
+            Err(ToolError::invalid("not here"))
+        }
+    }
+
+    /// The app lists models without the engine: from what the session holds, read once, while the
+    /// engine stays free for other tools. Listings for two types at once both keep their lists.
+    #[test]
+    fn listing_needs_no_engine_and_listings_at_once_keep_each_others_lists() {
+        let (open, waiting) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        let gated: Arc<dyn AssetProvider> = Arc::new(Gated { open: open.clone(), waiting: waiting.clone() });
+        let f = Fixture::new(vec![gated], &["gated"]);
+        let src = ListSources::of(&f.engine.session());
+        std::thread::scope(|s| {
+            let slow = s.spawn(|| list_models(&src, AssetKind::Model3d, false, None, &CancelToken::default(), &|_| {}));
+            let started = std::time::Instant::now();
+            while !waiting.load(Ordering::SeqCst) && started.elapsed() < std::time::Duration::from_secs(5) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(waiting.load(Ordering::SeqCst), "the 3D listing is asking its provider");
+            // Meanwhile the engine runs a tool, and the pictures' list is read and kept.
+            assert!(f.engine.try_session().is_some(), "the listing doesn't hold the session");
+            let pictures = f.call(json!({"kind": "image"})).unwrap();
+            assert_eq!(ids(entry(&pictures, "gated")), ["image-model"]);
+            assert!(f.cache()["lists"]["gated/image"].is_object());
+            open.store(true, Ordering::SeqCst);
+            let models = slow.join().unwrap().unwrap();
+            assert_eq!(ids(entry(&models, "gated")), ["model_3d-model"]);
+        });
+        let lists = &f.cache()["lists"];
+        assert!(lists["gated/image"].is_object() && lists["gated/model_3d"].is_object(), "both lists are kept: {lists}");
     }
 
     #[test]

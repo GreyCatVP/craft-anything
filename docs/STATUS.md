@@ -99,7 +99,9 @@ off and keeps the choices while it is off. **Ignore budget** turns every limit i
 once; what is used is still counted and shown. Notes under the table say which types have an unknown
 price (usage not tracked), which can pass their limit by one generation (the price is known only after
 the run), and which provider has no key. Asset spending is separate from the coding agent's AI usage
-cost. Drawing the panel reads only memory: usage and the model lists are read on worker threads.
+cost. Drawing the panel reads only memory: usage and the model lists are read on worker threads. A
+type's lists are asked for when its picker opens and they are older than ten minutes (opening the
+project asks no provider), without holding the engine, so the panel's switches save meanwhile.
 
 Settings → Builds holds the provider keys, the default provider, model and limit for each type that a
 new project copies, a default for Ignore budget, a line saying when the lists were fetched, and a

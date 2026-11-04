@@ -864,7 +864,7 @@ fn stored_type(root: &std::path::Path, kind: craft_anything_engines::assets::Ass
     craft_anything_engine::workspace::Workspace::open(root).unwrap().manifest.assets.types.get(&kind).cloned()
 }
 
-/// A project with scenario pictures (500 credits) and fal 3D models ($5), stored.
+/// A project with scenario pictures (500 credits) and fal 3D models ($5), and the other types Off, stored.
 fn project_with_two_types(parent: &std::path::Path) -> craft_anything_engine::workspace::Workspace {
     use craft_anything_engine::workspace::{TargetRef, TypeAssets, Workspace};
     use craft_anything_engines::assets::AssetKind;
@@ -872,6 +872,8 @@ fn project_with_two_types(parent: &std::path::Path) -> craft_anything_engine::wo
     let mut ws = Workspace::create(parent, "Snake", "A snake game", TargetRef::None).unwrap();
     ws.set_person(|m| {
         m.generate_assets = true;
+        // A new project stores every type (the others Off, as Settings has no default for them).
+        m.assets = craft_anything_engine::workspace::ProjectAssets::from_defaults(&craft_anything_engine::settings::AssetSettings::default(), 1);
         let quote = Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(20.0) } };
         let tripo = Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.4) };
         m.assets.types.insert(
@@ -1098,13 +1100,15 @@ fn a_type_is_chosen_in_its_row() {
     let root = ws.root.clone();
     let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || project_app(engine, &["fal", "scenario"], ws));
     h.run_steps(3);
-    assert!(lists_read(&mut h));
+    // A project that never chose a type has what it takes from Settings (Off here) stored as it opens.
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.follows_settings())));
+    assert_eq!(stored_type(&root, Image).map(|t| t.choice), Some(craft_anything_engine::asset_choice::AssetChoice::off()), "Off until the person chooses");
     h.run_steps(3);
-    assert_eq!(stored_type(&root, Image), None, "nothing is stored until the person chooses");
     assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Off"));
     assert!(h.query_by_label("Pictures limit").is_none());
-    // The list opens beside the narrow panel and stays on the screen.
+    // The list opens beside the narrow panel and stays on the screen; opening it asks for the lists.
     h.get_by_label("Pictures model").click();
+    assert!(wait(&mut h, |a| a.asset_models.get(&Image).is_some_and(|v| v.is_read() && !v.loading)));
     h.run_steps(3);
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1100.0));
     for words in ["Nano Banana Pro · $0.15 a picture", "Gemini 3.1 · ~20 credits a picture", "Some new model · price unknown"] {
@@ -1112,7 +1116,7 @@ fn a_type_is_chosen_in_its_row() {
         assert!(screen.contains_rect(rect), "{words} is at {rect:?}, off the screen");
     }
     h.get_by_label_contains("Nano Banana Pro").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types.contains_key(&Image))));
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].choice.provider.is_some())));
     let t = stored_type(&root, Image).unwrap();
     let per_picture = Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.15) };
     assert_eq!(
@@ -1280,54 +1284,92 @@ fn the_notes_under_the_table_name_the_type_they_are_about() {
     assert!(h.query_by_label_contains("Speech:").is_none() && h.query_by_label_contains("3D models:").is_none(), "a type that is Off has no note");
 }
 
-/// Opening a project asks the providers for their model lists again, on a worker: the panel keeps
-/// drawing and its picker says so while the request runs; lists read lately are kept; old ones are
-/// asked for again.
+/// Opening a project asks no provider for its model lists; opening a type's picker asks for that
+/// type's lists on a worker when they are old, without holding the engine: the panel keeps drawing,
+/// its picker says what it is waiting for, and the panel's switches save meanwhile.
 #[test]
-fn opening_a_project_refreshes_stale_model_lists_in_the_background() {
+fn a_types_lists_are_asked_for_when_its_picker_opens() {
+    use craft_anything_engines::assets::AssetKind::Image;
     let (engine, probe) = asset_engine(&["fal", "scenario"]);
     probe.hold(true);
     let d = tempfile::tempdir().unwrap();
     let ws = project_with_two_types(d.path());
+    let root = ws.root.clone();
     let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
         let mut a = demo::app(engine);
         a.asset_keys = Some(["fal", "scenario", "elevenlabs"].into_iter().map(|id| (id.to_string(), id != "elevenlabs")).collect());
         a
     });
     h.run_steps(3);
-    assert_eq!((probe.total(), h.state().asset_models.len()), (0, 0), "nothing is asked until a project opens");
     h.state_mut().open_workspace(ws);
     h.run_steps(3);
     let asking = |h: &Harness<'static, CraftApp>| h.state().jobs.running().filter(|j| j.title == "Ask the providers for their models").count();
-    assert_eq!(asking(&h), 5, "a request for each type, on workers");
-    assert!(h.state().asset_models.values().all(|v| v.loading && !v.is_read()));
-    // The providers are held back, yet the panel draws and its picker says what it is waiting for.
+    assert_eq!((asking(&h), probe.total(), h.state().asset_models.len()), (0, 0, 0), "opening the project asks no provider");
+    // The pictures' picker opens: their lists are asked for, on a worker, while the panel draws.
     h.get_by_label("Pictures model").click();
     h.run_steps(3);
+    assert_eq!(asking(&h), 1, "a request for pictures only");
+    assert!(h.state().asset_models[&Image].loading);
     h.get_by_label("Asking the providers for their models…");
-    h.key_press(egui::Key::Escape);
+    // Closed by clicking its button again (Esc in its search field would leave the project).
+    h.get_by_label("Pictures model").click();
     h.run_steps(2);
+    assert!(wait(&mut h, |_| probe.total() == 1), "a provider is being asked, and held");
+    // Meanwhile the engine is free: the panel's switch is saved through its tool at once.
+    h.get_by_label("Ignore budget (no limits)").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.ignore_budget)));
+    assert!(craft_anything_engine::workspace::Workspace::open(&root).unwrap().manifest.assets.ignore_budget, "saved with the project");
+    assert!(h.state().asset_models[&Image].loading && probe.total() == 1, "while the provider is still held");
     probe.hold(false);
-    assert!(lists_read(&mut h));
-    assert_eq!((probe.asked("fal"), probe.asked("scenario"), probe.asked("elevenlabs")), (5, 5, 0), "each keyed provider once per type");
-    // Away and back soon: the lists are young, nobody is asked.
-    h.state_mut().state.screen = Screen::Home;
-    h.run_steps(2);
-    h.state_mut().state.screen = Screen::Project;
+    assert!(wait(&mut h, |a| a.asset_models[&Image].is_read() && !a.asset_models[&Image].loading));
+    assert_eq!((probe.asked("fal"), probe.asked("scenario"), probe.asked("elevenlabs")), (1, 1, 0), "each keyed provider once, for pictures");
+    assert_eq!(h.state().asset_models.len(), 1, "no other type was asked for");
+    // Opened again soon: the list is young, nobody is asked.
     h.run_steps(3);
-    assert_eq!(asking(&h), 0);
-    assert_eq!(probe.total(), 10);
-    // Lists read more than ten minutes ago are asked for again.
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(2);
+    assert_eq!((asking(&h), probe.total()), (0, 2));
+    // A list read more than ten minutes ago is asked for again when its picker opens.
     let long_ago = craft_anything_engine::inbox::now_ms() - 11 * 60 * 1000;
-    for v in h.state_mut().asset_models.values_mut() {
-        v.fetched_ms = long_ago;
-    }
-    h.state_mut().state.screen = Screen::Home;
-    h.run_steps(2);
-    h.state_mut().state.screen = Screen::Project;
+    h.state_mut().asset_models.get_mut(&Image).unwrap().fetched_ms = long_ago;
+    h.get_by_label("Pictures model").click();
     h.run_steps(3);
-    assert!(h.state().asset_models.values().all(|v| v.loading || v.is_read()) && h.state().asset_models.len() == 5);
-    assert!(wait(&mut h, |a| a.asset_models.values().all(|v| v.fetched_ms > long_ago && !v.loading)), "a request for each type again, and its answer");
+    assert!(wait(&mut h, |a| a.asset_models[&Image].fetched_ms > long_ago && !a.asset_models[&Image].loading), "asked again, and answered");
+    // The list kept on disk is young, so it is what comes back: no provider is asked again.
+    assert_eq!((h.state().asset_models.len(), probe.total()), (1, 2));
+}
+
+/// A project from before each type had its own choice gets what it takes from Settings stored as the
+/// app opens it; Settings changed afterwards doesn't change its rows or what is stored.
+#[test]
+fn an_old_project_keeps_its_asset_choices_when_settings_change() {
+    use craft_anything_engines::assets::AssetKind::{Image, Music};
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":3,"name":"Old","request":"A game","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true,"asset_budget_usd":12.0}"#;
+    std::fs::write(d.path().join("craft.json"), old).unwrap();
+    let ws = craft_anything_engine::workspace::Workspace::open(d.path()).unwrap();
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        with_two_defaults(&mut a);
+        a.open_workspace(ws);
+        a
+    });
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.follows_settings())), "stored as it opens");
+    let (pictures, music) = (stored_type(&root, Image).unwrap(), stored_type(&root, Music).unwrap());
+    assert_eq!((music.choice.model.as_str(), music.limit), ("fal-ai/lyria-3-pro", 12.0), "the old budget is the dollar type's limit");
+    assert_eq!((pictures.choice.model.as_str(), pictures.limit), ("model_gemini-3-1", 500.0));
+    // The person changes Settings afterwards.
+    h.state_mut().settings.assets.defaults.clear();
+    h.state_mut().settings.assets.usd_limit = 1.0;
+    h.state_mut().settings.assets.credit_limit = 9.0;
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Music model").value().as_deref(), Some("fal.ai · Lyria 3 Pro"));
+    assert_eq!(h.get_by_label("Music limit").value().as_deref(), Some("$12.00"));
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Scenario · Gemini 3.1"));
+    assert_eq!((stored_type(&root, Image).unwrap(), stored_type(&root, Music).unwrap()), (pictures, music), "nothing stored changed");
 }
 
 /// Asking again for a type's lists (a key was saved or removed) stops the request it replaces, and the
@@ -1399,9 +1441,10 @@ fn a_provider_whose_key_was_just_removed_is_not_offered_while_the_lists_are_aske
     assert!(!has_fal(h.state()), "and the answer agrees");
 }
 
-/// A Settings default changed while a request for the model lists holds the engine is in the app at
-/// once, reaches the engine's settings when the request lets go, and is then saved. (In a child
-/// process with a config folder of its own: the app saves to the real one.)
+/// A request for the model lists doesn't hold the engine: a Settings default changed while the
+/// providers are asked is in the app at once, and reaches the engine's settings and the file without
+/// waiting for the lists. (In a child process with a config folder of its own: the app saves to the
+/// real one.)
 #[test]
 fn a_default_changed_while_the_providers_are_asked_reaches_the_session_and_the_file() {
     use craft_anything_platform::process::Process;
@@ -1431,21 +1474,21 @@ fn a_default_changed_while_the_providers_are_asked_reaches_the_session_and_the_f
     });
     h.run_steps(3);
     assert_eq!(h.state().asset_models.len(), 5);
-    assert!(h.state().asset_models.values().all(|v| v.loading), "the providers are being asked, and the engine is held meanwhile");
-    assert!(h.state().engine.try_session().is_none());
+    assert!(h.state().asset_models.values().all(|v| v.loading), "the providers are being asked");
+    assert!(wait(&mut h, |_| probe.total() > 0), "and held");
+    assert!(wait(&mut h, |a| a.engine.try_session().is_some()), "while the engine is free");
     // The person changes a default while that goes on.
     h.get_by_label("Ignore budget").scroll_to_me();
     h.run_steps(3);
     h.get_by_label("Ignore budget").click();
     h.run_steps(3);
     assert!(h.state().settings.assets.ignore_budget, "the app has it at once");
-    h.run_steps(5);
-    assert!(h.state().engine.try_session().is_none(), "and the engine, still held, doesn't yet");
-    assert!(!craft_anything_engine::Settings::load().assets.ignore_budget, "nor does the file");
-    // The request lets go: the engine gets it, and it is written.
-    probe.hold(false);
+    // The engine gets it, and it is written, with the providers still held.
     assert!(wait(&mut h, |a| a.engine.try_session().is_some_and(|s| s.settings.assets.ignore_budget)));
-    assert!(wait(&mut h, |_| craft_anything_engine::Settings::load().assets.ignore_budget), "saved after the engine took it");
+    assert!(wait(&mut h, |_| craft_anything_engine::Settings::load().assets.ignore_budget), "saved without waiting for the lists");
+    assert!(h.state().asset_models.values().any(|v| v.loading), "the providers are still being asked");
+    probe.hold(false);
+    assert!(lists_read(&mut h));
 }
 
 #[test]

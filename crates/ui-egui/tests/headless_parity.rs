@@ -147,6 +147,8 @@ const PLUMBING: &[(&str, &str)] = &[
     ("load_prefs", "startup"), ("after_first_frames", "startup"), ("log", "the log panel"), ("toast", "a message"),
     ("settings_changed", "marks settings dirty; each setting has its row"), ("flush_settings", "saves settings"),
     ("refresh_stale_asset_models", "part of refresh_asset_models: asks again for the lists that are old, when Builds opens"),
+    ("refresh_asset_models_if_stale", "part of refresh_asset_models: asks again for one type's lists when they are old, as its picker opens"),
+    ("keep_asset_defaults", "part of open_workspace: stores what an old project takes from Settings, as the project asset tools do"),
     ("refresh_view", "redraw data"), ("resolve_chat_evidence", "redraw data"), ("mark_dirty", "redraw data"),
     ("poll_conversation", "polling"), ("allow_for_project", "part of answer_consent"),
     ("handle_done", "a job's result"), ("tool_done", "a job's result"),

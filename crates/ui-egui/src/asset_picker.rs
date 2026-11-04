@@ -288,18 +288,27 @@ fn picker_button(ui: &mut Ui, id: Id, name: &str, words: &str, width: f32) -> Re
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// What a picker did this frame.
+#[derive(Debug, Default)]
+pub struct Picked {
+    /// Another choice, when one was picked.
+    pub choice: Option<AssetChoice>,
+    /// The list was opened: the caller asks for it again if what it has is old.
+    pub opened: bool,
+}
+
 /// A provider and model picker for `kind`: a button saying `current`, opening a searchable list of
 /// the models in `view` grouped by provider, each with its price (or "price unknown") and the
-/// options it ignores, and "Off". Returns the choice when another one is picked. `view` is what
-/// `assets_models_list` last said; `None` before anything was read. `id` names this picker among
-/// the others on a screen.
-pub fn asset_picker(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice, view: Option<&ModelsView>) -> Option<AssetChoice> {
+/// options it ignores, and "Off". Returns the choice when another one is picked, and whether the
+/// list was opened. `view` is what `assets_models_list` last said; `None` before anything was read.
+/// `id` names this picker among the others on a screen.
+pub fn asset_picker(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice, view: Option<&ModelsView>) -> Picked {
     asset_picker_sized(ui, id, kind, current, view, BUTTON_WIDTH)
 }
 
 /// [`asset_picker`] with a button of the given width, for a place with less (or more) room: a name
 /// that does not fit is cut short, and the whole of it is in the hover.
-pub fn asset_picker_sized(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice, view: Option<&ModelsView>, width: f32) -> Option<AssetChoice> {
+pub fn asset_picker_sized(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice, view: Option<&ModelsView>, width: f32) -> Picked {
     let name = trf("{type} model", &[("type", &tr(type_title(kind)))]);
     let words = choice_words(current, view);
     let button = picker_button(ui, id, &name, &words, width).on_hover_text(&words);
@@ -319,7 +328,7 @@ pub fn asset_picker_sized(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetC
             ui.close();
         }
     });
-    picked.and_then(|p| changed_choice(p, current))
+    Picked { choice: picked.and_then(|p| changed_choice(p, current)), opened: button.clicked() }
 }
 
 /// `picked` when it changes `current`. Picking what is already chosen changes nothing, except that

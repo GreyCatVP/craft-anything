@@ -631,18 +631,6 @@ impl CraftApp {
         self.facts_reader.wanted = true;
     }
 
-    /// The model lists are asked for again each time the Project screen opens (those read lately
-    /// are kept), in the background: its asset rows' pickers draw what is there meanwhile.
-    pub(crate) fn watch_project_page(&mut self) {
-        let showing = self.state.screen == Screen::Project && self.workspace.is_some();
-        if showing != self.project_page_open {
-            self.project_page_open = showing;
-            if showing {
-                self.refresh_stale_asset_models();
-            }
-        }
-    }
-
     /// Start a wanted read when none is under way and the last began a second ago or more.
     pub(crate) fn read_facts(&mut self, ctx: &egui::Context) {
         const EVERY: std::time::Duration = std::time::Duration::from_secs(1);
@@ -890,7 +878,7 @@ fn limit_field(ui: &mut Ui, id: egui::Id, name: &str, unit: Unit, stored: f64, s
 /// One asset type in the panel's table: its name, what it has used against its limit (an amount
 /// field in the provider's unit), the provider and model it is made with, and the limit's switch.
 /// Reads memory only; what the person changes is returned.
-fn asset_row(app: &CraftApp, ui: &mut Ui, ws: &Workspace, kind: AssetKind, saving: bool) -> Option<AssetEdit> {
+fn asset_row(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace, kind: AssetKind, saving: bool) -> Option<AssetEdit> {
     let t = Tokens::get(ui.ctx());
     let stored = ws.manifest.assets.effective(kind, &app.settings.assets);
     let (unit, tracked) = (stored.choice.unit, stored.choice.pricing.tracked());
@@ -952,11 +940,14 @@ fn asset_row(app: &CraftApp, ui: &mut Ui, ws: &Workspace, kind: AssetKind, savin
     }
 
     // The second line: the provider and model, and the limit's switch.
+    let mut opened = false;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         let width = (ui.available_width() - SWITCH_SLOT - ui.spacing().item_spacing.x).max(120.0);
         let view = crate::asset_picker::offered(app.asset_models.get(&kind), app.asset_keys.as_ref());
-        if let Some(choice) = asset_picker_sized(ui, id.with("picker"), kind, &stored.choice, view.as_deref(), width) {
+        let picker = asset_picker_sized(ui, id.with("picker"), kind, &stored.choice, view.as_deref(), width);
+        opened = picker.opened;
+        if let Some(choice) = picker.choice {
             edit = Some(AssetEdit::Choose(choice));
         }
         // A type that is Off, or whose price is unknown, has no limit to switch.
@@ -969,6 +960,11 @@ fn asset_row(app: &CraftApp, ui: &mut Ui, ws: &Workspace, kind: AssetKind, savin
             }
         }
     });
+    // The type's list is asked for when its picker opens, if what is there is old; opening the
+    // project asks no provider.
+    if opened {
+        app.refresh_asset_models_if_stale(kind);
+    }
     edit
 }
 

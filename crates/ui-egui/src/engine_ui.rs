@@ -415,10 +415,12 @@ impl CraftApp {
         });
     }
 
-    /// Ask the providers, in the background, which models they offer for `kind` and what each costs
-    /// (`assets_models_list`). The tool keeps the lists on disk and uses them again while they are
-    /// young; `force` asks every provider again. It can take minutes, holds the engine while it
-    /// does, and is the only way the pickers get their lists: drawing never asks.
+    /// Ask the providers, in the background, which models they offer for `kind` and what each costs:
+    /// what `assets_models_list` does, through the same function, which keeps the lists on disk and
+    /// uses them again while they are young; `force` asks every provider again. It can take minutes,
+    /// so it doesn't go through the engine: the providers, keys and config folder are read under one
+    /// short hold of the session, and the engine stays free for other tools meanwhile. It is the only
+    /// way the pickers get their lists: drawing never asks.
     pub fn refresh_asset_models(&mut self, kind: AssetKind, force: bool) {
         // An engine without the AI layer's tools (the demo's) has nobody to ask.
         if self.engine.registry().get("assets_models_list").is_none() {
@@ -428,12 +430,10 @@ impl CraftApp {
         let engine = self.engine.clone();
         let job = self.jobs.spawn(tr("Ask the providers for their models"), true, move |j| {
             let progress = j.reporter();
-            let opts = CallOptions::new(Caller::Ui).with_cancel(j.cancel.clone()).with_progress(&progress);
-            let result = engine.call("assets_models_list", serde_json::json!({"kind": kind, "refresh": force}), opts).and_then(|out| {
-                let json = out.to_json();
-                ModelsView::from_result(json.get("result").unwrap_or(&serde_json::Value::Null), craft_anything_engine::inbox::now_ms())
-                    .map_err(ToolError::internal)
-            });
+            let report = |message: String| progress(craft_anything_engine::Progress { fraction: None, message });
+            let sources = craft_anything_ai::asset_models::ListSources::of(&engine.session());
+            let result = craft_anything_ai::asset_models::list_models(&sources, kind, force, None, &j.cancel, &report)
+                .and_then(|listed| ModelsView::from_result(&listed, craft_anything_engine::inbox::now_ms()).map_err(ToolError::internal));
             Ok(Done::AssetModels { kind, result })
         });
         // A request this one replaces is stopped, not left running for nobody: its answer would be
@@ -444,13 +444,19 @@ impl CraftApp {
     }
 
     /// Ask again for the lists of every type that was never read or was read more than ten minutes
-    /// ago (when a page that shows them opens). A request already running is left to finish.
+    /// ago (when Settings → Builds opens). A request already running is left to finish.
     pub fn refresh_stale_asset_models(&mut self) {
-        let now = craft_anything_engine::inbox::now_ms();
         for kind in AssetKind::ALL {
-            if self.asset_models.get(&kind).is_none_or(|v| !v.loading && v.is_stale(now)) {
-                self.refresh_asset_models(kind, false);
-            }
+            self.refresh_asset_models_if_stale(kind);
+        }
+    }
+
+    /// Ask again for `kind`'s lists if they were never read or were read more than ten minutes ago
+    /// (when its picker opens). A request already running is left to finish.
+    pub fn refresh_asset_models_if_stale(&mut self, kind: AssetKind) {
+        let now = craft_anything_engine::inbox::now_ms();
+        if self.asset_models.get(&kind).is_none_or(|v| !v.loading && v.is_stale(now)) {
+            self.refresh_asset_models(kind, false);
         }
     }
 
