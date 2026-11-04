@@ -220,7 +220,7 @@ impl AssetSettings {
 }
 
 /// A model of the asset table that `config.toml` versions 4 and older named by id
-/// (`[assets] image_model` and `model_3d`).
+/// (`[assets] image_model` and `model_3d`), or used for a type with no setting.
 struct LegacyAssetModel {
     id: &'static str,
     kind: AssetKind,
@@ -232,8 +232,9 @@ struct LegacyAssetModel {
 }
 
 /// The ids of that table and the model each stands for. `scenario-meshy` pointed at an endpoint
-/// Scenario has deprecated, so it stands for its replacement.
-const LEGACY_ASSET_MODELS: [LegacyAssetModel; 6] = [
+/// Scenario has deprecated, so it stands for its replacement. The audio models had no setting:
+/// version 4 always used them.
+const LEGACY_ASSET_MODELS: [LegacyAssetModel; 9] = [
     LegacyAssetModel {
         id: "nano-banana-pro",
         kind: AssetKind::Image,
@@ -261,6 +262,40 @@ const LEGACY_ASSET_MODELS: [LegacyAssetModel; 6] = [
         name: "Scenario Meshy 7.1",
         unit: Unit::Credits,
     },
+    LegacyAssetModel {
+        id: "eleven-multilingual-v2",
+        kind: AssetKind::Speech,
+        provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
+        name: "ElevenLabs Multilingual v2",
+        unit: Unit::Credits,
+    },
+    LegacyAssetModel {
+        id: "eleven-sound-effects-v2",
+        kind: AssetKind::SoundEffect,
+        provider: "elevenlabs",
+        model: "eleven_text_to_sound_v2",
+        name: "ElevenLabs Sound Effects v2",
+        unit: Unit::Credits,
+    },
+    LegacyAssetModel {
+        id: "eleven-music-v1",
+        kind: AssetKind::Music,
+        provider: "elevenlabs",
+        model: "music_v1",
+        name: "ElevenLabs Music v1",
+        unit: Unit::Credits,
+    },
+];
+
+/// What version 4 used for each type when `config.toml` named no model (its built-in defaults), and
+/// the key that named one, for the two types that had a setting.
+const LEGACY_ASSET_DEFAULTS: [(AssetKind, Option<&str>, &str); 5] = [
+    (AssetKind::Image, Some("image_model"), "nano-banana-pro"),
+    (AssetKind::Model3d, Some("model_3d"), "tripo-p1"),
+    (AssetKind::Speech, None, "eleven-multilingual-v2"),
+    (AssetKind::SoundEffect, None, "eleven-sound-effects-v2"),
+    (AssetKind::Music, None, "eleven-music-v1"),
 ];
 
 impl LegacyAssetModel {
@@ -348,11 +383,14 @@ fn settings_v3_to_v4(_: &mut toml::Table) -> Result<(), String> {
 
 /// Version 5: generated assets are chosen per type. `[assets] budget_usd` becomes `usd_limit`, and
 /// `image_model` and `model_3d` (ids of the old asset table) become `[assets.defaults.image]` and
-/// `[assets.defaults.model_3d]`, a provider, a model and the unit it bills in. An id the old table
-/// never had is dropped: that type is Off. The price is unknown until the provider's list is fetched.
+/// `[assets.defaults.model_3d]`, a provider, a model and the unit it bills in. A type the file names
+/// no model for (and every audio type, which had no setting) gets what version 4 used for it, so
+/// nothing the person had changes. An id the old table never had is dropped: that type is Off. The
+/// price is unknown until the provider's list is fetched.
 fn settings_v4_to_v5(table: &mut toml::Table) -> Result<(), String> {
-    let Some(assets) = table.get_mut("assets").and_then(toml::Value::as_table_mut) else {
-        return Ok(());
+    let assets = table.entry("assets").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let Some(assets) = assets.as_table_mut() else {
+        return Err(format!("assets ({assets}) isn't a table"));
     };
     if let Some(old) = assets.remove("budget_usd") {
         let usd = match old {
@@ -363,11 +401,17 @@ fn settings_v4_to_v5(table: &mut toml::Table) -> Result<(), String> {
         assets.entry("usd_limit").or_insert(toml::Value::Float(usd));
     }
     let mut defaults = toml::Table::new();
-    for (old_key, kind, new_key) in [("image_model", AssetKind::Image, "image"), ("model_3d", AssetKind::Model3d, "model_3d")] {
-        let Some(old) = assets.remove(old_key) else { continue };
-        let id = old.as_str().ok_or_else(|| format!("assets.{old_key} ({old}) isn't a model id"))?;
+    for (kind, old_key, built_in) in LEGACY_ASSET_DEFAULTS {
+        let named = match old_key.and_then(|k| assets.remove(k).map(|v| (k, v))) {
+            None => None,
+            Some((key, old)) => Some(old.as_str().ok_or_else(|| format!("assets.{key} ({old}) isn't a model id"))?.trim().to_string()),
+        };
+        // Version 4 read an empty id as "the default" too.
+        let id = named.filter(|id| !id.is_empty()).unwrap_or_else(|| built_in.to_string());
         if let Some(model) = LEGACY_ASSET_MODELS.iter().find(|m| m.kind == kind && m.id == id) {
-            defaults.insert(new_key.into(), toml::Value::Table(model.v5_table()?));
+            let key = toml::Value::try_from(kind).map_err(|e| e.to_string())?;
+            let key = key.as_str().ok_or_else(|| format!("asset type {kind:?} has no name"))?.to_string();
+            defaults.insert(key, toml::Value::Table(model.v5_table()?));
         }
     }
     if !defaults.is_empty() {
@@ -793,7 +837,14 @@ default = "Claude Code"
         let m3d = s.assets.choice(AssetKind::Model3d);
         assert_eq!((m3d.provider.as_deref(), m3d.model.as_str(), m3d.unit), (Some("scenario"), "model_meshy-7-1-img23d", Unit::Credits));
         assert_eq!(m3d.pricing, Pricing::After { unit: Unit::Credits });
-        assert_eq!(s.assets.choice(AssetKind::Music).provider, None, "no old choice: Off");
+        // Version 4 always made audio with ElevenLabs: those stay the defaults.
+        for (kind, model) in
+            [(AssetKind::Speech, "eleven_multilingual_v2"), (AssetKind::SoundEffect, "eleven_text_to_sound_v2"), (AssetKind::Music, "music_v1")]
+        {
+            let c = s.assets.choice(kind);
+            assert_eq!((c.provider.as_deref(), c.model.as_str(), c.unit), (Some("elevenlabs"), model, Unit::Credits), "{kind:?}");
+            assert_eq!(c.pricing, Pricing::After { unit: Unit::Credits });
+        }
         assert!(!s.assets.ignore_budget);
         let saved = toml::to_string(&s).unwrap();
         assert!(!saved.contains("budget_usd") && !saved.contains("image_model"), "the old keys are gone: {saved}");
@@ -817,9 +868,12 @@ default = "Claude Code"
             assert!(!c.model_name.is_empty(), "{id} keeps a name to show");
         }
         let none = read_settings("version = 4\n[assets]\nimage_model = \"made-up\"\nmodel_3d = \"also-made-up\"\n").unwrap();
-        assert!(none.assets.defaults.is_empty(), "an id the old table never had is dropped (Off)");
+        for kind in [AssetKind::Image, AssetKind::Model3d] {
+            assert_eq!(none.assets.choice(kind), AssetChoice::off(), "an id the old table never had is dropped (Off): {kind:?}");
+        }
         let wrong = read_settings("version = 4\n[assets]\nimage_model = \"tripo-p1\"\n").unwrap();
-        assert!(wrong.assets.defaults.is_empty(), "a 3D model isn't a picture model");
+        assert_eq!(wrong.assets.choice(AssetKind::Image), AssetChoice::off(), "a 3D model isn't a picture model");
+        assert_eq!(wrong.assets.choice(AssetKind::Model3d).model, "tripo3d/p1/image-to-3d", "no old 3D choice: the old default");
     }
 
     #[test]
@@ -833,13 +887,36 @@ default = "Claude Code"
         assert!(old.assets.defaults.is_empty() && !old.assets.ignore_budget);
         // Versions 0 to 3 go through the same step; a whole-number budget is read too.
         let v3 = read_settings("version = 3\n[assets]\nbudget_usd = 9\nimage_model = \"flux-dev\"\n").unwrap();
-        assert_eq!((v3.version, v3.assets.usd_limit, v3.assets.choice(AssetKind::Model3d).provider), (SETTINGS_VERSION, 9.0, None));
+        assert_eq!((v3.version, v3.assets.usd_limit), (SETTINGS_VERSION, 9.0));
+        assert_eq!(v3.assets.choice(AssetKind::Model3d).model, "tripo3d/p1/image-to-3d", "no 3D choice: the old default");
         assert_eq!(v3.assets.choice(AssetKind::Image).model, "fal-ai/flux/dev");
         let kept = read_settings("version = 3\n[assets]\nmodel_3d = \"tripo-p1\"\n").unwrap();
         assert_eq!((kept.version, kept.assets.choice(AssetKind::Model3d).model.as_str()), (SETTINGS_VERSION, "tripo3d/p1/image-to-3d"));
-        // Nothing to move: no [assets] table, and an empty one.
-        assert_eq!(read_settings("version = 4\n").unwrap().assets, AssetSettings::default());
-        assert_eq!(read_settings("version = 4\n[assets]\n").unwrap().assets, AssetSettings::default());
+        // No [assets] table, an empty one, or only a budget: version 4 used its built-in models for
+        // every type, so those become the defaults, and the limits are the built-in ones (or the budget).
+        let old_defaults = [
+            (AssetKind::Image, "fal", "fal-ai/nano-banana-pro", "Nano Banana Pro", Unit::Usd),
+            (AssetKind::Model3d, "fal", "tripo3d/p1/image-to-3d", "Tripo P1", Unit::Usd),
+            (AssetKind::Speech, "elevenlabs", "eleven_multilingual_v2", "ElevenLabs Multilingual v2", Unit::Credits),
+            (AssetKind::SoundEffect, "elevenlabs", "eleven_text_to_sound_v2", "ElevenLabs Sound Effects v2", Unit::Credits),
+            (AssetKind::Music, "elevenlabs", "music_v1", "ElevenLabs Music v1", Unit::Credits),
+        ];
+        for (text, usd) in [("version = 4\n", 5.0), ("version = 4\n[assets]\n", 5.0), ("version = 4\n[assets]\nbudget_usd = 2.5\n", 2.5), ("", 5.0)] {
+            let a = read_settings(text).unwrap().assets;
+            assert_eq!((a.usd_limit, a.credit_limit, a.ignore_budget), (usd, 500.0, false), "{text:?}");
+            assert_eq!(a.defaults.len(), 5, "{text:?}: {:?}", a.defaults);
+            for (kind, provider, model, name, unit) in old_defaults {
+                let c = a.choice(kind);
+                assert_eq!((c.provider.as_deref(), c.model.as_str(), c.model_name.as_str(), c.unit), (Some(provider), model, name, unit), "{text:?} {kind:?}");
+                assert_eq!(c.pricing, Pricing::After { unit }, "{text:?} {kind:?}");
+            }
+        }
+        // An empty id meant the default in version 4 too.
+        let blank = read_settings("version = 4\n[assets]\nimage_model = \"\"\nmodel_3d = \" \"\n").unwrap();
+        assert_eq!(blank.assets.choice(AssetKind::Image).model, "fal-ai/nano-banana-pro");
+        assert_eq!(blank.assets.choice(AssetKind::Model3d).model, "tripo3d/p1/image-to-3d");
+        // A new install (no file at all) has no defaults: each type is Off until the person picks one.
+        assert!(Settings::default().assets.defaults.is_empty());
         // A key of the wrong type is an error the person is told about, as before.
         assert!(read_settings("version = 4\n[assets]\nbudget_usd = \"lots\"\n").is_err());
         assert!(read_settings("version = 4\n[assets]\nimage_model = 3\n").is_err());
