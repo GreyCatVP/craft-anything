@@ -663,6 +663,34 @@ fn models_are_listed_and_tried_without_saving_anything() {
     assert_eq!(seen.lock().unwrap()[1].body["model"], "qwen3:8b", "the chat model is the one asked");
 }
 
+/// A test of an AI that isn't saved never sends a saved AI's key: the form may reuse a saved name
+/// with another address and an empty key field. Testing the saved AI still uses its key.
+#[test]
+fn an_unsaved_test_never_sends_a_saved_key_by_its_name() {
+    let (h, _d) = hub();
+    h.keys.set("Box", "sk-saved").unwrap();
+    let reply = chat_sse(&[json!({"model":"m1","choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]})]);
+    let (url, seen) = mock(vec![(200, "text/event-stream", reply)]);
+    let own = BackendConfig { name: "Box".into(), kind: BackendKind::OpenaiCompatible, model: "m1".into(), base_url: Some(url), ssh_host: None, enabled: true };
+    h.test_config(&own, None).unwrap();
+    assert_eq!(seen.lock().unwrap()[0].header("authorization"), None, "the saved key stayed home");
+    // An API kind at another address: no key given, none stored by name is read, none from the
+    // environment for an address that isn't the service's own. Refused before any request.
+    let api = BackendConfig { kind: BackendKind::Openai, base_url: Some("http://127.0.0.1:9/v1".into()), ..own };
+    let e = h.test_config(&api, None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadSettings, "{e:?}");
+}
+
+/// A kind's own environment key is only for the service's own address.
+#[test]
+fn a_kinds_environment_key_never_goes_to_another_address() {
+    let env = |v: &str| (v == "OPENAI_API_KEY").then(|| "sk-env".to_string());
+    assert_eq!(kind_env_key_with(BackendKind::Openai, None, env).as_deref(), Some("sk-env"));
+    assert_eq!(kind_env_key_with(BackendKind::Openai, Some(" "), env).as_deref(), Some("sk-env"), "a blank address is the default");
+    assert_eq!(kind_env_key_with(BackendKind::Openai, Some("http://other-host/v1"), env), None);
+    assert_eq!(kind_env_key_with(BackendKind::Openrouter, None, env), None, "another kind's variable");
+}
+
 #[test]
 fn listing_models_at_a_closed_port_or_a_bad_address_is_a_plain_error() {
     let (h, _d) = hub();
