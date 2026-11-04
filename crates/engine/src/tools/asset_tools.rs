@@ -482,7 +482,15 @@ impl Ready {
     /// What this type's receipts say besides where each went and what it cost.
     fn receipt<'a>(&'a self, from: &'a str) -> Receipt<'a> {
         let tracked = self.limited().choice.pricing.tracked();
-        Receipt { kind: self.kind, from, provider: self.provider.id(), model: &self.t.choice.model, unit: self.t.choice.unit, tracked }
+        Receipt {
+            kind: self.kind,
+            from,
+            provider: self.provider.id(),
+            model: &self.t.choice.model,
+            unit: self.t.choice.unit,
+            tracked,
+            since_ms: self.t.since_ms,
+        }
     }
 }
 
@@ -497,6 +505,9 @@ struct Receipt<'a> {
     unit: Unit,
     /// The type's price was one to count with when it ran, so a cost was expected.
     tracked: bool,
+    /// When the type's provider was chosen: its usage counts from then, so no receipt is dated
+    /// before it, even when this computer's clock is behind the one that made the choice.
+    since_ms: u64,
 }
 
 /// Whether a reported amount is one to count with: a number, not below nothing.
@@ -520,7 +531,7 @@ impl Receipt<'_> {
             amount: counted,
             unit: Some(self.unit),
             cost_missing: if amount.is_some() { counted.is_none() } else { self.tracked },
-            at_ms: crate::inbox::now_ms(),
+            at_ms: crate::inbox::now_ms().max(self.since_ms),
         }
     }
 
@@ -952,7 +963,7 @@ mod tests {
 
     /// A spoken line made at ElevenLabs, as a receipt records it.
     fn speech() -> Receipt<'static> {
-        Receipt { kind: AssetKind::Speech, from: "hi", provider: "elevenlabs", model: "eleven_v3", unit: Unit::Credits, tracked: true }
+        Receipt { kind: AssetKind::Speech, from: "hi", provider: "elevenlabs", model: "eleven_v3", unit: Unit::Credits, tracked: true, since_ms: 0 }
     }
 
     /// A dollar receipt written by hand, to stand for spending already in the ledger.
@@ -2081,6 +2092,31 @@ mod tests {
             }
             assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
         }
+    }
+
+    /// A receipt is never dated before its type's provider was chosen: a clock that is behind the
+    /// time of the choice (another computer's, or one set back) still counts the generation.
+    #[test]
+    fn a_receipt_counts_even_when_the_clock_is_behind_the_choice() {
+        let (_d, mut w) = ws();
+        let stub = Recording::new("elevenlabs", Unit::Credits, 10.0);
+        choose_all(&mut w, &stub);
+        let ahead = crate::inbox::now_ms() + 86_400_000;
+        w.set_person(|m| m.assets.types.get_mut(&AssetKind::Speech).unwrap().since_ms = ahead).unwrap();
+        let t = w.manifest.assets.types[&AssetKind::Speech].clone();
+        assert_eq!(t.since_ms, ahead);
+        let ready = Ready { kind: AssetKind::Speech, model: stub.models["speech"].clone(), t: t.clone(), provider: Arc::new(stub), key: "sk-test".into() };
+        let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
+        let made = Generated { url: String::new(), bytes: b"ID3 generated".to_vec(), cost: Some(3.0), ignored: Vec::new() };
+        keep(&w, &path, &rel, &ready.receipt("hi"), &made).unwrap();
+        let rows = w.try_assets().unwrap();
+        assert_eq!(rows.last().map(|r| r.at_ms), Some(ahead), "dated when the type was chosen, not before it");
+        let usage = w.try_type_usage(AssetKind::Speech, &t).unwrap();
+        assert_eq!((usage.generations, usage.amount), (1, 3.0), "counted against the type's limit");
+        // A charge recorded from a failed run is dated the same way.
+        let error = craft_anything_engines::assets::charged(ToolError::new(ErrorCode::EngineMissing, "timed out"), 2.0);
+        let _ = record_charge(&w, &ready.receipt("hi"), AssetKind::Speech, &rel, error);
+        assert_eq!(w.try_type_usage(AssetKind::Speech, &t).unwrap().amount, 5.0);
     }
 
     /// A final ledger read failure cannot be reported as successful generation with zero historical spending.
