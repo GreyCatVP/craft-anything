@@ -644,7 +644,7 @@ Gaps found while using the app for real projects.
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
       total, so a forked answer shows none; count questions in the project's usage
 - [ ] "Make this change" on an answer that suggests one (sends it as a normal message)
-- [ ] #666: a long line in a feed's tool-work row (a Deep-mode decompile, a status note) ran off
+- [x] #666: a long line in a feed's tool-work row (a Deep-mode decompile, a status note) ran off
       the window and pushed the feed left; the header title can't wrap in egui, so it's the note's
       first line now, cut at 90 characters, and the full note wraps in the body — claimed: claude,
       branch bugfix/r2.9-feed-text-overflow
