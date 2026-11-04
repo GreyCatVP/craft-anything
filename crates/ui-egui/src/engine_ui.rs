@@ -426,7 +426,7 @@ impl CraftApp {
         }
         self.asset_models.entry(kind).or_default().loading = true;
         let engine = self.engine.clone();
-        let job = self.jobs.spawn("Ask the providers for their models", true, move |j| {
+        let job = self.jobs.spawn(tr("Ask the providers for their models"), true, move |j| {
             let progress = j.reporter();
             let opts = CallOptions::new(Caller::Ui).with_cancel(j.cancel.clone()).with_progress(&progress);
             let result = engine.call("assets_models_list", serde_json::json!({"kind": kind, "refresh": force}), opts).and_then(|out| {
@@ -436,7 +436,11 @@ impl CraftApp {
             });
             Ok(Done::AssetModels { kind, result })
         });
-        self.asset_model_jobs.insert(kind, job);
+        // A request this one replaces is stopped, not left running for nobody: its answer would be
+        // dropped anyway.
+        if let Some(old) = self.asset_model_jobs.insert(kind, job) {
+            self.jobs.cancel(old);
+        }
     }
 
     /// Ask again for the lists of every type that was never read or was read more than ten minutes

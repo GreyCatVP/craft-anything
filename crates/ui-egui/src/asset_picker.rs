@@ -13,10 +13,12 @@ use egui::text::{LayoutJob, TextFormat};
 use egui::{Id, Popup, PopupCloseBehavior, Response, RichText, Sense, Stroke, TextEdit, Ui, Vec2};
 use serde::Deserialize;
 use serde_json::Value;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 /// A list read earlier than this long ago is asked for again when a page that shows it opens.
 pub const STALE_AFTER_MS: u64 = 10 * 60 * 1000;
-/// The width of the picker's button, and of its list.
+/// The width of the picker's button where it has room (Settings), and of its list.
 const BUTTON_WIDTH: f32 = 200.0;
 const POPUP_WIDTH: f32 = 420.0;
 /// The height of the list, which scrolls when it has more rows.
@@ -73,6 +75,20 @@ impl ModelsView {
     pub fn is_stale(&self, now_ms: u64) -> bool {
         !self.is_read() || self.fetched_ms > now_ms || now_ms - self.fetched_ms > STALE_AFTER_MS
     }
+}
+
+/// The view a picker should draw: `view` as it is, except that while a request for the lists is
+/// running a provider whose key is known to be missing is left out. Saving or forgetting a key asks
+/// for the lists again, and until the answer comes the old lists would still offer a provider whose
+/// key was just removed. `keys` is which providers have a key (`None` before that was checked).
+pub fn offered<'a>(view: Option<&'a ModelsView>, keys: Option<&BTreeMap<String, bool>>) -> Option<Cow<'a, ModelsView>> {
+    let view = view?;
+    let missing = |p: &ProviderModels| keys.is_some_and(|k| k.get(&p.provider) == Some(&false));
+    if !view.loading || !view.providers.iter().any(missing) {
+        return Some(Cow::Borrowed(view));
+    }
+    let providers = view.providers.iter().filter(|p| !missing(p)).cloned().collect();
+    Some(Cow::Owned(ModelsView { providers, ..view.clone() }))
 }
 
 /// What the asset type is called to a person ("Pictures"). A type a later build adds is "Assets".
@@ -231,9 +247,15 @@ fn picker_button(ui: &mut Ui, id: Id, name: &str, words: &str, width: f32) -> Re
 /// `assets_models_list` last said; `None` before anything was read. `id` names this picker among
 /// the others on a screen.
 pub fn asset_picker(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice, view: Option<&ModelsView>) -> Option<AssetChoice> {
+    asset_picker_sized(ui, id, kind, current, view, BUTTON_WIDTH)
+}
+
+/// [`asset_picker`] with a button of the given width, for a place with less (or more) room: a name
+/// that does not fit is cut short, and the whole of it is in the hover.
+pub fn asset_picker_sized(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice, view: Option<&ModelsView>, width: f32) -> Option<AssetChoice> {
     let name = trf("{type} model", &[("type", &tr(type_title(kind)))]);
     let words = choice_words(current, view);
-    let button = picker_button(ui, id, &name, &words, BUTTON_WIDTH).on_hover_text(&words);
+    let button = picker_button(ui, id, &name, &words, width).on_hover_text(&words);
     let search_id = id.with("search");
     // A click opens the list afresh: empty search, and the cursor in it.
     if button.clicked() {
@@ -250,8 +272,15 @@ pub fn asset_picker(ui: &mut Ui, id: Id, kind: AssetKind, current: &AssetChoice,
             ui.close();
         }
     });
-    // Picking what is already chosen changes nothing.
-    picked.filter(|p| p.provider != current.provider || p.model != current.model || p.unit != current.unit)
+    picked.and_then(|p| changed_choice(p, current))
+}
+
+/// `picked` when it changes `current`. Picking what is already chosen changes nothing, except that
+/// the same model with a price that differs from the stored one is returned: a price stored while it
+/// was unknown (or known only after the run) is refreshed by choosing the model again.
+fn changed_choice(picked: AssetChoice, current: &AssetChoice) -> Option<AssetChoice> {
+    let same = picked.provider == current.provider && picked.model == current.model && picked.unit == current.unit && picked.pricing == current.pricing;
+    (!same).then_some(picked)
 }
 
 /// The inside of the open list; the choice when a row is clicked.
@@ -293,7 +322,7 @@ fn list(ui: &mut Ui, search_id: Id, kind: AssetKind, current: &AssetChoice, view
         );
     }
     let mut rows = entries(view, &query);
-    if rows.len() == 1 && !view.providers.is_empty() {
+    if nothing_matches(view, rows.len(), &query) {
         words(ui, &tr("No model matches that."), t.text_dim);
     }
     let cut = rows.len().saturating_sub(MAX_ROWS);
@@ -333,6 +362,12 @@ fn list(ui: &mut Ui, search_id: Id, kind: AssetKind, current: &AssetChoice, view
         asking(ui);
     }
     picked
+}
+
+/// Whether to say that nothing matches the words typed: some were typed, a provider has lists, and
+/// no row but "Off" is left.
+fn nothing_matches(view: &ModelsView, rows: usize, query: &str) -> bool {
+    rows == 1 && !view.providers.is_empty() && !query.trim().is_empty()
 }
 
 /// "Off" alone, for when there is nothing to choose from.
@@ -432,6 +467,55 @@ mod tests {
         let other = AssetChoice { provider: Some("a-fork".into()), ..c };
         assert_eq!(choice_words(&other, None), "a-fork · Model 1", "the id stands in for a provider nobody knows");
         assert_eq!(choice_words(&AssetChoice::off(), None), "Off");
+    }
+
+    #[test]
+    fn picking_the_chosen_model_again_changes_nothing_unless_its_price_differs() {
+        let listed = model("m1", "Model 1", Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.5) });
+        let pick = chosen(&provider(Vec::new()), &listed);
+        // The same choice: nothing to save.
+        assert_eq!(changed_choice(pick.clone(), &pick), None);
+        // Stored while the price was unknown, or known only after the run: the listed price replaces it.
+        for stale in [Pricing::Unknown, Pricing::After { unit: Unit::Usd }] {
+            let stored = AssetChoice { pricing: stale, ..pick.clone() };
+            assert_eq!(changed_choice(pick.clone(), &stored), Some(pick.clone()), "the model's current price is stored");
+        }
+        // Another model, another provider and Off are changes whatever the price.
+        assert!(changed_choice(chosen(&provider(Vec::new()), &model("m2", "Model 2", listed.pricing.clone())), &pick).is_some());
+        assert!(changed_choice(AssetChoice::off(), &pick).is_some());
+        assert_eq!(changed_choice(AssetChoice::off(), &AssetChoice::off()), None);
+    }
+
+    #[test]
+    fn while_the_lists_are_asked_for_again_a_provider_whose_key_is_gone_is_not_offered() {
+        let other = ProviderModels { provider: "scenario".into(), name: "Scenario".into(), unit: Unit::Credits, ..provider(Vec::new()) };
+        let view = |loading| ModelsView { fetched_ms: 1, providers: vec![provider(Vec::new()), other.clone()], loading };
+        let keys = |fal: bool, scenario: bool| BTreeMap::from([("fal".to_string(), fal), ("scenario".to_string(), scenario)]);
+        let names = |v: Option<Cow<'_, ModelsView>>| v.map(|v| v.providers.iter().map(|p| p.provider.clone()).collect::<Vec<_>>());
+        // A request is running and the fal.ai key was just removed.
+        assert_eq!(names(offered(Some(&view(true)), Some(&keys(false, true)))), Some(vec!["scenario".to_string()]));
+        // Nothing is running: the lists are what the providers last said, whatever the keys say now.
+        assert_eq!(names(offered(Some(&view(false)), Some(&keys(false, true)))).map(|n| n.len()), Some(2));
+        // Keys not checked yet, or every key there: the view is shown as it is, without copying it.
+        assert!(matches!(offered(Some(&view(true)), None), Some(Cow::Borrowed(_))));
+        assert!(matches!(offered(Some(&view(true)), Some(&keys(true, true))), Some(Cow::Borrowed(_))));
+        // A provider the key table does not know is kept.
+        assert_eq!(names(offered(Some(&view(true)), Some(&BTreeMap::new()))).map(|n| n.len()), Some(2));
+        assert!(offered(None, Some(&keys(true, true))).is_none());
+        // Everything but "loading" and the providers comes along.
+        let loading = view(true);
+        let kept = offered(Some(&loading), Some(&keys(false, true))).unwrap();
+        assert_eq!((kept.fetched_ms, kept.loading), (1, true));
+    }
+
+    #[test]
+    fn nothing_matches_is_said_only_for_words_that_were_typed() {
+        let view = ModelsView { fetched_ms: 1, providers: vec![provider(vec![model("m", "M", Pricing::Unknown)])], loading: false };
+        assert!(nothing_matches(&view, 1, "zzz"), "only Off is left for what was typed");
+        assert!(!nothing_matches(&view, 1, ""), "nothing was typed");
+        assert!(!nothing_matches(&view, 1, "   "), "blanks are nothing");
+        assert!(!nothing_matches(&view, 3, "m"), "some rows match");
+        assert!(!nothing_matches(&ModelsView { fetched_ms: 1, ..Default::default() }, 1, "zzz"), "no provider has a key: that has its own note");
     }
 
     #[test]

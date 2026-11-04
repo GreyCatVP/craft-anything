@@ -3,6 +3,7 @@
 //! approval cards, and a box to ask for changes. Technical detail (each tool the agent used)
 //! stays folded away in Simple mode.
 
+use crate::asset_picker::{asset_picker_sized, type_title};
 use crate::i18n::{tr, trf};
 use crate::make::{self, resolve_target};
 use crate::state::{FeedItem, MakeDraft, Modal, PlanStatus, PlanStep, Screen, UserItem};
@@ -12,9 +13,15 @@ use craft_anything_ai::AgentEvent;
 use craft_anything_ai::rebuild::activity::{Action, ActivityNow, LineKind};
 use craft_anything_ai::rebuild::feed::{self, apply};
 use craft_anything_ai::rebuild::{self, AppKind, KindRegistry, KindWords, Note, RebuildRun, RunEvent, RunOptions, Started, Step, Stopped, TargetKind};
+use craft_anything_engine::asset_choice::AssetChoice;
 use craft_anything_engine::inbox::{Answer, Inbox, Request, RequestKind};
-use craft_anything_engine::workspace::{CheckResult, ProjectAssets, Status, TargetRef, Workspace, suggest_name};
+use craft_anything_engine::settings::AssetSettings;
+use craft_anything_engine::tools::asset_tools::limit_applies;
+use craft_anything_engine::workspace::{CheckResult, ProjectAssets, Status, TargetRef, TypeAssets, TypeUsage, Workspace, suggest_name, type_usage};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{Pricing, Unit};
 use egui::{Color32, Margin, RichText, Ui, Vec2};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 // ---- controller -------------------------------------------------------------------------------
@@ -91,10 +98,6 @@ impl CraftApp {
             let now = craft_anything_engine::inbox::now_ms();
             ws.set_person(|m| {
                 m.assets = ProjectAssets::from_defaults(&assets, now);
-                // Temporary: the asset tools and the project panel still check one dollar budget, so
-                // it starts at Settings' dollar limit as before; Tasks 10 and 14 of the per-type
-                // assets plan drop it.
-                m.assets.legacy_budget_usd = Some(assets.default_limit(craft_anything_engines::assets::model::Unit::Usd));
                 m.generate_assets = generate;
                 // Picked on Make: its later changes are built by it too.
                 m.builder = draft.ai;
@@ -525,6 +528,24 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
     });
 }
 
+/// What an asset type has used, with the choice it was counted for. A choice made since (another
+/// provider, unit or start of the count) makes this stale, and then it is not shown as the type's
+/// usage: the numbers of one provider must never appear in another's unit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CountedUsage {
+    pub provider: String,
+    pub unit: Unit,
+    pub since_ms: u64,
+    pub usage: TypeUsage,
+}
+
+impl CountedUsage {
+    /// Whether this was counted for `t`'s choice.
+    fn is_for(&self, t: &TypeAssets) -> bool {
+        t.choice.provider.as_deref() == Some(self.provider.as_str()) && t.choice.unit == self.unit && t.since_ms == self.since_ms
+    }
+}
+
 /// What the Project screen shows from the project's files, read on a worker when the project
 /// opens and as its run reports (at most once a second), never while drawing: a slow or offline
 /// drive must not freeze the window.
@@ -537,8 +558,9 @@ pub struct Facts {
     pub program: bool,
     /// Pictures of the original to match.
     pub references: usize,
-    /// Generated assets: how many, what they cost.
-    pub assets: (usize, f64),
+    /// What each asset type that has a provider has used, in the unit of that provider, counted for
+    /// the choice it had when this was read. Empty while `assets_error` is set.
+    pub asset_usage: BTreeMap<AssetKind, CountedUsage>,
     /// Why spending could not be read; an unreadable ledger must not appear as zero spending.
     pub assets_error: Option<String>,
     /// The builder's open questions, most important first.
@@ -547,21 +569,29 @@ pub struct Facts {
 
 impl Facts {
     /// Read project facts on a worker, keeping ledger failures distinct from an empty history.
-    pub fn read(ws: &Workspace, godot: Option<&Path>) -> Facts {
+    /// `assets` is Settings' asset table, which fills in a type the project has not chosen yet.
+    pub fn read(ws: &Workspace, godot: Option<&Path>, assets: &AssetSettings) -> Facts {
         let dir = ws.app_dir();
-        let (assets, assets_error) = match ws.try_assets() {
-            // Summed from +0.0: an empty f64 `sum()` is -0.0, shown as "$-0.00". Temporary: this
-            // adds dollars and credits as plain numbers, until Task 14 of the per-type assets plan
-            // shows each type's own usage in its own unit.
-            Ok(records) => ((records.len(), records.iter().fold(0.0, |sum, record| sum + record.amount.unwrap_or(0.0))), None),
-            Err(error) => ((0, 0.0), Some(error.for_people())),
+        let (asset_usage, assets_error) = match ws.try_assets() {
+            Ok(records) => {
+                let counted = AssetKind::ALL
+                    .into_iter()
+                    .filter_map(|kind| {
+                        let t = ws.manifest.assets.effective(kind, assets);
+                        let provider = t.choice.provider.clone()?;
+                        Some((kind, CountedUsage { provider, unit: t.choice.unit, since_ms: t.since_ms, usage: type_usage(&records, kind, &t) }))
+                    })
+                    .collect();
+                (counted, None)
+            }
+            Err(error) => (BTreeMap::new(), Some(error.for_people())),
         };
         Facts {
             root: ws.root.clone(),
             site: rebuild::site_dir(&dir).is_some(),
             program: rebuild::launch(&dir, godot).is_some(),
             references: ws.references().len(),
-            assets,
+            asset_usage,
             assets_error,
             open_questions: craft_anything_ai::rebuild::self_check::open_questions(ws).into_iter().map(|u| u.question).collect(),
         }
@@ -582,6 +612,18 @@ impl CraftApp {
         self.facts_reader.wanted = true;
     }
 
+    /// The model lists are asked for again each time the Project screen opens (those read lately
+    /// are kept), in the background: its asset rows' pickers draw what is there meanwhile.
+    pub(crate) fn watch_project_page(&mut self) {
+        let showing = self.state.screen == Screen::Project && self.workspace.is_some();
+        if showing != self.project_page_open {
+            self.project_page_open = showing;
+            if showing {
+                self.refresh_stale_asset_models();
+            }
+        }
+    }
+
     /// Start a wanted read when none is under way and the last began a second ago or more.
     pub(crate) fn read_facts(&mut self, ctx: &egui::Context) {
         const EVERY: std::time::Duration = std::time::Duration::from_secs(1);
@@ -592,9 +634,10 @@ impl CraftApp {
             return;
         }
         let godot = self.game_engines.as_ref().and_then(|i| i.best(craft_anything_engines::game::Builder::Godot)).map(|i| i.program.clone());
+        let assets = self.settings.assets.clone();
         r.wanted = false;
         r.at = Some(std::time::Instant::now());
-        r.job = Some(self.jobs.spawn("Read the project", false, move |_| Ok(Done::Facts(Facts::read(&ws, godot.as_deref())))));
+        r.job = Some(self.jobs.spawn("Read the project", false, move |_| Ok(Done::Facts(Facts::read(&ws, godot.as_deref(), &assets)))));
     }
 
     pub(crate) fn facts_read(&mut self, job: u64, facts: Option<Facts>) {
@@ -606,24 +649,9 @@ impl CraftApp {
         }
     }
 
-    /// What "Raise the budget" adds: the default budget from Settings (or $5 when that is 0).
-    pub(crate) fn asset_budget_step(&self) -> f64 {
-        let b = self.settings.assets.default_limit(craft_anything_engines::assets::model::Unit::Usd);
-        if b > 0.0 { b } else { craft_anything_engine::workspace::ASSET_BUDGET_USD }
-    }
-
-    /// Give the open project another [`Self::asset_budget_step`] for generated assets, through
-    /// the project_assets_budget tool.
-    fn raise_asset_budget(&mut self) {
-        let step = self.asset_budget_step();
-        let Some(ws) = self.workspace.as_ref() else { return };
-        let params = serde_json::json!({"project": ws.root});
-        self.change_assets("project_assets_budget", params, tr("Raise the asset budget"), Some(step));
-    }
-
     /// Save through the engine, then reload on the same worker. Disable further asset edits
     /// until the saved settings arrive, so a second click never starts from an old value.
-    pub(crate) fn change_assets(&mut self, tool: &'static str, mut params: serde_json::Value, title: String, budget_step: Option<f64>) {
+    pub(crate) fn change_assets(&mut self, tool: &'static str, params: serde_json::Value, title: String) {
         if self.asset_change_job.is_some() {
             return;
         }
@@ -632,13 +660,7 @@ impl CraftApp {
         self.asset_change_job = Some(self.jobs.spawn(title, false, move |_| {
             let result = (|| {
                 let root = root.as_deref().unwrap_or(Path::new(""));
-                if let Some(step) = budget_step {
-                    // A CLI or another app can change this budget while the sidebar is open.
-                    // Raising starts from disk; an explicit Save still sets the typed amount.
-                    let ws = Workspace::open(root)?;
-                    params["budget_usd"] =
-                        serde_json::json!((ws.manifest.legacy_budget_usd() + step).min(craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD));
-                }
+                // As the person: the app's own click, which the tools apply without asking.
                 engine.call(
                     tool,
                     params,
@@ -657,6 +679,8 @@ impl CraftApp {
             Ok(saved) => {
                 if let Some(ws) = self.workspace.as_mut().filter(|ws| ws.root == saved.root) {
                     ws.manifest = saved.manifest;
+                    // The person changed this: what it counts is read again now, not within a second.
+                    self.facts_reader.at = None;
                     self.refresh_side_panel();
                 }
                 self.refresh_projects();
@@ -666,100 +690,332 @@ impl CraftApp {
     }
 }
 
-/// Every project's provider permissions and shared asset budget, separate from coding-agent cost.
+// ---- generated assets in the side panel ---------------------------------------------------------
+
+/// What the person changed in one asset type's row. It is made through the project tools, as every
+/// change to a project's assets is (see [`edit_call`]).
+#[derive(Debug, Clone, PartialEq)]
+enum AssetEdit {
+    /// Another provider and model, or Off.
+    Choose(AssetChoice),
+    /// Another limit, in the unit of the type's provider.
+    Limit(f64),
+    /// The type's limit switched on or off.
+    LimitOn(bool),
+}
+
+/// The tool call that makes `edit` to `kind` in the project at `root`: the tool, its parameters and
+/// the title of the job that runs it.
+fn edit_call(root: &Path, kind: AssetKind, edit: AssetEdit) -> (&'static str, serde_json::Value, String) {
+    let title = tr("Save asset settings");
+    match edit {
+        // Off has no model, name, unit or price to give.
+        AssetEdit::Choose(AssetChoice { provider: None, .. }) => {
+            ("project_assets_choose", serde_json::json!({"project": root, "kind": kind, "provider": null}), title)
+        }
+        AssetEdit::Choose(c) => (
+            "project_assets_choose",
+            serde_json::json!({"project": root, "kind": kind, "provider": c.provider, "model": c.model, "model_name": c.model_name, "unit": c.unit, "pricing": c.pricing}),
+            title,
+        ),
+        AssetEdit::Limit(limit) => ("project_assets_limit", serde_json::json!({"project": root, "kind": kind, "limit": limit}), title),
+        AssetEdit::LimitOn(on) => ("project_assets_limit", serde_json::json!({"project": root, "kind": kind, "enabled": on}), title),
+    }
+}
+
+/// What the panel knows of an asset type's usage.
+#[derive(Debug, PartialEq)]
+enum Used<'a> {
+    /// Not read yet, or read for another choice than the project has now.
+    Reading,
+    /// The ledger could not be read, for this reason. Never shown as nothing used.
+    Unreadable(&'a str),
+    Counted(TypeUsage),
+}
+
+/// `kind`'s usage under `t` from the facts read earlier: only if they are this project's, and were
+/// counted for this provider, unit and start.
+fn used_of<'a>(facts: &'a Facts, ws: &Workspace, kind: AssetKind, t: &TypeAssets) -> Used<'a> {
+    if facts.root != ws.root {
+        return Used::Reading;
+    }
+    if let Some(error) = &facts.assets_error {
+        return Used::Unreadable(error);
+    }
+    match facts.asset_usage.get(&kind) {
+        Some(counted) if counted.is_for(t) => Used::Counted(counted.usage),
+        _ => Used::Reading,
+    }
+}
+
+/// A number of credits: "120", "0.5", "under 0.01".
+fn credits_words(x: f64) -> String {
+    if x > 0.0 && x < 0.005 {
+        return tr("under 0.01");
+    }
+    format!("{x:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// What has been used, in the unit's own look: "$0.40" for dollars, a plain number for credits.
+fn used_words(unit: Unit, x: f64) -> String {
+    match unit {
+        Unit::Usd => tr(&craft_anything_engines::assets::usd(x)),
+        Unit::Credits => credits_words(x),
+    }
+}
+
+/// A limit as its field shows it: "$5.00", or "500".
+fn limit_text(unit: Unit, x: f64) -> String {
+    match unit {
+        Unit::Usd => format!("${x:.2}"),
+        Unit::Credits => credits_words(x),
+    }
+}
+
+/// The limit typed in its field: a number (a dollar amount may start with "$") that a limit in
+/// `unit` can be.
+fn parse_limit(text: &str, unit: Unit) -> Option<f64> {
+    let x = text.trim().trim_start_matches('$').trim().parse::<f64>().ok()?;
+    unit.accepts(x).then_some(x)
+}
+
+/// What the person is told when a limit they typed is not one.
+fn limit_hint(unit: Unit) -> String {
+    let max = format!("{:.0}", unit.max_amount());
+    let words = match unit {
+        Unit::Usd => tr("dollars"),
+        Unit::Credits => tr("credits"),
+    };
+    trf("Enter an amount from 0 to {max} {unit}.", &[("max", &max), ("unit", &words)])
+}
+
+/// Why a type's limit does or does not hold, for the hover over its switch and field.
+fn limit_state_words(ws: &Workspace, t: &TypeAssets) -> String {
+    tr(if ws.manifest.assets.ignore_budget {
+        "Ignore budget is on, so no limit applies. What is used is still counted."
+    } else if t.limit_on {
+        "The limit is on: you are asked before this goes past it."
+    } else {
+        "The limit is off: nothing stops this, and what is used is still counted."
+    })
+}
+
+/// A thin line between two rows.
+fn rule(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover());
+    ui.painter().hline(rect.x_range(), rect.center().y, egui::Stroke::new(1.0, t.card_border));
+}
+
+/// The room the limit's switch has beside the picker, kept for every row so the pickers line up.
+const SWITCH_SLOT: f32 = 32.0;
+
+/// The limit's amount field, for `stored`. What is typed is applied when the field is left (Enter,
+/// Tab or a click elsewhere); Esc puts the stored limit back. Returns the new limit when one was
+/// typed, and whether the text now in the field is not a limit.
+fn limit_field(ui: &mut Ui, id: egui::Id, name: &str, unit: Unit, stored: f64, saving: bool, dim: bool) -> (Option<f64>, bool) {
+    let t = Tokens::get(ui.ctx());
+    // Being typed in: it has the focus, or lost it a moment ago (the frame in which another field was
+    // clicked is the last in which this one has to apply what was typed).
+    let editing = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+    let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| limit_text(unit, stored));
+    // The stored limit is what is shown, except while it is being typed or its change is being saved.
+    if !editing && !saving {
+        text = limit_text(unit, stored);
+    }
+    // Esc in this field is for the field: it puts the stored limit back and leaves it. Left to egui,
+    // it would drop the focus and then take the person back to Home (`shortcuts` takes an Esc with
+    // no field focused to mean that).
+    if ui.memory(|m| m.has_focus(id)) && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        text = limit_text(unit, stored);
+        ui.memory_mut(|m| m.surrender_focus(id));
+    }
+    let color = if dim { t.text_faint } else { t.text };
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .font(egui::FontId::proportional(theme::CAPTION))
+            .text_color(color)
+            .horizontal_align(egui::Align::RIGHT)
+            .desired_width(54.0)
+            .frame(widgets::text_field_frame(&t).inner_margin(Margin::symmetric(6, 3))),
+    );
+    widgets::named(response.clone(), name);
+    if response.has_focus() {
+        // The field's own filter, plus Esc: set after the field's, which sets its own each frame.
+        let keys = egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, escape: true, ..Default::default() };
+        ui.memory_mut(|m| m.set_focus_lock_filter(id, keys));
+    }
+    let mut typed = None;
+    if response.lost_focus() {
+        match parse_limit(&text, unit) {
+            Some(x) if x != stored => typed = Some(x),
+            _ => text = limit_text(unit, stored),
+        }
+    }
+    let invalid = response.has_focus() && parse_limit(&text, unit).is_none();
+    ui.data_mut(|d| d.insert_temp(id, text));
+    (typed, invalid)
+}
+
+/// One asset type in the panel's table: its name, what it has used against its limit (an amount
+/// field in the provider's unit), the provider and model it is made with, and the limit's switch.
+/// Reads memory only; what the person changes is returned.
+fn asset_row(app: &CraftApp, ui: &mut Ui, ws: &Workspace, kind: AssetKind, saving: bool) -> Option<AssetEdit> {
+    let t = Tokens::get(ui.ctx());
+    let stored = ws.manifest.assets.effective(kind, &app.settings.assets);
+    let (unit, tracked) = (stored.choice.unit, stored.choice.pricing.tracked());
+    let applies = limit_applies(ws, &stored);
+    let title = tr(type_title(kind));
+    let id = egui::Id::new(("project-asset", &ws.root, kind.id()));
+    let faint = |text: String| RichText::new(text).size(theme::CAPTION).color(t.text_faint);
+    let mut edit = None;
+    let mut invalid = false;
+
+    // The first line: the type, and what it has used against its limit.
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if stored.choice.provider.is_none() {
+                ui.label(faint("–".into()));
+            } else {
+                let used = used_of(&app.facts, ws, kind, &stored);
+                // Right to left: the unit, the limit, then what is used.
+                if tracked {
+                    if unit == Unit::Credits {
+                        ui.label(faint(tr("credits")));
+                    }
+                    let name = trf("{type} limit", &[("type", &title)]);
+                    let (typed, bad) = limit_field(ui, id.with("limit"), &name, unit, stored.limit, saving, !applies);
+                    invalid = bad;
+                    if let Some(x) = typed {
+                        edit = Some(AssetEdit::Limit(x));
+                    }
+                }
+                let (words, warn, tip) = match &used {
+                    Used::Reading => ("…".to_string(), false, tr("Reading what this has used…")),
+                    Used::Unreadable(error) => (tr("unreadable"), true, (*error).to_string()),
+                    Used::Counted(u) if tracked => {
+                        let over = applies && u.amount >= stored.limit;
+                        let plus = if u.cost_missing { "+" } else { "" };
+                        let tip = if u.cost_missing {
+                            tr("At least this much: the cost of an earlier one could not be read.")
+                        } else {
+                            trf("{n} made so far", &[("n", &u.generations.to_string())])
+                        };
+                        (format!("{}{plus}", used_words(unit, u.amount)), over || u.cost_missing, tip)
+                    }
+                    Used::Counted(u) => {
+                        (trf("{n} made", &[("n", &u.generations.to_string())]), false, tr("This model's price is unknown, so what these cost is not counted."))
+                    }
+                };
+                let words = if tracked { format!("{words} /") } else { words };
+                let color = if warn { t.warning } else { t.text_dim };
+                ui.label(RichText::new(words).size(theme::CAPTION).color(color)).on_hover_text(tip);
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(RichText::new(&title).font(theme::medium(theme::SMALL)).color(t.text)).truncate());
+            });
+        });
+    });
+    if invalid {
+        ui.add(egui::Label::new(RichText::new(limit_hint(unit)).size(theme::CAPTION).color(t.warning)).wrap());
+    }
+
+    // The second line: the provider and model, and the limit's switch.
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let width = (ui.available_width() - SWITCH_SLOT - ui.spacing().item_spacing.x).max(120.0);
+        let view = crate::asset_picker::offered(app.asset_models.get(&kind), app.asset_keys.as_ref());
+        if let Some(choice) = asset_picker_sized(ui, id.with("picker"), kind, &stored.choice, view.as_deref(), width) {
+            edit = Some(AssetEdit::Choose(choice));
+        }
+        // A type that is Off, or whose price is unknown, has no limit to switch.
+        if stored.choice.provider.is_some() && tracked {
+            let mut on = stored.limit_on;
+            let name = trf("{type} limit switch", &[("type", &title)]);
+            let response = widgets::named(widgets::toggle(ui, &mut on, ""), &name).on_hover_text(limit_state_words(ws, &stored));
+            if response.changed() {
+                edit = Some(AssetEdit::LimitOn(on));
+            }
+        }
+    });
+    edit
+}
+
+/// The lines under the table, one for each type that needs one: a price that is unknown (so its
+/// usage is not tracked), a limit that a model priced only after the run can pass by one generation,
+/// and a provider that has no key. Each is a sentence and whether it is a warning.
+fn asset_notes(app: &CraftApp, ws: &Workspace) -> Vec<(String, bool)> {
+    let mut notes = Vec::new();
+    for kind in AssetKind::ALL {
+        let t = ws.manifest.assets.effective(kind, &app.settings.assets);
+        let Some(provider) = &t.choice.provider else { continue };
+        let type_name = tr(type_title(kind));
+        if !t.choice.pricing.tracked() {
+            notes.push((trf("{type}: price unknown, usage not tracked", &[("type", &type_name)]), true));
+        } else if matches!(t.choice.pricing, Pricing::After { .. }) && limit_applies(ws, &t) {
+            notes.push((trf("{type}: may pass the limit by one generation", &[("type", &type_name)]), false));
+        }
+        if app.asset_keys.as_ref().and_then(|keys| keys.get(provider.as_str())) == Some(&false) {
+            let name = app.asset_providers.get(provider).map_or_else(|| provider.clone(), |p| p.name().to_string());
+            notes.push((trf("{type}: no {name} key", &[("type", &type_name), ("name", &name)]), true));
+        }
+    }
+    notes
+}
+
+/// The project's generated assets: the master switch, "Ignore budget", and a row for each asset
+/// type with its usage, limit, provider and model. Reads memory only (`ws.manifest.assets` and the
+/// usage read on a worker, in `app.facts`); every change goes through the project tools.
 fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     let t = Tokens::get(ui.ctx());
     widgets::caption(ui, "Generated assets");
     ui.add_space(4.0);
-    // The session's registry, so providers a fork registers can be turned on and off here too.
-    let providers = app.asset_providers.clone();
     let saving = app.asset_change_job.is_some();
     let running = ws.manifest.generate_assets;
+    let mut calls = Vec::new();
     ui.add_enabled_ui(!saving, |ui| {
-        // The master switch is separate from the provider choices: pausing and resuming keeps them.
+        // The master switch is separate from the choices below: pausing and resuming keeps them.
         let mut on = running;
         if widgets::toggle(ui, &mut on, "Generate pictures, models and audio").changed() {
             let title = tr(if on { "Allow generated assets" } else { "Stop generated assets" });
-            // Missing keys don't block the choice: each provider says "Key needed" below.
-            app.act("project_assets_allow", serde_json::json!({"project": ws.root, "allow": on}), title);
+            calls.push(("project_assets_allow", serde_json::json!({"project": ws.root, "allow": on}), title));
         }
         if !running {
-            widgets::caption(ui, "Off. Turning this on uses the providers chosen below.");
+            widgets::caption(ui, "Off. Turning this on uses the choices below.");
         }
-        // Paused, the toggles show the stored choices without changing them: enabling a provider
-        // while paused starts it alone (project_assets_allow), which would drop the others.
-        ui.add_enabled_ui(running, |ui| {
-            for provider in providers.ids().into_iter().filter_map(|id| providers.get(id)) {
-                let mut chosen = ws.manifest.asset_provider_chosen(provider.id());
-                ui.horizontal(|ui| {
-                    if widgets::toggle(ui, &mut chosen, provider.name()).changed() {
-                        app.act(
-                            "project_assets_allow",
-                            serde_json::json!({"project": ws.root, "provider": provider.id(), "allow": chosen}),
-                            tr("Save asset settings"),
-                        );
-                    }
-                    if app.asset_keys.as_ref().and_then(|keys| keys.get(provider.id())) == Some(&false) {
-                        ui.label(RichText::new(tr("Key needed")).color(t.text_dim).size(theme::SMALL));
-                    }
-                });
+        let mut ignore = ws.manifest.assets.ignore_budget;
+        let switch = widgets::toggle(ui, &mut ignore, "Ignore budget (no limits)")
+            .on_hover_text(tr("Every limit in this project is off while this is on. What is used is still counted and shown."));
+        if switch.changed() {
+            calls.push(("project_assets_allow", serde_json::json!({"project": ws.root, "ignore_budget": ignore}), tr("Save asset settings")));
+        }
+        ui.add_space(6.0);
+        for kind in AssetKind::ALL {
+            rule(ui);
+            ui.add_space(4.0);
+            if let Some(edit) = asset_row(app, ui, ws, kind, saving) {
+                calls.push(edit_call(&ws.root, kind, edit));
             }
-        });
+            ui.add_space(4.0);
+        }
+        rule(ui);
+        ui.add_space(4.0);
+        for (note, warning) in asset_notes(app, ws) {
+            ui.add(egui::Label::new(RichText::new(note).size(theme::CAPTION).color(if warning { t.warning } else { t.text_dim })).wrap());
+        }
     });
+    if let Some((tool, params, title)) = calls.into_iter().next() {
+        app.act(tool, params, title);
+    }
     if widgets::link(ui, "Manage provider keys").clicked() {
         app.state.modal = Some(Modal::Assets);
     }
-    let facts_match = app.facts.root == ws.root;
-    let assets = (facts_match && app.facts.assets_error.is_none()).then_some(app.facts.assets);
-    if let Some(error) = app.facts.assets_error.as_deref().filter(|_| facts_match) {
+    if let Some(error) = app.facts.assets_error.as_deref().filter(|_| app.facts.root == ws.root) {
         ui.label(RichText::new(tr("Asset spending is unavailable. Repair assets.json before generating.")).color(t.warning).size(theme::SMALL))
             .on_hover_text(error);
     }
-    ui.add_space(6.0);
-    let budget = ws.manifest.legacy_budget_usd();
-    let (count, spent, remaining) = assets.map_or_else(
-        || ("…".to_string(), "…".to_string(), "…".to_string()),
-        |(count, spent)| (count.to_string(), format!("{spent:.2}"), format!("{:.2}", (budget - spent).max(0.0))),
-    );
-    let amount = trf("Assets: {n} · estimated spent ${spent}", &[("n", &count), ("spent", &spent)]);
-    ui.label(RichText::new(amount).font(theme::mono(12.5)).color(if assets.is_some_and(|(_, spent)| spent >= budget) { t.warning } else { t.text_dim }));
-    ui.label(
-        RichText::new(trf("Budget ${budget} · remaining ${remaining}", &[("budget", &format!("{budget:.2}")), ("remaining", &remaining)]))
-            .font(theme::mono(12.5))
-            .color(t.text_dim),
-    );
-    ui.add_enabled_ui(!saving, |ui| {
-        let id = egui::Id::new(("project-asset-budget", &ws.root));
-        let mut draft: (f64, String) = ui.data(|data| data.get_temp(id)).unwrap_or_else(|| (budget, budget.to_string()));
-        if draft.0 != budget {
-            draft = (budget, budget.to_string());
-        }
-        widgets::caption(ui, "Shared asset budget (USD)");
-        ui.horizontal(|ui| {
-            widgets::named(
-                ui.add(egui::TextEdit::singleline(&mut draft.1).desired_width(100.0).frame(widgets::text_field_frame_compact(&t))),
-                "Asset budget in USD",
-            );
-            let value =
-                draft.1.trim().parse::<f64>().ok().filter(|v| v.is_finite() && (0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD).contains(v));
-            if ui.add_enabled(value.is_some_and(|v| v != budget), egui::Button::new(tr("Save budget"))).clicked()
-                && let Some(value) = value
-            {
-                app.act("project_assets_budget", serde_json::json!({"project": ws.root, "budget_usd": value}), tr("Save asset settings"));
-            }
-        });
-        if !draft.1.trim().parse::<f64>().is_ok_and(|v| v.is_finite() && (0.0..=craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD).contains(&v)) {
-            widgets::caption(
-                ui,
-                &trf("Enter an amount from 0 to {max} USD.", &[("max", format!("{:.0}", craft_anything_engine::workspace::MAX_ASSET_BUDGET_USD).as_str())]),
-            );
-        }
-        ui.data_mut(|data| data.insert_temp(id, draft));
-        let step = craft_anything_engines::assets::usd(app.asset_budget_step());
-        if widgets::link(ui, &trf("Raise the budget by {amount}", &[("amount", &step)])).clicked() {
-            app.raise_asset_budget();
-        }
-    });
     if saving {
         widgets::caption(ui, "Saving asset settings…");
     }
@@ -1975,79 +2231,320 @@ mod tests {
     use super::*;
     use craft_anything_ai::AgentEvent;
 
-    /// A broken ledger is shown as unavailable until repaired, never as an empty spending history.
-    #[test]
-    fn asset_sidebar_reports_a_broken_ledger_without_resetting_spending() {
-        use egui_kittest::{Harness, kittest::Queryable};
+    // ---- the generated-assets table ------------------------------------------------------------
+
+    use craft_anything_engine::workspace::AssetRecord;
+    use craft_anything_engines::assets::model::Rate;
+
+    /// The width of the side panel's content: its 300 points less the margin on each side.
+    const PANEL: f32 = 260.0;
+
+    fn chosen(provider: &str, model: &str, name: &str, unit: Unit, pricing: Pricing) -> AssetChoice {
+        AssetChoice { provider: Some(provider.into()), model: model.into(), model_name: name.into(), unit, pricing }
+    }
+
+    fn quoted(credits: f64) -> Pricing {
+        Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(credits) } }
+    }
+
+    /// A generation as the ledger holds it; no amount means the provider reported no cost.
+    fn made(kind: &str, provider: &str, unit: Unit, amount: Option<f64>, at_ms: u64) -> AssetRecord {
+        AssetRecord {
+            file: format!("{kind}-{at_ms}"),
+            kind: kind.into(),
+            prompt: "p".into(),
+            provider: provider.into(),
+            model: "m".into(),
+            amount,
+            unit: Some(unit),
+            cost_missing: false,
+            at_ms,
+        }
+    }
+
+    /// A project whose types are `types` (kind, choice, limit, limit switch), counted from the start.
+    fn project_with(types: &[(AssetKind, AssetChoice, f64, bool)]) -> (tempfile::TempDir, Workspace) {
         let dir = tempfile::tempdir().unwrap();
-        let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let mut ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        ws.set_person(|m| {
+            m.generate_assets = true;
+            for (kind, choice, limit, on) in types {
+                m.assets.types.insert(*kind, TypeAssets { choice: choice.clone(), limit: *limit, limit_on: *on, since_ms: 0 });
+            }
+        })
+        .unwrap();
+        (dir, ws)
+    }
+
+    /// The app, with the facts a worker would have read for `ws`.
+    fn app_for(ws: &Workspace) -> CraftApp {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.facts = Facts::read(ws, None, &app.settings.assets);
+        app
+    }
+
+    /// The panel drawn alone, as wide as the side panel's content.
+    fn panel(app: CraftApp, ws: Workspace) -> egui_kittest::Harness<'static, (CraftApp, Workspace)> {
+        let mut setup = false;
+        egui_kittest::Harness::builder().with_size(egui::vec2(300.0, 1100.0)).build_ui_state(
+            move |ui, (app, ws)| {
+                if !setup {
+                    CraftApp::setup_context(ui.ctx());
+                    setup = true;
+                    return;
+                }
+                ui.set_max_width(PANEL);
+                asset_line(app, ui, ws);
+            },
+            (app, ws),
+        )
+    }
+
+    /// A project with a type of each kind of price, and a ledger to count against them.
+    fn mixed() -> (tempfile::TempDir, Workspace) {
+        let tripo = Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.4) };
+        let (dir, ws) = project_with(&[
+            (AssetKind::Image, chosen("scenario", "model_gemini-3-1", "Gemini 3.1", Unit::Credits, quoted(20.0)), 500.0, true),
+            (AssetKind::Model3d, chosen("fal", "tripo3d/p1/image-to-3d", "Tripo P1", Unit::Usd, tripo), 5.0, false),
+            (AssetKind::Speech, chosen("elevenlabs", "eleven_v3", "Eleven v3", Unit::Credits, Pricing::After { unit: Unit::Credits }), 1000.0, true),
+            (AssetKind::SoundEffect, chosen("fal", "fal-ai/stable-audio", "Stable Audio", Unit::Usd, Pricing::Unknown), 5.0, true),
+        ]);
+        for record in [
+            made("image", "scenario", Unit::Credits, Some(60.0), 1),
+            made("image", "scenario", Unit::Credits, Some(60.0), 2),
+            made("model", "fal", Unit::Usd, Some(0.4), 3),
+            made("sound", "fal", Unit::Usd, None, 4),
+            made("sound", "fal", Unit::Usd, None, 5),
+        ] {
+            ws.record_asset(record).unwrap();
+        }
+        (dir, ws)
+    }
+
+    /// One row for each asset type: its name, what it has used against its limit in the provider's
+    /// own unit, the provider and model, and the limit's switch; a type that is Off has neither
+    /// limit nor switch.
+    #[test]
+    fn the_panel_has_a_row_per_type_with_usage_and_limit() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let (_dir, ws) = mixed();
+        let mut h = panel(app_for(&ws), ws);
+        h.run_steps(3);
+        for title in ["Pictures", "3D models", "Speech", "Sound effects", "Music"] {
+            h.get_by_label(title);
+        }
+        let model = |h: &egui_kittest::Harness<'static, (CraftApp, Workspace)>, title: &str| h.get_by_label(&format!("{title} model")).value();
+        assert_eq!(model(&h, "Pictures").as_deref(), Some("Scenario · Gemini 3.1"));
+        assert_eq!(model(&h, "3D models").as_deref(), Some("fal.ai · Tripo P1"));
+        assert_eq!(model(&h, "Speech").as_deref(), Some("ElevenLabs · Eleven v3"));
+        assert_eq!(model(&h, "Music").as_deref(), Some("Off"));
+        // Used against the limit, each in its own unit: credits are never turned into dollars.
+        h.get_by_label("120 /");
+        h.get_by_label("$0.40 /");
+        h.get_by_label("0 /");
+        assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("500"));
+        assert_eq!(h.get_by_label("3D models limit").value().as_deref(), Some("$5.00"));
+        assert_eq!(h.get_by_label("Speech limit").value().as_deref(), Some("1000"));
+        assert_eq!(h.query_all_by_label("credits").count(), 2, "credits are named once for each type billed in them");
+        // The limit's switch shows whether it is on, and a type that is Off has none.
+        let on = |h: &egui_kittest::Harness<'static, (CraftApp, Workspace)>, title: &str| {
+            h.get_by_label(&format!("{title} limit switch")).accesskit_node().toggled()
+        };
+        assert_eq!(on(&h, "Pictures"), Some(egui::accesskit::Toggled::True));
+        assert_eq!(on(&h, "3D models"), Some(egui::accesskit::Toggled::False));
+        assert!(h.query_by_label("Music limit").is_none() && h.query_by_label("Music limit switch").is_none());
+        // Every row fits the side panel's width.
+        let edge = h.get_by_label("Generated assets").rect().left() + PANEL + 1.0;
+        for label in [
+            "Pictures",
+            "Pictures model",
+            "Pictures limit",
+            "Pictures limit switch",
+            "3D models limit",
+            "Sound effects model",
+            "Speech limit switch",
+            "Music model",
+        ] {
+            let right = h.get_by_label(label).rect().right();
+            assert!(right <= edge, "{label} ends at {right}, beyond the panel's edge at {edge}");
+        }
+        // A project that has made nothing of a type has used none of it.
+        let (_dir, ws) = project_with(&[(AssetKind::Music, chosen("elevenlabs", "music_v1", "Music v1", Unit::Credits, quoted(15.0)), 500.0, true)]);
+        let mut h = panel(app_for(&ws), ws);
+        h.run_steps(3);
+        h.get_by_label("0 /");
+    }
+
+    /// A type whose price is unknown says its usage is not tracked, has no limit to set, and counts
+    /// what it made; a model priced only after the run says its limit may be passed by a generation,
+    /// unless no limit applies.
+    #[test]
+    fn price_unknown_and_after_run_notes_are_shown() {
+        use egui_kittest::kittest::Queryable;
+        let (_dir, ws) = mixed();
+        let mut h = panel(app_for(&ws), ws);
+        h.run_steps(3);
+        h.get_by_label("Sound effects: price unknown, usage not tracked");
+        h.get_by_label("Speech: may pass the limit by one generation");
+        assert!(h.query_by_label_contains("Pictures:").is_none(), "a price that is quoted before each run has nothing to say");
+        assert!(h.query_by_label_contains("3D models:").is_none());
+        assert!(h.query_by_label("Sound effects limit").is_none() && h.query_by_label("Sound effects limit switch").is_none(), "no price, no limit");
+        h.get_by_label("2 made");
+        // With the limit off for the type, nothing can be passed.
+        let (_, ws) = h.state_mut();
+        ws.manifest.assets.types.get_mut(&AssetKind::Speech).unwrap().limit_on = false;
+        h.run_steps(2);
+        assert!(h.query_by_label("Speech: may pass the limit by one generation").is_none(), "no limit, so nothing to pass");
+        h.get_by_label("Sound effects: price unknown, usage not tracked");
+        // With Ignore budget on, no type has a limit to pass either.
+        let (_, ws) = h.state_mut();
+        ws.manifest.assets.types.get_mut(&AssetKind::Speech).unwrap().limit_on = true;
+        h.run_steps(2);
+        h.get_by_label("Speech: may pass the limit by one generation");
+        let (_, ws) = h.state_mut();
+        ws.manifest.assets.ignore_budget = true;
+        h.run_steps(2);
+        assert!(h.query_by_label("Speech: may pass the limit by one generation").is_none());
+        h.get_by_label("Sound effects: price unknown, usage not tracked");
+    }
+
+    /// A broken ledger is shown as unavailable until repaired, never as an empty spending history, and
+    /// is not written over; the limits can still be read and edited meanwhile.
+    #[test]
+    fn a_broken_ledger_is_reported_without_resetting_usage() {
+        use egui_kittest::kittest::Queryable;
+        let (_dir, ws) = project_with(&[
+            (AssetKind::Image, chosen("scenario", "model_gemini-3-1", "Gemini 3.1", Unit::Credits, quoted(20.0)), 500.0, true),
+            (AssetKind::Speech, chosen("elevenlabs", "eleven_v3", "Eleven v3", Unit::Credits, Pricing::After { unit: Unit::Credits }), 1000.0, true),
+        ]);
         let ledger = ws.root.join("assets.json");
         let broken = b"{not-json";
         std::fs::write(&ledger, broken).unwrap();
-        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
-        app.facts = Facts::read(&ws, None);
-        assert!(app.facts.assets_error.is_some());
+        let app = app_for(&ws);
+        assert!(app.facts.assets_error.is_some() && app.facts.asset_usage.is_empty());
         assert_eq!(std::fs::read(&ledger).unwrap(), broken);
-        let mut setup = false;
-        let mut h = Harness::builder().with_size(egui::vec2(320.0, 750.0)).build_ui_state(
-            move |ui, (app, ws)| {
-                if !setup {
-                    CraftApp::setup_context(ui.ctx());
-                    setup = true;
-                    return;
-                }
-                asset_line(app, ui, ws);
-            },
-            (app, ws),
-        );
-        h.run_steps(2);
+        let mut h = panel(app, ws);
+        h.run_steps(3);
         h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
-        h.get_by_label("Assets: … · estimated spent $…");
-        h.get_by_label("Budget $5.00 · remaining $…");
-        assert!(h.query_by_label("Assets: 0 · estimated spent $0.00").is_none());
-        std::fs::write(&ledger, b"[]").unwrap();
+        assert_eq!(h.query_all_by_label("unreadable /").count(), 2, "each type with a provider says its usage can't be read");
+        assert!(h.query_by_label("0 /").is_none(), "an unreadable ledger is not zero");
+        assert!(h.query_by_label("$0.00 /").is_none());
+        assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("500"), "the limit is still there");
+        assert_eq!(std::fs::read(&ledger).unwrap(), broken, "drawing the panel never writes the ledger");
+        // Repaired and read again: the numbers come back.
+        std::fs::write(
+            &ledger,
+            serde_json::to_vec(&serde_json::json!({"version": 1, "records": [made("image", "scenario", Unit::Credits, Some(30.0), 1)]})).unwrap(),
+        )
+        .unwrap();
         let (app, ws) = h.state_mut();
-        app.facts = Facts::read(ws, None);
-        h.run_steps(2);
+        app.facts = Facts::read(ws, None, &app.settings.assets);
+        h.run_steps(3);
         assert!(h.query_by_label("Asset spending is unavailable. Repair assets.json before generating.").is_none());
-        h.get_by_label("Assets: 0 · estimated spent $0.00");
-        h.get_by_label("Budget $5.00 · remaining $5.00");
+        h.get_by_label("30 /");
+        h.get_by_label("0 /");
+        assert!(h.query_by_label("unreadable /").is_none());
     }
 
-    /// Cached spending stays hidden until it belongs to the project displayed by the sidebar.
+    /// Usage read for another project, or counted for another choice than the project has now, is
+    /// never shown as this type's: it reads "…" until the facts are read again.
     #[test]
-    fn asset_sidebar_never_uses_another_projects_cached_spend() {
-        use egui_kittest::{Harness, kittest::Queryable};
-        let dir = tempfile::tempdir().unwrap();
-        let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    fn usage_counted_for_another_project_or_choice_is_never_shown() {
+        use egui_kittest::kittest::Queryable;
+        let (_dir, ws) = mixed();
+        let counted = |provider: &str, unit, since_ms| CountedUsage {
+            provider: provider.into(),
+            unit,
+            since_ms,
+            usage: TypeUsage { amount: 99.0, generations: 4, cost_missing: false },
+        };
         let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
-        app.facts = Facts { root: dir.path().join("previous-project"), assets: (4, 20.0), ..Default::default() };
-        // Render this component directly to exercise the guard independently of the app's
-        // normal pre-draw reset when the open project changes.
-        let mut setup = false;
-        let mut h = Harness::builder().with_size(egui::vec2(320.0, 700.0)).build_ui_state(
-            move |ui, (app, ws)| {
-                if !setup {
-                    CraftApp::setup_context(ui.ctx());
-                    setup = true;
-                    return;
-                }
-                asset_line(app, ui, ws);
-            },
-            (app, ws),
-        );
-        h.run_steps(2);
-        h.get_by_label("Scenario");
-        h.get_by_label("ElevenLabs");
-        h.get_by_label("Save budget");
-        h.get_by_label("Assets: … · estimated spent $…");
-        h.get_by_label("Budget $5.00 · remaining $…");
-        assert!(h.query_by_label("Assets: 4 · estimated spent $20.00").is_none());
+        // The facts of the project that was open before.
+        app.facts = Facts {
+            root: ws.root.with_file_name("previous-project"),
+            asset_usage: [(AssetKind::Image, counted("scenario", Unit::Credits, 0))].into(),
+            ..Default::default()
+        };
+        let mut h = panel(app, ws);
+        h.run_steps(3);
+        assert!(h.query_by_label("99 /").is_none());
+        assert_eq!(h.query_all_by_label("… /").count(), 3, "each type that counts an amount is being read");
+        // This project's facts, but counted before the person chose another provider or unit.
         let (app, ws) = h.state_mut();
-        app.facts = Facts { root: ws.root.clone(), assets: (1, 0.51), ..Default::default() };
-        h.run_steps(2);
-        h.get_by_label("Assets: 1 · estimated spent $0.51");
-        h.get_by_label("Budget $5.00 · remaining $4.49");
+        app.facts = Facts {
+            root: ws.root.clone(),
+            asset_usage: [
+                (AssetKind::Image, counted("fal", Unit::Usd, 0)),
+                (AssetKind::Model3d, counted("fal", Unit::Usd, 77)),
+                (AssetKind::Speech, counted("elevenlabs", Unit::Credits, 0)),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        h.run_steps(3);
+        assert_eq!(h.query_all_by_label("… /").count(), 2, "another provider, or another start: not this type's");
+        h.get_by_label("99 /");
+        assert!(h.query_by_label("$99.00 /").is_none());
+    }
+
+    #[test]
+    fn the_numbers_are_said_in_each_units_own_look() {
+        assert_eq!(
+            (limit_text(Unit::Usd, 5.0).as_str(), limit_text(Unit::Credits, 500.0).as_str(), limit_text(Unit::Credits, 0.5).as_str()),
+            ("$5.00", "500", "0.5")
+        );
+        assert_eq!(
+            (used_words(Unit::Usd, 0.4).as_str(), used_words(Unit::Usd, 0.001).as_str(), used_words(Unit::Usd, 0.0).as_str()),
+            ("$0.40", "under $0.01", "$0.00")
+        );
+        assert_eq!(
+            (used_words(Unit::Credits, 120.0).as_str(), used_words(Unit::Credits, 0.0).as_str(), used_words(Unit::Credits, 0.004).as_str()),
+            ("120", "0", "under 0.01")
+        );
+        // A limit is typed as a number; a dollar amount may start with the sign; nothing else goes.
+        for (text, unit, expected) in [
+            ("750", Unit::Credits, Some(750.0)),
+            (" 2.5 ", Unit::Usd, Some(2.5)),
+            ("$2.50", Unit::Usd, Some(2.5)),
+            ("$ 2.5", Unit::Usd, Some(2.5)),
+            ("0", Unit::Credits, Some(0.0)),
+            ("10000", Unit::Usd, Some(10_000.0)),
+            ("10001", Unit::Usd, None),
+            ("10000000", Unit::Credits, Some(10_000_000.0)),
+            ("10000001", Unit::Credits, None),
+            ("-1", Unit::Credits, None),
+            ("", Unit::Usd, None),
+            ("$", Unit::Usd, None),
+            ("lots", Unit::Credits, None),
+            ("NaN", Unit::Credits, None),
+            ("inf", Unit::Usd, None),
+            ("1e400", Unit::Usd, None),
+            ("5 credits", Unit::Credits, None),
+        ] {
+            assert_eq!(parse_limit(text, unit), expected, "{text:?} in {unit:?}");
+        }
+        assert_eq!(limit_hint(Unit::Usd), "Enter an amount from 0 to 10000 dollars.");
+        assert_eq!(limit_hint(Unit::Credits), "Enter an amount from 0 to 10000000 credits.");
+    }
+
+    /// What the person changes in a row is made through the project tools, with what they take.
+    #[test]
+    fn a_row_edit_is_a_project_tool_call() {
+        let root = Path::new("/p");
+        let gemini = chosen("scenario", "model_gemini-3-1", "Gemini 3.1", Unit::Credits, quoted(20.0));
+        let (tool, params, _) = edit_call(root, AssetKind::Model3d, AssetEdit::Choose(gemini.clone()));
+        assert_eq!(tool, "project_assets_choose");
+        assert_eq!(
+            params,
+            serde_json::json!({"project": "/p", "kind": "model_3d", "provider": "scenario", "model": "model_gemini-3-1", "model_name": "Gemini 3.1", "unit": "credits", "pricing": gemini.pricing})
+        );
+        // Off says nothing else: the tool refuses a model, unit or price with it.
+        let (tool, params, _) = edit_call(root, AssetKind::Image, AssetEdit::Choose(AssetChoice::off()));
+        assert_eq!((tool, params), ("project_assets_choose", serde_json::json!({"project": "/p", "kind": "image", "provider": null})));
+        let (tool, params, _) = edit_call(root, AssetKind::SoundEffect, AssetEdit::Limit(7.5));
+        assert_eq!((tool, params), ("project_assets_limit", serde_json::json!({"project": "/p", "kind": "sound_effect", "limit": 7.5})));
+        let (tool, params, _) = edit_call(root, AssetKind::Music, AssetEdit::LimitOn(false));
+        assert_eq!((tool, params), ("project_assets_limit", serde_json::json!({"project": "/p", "kind": "music", "enabled": false})));
     }
 
     #[test]

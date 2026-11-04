@@ -414,6 +414,14 @@ laid out below the popup's edge, where they could not be hovered or clicked (no 
 and the screen looked fine). Give a list in a popup a fixed height (`min_scrolled_height` equal to
 `max_height`, `auto_shrink` off) and test a search that empties the list and then fills it again.
 
+**Esc in a single-line field took the person back to Home.** egui drops the focus of a single-line
+text field when Esc is pressed, before our `shortcuts` runs, and `shortcuts` reads "no field has focus"
+as "go back to Home" (its test for "Esc was meant for a text field" only holds for a field that asked
+egui to keep Esc). The project panel's limit field would have thrown away what was typed and left the
+project; a test that pressed Esc in it found that. A field where Esc means "cancel my edit" sets
+`memory.set_focus_lock_filter(id, EventFilter { escape: true, .. })` after adding the `TextEdit` (which
+sets its own filter each frame, so a call before it is overwritten) and gives up its own focus.
+
 **A size measured after drawing, used a frame late.** The prompt box's height was measured each
 frame and used to size the feed on the next, so every time it grew or shrank one frame showed it
 100 px too low, and typing looked like flicker. When a layout uses a size from the last frame,

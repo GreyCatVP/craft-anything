@@ -3182,8 +3182,10 @@ fn a_new_project_starts_with_the_asset_defaults_from_settings() {
     assert_eq!(saved.assets.types.len(), 5, "every type is stored, so later changes to Settings leave the project alone");
     settings.assets.defaults.clear();
     assert_eq!(saved.assets.effective(AssetKind::Music, &settings.assets).choice.provider.as_deref(), Some("elevenlabs"));
-    // The old project panel and project_assets_budget still show one dollar budget, so it starts at Settings' dollar limit.
-    assert_eq!(saved.legacy_budget_usd(), 8.0);
+    // Each type carries its own limit (a dollar-billed one starts at Settings' dollar limit); the one
+    // dollar budget of an older project is never written for a new one.
+    assert_eq!(saved.assets.types[&AssetKind::Image].limit, 8.0);
+    assert_eq!((saved.assets.legacy_budget_usd, saved.assets.legacy_providers), (None, None));
 }
 
 #[test]

@@ -680,6 +680,8 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
     changed |= generated_assets(app, ui);
     if changed {
         app.settings_changed();
+        // A project that has not chosen a type follows Settings' default for it: its usage is read for that.
+        app.refresh_side_panel();
     }
 }
 
@@ -718,7 +720,8 @@ fn defaults_table(app: &mut CraftApp, ui: &mut Ui) -> bool {
         ui.end_row();
         for kind in AssetKind::ALL {
             let choice = app.settings.assets.choice(kind);
-            let view = app.asset_models.get(&kind);
+            let view = asset_picker::offered(app.asset_models.get(&kind), app.asset_keys.as_ref());
+            let view = view.as_deref();
             let title = tr(type_title(kind));
             ui.label(RichText::new(&title).font(theme::medium(theme::SMALL)));
             ui.vertical(|ui| {

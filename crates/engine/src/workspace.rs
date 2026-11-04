@@ -497,35 +497,6 @@ impl Manifest {
         t.choice.provider.is_some().then_some(t)
     }
 
-    /// The one dollar budget the project had before limits were kept per type: the old budget it
-    /// carries, else the built-in one.
-    ///
-    /// Temporary: the callers still thinking in one budget (`project_assets_budget` and the project
-    /// panel) use it until Task 14 of the per-type assets plan moves them to
-    /// [`ProjectAssets::effective`]. The generation tools and the rebuild brief no longer read it.
-    pub fn legacy_budget_usd(&self) -> f64 {
-        self.assets.legacy_budget_usd.unwrap_or(ASSET_BUDGET_USD)
-    }
-
-    /// Whether the person allows this provider to generate paid assets in this project: the master
-    /// switch is on and the provider is among the old provider list's (see [`Self::asset_provider_chosen`]).
-    ///
-    /// Temporary, until Tasks 13 and 14 of the per-type assets plan (the project panel and
-    /// `project_assets_allow`'s provider list) decide by the type's chosen provider instead, as the
-    /// generation tools and the rebuild brief do.
-    pub fn asset_provider_allowed(&self, provider: &str) -> bool {
-        self.generate_assets && self.asset_provider_chosen(provider)
-    }
-
-    /// Whether this provider is among the project's old provider list, whatever the master switch
-    /// says: what turning generated assets back on would allow. No list: every provider.
-    ///
-    /// Temporary, until Tasks 13 and 14 of the per-type assets plan decide by the type's chosen
-    /// provider instead.
-    pub fn asset_provider_chosen(&self, provider: &str) -> bool {
-        self.assets.legacy_providers.as_ref().is_none_or(|ids| ids.iter().any(|id| id == provider))
-    }
-
     /// Take the fields the person owns from `other` (what's on disk).
     fn take_person_fields(&mut self, other: &Manifest) {
         self.generate_assets = other.generate_assets;
@@ -689,7 +660,8 @@ const MAX_ASSET_LEDGER_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Validate every recorded charge and reject totals that overflow instead of understating
 /// spending. An amount needs the unit it is counted in. Returns the sum of all amounts whatever
-/// their units (an overflow guard; see [`Workspace::try_assets_spent`]).
+/// their units, which is meaningful only as an overflow guard: dollars and credits are never added
+/// up for the person (see [`type_usage`], which counts one type in one unit).
 fn asset_total(records: &[AssetRecord]) -> Result<f64, ToolError> {
     records.iter().try_fold(0.0, |spent, record| {
         let amount = record.amount.unwrap_or(0.0);
@@ -1086,16 +1058,6 @@ impl Workspace {
         Ok(type_usage(&self.try_assets()?, kind, t))
     }
 
-    /// Checked sum of every amount in the ledger, whatever its unit (dollars and credits are
-    /// added as plain numbers); unreadable, malformed or invalid ledgers fail closed.
-    ///
-    /// Temporary: only for `project_assets_budget`, not yet rewritten for per-type limits. Task 14
-    /// of the per-type assets plan removes that tool and this, as the generation tools and the rebuild brief
-    /// already use [`Workspace::try_type_usage`] and [`type_usage`] instead.
-    pub fn try_assets_spent(&self) -> Result<f64, ToolError> {
-        asset_total(&self.try_assets()?)
-    }
-
     /// Take the project's spending lock, waiting up to `wait` for another process's generation to
     /// finish. Every paid generation holds it from its budget check until its receipt is written.
     pub fn lock_spending(&self, wait: std::time::Duration) -> Result<SpendLock, ToolError> {
@@ -1490,14 +1452,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
         assert!(ws.try_assets().unwrap().is_empty());
-        assert_eq!(ws.try_assets_spent().unwrap().to_bits(), 0.0f64.to_bits());
         ws.record_asset(asset_receipt(0.5)).unwrap();
-        assert_eq!(ws.try_assets_spent().unwrap(), 0.5);
+        assert_eq!(ws.try_assets().unwrap().len(), 1);
         let path = ws.root.join(ASSETS);
         for bytes in [b"broken JSON".to_vec(), ledger_bytes(&[asset_receipt(-1.0)]), ledger_bytes(&[asset_receipt(f64::MAX), asset_receipt(f64::MAX)])] {
             std::fs::write(&path, &bytes).unwrap();
             assert!(ws.try_assets().is_err());
-            assert!(ws.try_assets_spent().is_err());
             assert!(ws.record_asset(asset_receipt(0.2)).is_err());
             assert_eq!(std::fs::read(&path).unwrap(), bytes);
         }
@@ -1569,7 +1529,6 @@ mod tests {
             let ledger = ws.root.join(ASSETS);
             std::os::unix::fs::symlink(&target, &ledger).unwrap();
             assert!(ws.try_assets().is_err());
-            assert!(ws.try_assets_spent().is_err());
             assert!(ws.record_asset(asset_receipt(0.2)).is_err());
             assert_eq!(std::fs::read_link(&ledger).unwrap(), target);
             assert_eq!(target.exists(), target_exists);
@@ -1678,18 +1637,21 @@ mod tests {
         assert_eq!(ProjectUsage::load(dir.path()).work_ms, 5, "read as far as it's known, never written over");
     }
 
-    /// Saving stale build progress must preserve the latest budget, provider choices and approvals on disk.
+    /// Saving stale build progress must preserve the latest limits, choices and approvals on disk.
     #[test]
     fn a_run_holding_an_old_copy_keeps_the_persons_changes() {
+        use crate::settings::AssetSettings;
+        let settings = AssetSettings::default();
         let dir = tempfile::tempdir().unwrap();
         let mut run = Workspace::create(dir.path(), "game", "A snake game", TargetRef::None).unwrap();
-        // While the run works, the person raises the budget, turns assets on and always allows npm.
+        // While the run works, the person raises a limit, turns assets on, ignores the budget and
+        // always allows npm.
         let mut person = Workspace::open(&run.root).unwrap();
         person
             .set_person(|m| {
-                m.assets.legacy_budget_usd = Some(20.0);
+                m.assets.set_limit(AssetKind::Image, Some(20.0), Some(false), &settings).unwrap();
                 m.generate_assets = true;
-                m.assets.legacy_providers = Some(vec!["scenario".into()]);
+                m.assets.ignore_budget = true;
                 m.allowed_actions.push("bash:npm".into());
             })
             .unwrap();
@@ -1698,46 +1660,51 @@ mod tests {
         run.manifest.note = "Building".into();
         run.save().unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
-        assert_eq!((disk.legacy_budget_usd(), disk.generate_assets), (20.0, true));
+        let image = disk.assets.effective(AssetKind::Image, &settings);
+        assert_eq!((image.limit, image.limit_on, disk.generate_assets, disk.assets.ignore_budget), (20.0, false, true, true));
         assert_eq!(disk.allowed_actions, ["bash:npm"]);
-        assert_eq!(disk.assets.legacy_providers, Some(vec!["scenario".into()]));
         assert_eq!((disk.status, disk.note.as_str()), (Status::Building, "Building"), "the run's own fields are saved");
         // A setter on the old copy starts from what's on disk too.
-        run.set_person(|m| m.assets.legacy_budget_usd = Some(25.0)).unwrap();
+        run.set_person(|m| m.assets.set_limit(AssetKind::Image, Some(25.0), None, &settings).unwrap()).unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
-        assert_eq!((disk.legacy_budget_usd(), disk.generate_assets), (25.0, true));
-        assert_eq!(disk.assets.legacy_providers, Some(vec!["scenario".into()]));
+        let image = disk.assets.effective(AssetKind::Image, &settings);
+        assert_eq!((image.limit, image.limit_on, disk.generate_assets, disk.assets.ignore_budget), (25.0, false, true, true));
     }
 
-    /// Legacy opt-in permits every provider; explicit choices obey the master switch and survive copying.
+    /// A project from before each type had its own choice opens at the current version, and a
+    /// project's choices, limits and master switch survive copying it.
     #[test]
-    fn provider_choices_migrate_from_legacy_and_survive_duplication() {
+    fn asset_choices_survive_duplication() {
+        use crate::asset_choice::AssetChoice;
+        use crate::settings::AssetSettings;
+        use craft_anything_engines::assets::model::{Pricing, Unit};
         let old = br#"{"version":2,"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true}"#;
-        let mut m = read_manifest(old).unwrap();
-        assert_eq!(m.version, MANIFEST_VERSION);
-        assert!(m.assets.legacy_providers.is_none());
-        assert!(m.asset_provider_allowed("scenario") && m.asset_provider_allowed("custom"));
-        m.assets.legacy_providers = Some(vec!["scenario".into()]);
-        assert!(m.asset_provider_allowed("scenario"));
-        assert!(!m.asset_provider_allowed("fal"));
-        m.generate_assets = false;
-        assert!(!m.asset_provider_allowed("scenario"));
-        m.generate_assets = true;
-        m.assets.legacy_providers = Some(Vec::new());
-        assert!(!m.asset_provider_allowed("scenario"));
+        let m = read_manifest(old).unwrap();
+        assert_eq!((m.version, m.generate_assets), (MANIFEST_VERSION, true));
+        assert!(m.assets.legacy_providers.is_none() && m.assets.types.is_empty(), "nothing is chosen until the person chooses");
 
+        let settings = AssetSettings::default();
         let d = tempfile::tempdir().unwrap();
         let mut ws = Workspace::create(d.path(), "Original", "x", TargetRef::None).unwrap();
+        let choice = AssetChoice {
+            provider: Some("scenario".into()),
+            model: "m".into(),
+            model_name: "M".into(),
+            unit: Unit::Credits,
+            pricing: Pricing::After { unit: Unit::Credits },
+        };
         ws.set_person(|m| {
             m.generate_assets = true;
-            m.assets.legacy_providers = Some(vec!["scenario".into()]);
+            m.assets.choose(AssetKind::Music, choice.clone(), &settings, 7);
+            m.assets.set_limit(AssetKind::Music, Some(40.0), Some(false), &settings).unwrap();
         })
         .unwrap();
         let copy = ws.duplicate("Copy").unwrap();
         let saved = Workspace::open(&copy.root).unwrap().manifest;
-        assert!(saved.asset_provider_allowed("scenario"));
-        assert!(!saved.asset_provider_allowed("fal"));
-        assert_eq!(saved.assets.legacy_providers, ws.manifest.assets.legacy_providers);
+        assert!(saved.generate_assets);
+        let music = saved.assets.effective(AssetKind::Music, &settings);
+        assert_eq!((music.choice, music.limit, music.limit_on), (choice, 40.0, false));
+        assert_eq!(saved.assets, ws.manifest.assets);
     }
 
     #[test]
@@ -1854,7 +1821,7 @@ mod tests {
         let ws = Workspace::open(dir.path()).unwrap();
         assert_eq!(ws.manifest.version, MANIFEST_VERSION);
         assert_eq!(ws.manifest.status, Status::Ready);
-        assert_eq!(ws.manifest.legacy_budget_usd(), ASSET_BUDGET_USD);
+        assert_eq!(ws.manifest.assets, ProjectAssets::default(), "a project that never chose has nothing stored");
         assert!(!ws.manifest.generate_assets, "assets are generated only once the person turns it on");
         assert!(ws.manifest.checks[0].passed && !ws.is_read_only());
         ws.save().unwrap();

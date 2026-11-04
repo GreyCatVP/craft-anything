@@ -51,7 +51,6 @@ fn chinese_startup_language_menu_and_saved_selection() {
         assert_eq!(i18n::trf("Opened {name}", &[("name", "sample.exe")]), translated_open);
         assert_eq!(i18n::tr("A deliberately uncatalogued message"), "A deliberately uncatalogued message");
         assert_eq!(i18n::trf("Uncatalogued {name}", &[("name", "sample.exe")]), "Uncatalogued sample.exe");
-        assert_eq!(craft_anything_ui_egui::usage::asset_cost_words(0.0031), if initial == "zh-hans" { "低于 $0.01" } else { "低於 $0.01" });
         let kinds = craft_anything_ai::rebuild::KindRegistry::built_in();
         for (suggestion, expected) in [("A website for my bakery", "website"), ("A simple snake game", "game")] {
             let translated = i18n::tr(suggestion);

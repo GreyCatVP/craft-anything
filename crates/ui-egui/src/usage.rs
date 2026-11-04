@@ -48,11 +48,6 @@ pub fn cost_words(usd: f64) -> String {
 /// Below this, a difference between two amounts is rounding, not money.
 const NOT_MONEY: f64 = 0.005;
 
-/// Approximate asset price, retaining the asset table's sub-cent precision rule.
-pub fn asset_cost_words(usd: f64) -> String {
-    if usd > 0.0 && usd < NOT_MONEY { tr("under $0.01") } else { cost_words(usd) }
-}
-
 /// How to show a project's cost. A coding agent's figure is an estimate and is called one: it's
 /// never shown as if it were what the person paid.
 #[derive(Debug, Clone, PartialEq)]
@@ -172,8 +167,6 @@ mod tests {
 
     #[test]
     fn plain_words_for_numbers() {
-        assert_eq!(asset_cost_words(0.0031), "under $0.01");
-        assert_eq!(asset_cost_words(0.65), "about $0.65");
         assert_eq!(tokens_words(830), "830 tokens");
         assert_eq!(tokens_short(1_180_000), "1.2M");
         assert_eq!(cost_words(3.21), "about $3.21");

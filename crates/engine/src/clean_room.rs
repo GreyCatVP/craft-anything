@@ -54,7 +54,6 @@ pub const TOOLS: &[&str] = &[
     "project_play",
     "project_preview",
     "project_open_folder",
-    "project_assets_budget",
     "project_assets_allow",
     "project_assets_choose",
     "project_assets_limit",

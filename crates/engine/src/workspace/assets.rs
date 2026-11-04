@@ -205,7 +205,6 @@ mod tests {
             at_ms: 7,
         };
         assert_eq!(ws.try_assets().unwrap(), std::slice::from_ref(&expected));
-        assert_eq!(ws.try_assets_spent().unwrap(), 2.25);
         let usage = ws.try_type_usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)).unwrap();
         assert_eq!(usage, TypeUsage { amount: 2.25, generations: 1, cost_missing: false });
         assert_eq!(std::fs::read_to_string(&path).unwrap(), OLD_LEDGER, "reading changes nothing");
@@ -334,7 +333,6 @@ mod tests {
         for (name, bytes) in cases {
             std::fs::write(&path, &bytes).unwrap();
             assert!(ws.try_assets().is_err(), "{name}: read");
-            assert!(ws.try_assets_spent().is_err(), "{name}: total");
             assert!(ws.try_type_usage(AssetKind::Image, &typed("fal", Unit::Usd, 0)).is_err(), "{name}: usage");
             assert!(ws.record_asset(made("image", "fal", Some(Unit::Usd), Some(0.2), 2)).is_err(), "{name}: record");
             assert_eq!(std::fs::read(&path).unwrap(), bytes.as_bytes(), "{name}: the damaged file is left as it was");
@@ -614,9 +612,10 @@ mod tests {
         // A manifest from before any of this reaches version 4 the same way.
         let v0 = br#"{"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"asset_budget_usd":3.5}"#;
         let m = read_manifest(v0).unwrap();
-        assert_eq!((m.version, m.assets.legacy_budget_usd, m.legacy_budget_usd()), (4, Some(3.5), 3.5));
+        assert_eq!((m.version, m.assets.legacy_budget_usd), (4, Some(3.5)));
+        assert_eq!(m.assets.effective(AssetKind::Image, &AssetSettings::default()).limit, 3.5, "a dollar-billed type takes the old budget as its limit");
         // A project that never had either gets the built-in budget.
-        assert_eq!(read_manifest(&v3("")).unwrap().legacy_budget_usd(), 5.0);
+        assert_eq!(read_manifest(&v3("")).unwrap().assets.effective(AssetKind::Image, &AssetSettings::default()).limit, 5.0);
         // Something that isn't an object, or whose assets isn't one, is refused rather than guessed at.
         assert!(read_manifest(br#"[1]"#).is_err());
         assert!(read_manifest(&v3(r#","assets":3,"asset_budget_usd":1.0"#)).is_err());

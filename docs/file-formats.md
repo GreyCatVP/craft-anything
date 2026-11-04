@@ -41,10 +41,11 @@ count afresh and puts its limit back to Settings' default for the unit, switched
 at the same provider changes none of that.
 
 Version 3's `asset_budget_usd` and `asset_providers` moved into `assets` as `legacy_budget_usd` and
-`legacy_providers`, and are only written when the project had them. A type the project has not
-chosen yet takes Settings' default for it, Off when `legacy_providers` is a list that leaves that
-provider out (missing or null: every provider, as in version 3), with `legacy_budget_usd` as the
-limit of a type billed in dollars. The master switch `generate_assets` still needs to be on.
+`legacy_providers`. They are written only for a project that had them in version 3: a new project
+stores all five types instead, and no tool changes them. A type the project has not chosen yet takes
+Settings' default for it, Off when `legacy_providers` is a list that leaves that provider out
+(missing or null: every provider, as in version 3), with `legacy_budget_usd` as the limit of a type
+billed in dollars. The master switch `generate_assets` still needs to be on.
 Choices, limits and "Ignore budget" are person-owned fields: builder saves preserve the values on
 disk, and duplicating a project retains them. An older build opens a version 4 project read-only.
 
