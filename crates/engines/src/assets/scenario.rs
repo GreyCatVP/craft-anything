@@ -108,11 +108,11 @@ impl Scenario {
             // A GET (a job's state, an asset's address) starts nothing paid, so it may be asked again.
             None => http::get(|| agent.get(&url).header("Authorization", auth).call()),
         }
-        // A paid submission sent whose answer never came in time may have started a job all the
-        // same: it is a possible charge at its quote. One that could not be sent is not.
+        // A paid submission that failed without an answer may have started a job all the same: it is
+        // a possible charge at its quote, unless it provably never left this computer.
         .map_err(|e| match charge {
-            Some(cost) if http::sent_but_unanswered(&e) => charged(http::network(), cost),
-            _ => http::network(),
+            Some(cost) => http::paid_failure(&e, Some(cost)),
+            None => http::network(),
         })?;
         http::status(response.status().as_u16())?;
         if path.ends_with("?dryRun=api") && response.status().as_u16() != 269 {
@@ -983,6 +983,16 @@ mod tests {
         let error = image(&quick(nobody)).unwrap_err();
         assert_eq!(error.code, ErrorCode::EngineMissing);
         assert!(!was_charged(&error));
+        // The submission was read and the line dropped with no answer: it may have started a job.
+        let (base, seen) = http::tests::serve_then_hang_up(|_| vec![(269, json!({"creativeUnitsCost":19}).to_string())]);
+        let error = image(&quick(base)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert_eq!(charged_amount(&error), Some(19.0), "a submission that reached Scenario is a possible charge");
+        assert_eq!(seen.lock().unwrap().len(), 2, "quoted and submitted");
+        // A price check dropped the same way is not a charge: nothing is submitted after it.
+        let (base, _) = http::tests::serve_then_hang_up(|_| Vec::new());
+        let error = image(&quick(base)).unwrap_err();
+        assert!(!was_charged(&error), "a price check is never a charge");
     }
 
     /// The estimate is Scenario's quote for the very request, by a dry run that submits nothing.

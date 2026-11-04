@@ -132,9 +132,9 @@ impl AssetProvider for ElevenLabs {
     }
     /// Send the request and return the audio it answers with. What it cost is ElevenLabs' own count
     /// of credits for speech, where it gives one, else the model's rate for the request. The answer
-    /// is synchronous (music may take minutes): a request sent whose answer never came in time may
-    /// have been made all the same, so it is a possible charge at that rate; one that could not be
-    /// sent at all is not.
+    /// is synchronous (music may take minutes): a request that failed without an answer may have
+    /// been made all the same, so it is a possible charge at that rate, unless it provably never
+    /// left this computer (see [`http::never_sent`]).
     fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
         let key = http::key(key)?;
         let Sent { path, body, ignored } = request(model, req)?;
@@ -144,7 +144,7 @@ impl AssetProvider for ElevenLabs {
             .header("xi-api-key", key)
             .header("Content-Type", "application/json")
             .send(Value::Object(body).to_string())
-            .map_err(|e| if http::sent_but_unanswered(&e) { charged_or_unknown(http::network(), estimate) } else { http::network() })?;
+            .map_err(|e| http::paid_failure(&e, estimate))?;
         http::status(response.status().as_u16())?;
         let counted = if req.kind() == AssetKind::Speech { character_cost(response.headers()) } else { None };
         let cost = counted.or(estimate);
@@ -517,6 +517,12 @@ mod tests {
         let error = ElevenLabs::at(nobody).generate("sk-test", &fixed("eleven_text_to_sound_v2"), &sound(2.0)).unwrap_err();
         assert_eq!(error.code, ErrorCode::EngineMissing);
         assert!(!was_charged(&error));
+        // The request was read and the line dropped with no answer: it may have been made.
+        let (base, seen) = http::tests::serve_then_hang_up(|_| Vec::new());
+        let error = ElevenLabs::at(base).generate("sk-test", &fixed("eleven_text_to_sound_v2"), &sound(2.0)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert_eq!(charged_amount(&error), Some(80.0), "a request that reached ElevenLabs is a possible charge");
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 }
 

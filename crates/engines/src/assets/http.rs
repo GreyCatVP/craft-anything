@@ -39,13 +39,36 @@ pub(super) fn network() -> ToolError {
         .with_remediation("Check your connection and provider account before retrying; an accepted job may already have been charged.")
 }
 
-/// Whether a failed request had reached the provider and was waiting for its answer when it
-/// failed: its answer (or the whole call) ran out of time after it was sent. A paid request like
-/// that may have been made all the same, so it is a possible charge; one that could not be sent at
-/// all (no connection) is not.
-pub(super) fn sent_but_unanswered(e: &ureq::Error) -> bool {
-    use ureq::Timeout;
-    matches!(e, ureq::Error::Timeout(Timeout::RecvResponse | Timeout::RecvBody | Timeout::Global | Timeout::PerCall))
+/// Whether a failed request provably never left this computer: the name wasn't found, no
+/// connection could be made (refused, or the resolver or the connection timed out), or the request
+/// or the TLS setup was wrong here. Anything else (a connection reset or closed after the request
+/// was read, an answer that isn't HTTP, a timeout while sending or waiting) may have reached the
+/// provider, so a paid request that failed that way may have been made all the same.
+pub(super) fn never_sent(e: &ureq::Error) -> bool {
+    use std::io::ErrorKind;
+    use ureq::{Error, Timeout};
+    match e {
+        Error::HostNotFound
+        | Error::ConnectionFailed
+        | Error::BadUri(_)
+        | Error::Http(_)
+        | Error::InvalidProxyUrl
+        | Error::ConnectProxyFailed(_)
+        | Error::RequireHttpsOnly(_)
+        | Error::TlsRequired
+        | Error::Tls(_)
+        | Error::Timeout(Timeout::Resolve | Timeout::Connect) => true,
+        // Refused, or no local address to connect from: only a connection attempt fails this way.
+        Error::Io(io) => matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::AddrNotAvailable),
+        _ => false,
+    }
+}
+
+/// The error for a paid request that failed with `e`: a possible charge of `if_sent` (unknown when
+/// `None`) unless it provably never left this computer ([`never_sent`]). It fails closed: when in
+/// doubt the request is counted, so a retry is checked against what it may already have used.
+pub(super) fn paid_failure(e: &ureq::Error, if_sent: Option<f64>) -> ToolError {
+    if never_sent(e) { network() } else { super::charged_or_unknown(network(), if_sent) }
 }
 // Shared by the providers' model lists (`Fal::list`, `Scenario::list`, ...).
 
@@ -281,6 +304,41 @@ pub(super) mod tests {
         let mut payload = vec![0; len];
         reader.read_exact(&mut payload).unwrap();
         format!("{head}{}", String::from_utf8_lossy(&payload))
+    }
+
+    /// [`serve`], then one more request is read and its connection closed without an answer, as a
+    /// provider that took the request and then dropped the line would.
+    pub fn serve_then_hang_up(answers: impl FnOnce(&str) -> Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let answers = answers(&base);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            for answer in answers.into_iter().map(Some).chain([None]) {
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((s, _)) => break s,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(start.elapsed() < Duration::from_secs(10), "local request was never sent");
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(e) => panic!("local accept failed: {e}"),
+                    }
+                };
+                recorded.lock().unwrap().push(request_of(&stream));
+                match answer {
+                    Some((status, body)) => {
+                        let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    }
+                    // Read, then dropped: the connection closes with no answer.
+                    None => drop(stream),
+                }
+            }
+        });
+        (base, seen)
     }
 
     /// A stand-in that answers each request by what it asks for (`answer(target)`, the request's

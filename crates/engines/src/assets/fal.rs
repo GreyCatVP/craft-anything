@@ -172,9 +172,9 @@ struct Answer {
 
 impl Fal {
     /// Run one paid request. A refusal (any answer but success) is not charged; a success is the
-    /// finished, paid generation. A request that was sent but whose answer never came in time may
-    /// have been made all the same: it is charged `if_sent` (unknown when `None`). One that could
-    /// not be sent at all (no connection) is not.
+    /// finished, paid generation. A request that failed without an answer may have been made all
+    /// the same: it is charged `if_sent` (unknown when `None`), unless it provably never left this
+    /// computer (no connection; see [`http::never_sent`]).
     fn post(&self, key: &str, model: &str, body: &Value, if_sent: Option<f64>) -> Result<Answer, ToolError> {
         let url = format!("{}/{model}", self.base);
         let response = http::agent(self.generate_timeout)
@@ -182,7 +182,7 @@ impl Fal {
             .header("Authorization", &format!("Key {key}"))
             .header("Content-Type", "application/json")
             .send(body.to_string())
-            .map_err(|e| if http::sent_but_unanswered(&e) { charged_or_unknown(http::network(), if_sent) } else { http::network() })?;
+            .map_err(|e| http::paid_failure(&e, if_sent))?;
         refusal(response.status().as_u16())?;
         Ok(Answer { units: billable_units(response.headers()), body: response.into_body() })
     }
@@ -886,6 +886,12 @@ mod tests {
         let error = fal(nobody).generate("k", &flux(), &picture(Shape::Tall)).unwrap_err();
         assert_eq!(error.code, ErrorCode::EngineMissing);
         assert!(!was_charged(&error));
+        // The request was read and the line dropped with no answer: it may have been made.
+        let (base, seen) = http::tests::serve_then_hang_up(|_| Vec::new());
+        let error = fal(base).generate("k", &flux(), &picture(Shape::Tall)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert_eq!(charged_amount(&error), Some(0.025), "a request that reached fal is a possible charge");
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
     #[test]
