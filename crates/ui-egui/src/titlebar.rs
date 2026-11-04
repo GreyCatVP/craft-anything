@@ -172,12 +172,12 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
                 usage_pill(app, ui);
                 return;
             }
-            if icons::button(ui, "settings", 30.0, app.state.settings_open, "Settings").clicked() {
+            if icons::button(ui, "settings", widgets::control_height(ui), app.state.settings_open, "Settings").clicked() {
                 app.state.settings_open = !app.state.settings_open;
             }
             rule(ui);
             let sel = usize::from(app.mode() == Mode::Experienced);
-            if let Some(i) = widgets::segmented(ui, &["Simple", "Advanced"], sel, 28.0) {
+            if let Some(i) = widgets::segmented(ui, &["Simple", "Advanced"], sel) {
                 app.set_mode(if i == 0 { Mode::Beginner } else { Mode::Experienced });
             }
             rule(ui);
@@ -202,7 +202,7 @@ fn usage_pill(app: &CraftApp, ui: &mut Ui) {
     }
     let t = Tokens::get(ui.ctx());
     let text = if u.priced { crate::usage::cost_short(u) } else { crate::usage::tokens_words(u.tokens()) };
-    let r = widgets::pill(ui, &text, t.text_dim, t.raised);
+    let r = widgets::status_chip(ui, &text, t.text_dim, t.raised);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
     r.on_hover_ui(|ui| {
         ui.label(RichText::new(tr("AI use this session")).font(theme::semibold(theme::SMALL)));
@@ -217,8 +217,8 @@ fn download_pill(ui: &mut Ui, title: &str, fraction: Option<f32>) -> egui::Respo
         Some(f) => format!("{title} · {:.0}%", f * 100.0),
         None => title.to_string(),
     };
-    let g = widgets::label_galley(ui, &text, 12.0, t.text);
-    let size = Vec2::new(g.size().x + 26.0 + 52.0, 26.0);
+    let g = widgets::label_galley(ui, &text, widgets::CONTROL_TEXT, t.text);
+    let size = Vec2::new(g.size().x + 26.0 + 52.0, widgets::control_height(ui));
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let h = widgets::hover_t(ui, &resp);
     ui.painter().rect(rect, t.radius, crate::theme::mix(t.raised, t.hover, h), egui::Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
@@ -240,8 +240,8 @@ fn deep_toggle(app: &mut CraftApp, ui: &mut Ui) {
     let deep = app.settings.deep_mode;
     let missing = app.ghidra_missing();
     let label = tr(if deep { "Deep" } else { "Clean room" });
-    let g = widgets::label_galley(ui, &label, 12.0, t.text);
-    let size = Vec2::new(g.size().x + 64.0, 30.0);
+    let g = widgets::label_galley(ui, &label, widgets::CONTROL_TEXT, t.text);
+    let size = Vec2::new(g.size().x + 64.0, widgets::control_height(ui));
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
     let fill = if resp.hovered() { t.hover } else { egui::Color32::TRANSPARENT };
     ui.painter().rect(rect, t.radius, fill, egui::Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
@@ -278,13 +278,16 @@ fn backend_picker(app: &mut CraftApp, ui: &mut Ui) {
     let current = format!("{} · {}", tr("AI"), app.state.backend.clone().unwrap_or_else(|| tr("None")));
     let mut choice: Option<Option<String>> = None;
     let mut setup = false;
-    ui.scope(|ui| {
-        ui.spacing_mut().interact_size.y = 30.0;
-        egui::ComboBox::from_id_salt("backend-picker")
-            .selected_text(theme::label_text(&current, 12.0).color(if app.state.backend.is_some() { t.text } else { t.text_dim }))
-            .icon(widgets::combo_icon)
-            .width(190.0)
-            .show_ui(ui, |ui| {
+    // A drop-down lays itself out from the top of the space it's given, so it's given an exact,
+    // centred rect of its own height, to sit in the bar like the controls beside it.
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(190.0, widgets::control_height(ui)), egui::Sense::hover());
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+        widgets::combo(
+            ui,
+            egui::ComboBox::from_id_salt("backend-picker")
+                .selected_text(theme::label_text(&current, 12.0).color(if app.state.backend.is_some() { t.text } else { t.text_dim }))
+                .width(190.0),
+            |ui| {
                 for b in &app.backends {
                     let on = app.state.backend.as_ref() == Some(&b.name);
                     if ui.selectable_label(on, &b.name).on_hover_text(format!("{:?} · {}", b.kind, b.model)).clicked() {
@@ -298,9 +301,10 @@ fn backend_picker(app: &mut CraftApp, ui: &mut Ui) {
                 if ui.selectable_label(false, tr("Set up a brain…")).clicked() {
                     setup = true;
                 }
-            })
-            .response
-            .on_hover_text(tr("Which AI answers your questions"));
+            },
+        )
+        .response
+        .on_hover_text(tr("Which AI answers your questions"));
     });
     if let Some(c) = choice {
         app.choose_backend(c);
