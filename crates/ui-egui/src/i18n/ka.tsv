@@ -210,7 +210,7 @@ Build with this	ამით აწყობა
 Build with {name}	აწყობა {name}-ით
 Build with {name} instead	აწყობა {name}-ით, ნაცვლად ამისა
 Build without it	აწყობა მის გარეშე
-Builder's questions:	შემქმნელის კითხვები:
+Builder's questions:	ამწყობის კითხვები:
 Building	აწყობა მიმდინარეობს
 Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	ასაწყობად საჭიროა პროგრამირების აგენტი ამ კომპიუტერზე (Claude Code, Codex ან Gemini CLI: დააინსტალირეთ ერთ-ერთი და ერთხელ შედით მასში მის საკუთარ ფანჯარაში) ან AI API გასაღებით. Craft Anything თქვენს ანგარიშს ვერასოდეს ხედავს.
 Building needs a coding agent such as Claude Code, or an AI with an API key.	ასაწყობად საჭიროა პროგრამირების აგენტი, მაგალითად Claude Code, ან AI API გასაღებით.
@@ -996,7 +996,7 @@ See what a game packs and save its pictures as PNG files. Only for games you mad
 See what a game packs, and save its pictures as PNG files.	ნახეთ, რას შეიცავს თამაში, და შეინახეთ მისი სურათები PNG ფაილებად.
 See what a stand-in was asked	შემცვლელისთვის დასმული მოთხოვნების ნახვა
 See which servers an app talks to, and what it says.	ნახეთ, რომელ სერვერებს უკავშირდება აპი და რას ეუბნება მათ.
-Seen it	ვნახეთ
+Seen it	ნანახია
 Seen it: read directly from the file, page or capture.	ვნახეთ: წაკითხულია პირდაპირ ფაილიდან, გვერდიდან ან ჩანაწერიდან.
 Selected	მონიშნულია
 Selection	მონიშნული
