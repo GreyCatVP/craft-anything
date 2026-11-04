@@ -217,14 +217,8 @@ impl CraftApp {
         if ws.is_read_only() || !ws.manifest.assets.follows_settings() || self.asset_change_job.is_some() {
             return;
         }
-        let (mut kept, assets) = (ws.clone(), self.settings.assets.clone());
-        self.asset_change_job = Some(self.jobs.spawn(tr("Save asset settings"), false, move |_| {
-            // A failed save only means it keeps taking Settings' defaults, as before.
-            if let Err(e) = kept.keep_asset_defaults(&assets) {
-                log::warn!("couldn't store the asset defaults in {}: {}", kept.root.display(), e.message);
-            }
-            Ok(Done::AssetSettings(Workspace::open(&kept.root).map(Box::new)))
-        }));
+        let (root, assets) = (ws.root.clone(), self.settings.assets.clone());
+        self.asset_change_job = Some(self.jobs.spawn(tr("Save asset settings"), false, move |_| Ok(Done::AssetSettings(store_asset_defaults(&root, &assets)))));
     }
 
     /// Ask for a change (or continue after a pause or error).
@@ -835,6 +829,23 @@ impl CraftApp {
 }
 
 // ---- generated assets in the side panel ---------------------------------------------------------
+
+/// Store an old project's asset defaults ([`Workspace::keep_asset_defaults`]) in the project as it is on
+/// disk now, and return it. The copy the screen holds can be older than the file (the project list's is,
+/// and a build writes meanwhile), and saving from it would put its status, note and checks back. A
+/// project with nothing to store, or a read-only one, is not written. A failed save only means it keeps
+/// taking Settings' defaults, as before.
+fn store_asset_defaults(root: &Path, assets: &AssetSettings) -> Result<Box<Workspace>, craft_anything_engine::evidence::ToolError> {
+    match Workspace::open(root) {
+        Ok(mut fresh) => {
+            if let Err(e) = fresh.keep_asset_defaults(assets) {
+                log::warn!("couldn't store the asset defaults in {}: {}", root.display(), e.message);
+            }
+        }
+        Err(e) => log::warn!("couldn't open {} to store the asset defaults: {}", root.display(), e.message),
+    }
+    Workspace::open(root).map(Box::new)
+}
 
 /// What the person changed in one asset type's row. It is made through the project tools, as every
 /// change to a project's assets is (see [`edit_call`]).
@@ -2506,6 +2517,23 @@ mod tests {
         })
         .unwrap();
         (dir, ws)
+    }
+
+    /// The job that stores an old project's defaults writes only when the file on disk needs them: a
+    /// project with every type stored is left as it is, whatever copy the screen was holding.
+    #[test]
+    fn storing_asset_defaults_writes_nothing_when_nothing_needs_storing() {
+        let (_dir, stale) = project_with(&[]);
+        let settings = AssetSettings::default();
+        let mut fresh = Workspace::open(&stale.root).unwrap();
+        fresh.set_person(|m| m.assets = ProjectAssets::from_defaults(&settings, 5)).unwrap();
+        let file = stale.root.join(craft_anything_engine::workspace::MANIFEST);
+        let before = std::fs::read(&file).unwrap();
+        // The copy held by the screen is older and still follows Settings.
+        assert!(stale.manifest.assets.follows_settings());
+        let seen = store_asset_defaults(&stale.root, &settings).unwrap();
+        assert!(!seen.manifest.assets.follows_settings());
+        assert_eq!(std::fs::read(&file).unwrap(), before, "nothing needed storing, so nothing was written");
     }
 
     /// The app, with the facts a worker would have read for `ws`.

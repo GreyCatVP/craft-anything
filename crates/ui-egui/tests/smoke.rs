@@ -1397,6 +1397,38 @@ fn an_old_project_keeps_its_asset_choices_when_settings_change() {
     assert_eq!((stored_type(&root, Image).unwrap(), stored_type(&root, Music).unwrap()), (pictures, music), "nothing stored changed");
 }
 
+/// The job that stores an old project's defaults works on the project as it is on disk, not on the copy
+/// it was opened with: the project list's copy can be older than a build's last save, and storing from
+/// it would put the old status, note and reply back.
+#[test]
+fn storing_an_old_projects_defaults_keeps_what_a_build_wrote_since_the_copy_was_read() {
+    use craft_anything_engine::workspace::{Status, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":3,"name":"Old","request":"A game","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true,"asset_budget_usd":12.0}"#;
+    std::fs::write(d.path().join("craft.json"), old).unwrap();
+    let stale = Workspace::open(d.path()).unwrap();
+    let root = stale.root.clone();
+    assert_eq!((stale.manifest.status, stale.manifest.last_reply.as_str()), (Status::New, ""));
+    // A build saves its progress after that copy was read; the project still takes Settings' defaults.
+    let mut build = Workspace::open(&root).unwrap();
+    build.manifest.status = Status::Ready;
+    build.manifest.note = "Finished".into();
+    build.manifest.last_reply = "Done.".into();
+    build.save().unwrap();
+    assert!(Workspace::open(&root).unwrap().manifest.assets.follows_settings());
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(stale);
+        a
+    });
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.follows_settings())), "stored as it opens");
+    let disk = Workspace::open(&root).unwrap().manifest;
+    assert!(!disk.assets.follows_settings());
+    assert_eq!((disk.status, disk.note.as_str(), disk.last_reply.as_str()), (Status::Ready, "Finished", "Done."), "what the build wrote is still there");
+    let shown = &h.state().workspace.as_ref().unwrap().manifest;
+    assert_eq!((shown.status, shown.last_reply.as_str()), (Status::Ready, "Done."), "and the screen has it too");
+}
+
 /// Asking again for a type's lists (a key was saved or removed) stops the request it replaces, and the
 /// answer of the one stopped is dropped.
 #[test]
