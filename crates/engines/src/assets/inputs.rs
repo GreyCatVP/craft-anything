@@ -12,7 +12,7 @@
 //! [`MAX_CHOICES`]; a longer one is refused before anything is read from it.
 
 use super::model::AssetOption;
-use super::tables::{InputRoles, Role};
+use super::tables::{InputRoles, OutputFormat, Role};
 use super::{AssetKind, AssetRequest, Shape};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Map, Number, Value};
@@ -76,6 +76,8 @@ enum Supply<'a> {
     /// A length in milliseconds: the seconds asked for times a thousand, rounded up.
     Millis(i64),
     Flag(bool),
+    /// The file format the tools save this kind of asset in.
+    Format(OutputFormat),
 }
 
 /// The request's value for a role, or `None` when the request has none (or never uses the role).
@@ -99,6 +101,9 @@ fn supply<'a>(req: &AssetRequest<'a>, role: Role) -> Option<Supply<'a>> {
         (R::Speech { voice_id, .. }, Role::Voice) => filled(Some(voice_id)).map(Supply::Text),
         // One result a run, whatever the request: a price per run is the price of one result.
         (_, Role::Count) => Some(Supply::Count(1)),
+        // The format the tools save: PNG pictures and MP3 audio. A 3D model has no choice here.
+        (R::Image { .. }, Role::Format) => Some(Supply::Format(OutputFormat::Png)),
+        (R::Speech { .. } | R::SoundEffect { .. } | R::Music { .. }, Role::Format) => Some(Supply::Format(OutputFormat::Mp3)),
         _ => None,
     }
 }
@@ -138,7 +143,7 @@ fn options_of(kind: AssetKind) -> &'static [AssetOption] {
 /// The option a role carries; the prompt and the picture to start from are not options.
 fn option_of(role: Role) -> Option<AssetOption> {
     match role {
-        Role::Prompt | Role::Image | Role::Count => None,
+        Role::Prompt | Role::Image | Role::Count | Role::Format => None,
         Role::Shape | Role::Width | Role::Height => Some(AssetOption::Shape),
         Role::Faces => Some(AssetOption::Faces),
         Role::Textured => Some(AssetOption::Textured),
@@ -159,6 +164,8 @@ fn holds(role: Role, kind: &FieldKind) -> bool {
         }
         Role::Textured | Role::Instrumental => matches!(kind, FieldKind::Bool),
         Role::Voice => matches!(kind, FieldKind::Text | FieldKind::Choice(_)),
+        // Only a choice: a free text field named like this may mean something else.
+        Role::Format => matches!(kind, FieldKind::Choice(_)),
     }
 }
 
@@ -168,6 +175,7 @@ fn takes_some(role: Role, kind: &FieldKind, roles: &InputRoles) -> bool {
         && match (role, kind) {
             (Role::Shape, FieldKind::Choice(values)) => [Shape::Square, Shape::Wide, Shape::Tall].into_iter().any(|s| roles.shape_value(s, values).is_some()),
             (Role::Voice, FieldKind::Choice(values)) => !values.is_empty(),
+            (Role::Format, FieldKind::Choice(values)) => [OutputFormat::Png, OutputFormat::Mp3].into_iter().any(|f| roles.format_value(f, values).is_some()),
             _ => true,
         }
 }
@@ -245,6 +253,7 @@ fn place(field: &InputField, role: Role, offered: Supply, roles: &InputRoles) ->
         (Supply::Millis(ms), FieldKind::Integer { min, max }) => Some(Value::from(bounded_int(ms, *min, *max))),
         (Supply::Millis(ms), FieldKind::Number { min, max }) => Some(Value::from(bounded_whole(ms, *min, *max))),
         (Supply::Flag(on), FieldKind::Bool) => Some(Value::Bool(on)),
+        (Supply::Format(format), FieldKind::Choice(values)) => roles.format_value(format, values).map(Value::String),
         _ => None,
     }
 }
@@ -911,6 +920,37 @@ mod tests {
         assert!(runnable(&[field("prompt", FieldKind::Text), required(field("numSamples", int(None, None)))], AssetKind::Music, roles).is_ok());
         // A count that isn't a number is no count: left to the model when it may be.
         assert_eq!(body(&map(&[field("prompt", FieldKind::Text), field("num_images", FieldKind::Text)], picture(Shape::Square))), json!({"prompt": "crate"}));
+    }
+
+    /// Where a model offers a choice of file format, it is asked for the one the tools save: PNG
+    /// pictures and MP3 audio. A model that offers neither keeps its own (the tools then save what
+    /// comes back under its own extension), and a 3D model is never asked.
+    #[test]
+    fn a_model_with_a_format_choice_is_asked_for_png_or_mp3() {
+        let roles = InputRoles::built_in();
+        let formats = |values: &[&str]| field("output_format", choice(values));
+        let pictures = [required(field("prompt", FieldKind::Text)), formats(&["jpeg", "png", "webp"])];
+        assert_eq!(body(&map(&pictures, picture(Shape::Square))), json!({"prompt": "crate", "output_format": "png"}));
+        let sound = AssetRequest::SoundEffect { prompt: "wind", duration_seconds: 2.0 };
+        let audio = [required(field("prompt", FieldKind::Text)), formats(&["wav", "mp3", "flac"])];
+        assert_eq!(map(&audio, sound).body.get("output_format"), Some(&json!("mp3")));
+        let music = AssetRequest::Music { prompt: "calm", duration_seconds: 10.0, instrumental: true };
+        let eleven = [required(field("prompt", FieldKind::Text)), field("outputFormat", choice(&["pcm_16000", "mp3_44100_128"]))];
+        assert_eq!(map(&eleven, music).body.get("outputFormat"), Some(&json!("mp3_44100_128")));
+        let speech = AssetRequest::Speech { text: "hi", voice_id: "v" };
+        assert_eq!(map(&audio, speech).body.get("output_format"), Some(&json!("mp3")));
+        // No PNG to choose: the model's own format, and it is still offered.
+        let jpeg_only = [required(field("prompt", FieldKind::Text)), formats(&["jpeg", "webp"])];
+        assert_eq!(body(&map(&jpeg_only, picture(Shape::Square))), json!({"prompt": "crate"}));
+        assert!(runnable(&jpeg_only, AssetKind::Image, roles).is_ok());
+        // The format is not an option the person chose: it is never reported as ignored.
+        assert_eq!(map(&jpeg_only, picture(Shape::Square)).ignored, [AssetOption::Shape]);
+        // A 3D model is not asked for a picture format.
+        let glb = [field("image_url", FieldKind::Image), formats(&["png", "glb"])];
+        assert!(map(&glb, solid()).body.get("output_format").is_none());
+        // A free text field of that name is not filled: it may mean something else.
+        let text = [required(field("prompt", FieldKind::Text)), field("output_format", FieldKind::Text)];
+        assert_eq!(body(&map(&text, picture(Shape::Square))), json!({"prompt": "crate"}));
     }
 
     #[test]

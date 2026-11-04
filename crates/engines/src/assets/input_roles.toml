@@ -27,6 +27,10 @@ instrumental = ["instrumental", "force_instrumental"]
 voice = ["voice", "voice_id"]
 # How many results one run makes: always one, since a price per run is the price of one result.
 count = ["num_images", "num_outputs", "numOutputs", "numSamples"]
+# The file format of the result, a choice: `[format_values]` says which values give the format the
+# tools save (PNG pictures, MP3 audio). A model that offers neither keeps its own; the tools then
+# save what comes back under its own extension.
+format = ["output_format", "outputFormat"]
 
 # The values of a `shape` field that stand for each picture shape, best first: the first one a
 # model allows is the one we send.
@@ -34,3 +38,9 @@ count = ["num_images", "num_outputs", "numOutputs", "numSamples"]
 square = ["square_hd", "square", "1:1"]
 wide = ["landscape_16_9", "16:9"]
 tall = ["portrait_16_9", "9:16"]
+
+# The values of a `format` field that give each format the tools save, best first: the first one a
+# model allows is the one we send.
+[format_values]
+png = ["png", "PNG"]
+mp3 = ["mp3", "mp3_44100_128", "mp3_44100_192", "MP3"]

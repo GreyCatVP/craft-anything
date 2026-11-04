@@ -8,6 +8,7 @@
 
 pub mod elevenlabs;
 pub mod fal;
+pub mod formats;
 mod http;
 pub mod inputs;
 pub mod model;

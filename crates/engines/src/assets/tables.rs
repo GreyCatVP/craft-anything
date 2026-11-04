@@ -138,12 +138,21 @@ pub enum Role {
     Voice,
     /// How many results one run makes. Always one: a price per run is the price of one result.
     Count,
+    /// The file format of the result: PNG for pictures, MP3 for audio, where the model offers it.
+    Format,
+}
+
+/// A file format the tools ask a model for, where it has a choice of format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    Png,
+    Mp3,
 }
 
 impl Role {
     /// Every role. A new variant must be added here as well as to the matches on `Role`, which
     /// the compiler checks; a test requires `input_roles.toml` to give each one a field name.
-    pub const ALL: [Role; 12] = [
+    pub const ALL: [Role; 13] = [
         Role::Prompt,
         Role::Image,
         Role::Shape,
@@ -156,6 +165,7 @@ impl Role {
         Role::Instrumental,
         Role::Voice,
         Role::Count,
+        Role::Format,
     ];
 }
 
@@ -175,10 +185,11 @@ struct RoleNames {
     instrumental: Vec<String>,
     voice: Vec<String>,
     count: Vec<String>,
+    format: Vec<String>,
 }
 
 impl RoleNames {
-    fn by_role(&self) -> [(Role, &[String]); 12] {
+    fn by_role(&self) -> [(Role, &[String]); 13] {
         [
             (Role::Prompt, &self.prompt),
             (Role::Image, &self.image),
@@ -192,6 +203,7 @@ impl RoleNames {
             (Role::Instrumental, &self.instrumental),
             (Role::Voice, &self.voice),
             (Role::Count, &self.count),
+            (Role::Format, &self.format),
         ]
     }
 }
@@ -205,6 +217,14 @@ struct ShapeValues {
     tall: Vec<String>,
 }
 
+/// The values of a `format` field for each format the tools save, best first.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+struct FormatValues {
+    png: Vec<String>,
+    mp3: Vec<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InputRolesFile {
@@ -213,6 +233,8 @@ struct InputRolesFile {
     roles: RoleNames,
     #[serde(default)]
     shape_values: ShapeValues,
+    #[serde(default)]
+    format_values: FormatValues,
 }
 
 /// What the input fields of the providers' models mean to us (`input_roles.toml`).
@@ -220,6 +242,7 @@ struct InputRolesFile {
 pub struct InputRoles {
     roles: HashMap<String, Role>,
     shapes: ShapeValues,
+    formats: FormatValues,
 }
 
 impl InputRoles {
@@ -263,7 +286,24 @@ impl InputRoles {
                 return Err(format!("the shape value {value:?} is empty or listed twice"));
             }
         }
-        Ok(InputRoles { roles, shapes: file.shape_values })
+        let mut seen = HashSet::new();
+        let formats = &file.format_values;
+        for value in formats.png.iter().chain(&formats.mp3) {
+            if value.trim().is_empty() || !seen.insert(value.as_str()) {
+                return Err(format!("the format value {value:?} is empty or listed twice"));
+            }
+        }
+        Ok(InputRoles { roles, shapes: file.shape_values, formats: file.format_values })
+    }
+
+    /// The value for `format` that a `format` field allows: the first of the format's values, best
+    /// first, that is among `allowed`. `None` when the field doesn't offer that format.
+    pub fn format_value(&self, format: OutputFormat, allowed: &[String]) -> Option<String> {
+        let values = match format {
+            OutputFormat::Png => &self.formats.png,
+            OutputFormat::Mp3 => &self.formats.mp3,
+        };
+        values.iter().find(|v| allowed.contains(v)).cloned()
     }
 
     /// What the field of this name is for, or `None` when it has no role we can fill.
@@ -427,13 +467,14 @@ mod tests {
                 Role::Instrumental => "force_instrumental",
                 Role::Voice => "voice_id",
                 Role::Count => "num_images",
+                Role::Format => "output_format",
             }
         }
         let table = InputRoles::built_in();
         for role in Role::ALL {
             assert_eq!(table.role_of(example_field(role)), Some(role), "{role:?} has no field name in input_roles.toml");
         }
-        // `ALL` lists each role once, and the table parser's own list covers the same twelve.
+        // `ALL` lists each role once, and the table parser's own list covers the same thirteen.
         let distinct: HashSet<Role> = Role::ALL.into_iter().collect();
         assert_eq!(distinct.len(), Role::ALL.len());
         let parsed: HashSet<Role> = RoleNames::default().by_role().into_iter().map(|(role, _)| role).collect();
@@ -483,5 +524,16 @@ mod tests {
         assert_eq!(roles.shape_value(Shape::Wide, &strings(&["16:9", "9:16"])), Some("16:9".into()));
         assert_eq!(roles.shape_value(Shape::Tall, &strings(&["9:16", "portrait_16_9"])), Some("portrait_16_9".into()));
         assert_eq!(roles.shape_value(Shape::Wide, &[]), None);
+    }
+
+    #[test]
+    fn the_format_values_ask_for_png_pictures_and_mp3_audio() {
+        let roles = InputRoles::built_in();
+        assert_eq!((roles.role_of("output_format"), roles.role_of("outputFormat")), (Some(Role::Format), Some(Role::Format)));
+        assert_eq!(roles.format_value(OutputFormat::Png, &strings(&["jpeg", "png", "webp"])), Some("png".into()));
+        assert_eq!(roles.format_value(OutputFormat::Png, &strings(&["jpeg", "webp"])), None, "a model without PNG keeps its own");
+        assert_eq!(roles.format_value(OutputFormat::Mp3, &strings(&["wav", "mp3_44100_128", "mp3"])), Some("mp3".into()), "best first");
+        assert_eq!(roles.format_value(OutputFormat::Mp3, &strings(&["pcm_16000", "mp3_44100_128"])), Some("mp3_44100_128".into()));
+        assert!(InputRoles::parse("version = 1\n[format_values]\npng = [\"png\"]\nmp3 = [\"png\"]\n").is_err(), "a value listed twice");
     }
 }

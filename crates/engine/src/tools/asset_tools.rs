@@ -15,7 +15,7 @@ use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, TypeAssets, TypeUsage,
 use craft_anything_engines::assets::inputs::map_request;
 use craft_anything_engines::assets::model::{ModelDetail, Unit, amount};
 use craft_anything_engines::assets::tables::InputRoles;
-use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Generated, Shape, charged_amount, fal, was_charged};
+use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Generated, Shape, charged_amount, fal, formats, was_charged};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -55,7 +55,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "assets_image_generate",
             title: "Generate a picture",
-            summary: "Make a picture with the provider and model the project chose for pictures, and save it as a PNG inside app/: a texture, a sky or background, an icon, a title screen or concept art. shape: square (1024x1024, default), wide (1024x576) or tall (576x1024); a model that can't make the shape says so in the result's ignored list. Counts against the project's limit for pictures, in its provider's unit (dollars or credits). Describe original designs in the original's style; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, what it cost and what is left of the limit.",
+            summary: "Make a picture with the provider and model the project chose for pictures, and save it inside app/ under save_as (a .png name): a texture, a sky or background, an icon, a title screen or concept art. A model with a choice of format is asked for PNG; one that sends another format (JPEG, WebP) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. shape: square (1024x1024, default), wide (1024x576) or tall (576x1024); a model that can't make the shape says so in the result's ignored list. Counts against the project's limit for pictures, in its provider's unit (dollars or credits). Describe original designs in the original's style; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, what it cost and what is left of the limit.",
             beginner: "Makes a picture for your game, like a texture or a sky.",
             toolset: Toolset::Core,
             effects,
@@ -77,7 +77,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "assets_speech_generate",
             title: "Generate speech",
-            summary: "Generate speech from text with the provider and model the project chose for speech, and save an MP3 inside app/. Choose a voice_id you are entitled to use. Requires the project's generated-assets opt-in and counts against its limit for speech. Returns the saved path and what it cost.",
+            summary: "Generate speech from text with the provider and model the project chose for speech, and save it inside app/ under save_as (a .mp3 name). A model with a choice of format is asked for MP3; one that sends another format (WAV, Ogg, FLAC) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. Choose a voice_id you are entitled to use. Requires the project's generated-assets opt-in and counts against its limit for speech. Returns the saved path and what it cost.",
             beginner: "Makes spoken dialogue or narration for your project.",
             toolset: Toolset::Core,
             effects,
@@ -88,7 +88,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "assets_sound_generate",
             title: "Generate a sound effect",
-            summary: "Generate an original sound effect from a prompt and duration_seconds (0.5 to 30) with the provider and model the project chose for sound effects, saving an MP3 inside app/. Requires the project's generated-assets opt-in and counts against its limit for sound effects.",
+            summary: "Generate an original sound effect from a prompt and duration_seconds (0.5 to 30) with the provider and model the project chose for sound effects, saving it inside app/ under save_as (a .mp3 name). A model with a choice of format is asked for MP3; one that sends another format (WAV, Ogg, FLAC) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. Requires the project's generated-assets opt-in and counts against its limit for sound effects.",
             beginner: "Makes a sound effect for your project.",
             toolset: Toolset::Core,
             effects,
@@ -99,7 +99,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "assets_music_generate",
             title: "Generate music",
-            summary: "Generate original music from a prompt and duration_seconds (3 to 600) with the provider and model the project chose for music, saving an MP3 inside app/. instrumental defaults to true. Requires the project's generated-assets opt-in and counts against its limit for music.",
+            summary: "Generate original music from a prompt and duration_seconds (3 to 600) with the provider and model the project chose for music, saving it inside app/ under save_as (a .mp3 name). A model with a choice of format is asked for MP3; one that sends another format (WAV, Ogg, FLAC) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. instrumental defaults to true. Requires the project's generated-assets opt-in and counts against its limit for music.",
             beginner: "Makes original background music for your project.",
             toolset: Toolset::Core,
             effects,
@@ -115,7 +115,8 @@ pub fn specs() -> Vec<ToolSpec> {
 pub struct ImageParams {
     /// What to draw, in detail (subject, style, colours, lighting).
     pub prompt: String,
-    /// Where to save it, relative to app/, ending in .png (e.g. Assets/Textures/crate.png).
+    /// Where to save it, relative to app/, ending in .png (e.g. Assets/Textures/crate.png). A picture
+    /// that comes back in another format is saved under the same name with its own extension.
     pub save_as: String,
     /// square (default), wide or tall.
     #[serde(default)]
@@ -153,7 +154,8 @@ pub struct SpeechParams {
     pub text: String,
     /// A voice id of the chosen speech model that you are entitled to use.
     pub voice_id: String,
-    /// Destination relative to app/, ending in .mp3.
+    /// Destination relative to app/, ending in .mp3 (audio in another format keeps the name with its
+    /// own extension).
     pub save_as: String,
 }
 
@@ -163,7 +165,8 @@ pub struct SoundParams {
     pub prompt: String,
     /// Sound length, 0.5 to 30 seconds.
     pub duration_seconds: f64,
-    /// Destination relative to app/, ending in .mp3.
+    /// Destination relative to app/, ending in .mp3 (audio in another format keeps the name with its
+    /// own extension).
     pub save_as: String,
 }
 
@@ -176,7 +179,8 @@ pub struct MusicParams {
     /// Defaults to true (no vocals).
     #[serde(default)]
     pub instrumental: Option<bool>,
-    /// Destination relative to app/, ending in .mp3.
+    /// Destination relative to app/, ending in .mp3 (audio in another format keeps the name with its
+    /// own extension).
     pub save_as: String,
 }
 
@@ -310,7 +314,7 @@ fn assets_speech_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput
     generate_one(ctx, &p.save_as, "mp3", text, AssetRequest::Speech { text, voice_id: voice }, "Generating speech…")
 }
 
-/// Validate the prompt and sound duration before generating an MP3 with the project's sound model.
+/// Validate the prompt and sound duration before generating it with the project's sound model.
 fn assets_sound_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: SoundParams = parse_params(params)?;
     let prompt = prompt_ok(&p.prompt)?;
@@ -337,7 +341,7 @@ fn generate_one(ctx: &mut Ctx<'_>, save_as: &str, ext: &str, from: &str, req: As
     within_limit(ctx, &j.inbox, &mut j.ws, ready.kind, &ready.limited(), estimate)?;
     ctx.report(None, progress);
     let made = make(&j.ws, &ready, &req, &path, &rel, from, estimate)?;
-    summary(&j.ws, &ready, &rel, &made, json!({}))
+    summary(&j.ws, &ready, &made, json!({}))
 }
 
 /// What a generation needs: the keys, the providers, the starting choices from Settings (for a
@@ -624,17 +628,58 @@ fn within_limit(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, kind: Asse
     }
 }
 
-/// Run one paid stage, record it and save its output. When the provider fails after it accepted
-/// the work and reports a charge, that charge is recorded first, so a retry is checked against the
-/// limit it already used. An overrun of the estimate is reported only after the receipt and the
-/// output are kept.
-fn make(ws: &Workspace, ready: &Ready, req: &AssetRequest<'_>, path: &Path, rel: &str, from: &str, estimate: Option<f64>) -> Result<Generated, ToolError> {
+/// A generation run and kept: what the provider gave, and where it was saved.
+struct Made {
+    g: Generated,
+    place: Place,
+}
+
+/// Where a generation is saved: the file asked for, or, when its bytes are another format than the
+/// name says, the same name with that format's extension, never mismatched bytes under the name
+/// asked for. `note` says why, for the result.
+struct Place {
+    path: PathBuf,
+    rel: String,
+    /// The file asked for, when it was saved elsewhere.
+    asked: Option<String>,
+    note: Option<String>,
+}
+
+/// Where `bytes`, asked to be saved at `path` (`rel` inside app/), go: there when they are the
+/// format its extension names, else under the same name with the extension of the format they are.
+/// Bytes of no format this app can tell are saved where asked, and the note says it couldn't check.
+fn real_place(path: &Path, rel: &str, bytes: &[u8]) -> Place {
+    let asked = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    match formats::sniff(bytes) {
+        Some(real) if !formats::same_extension(real.ext, asked) => {
+            let moved = Path::new(rel).with_extension(real.ext).display().to_string().replace('\\', "/");
+            let note =
+                format!("The model sent {} rather than {}, so it was saved as {moved} instead of {rel}; use that file.", real.name, formats::name_of(asked));
+            Place { path: path.with_extension(real.ext), rel: moved, asked: Some(rel.to_string()), note: Some(note) }
+        }
+        Some(_) => Place { path: path.to_path_buf(), rel: rel.to_string(), asked: None, note: None },
+        None => Place {
+            path: path.to_path_buf(),
+            rel: rel.to_string(),
+            asked: None,
+            note: Some(format!("The file's format couldn't be recognised, so it was saved as {rel}, as asked; check that it opens.")),
+        },
+    }
+}
+
+/// Run one paid stage, record it and save its output, under the extension of the format it really
+/// is ([`real_place`]). When the provider fails after it accepted the work and reports a charge,
+/// that charge is recorded first, so a retry is checked against the limit it already used. An
+/// overrun of the estimate is reported only after the receipt and the output are kept.
+fn make(ws: &Workspace, ready: &Ready, req: &AssetRequest<'_>, path: &Path, rel: &str, from: &str, estimate: Option<f64>) -> Result<Made, ToolError> {
     let receipt = ready.receipt(from);
     // The run may not start at a price above the one its limit was checked against.
     let g = ready.provider.generate_within(&ready.key, &ready.model, req, estimate).map_err(|e| record_charge(ws, &receipt, ready.kind, rel, e))?;
-    keep(ws, path, rel, &receipt, &g)?;
-    within_estimate(rel, g.cost, estimate, ready.t.choice.unit)?;
-    Ok(g)
+    let place = real_place(path, rel, &g.bytes);
+    // The receipt names the file as it is saved, and is written before it.
+    keep(ws, &place.path, &place.rel, &receipt, &g)?;
+    within_estimate(&place.rel, g.cost, estimate, ready.t.choice.unit)?;
+    Ok(Made { g, place })
 }
 
 /// Record the charge a failed generation reported, and say so in its error. A charge of unknown
@@ -724,16 +769,19 @@ fn within_estimate(saved: &str, actual: Option<f64>, estimate: Option<f64>, unit
     Ok(())
 }
 
-/// The result of a saved generation: what it cost and what the type has used of its limit, from a
-/// checked ledger read (an unreadable ledger is never shown as an empty one), and the options of the
-/// request the model ignored.
-fn summary(ws: &Workspace, ready: &Ready, saved: &str, made: &Generated, extra: Value) -> Result<ToolOutput, ToolError> {
+/// The result of a saved generation: where it was saved (and, when that isn't the file asked for,
+/// which was and why), what it cost and what the type has used of its limit, from a checked ledger
+/// read (an unreadable ledger is never shown as an empty one), and the options of the request the
+/// model ignored.
+fn summary(ws: &Workspace, ready: &Ready, made: &Made, extra: Value) -> Result<ToolOutput, ToolError> {
+    let saved = made.place.rel.as_str();
+    let generated = &made.g;
     let unit = ready.t.choice.unit;
     let usage: TypeUsage = ws.try_type_usage(ready.kind, &ready.t).map_err(|e| {
         let (many, _) = type_words(ready.kind);
         ToolError::new(
             e.code,
-            format!("Saved {saved} and recorded {}, but the usage of {many} could not be read: {}", ready.receipt("").charge(made.cost), e.message),
+            format!("Saved {saved} and recorded {}, but the usage of {many} could not be read: {}", ready.receipt("").charge(generated.cost), e.message),
         )
         .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and check the asset ledger before continuing.")
     })?;
@@ -744,15 +792,23 @@ fn summary(ws: &Workspace, ready: &Ready, saved: &str, made: &Generated, extra: 
         "kind": ready.kind.id(),
         "provider": ready.provider.id(),
         "model": t.choice.model,
-        "cost": made.cost.map(round),
+        "cost": generated.cost.map(round),
         "unit": unit,
         "used": round(usage.amount),
         "generations": usage.generations,
         "cost_missing": usage.cost_missing,
         "limit": limited.then(|| round(t.limit)),
         "left": limited.then(|| round((t.limit - usage.amount).max(0.0))),
-        "ignored": made.ignored,
+        "ignored": generated.ignored,
     });
+    if let Some(o) = v.as_object_mut() {
+        if let Some(asked) = &made.place.asked {
+            o.insert("asked".into(), json!(asked));
+        }
+        if let Some(note) = &made.place.note {
+            o.insert("note".into(), json!(note));
+        }
+    }
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
         o.extend(e.clone());
     }
@@ -772,7 +828,8 @@ fn prompt_ok(p: &str) -> Result<&str, ToolError> {
     Ok(p)
 }
 
-/// Validate the destination, the project's picture choice and its limit before saving a PNG.
+/// Validate the destination, the project's picture choice and its limit before saving the picture
+/// (a PNG where the model gives one).
 fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ImageParams = parse_params(params)?;
     let prompt = prompt_ok(&p.prompt)?;
@@ -873,10 +930,14 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         (Start::Given(url), _) => (Some(url), format!("from {image}")),
         (Start::Made(pictures), Some((pic_path, pic_rel))) => {
             ctx.report(None, "Making a picture of it first…");
-            let g = make(&j.ws, &pictures, &picture_req, &pic_path, &pic_rel, words, picture_estimate)?;
-            picture = json!({"saved": pic_rel, "provider": pictures.provider.id(), "model": pictures.t.choice.model, "cost": g.cost.map(round), "unit": pictures.t.choice.unit});
-            // A provider that sends the picture back without an address: it goes inline.
-            let url = if g.url.is_empty() { fal::data_uri(&g.bytes, "image/png") } else { g.url };
+            let Made { g, place } = make(&j.ws, &pictures, &picture_req, &pic_path, &pic_rel, words, picture_estimate)?;
+            picture = json!({"saved": place.rel, "provider": pictures.provider.id(), "model": pictures.t.choice.model, "cost": g.cost.map(round), "unit": pictures.t.choice.unit});
+            if let (Some(o), Some(note)) = (picture.as_object_mut(), place.note) {
+                o.insert("note".into(), json!(note));
+            }
+            // A provider that sends the picture back without an address: it goes inline, as the
+            // format it is.
+            let url = if g.url.is_empty() { fal::data_uri(&g.bytes, formats::sniff(&g.bytes).map_or("image/png", |f| f.media)) } else { g.url };
             (Some(url), words.to_string())
         }
         (Start::Made(_), None) => return Err(ToolError::internal("the picture made first has no place to be saved")),
@@ -886,7 +947,7 @@ fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let model_req = AssetRequest::Model3d { image_url: url.as_deref(), prompt: url.is_none().then_some(words), textured, faces };
     ctx.report(None, "Turning it into a 3D model (a minute or two)…");
     let made = make(&j.ws, &solid, &model_req, &path, &rel, &made_from, model_estimate)?;
-    summary(&j.ws, &solid, &rel, &made, json!({"picture": picture, "textured": textured, "faces": faces}))
+    summary(&j.ws, &solid, &made, json!({"picture": picture, "textured": textured, "faces": faces}))
 }
 
 /// Where to save inside app/: (full path, path relative to app/). `ext` is the required extension.
@@ -1057,6 +1118,8 @@ mod tests {
         cost: Option<Option<f64>>,
         /// Every run fails after it was accepted, with this charge.
         fails_charging: Option<Option<f64>>,
+        /// What every run sends back, instead of bytes of no known format.
+        bytes: Option<Vec<u8>>,
         /// A project whose spending lock is looked at during each run: whether it was held.
         probe: Option<(PathBuf, Mutex<Option<bool>>)>,
         calls: Mutex<Vec<Call>>,
@@ -1087,6 +1150,7 @@ mod tests {
                 estimate: None,
                 cost: None,
                 fails_charging: None,
+                bytes: None,
                 probe: None,
                 calls: Mutex::default(),
                 estimates: Mutex::default(),
@@ -1159,7 +1223,8 @@ mod tests {
                 let failed = ToolError::new(ErrorCode::ProgramFailed, "The job failed.").with_remediation("Check the job.");
                 return Err(charged_or_unknown(failed, charge));
             }
-            Ok(Generated { url: "https://stand-in/picture.png".into(), bytes: b"generated".to_vec(), cost, ignored: mapped.ignored })
+            let bytes = self.bytes.clone().unwrap_or_else(|| b"generated".to_vec());
+            Ok(Generated { url: "https://stand-in/picture.png".into(), bytes, cost, ignored: mapped.ignored })
         }
         /// Record the estimate the run was approved within, then run it.
         fn generate_within(&self, key: &str, model: &ModelDetail, req: &AssetRequest, approved: Option<f64>) -> Result<Generated, ToolError> {
@@ -2119,6 +2184,100 @@ mod tests {
         assert_eq!(w.try_type_usage(AssetKind::Speech, &t).unwrap().amount, 5.0);
     }
 
+    /// A generation is saved under the extension of the format it really is: a picture asked as a PNG
+    /// that comes back as a JPEG is saved as a .jpg, with the receipt and the result naming that file
+    /// and the result saying why; nothing is saved under the name asked for. Bytes that match keep
+    /// the name, and bytes of no format this app can tell keep it with a note.
+    #[test]
+    fn a_generation_is_saved_under_the_extension_of_what_came_back() {
+        let jpeg = b"\xff\xd8\xff\xe0 a picture".to_vec();
+        let wav = b"RIFF\x24\x00\x00\x00WAVEfmt a sound".to_vec();
+        for (tool, params, bytes, saved, asked, said) in [
+            (
+                "assets_image_generate",
+                json!({"prompt": "a crate", "save_as": "Assets/crate.png"}),
+                jpeg.clone(),
+                "Assets/crate.jpg",
+                Some("Assets/crate.png"),
+                Some("JPEG rather than PNG"),
+            ),
+            (
+                "assets_image_generate",
+                json!({"prompt": "a crate", "save_as": "Assets/crate.png"}),
+                b"\x89PNG\r\n\x1a\nok".to_vec(),
+                "Assets/crate.png",
+                None,
+                None,
+            ),
+            (
+                "assets_sound_generate",
+                json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": "audio/wind.mp3"}),
+                wav.clone(),
+                "audio/wind.wav",
+                Some("audio/wind.mp3"),
+                Some("WAV rather than MP3"),
+            ),
+            (
+                "assets_music_generate",
+                json!({"prompt": "calm", "duration_seconds": 3.0, "save_as": "audio/calm.mp3"}),
+                b"ID3\x04 music".to_vec(),
+                "audio/calm.mp3",
+                None,
+                None,
+            ),
+            (
+                "assets_speech_generate",
+                json!({"text": "hi", "voice_id": "v1", "save_as": "audio/hi.mp3"}),
+                b"<html>?".to_vec(),
+                "audio/hi.mp3",
+                None,
+                Some("couldn't be recognised"),
+            ),
+        ] {
+            let (_d, mut w) = ws();
+            let stub = Recording { bytes: Some(bytes.clone()), ..Recording::new("fal", Unit::Usd, 0.1) };
+            let (engine, _stub) = recording_engine(&mut w, stub);
+            let v = call(&engine, tool, params).unwrap();
+            assert_eq!(v["saved"], saved, "{tool}: {v}");
+            assert_eq!(v.get("asked").and_then(Value::as_str), asked, "{tool}: {v}");
+            match said {
+                Some(words) => assert!(v["note"].as_str().is_some_and(|n| n.contains(words)), "{tool}: {v}"),
+                None => assert!(v.get("note").is_none(), "{tool}: {v}"),
+            }
+            assert_eq!(std::fs::read(w.app_dir().join(saved)).unwrap(), bytes, "{tool}: the bytes, unchanged");
+            if let Some(asked) = asked {
+                assert!(!w.app_dir().join(asked).exists(), "{tool}: nothing under the name asked for");
+            }
+            let receipts: Vec<String> = w.try_assets().unwrap().into_iter().map(|r| r.file).collect();
+            assert_eq!(receipts, [saved], "{tool}: the receipt names the file as saved");
+        }
+        // The picture a 3D model is made from is saved as what it is too; the model, a GLB, as asked.
+        let (_d, mut w) = ws();
+        let pictures = Recording { bytes: Some(jpeg), ..Recording::new("fal", Unit::Usd, 0.15) };
+        let solids = Recording { bytes: Some(b"glTF\x02\x00\x00\x00 a barrel".to_vec()), ..Recording::new("scenario", Unit::Credits, 30.0) };
+        choose_all(&mut w, &pictures);
+        choose(&mut w, AssetKind::Model3d, "scenario", "solid", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        let engine = engine_with(&w, vec![Arc::new(pictures), Arc::new(solids)]);
+        let v = call(&engine, "assets_model_generate", json!({"prompt": "a barrel", "save_as": "barrel.glb"})).unwrap();
+        assert_eq!(v["picture"]["saved"], "barrel.jpg", "{v}");
+        assert!(v["picture"]["note"].as_str().is_some_and(|n| n.contains("JPEG")), "{v}");
+        assert_eq!((&v["saved"], v.get("note")), (&json!("barrel.glb"), None), "{v}");
+        assert!(w.app_dir().join("barrel.jpg").is_file() && !w.app_dir().join("barrel.png").exists());
+    }
+
+    /// The place a generation goes, from its bytes alone.
+    #[test]
+    fn the_real_place_keeps_the_name_and_changes_only_the_extension() {
+        let path = Path::new("/p/app/Assets/Sky.PNG");
+        let same = real_place(path, "Assets/Sky.PNG", b"\x89PNG\r\n\x1a\n");
+        assert_eq!((same.rel.as_str(), same.asked.is_none(), same.note.is_none()), ("Assets/Sky.PNG", true, true), "the extension's case doesn't matter");
+        let webp = real_place(path, "Assets/Sky.PNG", b"RIFF\x10\x00\x00\x00WEBPVP8 ");
+        assert_eq!((webp.path.as_path(), webp.rel.as_str()), (Path::new("/p/app/Assets/Sky.webp"), "Assets/Sky.webp"));
+        assert_eq!(webp.asked.as_deref(), Some("Assets/Sky.PNG"));
+        let gltf = real_place(Path::new("/p/app/m.glb"), "m.glb", b"glTF\x02\x00\x00\x00");
+        assert!(gltf.note.is_none() && gltf.rel == "m.glb");
+    }
+
     /// A final ledger read failure cannot be reported as successful generation with zero historical spending.
     #[test]
     fn saved_asset_summary_reports_ledger_failure_without_erasing_output() {
@@ -2131,7 +2290,8 @@ mod tests {
         let made = Generated { url: String::new(), bytes: b"generated".to_vec(), cost: Some(0.2), ignored: Vec::new() };
         keep(&w, &path, &rel, &ready.receipt("hi"), &made).unwrap();
         std::fs::write(w.root.join("assets.json"), "broken").unwrap();
-        let err = summary(&w, &ready, &rel, &made, json!({})).unwrap_err();
+        let made = Made { g: made, place: real_place(&path, &rel, b"ID3") };
+        let err = summary(&w, &ready, &made, json!({})).unwrap_err();
         assert!(err.message.contains("Saved a.mp3 and recorded") && err.message.contains("could not be read"), "{}", err.message);
         assert!(err.remediation.unwrap().contains("Do not blindly"));
         assert_eq!(std::fs::read(path).unwrap(), b"generated");

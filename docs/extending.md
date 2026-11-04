@@ -157,9 +157,15 @@ available to your ElevenLabs account):
 The shared tool path saves assets inside the project's `app/` folder and records each generation in
 the project's spending ledger with the amount in the provider's unit. `assets_speech_generate`
 accepts text and a voice id; `assets_sound_generate` and `assets_music_generate` accept a prompt and
-duration. The file name must end in `.mp3`. ElevenLabs is asked for MP3; audio from other providers
-is saved as the provider returns it, under the name given, and nothing converts or checks it. These
-tools are available in the CLI, MCP and builder for generating original assets.
+duration. The file name must end in `.mp3` (and a picture's in `.png`). ElevenLabs is asked for MP3,
+and a model of another provider that has a choice of output format is asked for MP3 audio or PNG
+pictures (the `format` role in `input_roles.toml`). Nothing is converted: the first bytes of what
+comes back are read (MP3, WAV, Ogg, FLAC, AAC, M4A; PNG, JPEG, WebP, GIF; GLB), and a file of another
+format than its name says is saved under the same name with its own extension, so a WAV asked for
+as `wind.mp3` becomes `wind.wav`. The receipt and the result name the file as saved, and the result
+says what was asked for and why (`asked`, `note`); bytes of no format the app can tell are saved
+under the name given, with a note. These tools are available in the CLI, MCP and builder for
+generating original assets.
 
 ### The spending ledger
 
