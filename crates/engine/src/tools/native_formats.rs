@@ -988,10 +988,13 @@ mod tests {
 
     #[test]
     fn real_binary_end_to_end_if_present() {
+        // `/bin/ls` is ELF on Linux and a universal Mach-O on a Mac.
+        let system = if cfg!(target_os = "macos") { "Mac" } else { "Linux" };
         let Ok(bytes) = std::fs::read("/bin/ls") else { return };
         let e = engine_with("ls", &bytes);
         let r = call(&e, "core_target_triage", json!({}));
-        assert!(r["result"]["plain_english"].as_str().unwrap().contains("Linux"));
+        let said = r["result"]["plain_english"].as_str().unwrap();
+        assert!(said.contains(system), "{said}");
         let r = call(&e, "core_overview_show", json!({}));
         assert!(r["result"]["counts"]["functions"].as_u64().unwrap() > 50);
         let r = call(&e, "native_layout_show", json!({"detail": "summary"}));

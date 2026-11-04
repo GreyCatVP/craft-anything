@@ -150,10 +150,13 @@ fn with_usual_dirs(path: Option<OsString>, home: Option<PathBuf>, local_data: Op
     let mut dirs: Vec<PathBuf> = path.as_ref().map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
     let before = dirs.len();
     let in_home = home.iter().flat_map(|h| USUAL_HOME_DIRS.iter().map(move |d| h.join(d)).chain(nvm_bins(h)).chain(npm_global_bin(h)));
-    // Antigravity's per-user installer may use a redirected LOCALAPPDATA directory.
+    // Antigravity's per-user installer may use a redirected LOCALAPPDATA directory, and its CLI
+    // (`agy.exe`) sits in `agy\bin` or straight in the `Antigravity` folder, depending on the
+    // installer's version (#62, #737). Only a file named `agy` matches, so the desktop app's own
+    // `Antigravity.exe` is never taken for the CLI.
     let local_data =
         local_data.filter(|p| !p.as_os_str().is_empty()).or_else(|| home.as_ref().filter(|_| cfg!(windows)).map(|h| h.join("AppData").join("Local")));
-    let antigravity = local_data.map(|p| p.join("agy").join("bin"));
+    let antigravity = local_data.into_iter().flat_map(|p| [p.join("agy").join("bin"), p.join("Antigravity")]);
     for d in in_home.chain(antigravity).chain(USUAL_DIRS.iter().map(PathBuf::from)) {
         if !dirs.contains(&d) {
             dirs.push(d);
@@ -368,6 +371,29 @@ mod tests {
         assert_eq!(which_in("agy", Some(path)), [program]);
     }
 
+    /// #737: the Antigravity installer may put `agy.exe` straight in the `Antigravity` folder, and
+    /// that folder's desktop app (`Antigravity.exe`) must not be taken for the CLI.
+    #[test]
+    fn antigravity_cli_next_to_its_folder_is_found_but_not_the_desktop_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("profile");
+        let local_data = dir.path().join("local");
+        let folder = local_data.join("Antigravity");
+        std::fs::create_dir_all(&folder).unwrap();
+        let app = folder.join("Antigravity.exe");
+        std::fs::write(&app, b"desktop").unwrap();
+        let path = with_usual_dirs(None, Some(home.clone()), Some(local_data.clone()));
+        assert!(which_in("agy", path.clone()).is_empty(), "no CLI yet");
+        let program = folder.join(if cfg!(windows) { "agy.exe" } else { "agy" });
+        std::fs::write(&program, b"cli").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(which_in("agy", path.clone()).as_slice(), std::slice::from_ref(&program));
+    }
+
     #[cfg(windows)]
     #[test]
     fn usual_windows_dirs_come_after_path() {
@@ -375,10 +401,12 @@ mod tests {
         let path = OsString::from(r"C:\Windows;C:\Users\u\.local\bin");
         let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone()), None).unwrap()).collect();
         assert_eq!(dirs[..3], [PathBuf::from(r"C:\Windows"), home.join(r".local\bin"), home.join(r"AppData\Roaming\npm")]);
-        // (Plus npm's prefix where the environment sets one.)
+        // PATH's two less `.local\bin`, which is a usual one too; Antigravity's two folders (plus
+        // npm's prefix where the environment sets one).
         let npm = usize::from(npm_global_bin(&home).is_some());
-        assert_eq!(dirs.len(), 2 + USUAL_HOME_DIRS.len() + USUAL_DIRS.len() + npm, "nothing twice");
+        assert_eq!(dirs.len(), 1 + USUAL_HOME_DIRS.len() + 2 + USUAL_DIRS.len() + npm, "nothing twice");
         assert!(dirs.contains(&home.join("AppData").join("Local").join("agy").join("bin")));
+        assert!(dirs.contains(&home.join("AppData").join("Local").join("Antigravity")));
         // Each way Claude Code installs on Windows: native, npm, WinGet (per user and machine-wide).
         assert!(dirs.contains(&home.join(r"AppData\Local\Microsoft\WinGet\Links")));
         assert!(dirs.contains(&PathBuf::from(r"C:\Program Files\WinGet\Links")));

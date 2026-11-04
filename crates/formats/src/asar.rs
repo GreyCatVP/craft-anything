@@ -83,8 +83,12 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<AsarArchive, AsarError> 
     if json_len > MAX_HEADER_BYTES {
         return Err(AsarError::HeaderTooLarge(json_len));
     }
-    if header_pickle < json_len.saturating_add(8) {
+    let payload_size = r.u32_le(8).ok_or(AsarError::NotAsar("truncated"))? as usize;
+    if header_pickle < json_len.saturating_add(8) || payload_size.checked_add(4) != Some(header_pickle) {
         return Err(AsarError::NotAsar("header sizes disagree"));
+    }
+    if r.slice(8, header_pickle).is_none() {
+        return Err(AsarError::NotAsar("header runs past the end"));
     }
     let json = r.slice(16, json_len).ok_or(AsarError::NotAsar("header runs past the end"))?;
     if json.first() != Some(&b'{') {

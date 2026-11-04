@@ -218,6 +218,7 @@ struct PyzRead {
     /// How many modules its table holds, which may be more than `entries`.
     total: usize,
     encrypted: bool,
+    outside: usize,
 }
 
 fn looks_zlib(b: &[u8]) -> bool {
@@ -254,6 +255,7 @@ fn read_pyz(data: &[u8], member: &PackedEntry, room: usize, key_seen: bool) -> R
     let unzipped = !samples.is_empty() && samples.iter().all(|b| !looks_zlib(b));
     let encrypted = key_seen || key_inside || unzipped;
     let kind = format!("{PYZ_KIND}{magic:04x}");
+    let outside = modules.iter().filter(|m| !in_range(m)).count();
     let entries = modules
         .iter()
         .map(|m| PackedEntry {
@@ -261,11 +263,11 @@ fn read_pyz(data: &[u8], member: &PackedEntry, room: usize, key_seen: bool) -> R
             offset: member.offset.saturating_add(m.at),
             stored_size: m.len,
             size: None,
-            compression: if encrypted { Compression::Unreadable } else { Compression::Zlib },
+            compression: if encrypted || !in_range(m) { Compression::Unreadable } else { Compression::Zlib },
             kind: Some(kind.clone()),
         })
         .collect();
-    Ok(PyzRead { magic, entries, total, encrypted })
+    Ok(PyzRead { magic, entries, total, encrypted, outside })
 }
 
 impl PackedFormat for PyInstaller {
@@ -312,6 +314,9 @@ impl PackedFormat for PyInstaller {
                         "encrypted": read.encrypted,
                     }));
                     truncated |= read.total > read.entries.len();
+                    if read.outside > 0 {
+                        notes.push(format!("{} module(s) in {} lie outside that PYZ archive and cannot be read.", read.outside, m.entry.path));
+                    }
                     nested.extend(read.entries);
                 }
                 Err(why) => {

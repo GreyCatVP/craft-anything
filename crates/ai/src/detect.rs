@@ -19,6 +19,10 @@ fn cfg(name: &str, kind: BackendKind, model: &str) -> BackendConfig {
     BackendConfig { name: name.into(), kind, model: model.into(), base_url: None, ssh_host: None, enabled: true }
 }
 
+fn cfg_at(name: &str, kind: BackendKind, model: &str, base: &str) -> BackendConfig {
+    BackendConfig { base_url: Some(base.into()), ..cfg(name, kind, model) }
+}
+
 /// Environment keys that are set.
 pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
     let mut out = Vec::new();
@@ -31,6 +35,28 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
             out.push(Detected { suggestion: cfg(name, kind, model), reason: format!("Found {var} in your environment"), needs_key: false });
         }
     }
+    // Hosted APIs we know by name. Offered only when their key is already set, like OpenAI and
+    // Anthropic, so a paid service is never advertised to someone who has no key for it.
+    for p in crate::providers::PROVIDERS {
+        if let Some(var) = p.key_names().find(|var| get(var).is_some_and(|v| !v.trim().is_empty())) {
+            out.push(Detected {
+                suggestion: cfg_at(p.name, p.kind, p.default_model, p.base_url),
+                reason: format!("Found {var} in your environment"),
+                needs_key: false,
+            });
+        }
+    }
+    // A Google AI Studio key is free and the easiest one to get (#646): always offered, found or pasted.
+    let gemini = get("GEMINI_API_KEY").is_some_and(|v| !v.trim().is_empty());
+    out.push(Detected {
+        suggestion: cfg(GEMINI_NAME, BackendKind::Gemini, crate::openai::GEMINI_DEFAULT_MODEL),
+        reason: if gemini {
+            "Found GEMINI_API_KEY in your environment".into()
+        } else {
+            "Gemini: paste a free key from Google AI Studio (aistudio.google.com/apikey)".into()
+        },
+        needs_key: !gemini,
+    });
     // Kimi K3.1 Pro builds through OpenRouter: with its key found, or one the person pastes.
     let found = get("OPENROUTER_API_KEY").is_some_and(|v| !v.trim().is_empty());
     out.push(Detected {
@@ -42,11 +68,26 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
         },
         needs_key: !found,
     });
+    // OpenCode Go: a paid subscription, so it is offered only when its key is already set. Gemini
+    // and Kimi are offered keyless because they are general model APIs.
+    let go = ["OPENCODEGO_API_KEY", "OPENCODE_GO_API_KEY"].iter().any(|v| get(v).is_some_and(|k| !k.trim().is_empty()));
+    if go {
+        out.push(Detected {
+            suggestion: cfg_at(OPENCODE_GO_NAME, BackendKind::OpenaiCompatible, crate::openai::OPENCODE_GO_DEFAULT_MODEL, crate::openai::OPENCODE_GO_BASE),
+            reason: "OpenCode Go, with its key in your environment".into(),
+            needs_key: false,
+        });
+    }
     out
 }
 
 /// The name Kimi K3.1 Pro is added under.
 pub const KIMI_NAME: &str = "Kimi K3.1 Pro (OpenRouter)";
+/// Name given to a Google AI Studio (Gemini API key) backend.
+pub const GEMINI_NAME: &str = "Gemini (Google AI Studio)";
+
+/// The name OpenCode Go is added under.
+pub const OPENCODE_GO_NAME: &str = "OpenCode Go (subscription)";
 
 /// Is something listening at this URL's host:port? (bounded TCP connect)
 pub fn port_open(base_url: &str, timeout: Duration) -> bool {
@@ -61,9 +102,15 @@ const NOT_CHAT: &[&str] = &["embed", "embedding", "embeddings", "embeddinggemma"
 
 /// The first model a server lists that can chat. A specialised model isn't a chat fallback.
 pub(crate) fn chat_model(models: &[String]) -> Option<String> {
+    let specialised =
+        |name: &str| name.split(|c: char| !c.is_ascii_alphanumeric()).any(|token| NOT_CHAT.contains(&token.trim_end_matches(|c: char| c.is_ascii_digit())));
     let chats = |m: &&String| {
-        let name = m.rsplit('/').next().unwrap_or(m).to_ascii_lowercase();
-        !name.split(|c: char| !c.is_ascii_alphanumeric()).any(|token| NOT_CHAT.contains(&token))
+        let lower = m.to_ascii_lowercase();
+        let (directory, name) = lower.rsplit_once(['/', '\\']).unwrap_or(("", lower.as_str()));
+        // A generic GGUF filename needs its model directory; arbitrary ancestors do not identify it.
+        let generic_gguf = name == "model.gguf" || name == "ggml-model.gguf" || (name.starts_with("ggml-model-") && name.ends_with(".gguf"));
+        let model_directory = directory.rsplit(['/', '\\']).next().unwrap_or_default();
+        !(specialised(name) || generic_gguf && specialised(model_directory))
     };
     models.iter().find(chats).cloned()
 }
@@ -108,6 +155,59 @@ pub fn agent_clis() -> Vec<Detected> {
             })
         })
         .collect()
+}
+
+/// What a scan found that isn't an AI to use but explains why one is missing.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DetectHint {
+    /// The Claude desktop app is installed, but not Claude Code, the `claude` command builds run:
+    /// "Claude" installed from its website wasn't found and nothing said why (#259).
+    ClaudeDesktopWithoutCli { app: PathBuf },
+}
+
+impl DetectHint {
+    pub fn message(&self) -> String {
+        match self {
+            Self::ClaudeDesktopWithoutCli { app } => {
+                format!("The Claude desktop app is installed ({}), but Claude Code, the `claude` command-line tool building uses, isn't.", app.display())
+            }
+        }
+    }
+
+    pub fn remediation(&self) -> &'static str {
+        match self {
+            Self::ClaudeDesktopWithoutCli { .. } => "Install Claude Code apart from the desktop app, sign in to it once in a terminal, then look again.",
+        }
+    }
+}
+
+/// Hints for what [`agent_clis`] can't offer.
+pub fn hints() -> Vec<DetectHint> {
+    if craft_anything_platform::which("claude").is_some() {
+        return Vec::new();
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let local_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    claude_desktop_app(home.as_deref(), local_data.as_deref()).map(|app| DetectHint::ClaudeDesktopWithoutCli { app }).into_iter().collect()
+}
+
+/// Where the Claude desktop app is, if it's installed. On Windows the Store package leaves a
+/// `claude-desktop` app alias (a link that only `symlink_metadata` can read) and the older
+/// installer an `AnthropicClaude` folder; on macOS it's `Claude.app`. There's no Linux app.
+fn claude_desktop_app(home: Option<&std::path::Path>, local_data: Option<&std::path::Path>) -> Option<PathBuf> {
+    let places: Vec<PathBuf> = if cfg!(windows) {
+        let local_data = local_data.map(PathBuf::from).or_else(|| home.map(|h| h.join("AppData").join("Local")));
+        local_data
+            .into_iter()
+            .flat_map(|d| [d.join("Microsoft").join("WindowsApps").join("claude-desktop.exe"), d.join("AnthropicClaude").join("claude.exe")])
+            .collect()
+    } else if cfg!(target_os = "macos") {
+        std::iter::once(PathBuf::from("/Applications/Claude.app")).chain(home.map(|h| h.join("Applications").join("Claude.app"))).collect()
+    } else {
+        Vec::new()
+    };
+    places.into_iter().find(|p| std::fs::symlink_metadata(p).is_ok())
 }
 
 /// The most servers taken from OpenCode's settings.
@@ -270,8 +370,39 @@ fn remote_agents(host: String) -> Vec<Detected> {
 }
 
 #[cfg(test)]
+mod model_id_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #259: the desktop app is found where its installers put it, and nothing is made up where
+    /// there's none.
+    #[test]
+    fn the_claude_desktop_app_is_found_where_its_installers_put_it() {
+        let empty = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("AnthropicClaude").join("claude.exe");
+        std::fs::create_dir_all(app.parent().unwrap()).unwrap();
+        std::fs::write(&app, b"app").unwrap();
+        let mac = dir.path().join("Applications").join("Claude.app");
+        std::fs::create_dir_all(&mac).unwrap();
+        let found = claude_desktop_app(Some(dir.path()), Some(dir.path()));
+        if cfg!(windows) {
+            assert_eq!(found, Some(app));
+            assert_eq!(claude_desktop_app(Some(empty.path()), Some(empty.path())), None);
+            // The Store package's alias wins over an old install.
+            let alias = dir.path().join("Microsoft").join("WindowsApps").join("claude-desktop.exe");
+            std::fs::create_dir_all(alias.parent().unwrap()).unwrap();
+            std::fs::write(&alias, b"").unwrap();
+            assert_eq!(claude_desktop_app(None, Some(dir.path())), Some(alias));
+        } else if cfg!(target_os = "linux") {
+            assert_eq!(found, None, "there's no Claude desktop app for Linux");
+        }
+        let hint = DetectHint::ClaudeDesktopWithoutCli { app: PathBuf::from("Claude") };
+        assert!(hint.message().contains("desktop app") && hint.message().contains("`claude`"), "{}", hint.message());
+        assert_eq!(serde_json::to_value(&hint).unwrap()["kind"], "claude_desktop_without_cli");
+    }
 
     /// Non-Git SSH hosts offer both supported agent suggestions without probing the remote computer.
     #[test]
@@ -286,15 +417,54 @@ mod tests {
     #[test]
     fn env_detection() {
         let d = env_keys(|v| (v == "OPENROUTER_API_KEY").then(|| "k".to_string()));
-        assert_eq!(d.len(), 2);
-        assert_eq!(d[0].suggestion.kind, BackendKind::Openrouter);
-        assert!(d[0].reason.contains("OPENROUTER_API_KEY"));
-        // Kimi K3.1 Pro rides on the same key, so it needs none of its own.
-        assert_eq!((d[1].suggestion.model.as_str(), d[1].needs_key), (crate::openai::KIMI_K3_1, false));
-        // Without a key, Kimi K3.1 Pro is still offered, asking for one.
+        let find = |name: &str| d.iter().find(|x| x.suggestion.name == name).unwrap_or_else(|| panic!("{name} offered"));
+        assert!(find("OpenRouter").reason.contains("OPENROUTER_API_KEY"));
+        // Gemini is always offered; without its key it asks for one.
+        assert!(find(GEMINI_NAME).needs_key);
+        // Kimi K3.1 Pro rides on the OpenRouter key, so it needs none of its own.
+        assert!(!find(KIMI_NAME).needs_key);
+        // A paid subscription is not advertised to someone who has no key for it.
+        assert!(d.iter().all(|x| x.suggestion.name != OPENCODE_GO_NAME));
+        // Without any key, everything that can be pasted is still offered.
         let none = env_keys(|_| Some("  ".into()));
-        assert_eq!(none.len(), 1);
-        assert!(none[0].needs_key && none[0].suggestion.name == KIMI_NAME);
+        assert!(none.iter().all(|x| x.needs_key));
+        for name in [GEMINI_NAME, KIMI_NAME] {
+            assert!(none.iter().any(|x| x.suggestion.name == name), "{name} offered");
+        }
+    }
+
+    /// OpenCode Go is offered when its key is set, under either of its environment names.
+    #[test]
+    fn opencode_go_is_offered_only_with_its_key() {
+        for var in ["OPENCODEGO_API_KEY", "OPENCODE_GO_API_KEY"] {
+            let d = env_keys(|v| (v == var).then(|| "k".to_string()));
+            let go = d.iter().find(|x| x.suggestion.name == OPENCODE_GO_NAME).expect("OpenCode Go offered");
+            assert!(!go.needs_key);
+            assert_eq!(go.suggestion.base_url.as_deref(), Some(crate::openai::OPENCODE_GO_BASE));
+            assert_eq!(go.suggestion.model.as_str(), crate::openai::OPENCODE_GO_DEFAULT_MODEL);
+        }
+    }
+
+    #[test]
+    fn gemini_key_in_the_environment_is_used() {
+        let d = env_keys(|v| (v == "GEMINI_API_KEY").then(|| "k".to_string()));
+        let g = d.iter().find(|x| x.suggestion.kind == BackendKind::Gemini).expect("Gemini offered");
+        assert!(!g.needs_key && g.reason.contains("GEMINI_API_KEY"));
+        assert_eq!(g.suggestion.model, crate::openai::GEMINI_DEFAULT_MODEL);
+        assert!(BackendKind::Gemini.needs_key());
+    }
+
+    /// A named provider is offered when its key is set, with its own base URL and default model.
+    #[test]
+    fn a_provider_key_offers_that_provider() {
+        let d = env_keys(|v| (v == "MOONSHOT_API_KEY").then(|| "k".to_string()));
+        let p = d.iter().find(|x| x.suggestion.name == "Moonshot").expect("Moonshot offered");
+        assert!(!p.needs_key);
+        assert!(p.reason.contains("MOONSHOT_API_KEY"));
+        assert_eq!(p.suggestion.base_url.as_deref(), Some("https://api.moonshot.ai/v1"));
+        assert_eq!(p.suggestion.model.as_str(), "kimi-k3.1-pro");
+        // A key that nobody has does not add a row.
+        assert!(d.iter().all(|x| x.suggestion.name != "DeepSeek"));
     }
 
     #[test]

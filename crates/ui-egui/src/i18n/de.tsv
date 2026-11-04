@@ -7,6 +7,8 @@ OpenCode model	OpenCode-Modell
 Remote program	Entferntes Programm
 Reload models	Modelle neu laden
 Apply	Übernehmen
+No chat models are visible in {agent}. Check its setup, then reload.	In {agent} sind keine Chat-Modelle sichtbar. Prüfe die Einrichtung und lade dann neu.
+The saved model is no longer visible. Choose another model or the {agent} default.	Das gespeicherte Modell ist nicht mehr sichtbar. Wähle ein anderes Modell oder den Standard von {agent}.
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	OpenCode hat keine sichtbaren Chat-Modelle. Verbinde in OpenCode einen Anbieter und lade dann neu.
 The saved model is no longer visible. Choose another model or the OpenCode default.	Das gespeicherte Modell ist nicht mehr sichtbar. Wähle ein anderes Modell oder den OpenCode-Standard.
 The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	Die gespeicherte Denktiefe ist für dieses Modell nicht verfügbar. Wähle seinen Standard oder eine angebotene Tiefe.
@@ -96,6 +98,8 @@ Add a folder…	Ordner hinzufügen …
 Add a plugin	Plugin hinzufügen
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Füge eine KI hinzu, dann lese ich diese Belege für dich, beantworte Anschlussfragen und zeige auf die Beweise.
 Add an AI by its address	KI über ihre Adresse hinzufügen
+Add another	Noch einen hinzufügen
+Add it again, to choose another account's folder for it.	Füge ihn noch einmal hinzu, um für ihn den Ordner eines anderen Kontos zu wählen.
 Add more info. The builder reads it at its next step.	Weitere Infos hinzufügen. Der Builder liest sie bei seinem nächsten Schritt.
 Add pictures	Bilder hinzufügen
 Add pictures of the original	Bilder des Originals hinzufügen
@@ -140,6 +144,7 @@ Answers come from {brain}. To build, set up a coding agent in Settings → AI.	A
 App	App
 App details on device	App-Details auf dem Gerät
 Apple apps	Apple-Apps
+Apply model options	Modelloptionen anwenden
 Approve an agent action	Aktion eines Agenten genehmigen
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Apps und Spiele: weiter verfeinern, bis sie deinen Bildern so ähnlich sehen. Aus: Die Ähnlichkeit wird nur gemeldet.
 Architectures	Architekturen
@@ -240,6 +245,7 @@ Choose what the builder's questions get	Wähle, was mit den Fragen des Builders 
 Choose what to recreate, say what you want, then press Start.	Wähle, was nachgebaut werden soll, sag, was du willst, und drücke dann Start.
 Choose…	Auswählen …
 Classes	Klassen
+Claude Code folder (CLAUDE_CONFIG_DIR)	Claude-Code-Ordner (CLAUDE_CONFIG_DIR)
 Clean room	Clean Room
 Clean room / Deep	Clean Room / Deep
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Clean Room liest nie den Code, die Dateien oder den Seitenquelltext des Originals. Der Deep-Modus liest sie mit allen Werkzeugen, die Craft Anything hat.
@@ -279,6 +285,7 @@ Connect to a browser	Mit einem Browser verbinden
 Connect {name}	{name} verbinden
 Connected devices	Verbundene Geräte
 Connected phone	Verbundenes Handy
+Context window	Kontextfenster
 Continue	Weiter
 Contradicted	Widerlegt
 Control-flow graph: a map of every path a function can take, like a flowchart.	Kontrollflussgraph: eine Karte aller Wege, die eine Funktion nehmen kann, wie ein Flussdiagramm.
@@ -328,6 +335,7 @@ Deep	Deep
 Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	Der Deep-Modus dekompiliert jetzt mit Ghidra. Der erste Blick auf ein großes Programm kann mehrere Minuten dauern.
 Deep mode on	Deep-Modus an
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Deep: Wir lesen Code, Dateien und Seitenquelltext mit allen Werkzeugen, die wir haben, und mit Ghidra, wenn es installiert ist. Klicke zum Wechseln.
+Default	Standard
 Delete a project	Ein Projekt löschen
 Delete it	Löschen
 Delete the project	Das Projekt löschen
@@ -400,6 +408,7 @@ Export a report (Markdown)	Einen Bericht exportieren (Markdown)
 Export captured scripts	Erfasste Skripte exportieren
 Export evidence	Belege exportieren
 Export report	Bericht exportieren
+Extended	Erweitert
 Extract an archive	Ein Archiv entpacken
 Extract firmware	Firmware extrahieren
 Extract with this	Damit extrahieren
@@ -560,6 +569,7 @@ It's mine, or I'm allowed to look	Es gehört mir, oder ich darf hineinsehen
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	Seine Kopie wird gelöscht, samt allem, was es dort gespeichert hat. Das Projekt selbst bleibt unverändert.
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	Sein Ordner wird mit allem darin gelöscht: dem Gebauten, den Prüfungen und dem Gespräch.
 Its own code	Sein eigener Code
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Eigene Anmeldung, Einstellungen und Gespräche: Ein anderer Ordner ist ein anderes Konto. Leer: sein üblicher Ordner.
 Java archive overview	Java-Archiv-Übersicht
 Java class	Java-Klasse
 Java method bytecode and pseudo-Java	Java-Methoden-Bytecode und Pseudo-Java
@@ -572,6 +582,15 @@ Jobs ({n})	Aufgaben ({n})
 Just a question: nothing was changed. Answered by	Nur eine Frage: Nichts wurde geändert. Beantwortet von
 Just ask	Einfach fragen
 Just look inside	Einfach hineinsehen
+Work on my project	An meinem Projekt arbeiten
+Work on a project you already have	An einem Projekt arbeiten, das du schon hast
+Pick its folder, say what you want, then press Start.	Wähle seinen Ordner, sag, was du willst, und drücke dann Start.
+Where is your project?	Wo ist dein Projekt?
+Choose your project's folder…	Den Ordner deines Projekts wählen …
+For example: add a dark mode	Zum Beispiel: einen dunklen Modus hinzufügen
+Pick your project's folder first.	Wähle zuerst den Ordner deines Projekts.
+Pick your project's folder	Wähle den Ordner deines Projekts
+That folder is empty. Pick the folder your project's files are in.	Dieser Ordner ist leer. Wähle den Ordner, in dem die Dateien deines Projekts liegen.
 Keep going without asking	Ohne Nachfragen weitermachen
 Keep it	Behalten
 Keep it in the sidebar to open any time, whatever later builds change.	Behalte es in der Seitenleiste, um es jederzeit zu öffnen, egal was spätere Builds ändern.
@@ -623,6 +642,7 @@ List strings	Strings auflisten
 Live: the project's latest build	Live: der neueste Build des Projekts
 Load a picture	Ein Bild laden
 Load a screenshot	Einen Screenshot laden
+Load model options	Modelloptionen laden
 Loading…	Wird geladen …
 Log	Protokoll
 Look again	Noch einmal ansehen
@@ -669,6 +689,7 @@ Memory for Ghidra	Speicher für Ghidra
 Minimise	Minimieren
 Mode	Modus
 Model	Modell
+Model options	Modelloptionen
 Model: {model}	Modell: {model}
 Modules	Module
 More detail	Mehr Details
@@ -873,6 +894,7 @@ Read the project	Das Projekt lesen
 Reading what's inside…	Es wird gelesen, was darin ist …
 Ready	Bereit
 Ready: {what} is on this computer.	Bereit: {what} ist auf diesem Computer.
+Reasoning	Schlussfolgern
 Rebuild status	Nachbau-Status
 Record a finding	Einen Befund festhalten
 Record a hypothesis	Eine Hypothese festhalten
@@ -975,7 +997,9 @@ Send (Enter)	Senden (Enter)
 Send now	Jetzt senden
 Server address	Serveradresse
 Session status	Sitzungsstatus
+Set an AI's folder	Den Ordner einer KI festlegen
 Set an AI's program	Das Programm einer KI festlegen
+Set model options	Modelloptionen festlegen
 Set one up	Eine einrichten
 Set up a brain…	KI einrichten …
 Set up a builder	Einen Builder einrichten
@@ -985,6 +1009,7 @@ Show a project	Ein Projekt zeigen
 Show folder	Ordner zeigen
 Show me everything	Zeig mir alles
 Show me the proof	Zeig mir den Beweis
+Show model options	Modelloptionen anzeigen
 Show pinned builds	Angepinnte Builds zeigen
 Show settings	Einstellungen zeigen
 Show the answer	Die Antwort zeigen
@@ -1008,6 +1033,7 @@ Some plugins couldn't be read:	Einige Plugins konnten nicht gelesen werden:
 Something a program borrows from the operating system or a library, like "open a file".	Etwas, das ein Programm vom Betriebssystem oder einer Bibliothek borgt, etwa „eine Datei öffnen“.
 Something a program or library offers for other programs to use.	Etwas, das ein Programm oder eine Bibliothek anderen Programmen zur Verfügung stellt.
 Source	Quelle
+Standard	Standard
 Start	Start
 Start a Frida session	Eine Frida-Sitzung starten
 Start a GDB session	Eine GDB-Sitzung starten
@@ -1138,6 +1164,7 @@ Unreal IoStore	Unreal IoStore
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal baut Spiele mit Apples Xcode, kostenlos im App Store.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal ist da, braucht aber zusätzlich die C++-Werkzeuge von Visual Studio.
 Unreal pak	Unreal-Pak
+Update a finding	Erkenntnis aktualisieren
 Update a hypothesis	Eine Hypothese aktualisieren
 Update an open question	Eine offene Frage aktualisieren
 Update the checklist	Die Checkliste aktualisieren
@@ -1477,3 +1504,13 @@ a track	pro Titel
 a megapixel	pro Megapixel
 a second	pro Sekunde
 a character	pro Zeichen
+Providers	Anbieter
+Harnesses	Agenten
+Nothing of this kind was found.	Nichts dieser Art wurde gefunden.
+Another model	Anderes Modell
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	Die Claude-Desktop-App ist installiert, aber zum Bauen wird Claude Code gebraucht, ihr eigenes Kommandozeilen-Tool. Installiere Claude Code, melde dich einmal in einem Terminal dort an und suche dann erneut.
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal ist da, aber die mitgelieferte Clang-C++-Toolchain wurde nicht gefunden.
+Add Unreal's Linux C++ toolchain	Unreals Linux-C++-Toolchain hinzufügen
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Führe im Engine-Ordner Engine/Build/BatchFiles/Linux/SetupToolchain.sh aus, um die mitgelieferte Clang-Toolchain zu installieren. Bei einem Quellcode-Build lädt Setup.sh stattdessen die native Toolchain herunter. Ein System-Clang passt möglicherweise nicht zur Engine-Version.
+Unreal is here, but it also needs Xcode.	Unreal ist da, braucht aber zusätzlich Xcode.
+About 60 GB, an Epic Games account, and Xcode.	Etwa 60 GB, ein Epic-Games-Konto und Xcode.

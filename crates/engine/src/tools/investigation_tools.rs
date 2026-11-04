@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError};
+use std::time::{Duration, Instant};
 
 pub fn specs() -> Vec<ToolSpec> {
     let w = Effects::MUTATES_SESSION.union(Effects::WRITES_FILESYSTEM);
@@ -86,6 +87,17 @@ pub fn specs() -> Vec<ToolSpec> {
             requires: Requires::Nothing,
             input_schema: schema_of::<FindingParams>,
             run: core_finding_record,
+        },
+        ToolSpec {
+            id: "core_finding_edit",
+            title: "Update a finding",
+            summary: "Correct a recorded finding without changing its id. Requires a statement and existing evidence ids; pass based_on_revision to refuse a stale investigation update.",
+            beginner: "Correct something we found, keeping its proof and reference.",
+            toolset: Toolset::Core,
+            effects: w,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<EditFindingParams>,
+            run: core_finding_edit,
         },
         ToolSpec {
             id: "core_handoff_write",
@@ -198,6 +210,19 @@ pub struct Investigation {
 
 type Slot = Mutex<Investigation>;
 
+/// The last loaded state, for clients that cannot read the project while drawing. Writers and
+/// project refreshes update this snapshot; an external writer is picked up by open_project.
+pub fn cached(session: &Session) -> Investigation {
+    session.ext.get::<Slot>().map(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).clone()).unwrap_or_default()
+}
+
+pub(crate) fn cache(session: &mut Session, investigation: Investigation) {
+    match session.ext.get::<Slot>() {
+        Some(slot) => *slot.lock().unwrap_or_else(PoisonError::into_inner) = investigation,
+        None => session.ext.insert(Arc::new(Mutex::new(investigation))),
+    }
+}
+
 fn dir(session: &Session) -> Option<PathBuf> {
     session.project.as_ref().map(|p| p.root.join("investigation"))
 }
@@ -210,7 +235,74 @@ pub fn load(session: &Session) -> Investigation {
     session.ext.get::<Slot>().map(|s| s.lock().unwrap_or_else(PoisonError::into_inner).clone()).unwrap_or_default()
 }
 
-fn save(session: &mut Session, mut inv: Investigation) -> Result<Investigation, ToolError> {
+struct UpdateLock {
+    directory: Option<PathBuf>,
+    _file: Option<std::fs::File>,
+}
+
+impl UpdateLock {
+    fn acquire(session: &Session, cancel: &crate::CancelToken, timeout: Duration) -> Result<Self, ToolError> {
+        cancel.check()?;
+        let directory = dir(session);
+        let Some(path) = directory.as_ref() else { return Ok(Self { directory, _file: None }) };
+        std::fs::create_dir_all(path).map_err(|error| ToolError::io(path.display(), error))?;
+        let lock_path = path.join("update.lock");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|error| ToolError::io(lock_path.display(), error))?;
+        let started = Instant::now();
+        loop {
+            cancel.check()?;
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { directory, _file: Some(file) }),
+                Err(std::fs::TryLockError::WouldBlock) if started.elapsed() < timeout => std::thread::park_timeout(Duration::from_millis(5)),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(ToolError::new(ErrorCode::TimedOut, "Another process is updating this investigation.")
+                        .with_remediation("Wait for the other update, reload the investigation and retry with its current revision."));
+                }
+                Err(std::fs::TryLockError::Error(error)) => return Err(ToolError::io(lock_path.display(), error)),
+            }
+        }
+    }
+}
+
+fn lock_update(session: &Session, cancel: &crate::CancelToken) -> Result<UpdateLock, ToolError> {
+    UpdateLock::acquire(session, cancel, Duration::from_secs(10))
+}
+
+fn load_for_update(session: &Session, guard: &UpdateLock) -> Result<Investigation, ToolError> {
+    let Some(directory) = &guard.directory else { return Ok(load(session)) };
+    let path = directory.join("state.json");
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
+            ToolError::new(ErrorCode::GarbledOutput, "The investigation state could not be read; it was not changed.")
+                .with_remediation("Restore a valid investigation/state.json backup before editing this investigation.")
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Investigation::default()),
+        Err(error) => Err(ToolError::io(path.display(), error)),
+    }
+}
+
+pub(crate) fn save_new_project(session: &mut Session, inv: Investigation) -> Result<Investigation, ToolError> {
+    let guard = lock_update(session, &crate::CancelToken::default())?;
+    if let Some(directory) = &guard.directory {
+        let path = directory.join("state.json");
+        if path.try_exists().map_err(|error| ToolError::io(path.display(), error))? {
+            return Err(ToolError::new(ErrorCode::StaleRevision, "This project already has an investigation.")
+                .with_remediation("Reload the existing investigation instead of replacing it."));
+        }
+    }
+    save(session, inv, &guard)
+}
+
+fn save(session: &mut Session, mut inv: Investigation, guard: &UpdateLock) -> Result<Investigation, ToolError> {
+    if guard.directory != dir(session) {
+        return Err(ToolError::internal("The investigation changed while its update lock was held."));
+    }
     inv.revision = inv.revision.saturating_add(1);
     let (_, date, time) = journal::now_utc();
     inv.updated = Some(format!("{date}T{time}Z"));
@@ -220,12 +312,8 @@ fn save(session: &mut Session, mut inv: Investigation) -> Result<Investigation, 
         for (name, body) in render(&inv) {
             write_atomic(&d.join(name), body.as_bytes())?;
         }
-    } else {
-        match session.ext.get::<Slot>() {
-            Some(slot) => *slot.lock().unwrap_or_else(PoisonError::into_inner) = inv.clone(),
-            None => session.ext.insert(Arc::new(Mutex::new(inv.clone()))),
-        }
     }
+    cache(session, inv.clone());
     Ok(inv)
 }
 
@@ -366,9 +454,10 @@ fn core_brief_write(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, ToolError
     if p.question.trim().is_empty() {
         return Err(ToolError::invalid("The brief needs a question."));
     }
-    let mut inv = load(ctx.session);
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut inv = load_for_update(ctx.session, &guard)?;
     inv.brief = Some(Brief { question: p.question, purpose: p.purpose, targets: p.targets, constraints: p.constraints, done_when: p.done_when });
-    let inv = save(ctx.session, inv)?;
+    let inv = save(ctx.session, inv, &guard)?;
     Ok(out(&inv, ctx.session))
 }
 
@@ -387,10 +476,11 @@ fn core_plan_update(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, ToolError
     if p.steps.len() > 200 {
         return Err(ToolError::invalid("A plan can have at most 200 steps."));
     }
-    let mut inv = load(ctx.session);
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut inv = load_for_update(ctx.session, &guard)?;
     check_revision(&inv, p.based_on_revision)?;
     inv.plan = p.steps;
-    let inv = save(ctx.session, inv)?;
+    let inv = save(ctx.session, inv, &guard)?;
     Ok(out(&inv, ctx.session))
 }
 
@@ -415,7 +505,8 @@ fn core_hypothesis_record(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, Too
     }
     check_ids(ctx.session, &p.evidence_for)?;
     check_ids(ctx.session, &p.evidence_against)?;
-    let mut inv = load(ctx.session);
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut inv = load_for_update(ctx.session, &guard)?;
     let id = format!("hyp_{}", inv.hypotheses.len() + 1);
     inv.hypotheses.push(Hypothesis {
         id: id.clone(),
@@ -426,7 +517,7 @@ fn core_hypothesis_record(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, Too
         contradicting: p.evidence_against,
         notes: Vec::new(),
     });
-    let inv = save(ctx.session, inv)?;
+    let inv = save(ctx.session, inv, &guard)?;
     Ok(ToolOutput::Value(json!({"hypothesis_id": id, "revision": inv.revision})))
 }
 
@@ -448,7 +539,8 @@ fn core_hypothesis_update(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, Too
     let p: UpdateHypothesisParams = parse_params(p)?;
     check_ids(ctx.session, &p.add_supporting_evidence_ids)?;
     check_ids(ctx.session, &p.add_contradicting_evidence_ids)?;
-    let mut inv = load(ctx.session);
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut inv = load_for_update(ctx.session, &guard)?;
     let h = inv
         .hypotheses
         .iter_mut()
@@ -471,7 +563,7 @@ fn core_hypothesis_update(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, Too
         h.notes.push(n);
     }
     let snapshot = h.clone();
-    let inv = save(ctx.session, inv)?;
+    let inv = save(ctx.session, inv, &guard)?;
     Ok(ToolOutput::Value(json!({"hypothesis": snapshot, "revision": inv.revision})))
 }
 
@@ -509,7 +601,8 @@ fn core_finding_record(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, ToolEr
             .with_remediation("Run the analysis that shows it, then cite the evidence id it returns."));
     }
     check_ids(ctx.session, &p.evidence_ids)?;
-    let mut inv = load(ctx.session);
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut inv = load_for_update(ctx.session, &guard)?;
     let id = format!("fnd_{}", inv.findings.len() + 1);
     let confidence = match p.confidence {
         ConfidenceParam::Observed => Confidence::Observed,
@@ -517,8 +610,52 @@ fn core_finding_record(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, ToolEr
         ConfidenceParam::Inferred => Confidence::Inferred,
     };
     inv.findings.push(Finding { id: id.clone(), statement: p.statement, evidence_ids: p.evidence_ids, confidence });
-    let inv = save(ctx.session, inv)?;
+    let inv = save(ctx.session, inv, &guard)?;
     Ok(ToolOutput::Value(json!({"finding_id": id, "revision": inv.revision})))
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditFindingParams {
+    /// An existing finding id from core_investigation_show.
+    pub finding_id: String,
+    /// The corrected settled answer.
+    pub statement: String,
+    /// Evidence ids that establish the corrected answer (at least one).
+    pub evidence_ids: Vec<String>,
+    /// Omit to keep the finding's current confidence.
+    #[serde(default)]
+    pub confidence: Option<ConfidenceParam>,
+    /// The investigation revision read before editing; a stale revision is refused.
+    #[serde(default)]
+    pub based_on_revision: Option<u64>,
+}
+
+fn core_finding_edit(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let params: EditFindingParams = parse_params(params)?;
+    if params.statement.trim().is_empty() || params.evidence_ids.is_empty() {
+        return Err(ToolError::invalid("A finding needs a statement and at least one evidence id."));
+    }
+    check_ids(ctx.session, &params.evidence_ids)?;
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut investigation = load_for_update(ctx.session, &guard)?;
+    check_revision(&investigation, params.based_on_revision)?;
+    let finding = investigation
+        .findings
+        .iter_mut()
+        .find(|finding| finding.id == params.finding_id)
+        .ok_or_else(|| ToolError::invalid(format!("Unknown finding {}", params.finding_id)))?;
+    finding.statement = params.statement;
+    finding.evidence_ids = params.evidence_ids;
+    if let Some(confidence) = params.confidence {
+        finding.confidence = match confidence {
+            ConfidenceParam::Observed => Confidence::Observed,
+            ConfidenceParam::Derived => Confidence::Derived,
+            ConfidenceParam::Inferred => Confidence::Inferred,
+        };
+    }
+    let investigation = save(ctx.session, investigation, &guard)?;
+    Ok(ToolOutput::Value(json!({"finding_id": params.finding_id, "revision": investigation.revision})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -530,9 +667,10 @@ pub struct HandoffParams {
 
 fn core_handoff_write(ctx: &mut Ctx<'_>, p: Value) -> Result<ToolOutput, ToolError> {
     let p: HandoffParams = parse_params(p)?;
-    let mut inv = load(ctx.session);
+    let guard = lock_update(ctx.session, &ctx.cancel)?;
+    let mut inv = load_for_update(ctx.session, &guard)?;
     inv.handoff = Some(p.text);
-    let inv = save(ctx.session, inv)?;
+    let inv = save(ctx.session, inv, &guard)?;
     Ok(ToolOutput::Value(json!({"revision": inv.revision})))
 }
 
@@ -588,6 +726,207 @@ mod tests {
 
     fn call(e: &Engine, id: &str, p: serde_json::Value) -> Result<serde_json::Value, craft_anything_evidence::ToolError> {
         e.call(id, p, CallOptions::new(Caller::Agent)).map(|o| o.to_json())
+    }
+
+    #[test]
+    fn finding_edits_refuse_unbacked_corrections_without_changing_memory() {
+        let engine = Engine::new(crate::testing::session());
+        assert!(engine.registry().get("core_finding_edit").is_some());
+        let before = call(&engine, "core_investigation_show", json!({})).unwrap();
+        for evidence_ids in [json!([]), json!(["ev_missing"])] {
+            assert!(call(&engine, "core_finding_edit", json!({"finding_id":"fnd_1", "statement":"corrected", "evidence_ids":evidence_ids})).is_err());
+        }
+        assert_eq!(call(&engine, "core_investigation_show", json!({})).unwrap(), before);
+    }
+
+    #[test]
+    fn investigation_locks_are_bounded_cancelled_and_released_on_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session = crate::Session::isolated(directory.path());
+        session.project = Some(Project::create(&directory.path().join("project.cany"), "Test", Purpose::Education).unwrap());
+        let cancel = crate::CancelToken::default();
+        let guard = super::UpdateLock::acquire(&session, &cancel, std::time::Duration::ZERO).unwrap();
+        assert_eq!(super::UpdateLock::acquire(&session, &cancel, std::time::Duration::ZERO).err().unwrap().code, craft_anything_evidence::ErrorCode::TimedOut);
+        cancel.cancel();
+        assert_eq!(
+            super::UpdateLock::acquire(&session, &cancel, std::time::Duration::from_secs(10)).err().unwrap().code,
+            craft_anything_evidence::ErrorCode::Cancelled
+        );
+        drop(guard);
+        assert!(super::UpdateLock::acquire(&session, &crate::CancelToken::default(), std::time::Duration::ZERO).is_ok());
+    }
+
+    #[test]
+    fn investigation_updates_never_replace_unreadable_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session = crate::Session::isolated(directory.path());
+        let project = Project::create(&directory.path().join("project.cany"), "Test", Purpose::Education).unwrap();
+        let path = project.root.join("investigation/state.json");
+        session.open_project(project).unwrap();
+        let engine = Engine::new(session);
+        call(&engine, "core_brief_write", json!({"question":"Keep this"})).unwrap();
+        let rendered = std::fs::read(path.with_file_name("brief.md")).unwrap();
+        std::fs::write(&path, b"not-json").unwrap();
+        assert_eq!(
+            call(&engine, "core_brief_write", json!({"question":"Do not replace"})).unwrap_err().code,
+            craft_anything_evidence::ErrorCode::GarbledOutput
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"not-json");
+        assert_eq!(std::fs::read(path.with_file_name("brief.md")).unwrap(), rendered);
+    }
+
+    #[test]
+    fn project_writer_child() {
+        let Ok(root) = std::env::var("CRAFT_TEST_INV_PROJECT") else { return };
+        let label = std::env::var("CRAFT_TEST_INV_LABEL").unwrap();
+        let mode = std::env::var("CRAFT_TEST_INV_MODE").unwrap();
+        let root = std::path::PathBuf::from(root);
+        let mut session = crate::Session::isolated(&root.join(format!("test-config-{label}")));
+        session.open_project(Project::open(&root).unwrap()).unwrap();
+        let engine = Engine::new(session);
+        if mode == "append" {
+            for index in 0..24 {
+                call(&engine, "core_hypothesis_record", json!({"claim":format!("{label}-{index}")})).unwrap();
+            }
+        } else {
+            let result = call(&engine, "core_plan_update", json!({"steps":[{"title":label,"status":"todo"}],"based_on_revision":0}));
+            let outcome = match result {
+                Ok(_) => "ok",
+                Err(error) if error.code == craft_anything_evidence::ErrorCode::StaleRevision => "stale",
+                Err(error) => panic!("{error:?}"),
+            };
+            std::fs::write(root.join(format!("{label}.result")), outcome).unwrap();
+        }
+    }
+
+    #[test]
+    fn project_writers_serialize_across_processes() {
+        let directory = tempfile::tempdir().unwrap();
+        for mode in ["append", "revision"] {
+            let project = Project::create(&directory.path().join(format!("{mode}.cany")), "Test", Purpose::Education).unwrap();
+            let children: Vec<_> = ["first", "second"]
+                .into_iter()
+                .map(|label| {
+                    let root = project.root.clone();
+                    std::thread::spawn(move || {
+                        craft_anything_platform::Process::new(std::env::current_exe().unwrap())
+                            .args(["--exact", "tools::investigation_tools::tests::project_writer_child", "--test-threads=1"])
+                            .env("CRAFT_TEST_INV_PROJECT", &root)
+                            .env("CRAFT_TEST_INV_LABEL", label)
+                            .env("CRAFT_TEST_INV_MODE", mode)
+                            .timeout(std::time::Duration::from_secs(30))
+                            .stdout_cap(64 * 1024)
+                            .stderr_cap(64 * 1024)
+                            .run_checked()
+                    })
+                })
+                .collect();
+            for child in children {
+                child.join().unwrap().unwrap();
+            }
+            let state: super::Investigation = serde_json::from_slice(&std::fs::read(project.root.join("investigation/state.json")).unwrap()).unwrap();
+            if mode == "append" {
+                assert_eq!(state.revision, 48);
+                assert_eq!(state.hypotheses.len(), 48);
+                assert_eq!(state.hypotheses.iter().map(|hypothesis| &hypothesis.id).collect::<std::collections::HashSet<_>>().len(), 48);
+            } else {
+                assert_eq!(state.revision, 1);
+                let mut outcomes: Vec<_> =
+                    ["first", "second"].into_iter().map(|label| std::fs::read_to_string(project.root.join(format!("{label}.result"))).unwrap()).collect();
+                outcomes.sort();
+                assert_eq!(outcomes, ["ok", "stale"]);
+            }
+            for (name, body) in super::render(&state) {
+                assert_eq!(std::fs::read_to_string(project.root.join("investigation").join(name)).unwrap(), body);
+            }
+        }
+    }
+
+    #[test]
+    fn finding_corrections_keep_their_id_and_reject_stale_revisions() {
+        use craft_anything_evidence::{Confidence, Environment, EvidenceBuilder, Subject};
+        let engine = Engine::new(crate::testing::session());
+        let evidence = EvidenceBuilder::new("test-observation", Subject { kind: "test".into(), sha256: None, name: None }, Environment::builtin(true))
+            .result(json!({"value": 1}))
+            .summary("Synthetic observation")
+            .confidence(Confidence::Observed)
+            .build()
+            .unwrap();
+        let evidence_id = evidence.id.clone();
+        engine.session().record(evidence).unwrap();
+        call(&engine, "core_finding_record", json!({"statement":"initial", "evidence_ids":[evidence_id]})).unwrap();
+        let edit = json!({"finding_id":"fnd_1", "statement":"corrected", "evidence_ids":[evidence_id], "confidence":"observed", "based_on_revision":1});
+        let result = call(&engine, "core_finding_edit", edit.clone()).unwrap();
+        assert_eq!(result["result"]["finding_id"], "fnd_1");
+        let investigation = call(&engine, "core_investigation_show", json!({})).unwrap();
+        assert_eq!(investigation["result"]["findings"].as_array().unwrap().len(), 1);
+        assert_eq!(investigation["result"]["findings"][0]["statement"], "corrected");
+        assert_eq!(call(&engine, "core_finding_edit", edit).unwrap_err().code, craft_anything_evidence::ErrorCode::StaleRevision);
+        for (confidence, expected) in [("observed", Confidence::Observed), ("derived", Confidence::Derived), ("inferred", Confidence::Inferred)] {
+            call(
+                &engine,
+                "core_finding_edit",
+                json!({"finding_id":"fnd_1", "statement":"reclassified", "evidence_ids":[evidence_id], "confidence":confidence}),
+            )
+            .unwrap();
+            assert_eq!(super::cached(&engine.session()).findings[0].confidence, expected);
+            call(&engine, "core_finding_edit", json!({"finding_id":"fnd_1", "statement":"clarified", "evidence_ids":[evidence_id]})).unwrap();
+            assert_eq!(super::cached(&engine.session()).findings[0].confidence, expected);
+        }
+    }
+
+    #[test]
+    fn shared_projects_preserve_memory_and_refresh_an_external_writers_findings() {
+        use craft_anything_evidence::{Confidence, Environment, EvidenceBuilder, Subject};
+        let directory = tempfile::tempdir().unwrap();
+        let engine = Engine::new(crate::session::Session::isolated(directory.path()));
+        let evidence = EvidenceBuilder::new("test-shared", Subject { kind: "test".into(), sha256: None, name: None }, Environment::builtin(true))
+            .result(json!({"value": 1}))
+            .summary("Synthetic observation")
+            .confidence(Confidence::Observed)
+            .build()
+            .unwrap();
+        let id = evidence.id.clone();
+        engine.session().record(evidence).unwrap();
+        call(&engine, "core_brief_write", json!({"question":"Shared question"})).unwrap();
+        let root = engine.session().ensure_shared_project().unwrap();
+        assert_eq!(engine.session().ensure_shared_project().unwrap(), root);
+        let mut child = crate::session::Session::isolated(&directory.path().join("child"));
+        child.open_project(Project::open(&root).unwrap()).unwrap();
+        let child = Engine::new(child);
+        assert_eq!(call(&child, "core_investigation_show", json!({})).unwrap()["result"]["brief"]["question"], "Shared question");
+        call(&child, "core_finding_record", json!({"statement":"Shared finding", "evidence_ids":[id]})).unwrap();
+        engine.session().open_project(Project::open(&root).unwrap()).unwrap();
+        assert_eq!(super::cached(&engine.session()).findings[0].id, "fnd_1");
+        assert_eq!(super::cached(&engine.session()).findings[0].statement, "Shared finding");
+        let mut reopened = crate::session::Session::isolated(&directory.path().join("reopened"));
+        reopened.open_project(Project::open(&root).unwrap()).unwrap();
+        assert_eq!(super::cached(&reopened).findings[0].id, "fnd_1");
+    }
+
+    #[test]
+    fn shared_targets_are_mode_aware_and_changed_files_are_refused() {
+        use crate::target::{Target, TargetContext};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("sample.bin");
+        std::fs::write(&path, b"sample").unwrap();
+        let target = Target::load(&path).unwrap();
+        let context = TargetContext::from_target(&target);
+        let mut deep = crate::session::Session::isolated(&directory.path().join("deep"));
+        deep.deep_for_run = Some(true);
+        deep.restore_targets(std::slice::from_ref(&context)).unwrap();
+        assert_eq!(deep.active().unwrap().target.id, target.id);
+        assert_eq!(deep.active().unwrap().target.bytes.as_ref(), b"sample");
+        std::fs::write(&path, b"changed").unwrap();
+        let mut other = crate::session::Session::isolated(&directory.path().join("other"));
+        other.deep_for_run = Some(true);
+        assert!(other.restore_targets(std::slice::from_ref(&context)).is_err());
+        assert!(other.active().is_err());
+        std::fs::remove_file(&path).unwrap();
+        let mut clean = crate::session::Session::isolated(&directory.path().join("clean"));
+        clean.restore_targets(&[context]).unwrap();
+        assert_eq!(clean.active().unwrap().target.id, target.id);
+        assert!(clean.active().unwrap().target.bytes.is_empty());
     }
 
     #[test]

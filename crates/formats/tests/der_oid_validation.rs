@@ -4,7 +4,7 @@ use craft_anything_formats::der::{oid, oid_name};
 fn unfinished_oid_does_not_alias_a_known_algorithm() {
     let mut algorithm = vec![0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 1, 1, 0x0b];
     assert_eq!(oid_name(&oid(&algorithm)), Some("sha256WithRSAEncryption"));
-    algorithm.push(0x80);
+    algorithm.push(0x81);
     assert_eq!(oid(&algorithm), "invalid");
     assert!(oid_name(&oid(&algorithm)).is_none());
 }

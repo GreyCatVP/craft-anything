@@ -326,6 +326,15 @@ Jobs ({n_jobs})	ジョブ({n_jobs})
 Just a question: nothing was changed. Answered by	質問のみ: 何も変更されていません。回答者:
 Just ask	質問するだけ
 Just look inside	中を覗くだけ
+Work on my project	自分のプロジェクトで作業する
+Work on a project you already have	すでにあるプロジェクトで作業する
+Pick its folder, say what you want, then press Start.	フォルダを選び、欲しいものを伝えて開始を押してください。
+Where is your project?	プロジェクトはどこにありますか?
+Choose your project's folder…	プロジェクトのフォルダを選ぶ…
+For example: add a dark mode	例: ダークモードを追加
+Pick your project's folder first.	まずプロジェクトのフォルダを選んでください。
+Pick your project's folder	プロジェクトのフォルダを選ぶ
+That folder is empty. Pick the folder your project's files are in.	そのフォルダは空です。プロジェクトのファイルがあるフォルダを選んでください。
 Keep going without asking	確認せずに続行
 Keep it	残す
 Keep it in the sidebar to open any time, whatever later builds change.	サイドバーに残して、後のビルドが変わってもいつでも開けるようにします。
@@ -936,3 +945,13 @@ a track	1 曲あたり
 a megapixel	1 メガピクセルあたり
 a second	1 秒あたり
 a character	1 文字あたり
+Providers	プロバイダ
+Harnesses	ハーネス
+Nothing of this kind was found.	この種類のものは見つかりませんでした。
+Another model	別のモデル
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	Claude デスクトップアプリはインストールされていますが、ビルドには別のコマンドラインツールである Claude Code が必要です。Claude Code をインストールし、ターミナルで一度サインインしてから、もう一度探してください。
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal はインストールされていますが、同梱の Clang C++ ツールチェーンが見つかりません。
+Add Unreal's Linux C++ toolchain	Unreal の Linux C++ ツールチェーンを追加
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	エンジンのフォルダーで Engine/Build/BatchFiles/Linux/SetupToolchain.sh を実行し、同梱の Clang ツールチェーンをインストールします。ソースからビルドした場合は、代わりに Setup.sh がネイティブツールチェーンをダウンロードします。システムの Clang はエンジンのバージョンと一致しない場合があります。
+Unreal is here, but it also needs Xcode.	Unreal はありますが、Xcode も必要です。
+About 60 GB, an Epic Games account, and Xcode.	約 60 GB、Epic Games アカウント、Xcode が必要です。

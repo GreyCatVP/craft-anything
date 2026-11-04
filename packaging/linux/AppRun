@@ -68,5 +68,17 @@ integrate() {
   done
 }
 
+# The command-line tool ships beside the app but nothing puts it on PATH, and the launcher renames
+# the AppImage on every update (#723). `<AppImage> --cli …` runs it, and so does a symlink to the
+# AppImage named `craft-anything-cli` (the runtime passes the name it was started by as $ARGV0).
+# It writes nothing to the desktop: a CLI or MCP run isn't a launch of the app.
+case "${ARGV0:-}" in
+  *craft-anything-cli) exec "$APPDIR/usr/bin/craft-anything-cli" "$@" ;;
+esac
+if [ "${1:-}" = "--cli" ]; then
+  shift
+  exec "$APPDIR/usr/bin/craft-anything-cli" "$@"
+fi
+
 integrate
 exec "$APPDIR/usr/bin/craft-anything" "$@"

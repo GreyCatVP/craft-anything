@@ -163,8 +163,9 @@ fn build(
                 build(children, inodes, d.ino, &path, limits, img, depth + 1, seen);
             }
             8 => {
-                let bytes = inodes.get(&d.ino).and_then(|i| reassemble(i, limits, img));
-                let size = bytes.as_ref().map(|b| b.len() as u64).unwrap_or(0);
+                let inode = inodes.get(&d.ino);
+                let size = inode.map_or(0, |i| u64::from(i.isize));
+                let bytes = inode.and_then(|i| reassemble(i, limits, img));
                 img.entries.push(FsEntry::file(path, size, bytes));
             }
             10 => {

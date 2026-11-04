@@ -4,6 +4,8 @@
 //! - a coding agent that keeps a session (Claude Code) answers from a copy of the builder's own
 //!   session (`--fork-session`), which isn't kept, with only Read, Glob and Grep (none in Clean
 //!   room) and no tool server, so the builder's session and files stay as they are;
+//! - Copilot starts a fresh ACP session with no tool server: only view, glob and grep in Deep
+//!   mode, no tools in Clean room. It answers from the project context, not the builder's chat;
 //! - an AI with an API key answers with our agent loop on a [`ReadOnlyHost`]: the engine's tools
 //!   that change nothing, pointed at this project in an engine of its own;
 //! - any other agent is refused, since it can't be held to reading.
@@ -13,7 +15,7 @@
 
 use super::*;
 use crate::agent::{EngineHost, LoopConfig, ReadOnlyHost};
-use crate::cli_agents::{CliConversation, CliSpec};
+use crate::cli_agents::CliSpec;
 use craft_anything_engine::Toolset;
 use serde::Serialize;
 use std::time::{Duration, Instant, SystemTime};
@@ -80,7 +82,7 @@ pub fn ask(
             preamble: Some(PREAMBLE.into()),
             ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
         };
-        Box::new(CliConversation::new(spec))
+        crate::cli_agents::conversation(spec)
     };
     let (mut conv, mut from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
         BackendKind::AgentCli => {
@@ -88,8 +90,19 @@ pub fn ask(
             if let Some(id) = session.as_deref() {
                 bring_back_session(ws, &entry, id);
             }
-            let from = if session.is_some() { AnsweredFrom::BuildersSession } else { AnsweredFrom::TheFiles };
-            (cli(session), from)
+            // Only a native adapter that resumes can answer from a copy of the builder's chat.
+            // Copilot's ACP question starts fresh, even when the project has a saved session id.
+            let native_session = crate::cli_agents::adapter_for(&entry.config.model).resumes();
+            let from = if session.is_some() && native_session { AnsweredFrom::BuildersSession } else { AnsweredFrom::TheFiles };
+            let spec = CliSpec {
+                question: true,
+                deep,
+                logs: logs.clone(),
+                resume: session,
+                preamble: Some(PREAMBLE.into()),
+                ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
+            };
+            (crate::cli_agents::conversation(spec), from)
         }
         _ => {
             // An engine of its own, pointed at this project, so a build running meanwhile keeps its.
@@ -138,7 +151,7 @@ fn bring_back_session(ws: &Workspace, entry: &crate::BackendEntry, id: &str) {
         return;
     }
     if let Some(saved) = super::kept_session_bytes(ws) {
-        let adapter = crate::cli_agents::AgentAdapters::default().for_agent(&entry.config.model);
+        let adapter = crate::cli_agents::AgentAdapters::default().for_backend(&entry.config.model, &entry.options);
         let _ = adapter.restore_session(id, &saved, &ws.root);
     }
 }

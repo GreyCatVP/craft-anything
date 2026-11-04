@@ -450,9 +450,23 @@ pub struct Manifest {
     /// that picks this up only needs to check: nothing is left to build.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub awaiting_check: bool,
+    /// Checks in a row, across runs, that found the build not working (it didn't build or serve).
+    /// A run stops when this reaches the limit; a new request from the person starts it again.
+    /// Kept in the project so "Try again" can't restart the count.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub not_working_checks: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Manifest {
+    /// The person's own project: their files are the app, edited in place, with nothing to recreate.
+    pub fn own_project(&self) -> bool {
+        self.app_in_root && self.target == TargetRef::None
+    }
+
     /// Create a new manifest with trimmed request text and paid asset generation disabled.
     fn new(name: &str, request: &str, target: TargetRef) -> Manifest {
         let now = now_ms();
@@ -478,6 +492,7 @@ impl Manifest {
             builder: None,
             questions: None,
             awaiting_check: false,
+            not_working_checks: 0,
         }
     }
 
@@ -1035,7 +1050,8 @@ impl Workspace {
     }
 
     /// Copy pictures of the original into reference/ as picture-N.ext. Returns how many were
-    /// added; files that aren't PNG, JPEG, WebP or GIF, or are over 20 MB, are skipped.
+    /// added; files that aren't PNG, JPEG, WebP or GIF are skipped, and a picture over 20 MB
+    /// refuses the whole call before anything is copied.
     pub fn add_references(&self, files: &[PathBuf]) -> Result<usize, ToolError> {
         copy_pictures(&self.reference_dir(), files).map(|v| v.len())
     }
@@ -1331,8 +1347,17 @@ fn pictures_in(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Copy pictures into `dir` as picture-N.ext, numbering on from what's there. Files that aren't
-/// PNG, JPEG, WebP or GIF, or are over 20 MB, are skipped.
+/// PNG, JPEG, WebP or GIF are skipped; a picture over 20 MB is refused before anything is copied.
 fn copy_pictures(dir: &Path, files: &[PathBuf]) -> Result<Vec<PathBuf>, ToolError> {
+    // Check the whole list first: a mixed add must not leave the valid pictures half-copied when
+    // one is too large.
+    for f in files {
+        if picture_too_large(f) {
+            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string());
+            return Err(ToolError::new(ErrorCode::OverLimit, format!("{name} can't be attached: a message takes pictures up to 20 MB."))
+                .with_remediation("Attach a smaller picture, or save it as a JPEG."));
+        }
+    }
     std::fs::create_dir_all(dir).map_err(|e| ToolError::io(dir.display(), e))?;
     let mut next = pictures_in(dir).iter().map(|p| picture_number(p)).max().unwrap_or(0);
     let mut added = Vec::new();
@@ -1357,7 +1382,7 @@ fn picture_number(p: &Path) -> u32 {
 /// The most pixels a pasted picture may have (a 16K screen): more is refused before encoding.
 const MAX_PASTED_PIXELS: u64 = 15360 * 8640;
 
-/// The largest picture a message sends ([`copy_pictures`] skips bigger files).
+/// The largest picture a message sends ([`copy_pictures`] refuses bigger files).
 const MAX_PICTURE_BYTES: u64 = 20 * 1024 * 1024;
 
 /// Whether the file starts the way a PNG, JPEG, GIF or WebP picture does, whatever its name says.
@@ -1373,6 +1398,11 @@ pub fn picture_content(p: &Path) -> bool {
         || head.starts_with(b"GIF87a")
         || head.starts_with(b"GIF89a")
         || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP".as_slice()))
+}
+
+/// Whether `p` is a picture larger than a message can take. Reads its size, so not while drawing.
+pub fn picture_too_large(p: &Path) -> bool {
+    is_picture(p) && p.metadata().is_ok_and(|m| m.is_file() && m.len() > MAX_PICTURE_BYTES)
 }
 
 /// A picture file a message can take: a picture ([`is_picture`]) of at most 20 MB. Reads its
@@ -1584,6 +1614,8 @@ mod tests {
         std::fs::write(&small, b"png").unwrap();
         let big = dir.path().join("big.PNG");
         std::fs::File::create(&big).unwrap().set_len(MAX_PICTURE_BYTES + 1).unwrap();
+        let exact = dir.path().join("exact.png");
+        std::fs::File::create(&exact).unwrap().set_len(MAX_PICTURE_BYTES).unwrap();
         let text = dir.path().join("notes.txt");
         std::fs::write(&text, b"hi").unwrap();
         let folder = dir.path().join("folder.png");
@@ -1592,8 +1624,32 @@ mod tests {
         for no in [&big, &text, &folder, &dir.path().join("gone.png")] {
             assert!(!attachable_picture(no), "{}", no.display());
         }
-        let copied = copy_pictures(&dir.path().join("attachments"), &[small, big]).unwrap();
-        assert_eq!(copied.len(), 1, "the big one is left out: {copied:?}");
+        assert!(picture_too_large(&big));
+        assert!(attachable_picture(&exact));
+        assert!(!picture_too_large(&exact), "exactly 20 MB is allowed");
+        assert!(!picture_too_large(&small));
+        let attachments = dir.path().join("attachments");
+        let err = copy_pictures(&attachments, &[small, big]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OverLimit, "{err:?}");
+        assert!(!attachments.join("picture-1.png").exists(), "nothing is copied before the refusal");
+    }
+
+    #[test]
+    fn an_oversized_picture_is_refused_by_references_and_attachments() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Copy it", TargetRef::None).unwrap();
+        let small = dir.path().join("small.png");
+        std::fs::write(&small, b"png").unwrap();
+        let big = dir.path().join("big.png");
+        std::fs::File::create(&big).unwrap().set_len(MAX_PICTURE_BYTES + 1).unwrap();
+
+        let err = ws.add_references(&[small, big.clone()]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OverLimit, "{err:?}");
+        assert!(ws.references().is_empty(), "nothing is copied before the refusal");
+
+        let err = ws.add_attachments(&[big]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OverLimit, "{err:?}");
+        assert!(!ws.attachments_dir().join("picture-1.png").exists());
     }
 
     #[test]
@@ -1637,7 +1693,9 @@ mod tests {
             std::fs::File::options().write(true).open(f).unwrap().set_modified(old).unwrap();
         }
         let third = save_pasted_picture(dir.path(), 2, 1, vec![0; 8], std::slice::from_ref(&second)).unwrap();
-        assert!(!p.exists() && second.exists() && third.exists());
+        // In the same millisecond as the first, the third takes the name its removal freed.
+        assert!((third == p || !p.exists()) && second.exists() && third.exists());
+        assert_ne!(std::fs::read(&third).ok(), Some(bytes), "the first paste is gone");
         let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
         names.sort();
         assert_eq!(names.len(), 2, "no temp files left behind: {names:?}");

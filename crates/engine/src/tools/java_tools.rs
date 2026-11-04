@@ -747,7 +747,10 @@ fn java_class_users_find(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         "Only direct bytecode references are found; reflection, invokedynamic bootstrap targets, service loaders and names built at run time are not.",
     ));
     if truncated {
-        lims.push(Limitation::new("truncated", format!("stopped after {MAX_REFS} references")));
+        lims.push(Limitation::new(
+            "truncated",
+            format!("The scan stopped early because a method could not be fully decoded or the {MAX_REFS}-reference limit was reached."),
+        ));
         cov.status = CoverageStatus::Partial;
     }
     let b = ev(ctx, "java_class_users_find", &src, json!({"path": p.path, "class_name": p.class_name, "method_name": p.method_name, "offset": p.offset, "limit": p.limit}))

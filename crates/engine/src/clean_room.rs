@@ -33,6 +33,7 @@ pub const TOOLS: &[&str] = &[
     "core_hypothesis_record",
     "core_hypothesis_update",
     "core_finding_record",
+    "core_finding_edit",
     "core_handoff_write",
     "core_journal_read",
     "core_report_save",
@@ -47,6 +48,8 @@ pub const TOOLS: &[&str] = &[
     "assets_key_remove",
     "assets_key_status",
     "assets_models_list",
+    "ai_model_options_show",
+    "ai_model_options_set",
     // Projects and the rebuild run.
     "project_list",
     "project_show",

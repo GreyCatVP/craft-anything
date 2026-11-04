@@ -501,12 +501,13 @@ impl Scrub {
         (names, kept.join("&"))
     }
 
-    /// Apply the current query rules to incoming requests and older saved samples alike.
-    fn query_text(&mut self, query: &str) -> String {
+    /// Apply current rules to a request or a saved query. Raw requests ignore empty segments,
+    /// but canonical saved queries use empty slots for explicit empty key/value pairs (`=`).
+    fn query_text(&mut self, query: &str, preserve_empty_pairs: bool) -> String {
         let pairs: Vec<(String, String)> = query
             .split('&')
+            .filter(|p| preserve_empty_pairs || !p.is_empty())
             .take(200)
-            .filter(|p| !p.is_empty())
             .map(|p| p.split_once('=').map_or((p.to_string(), String::new()), |(k, v)| (k.to_string(), v.to_string())))
             .collect();
         self.query(&pairs, false).1
@@ -1126,7 +1127,7 @@ pub fn answer(standin: &StandIn, turns: &mut Turns, method: &str, path: &str, qu
     // A request is brought to the same form as the recording, so a dropped value still compares equal.
     let mut scrub = Scrub::new(&[]);
     let clean_path = scrub.path(path.split(['?', '#']).next().unwrap_or_default(), false);
-    let clean_query = scrub.query_text(query);
+    let clean_query = scrub.query_text(query, false);
     let key = request_key(body);
     let key = key.as_deref();
 
@@ -1150,7 +1151,7 @@ pub fn answer(standin: &StandIn, turns: &mut Turns, method: &str, path: &str, qu
             .samples
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.path == clean_path && (s.query == clean_query || scrub.query_text(&s.query) == clean_query))
+            .filter(|(_, s)| s.path == clean_path && (s.query == clean_query || scrub.query_text(&s.query, true) == clean_query))
             .map(|(i, _)| i)
             .collect();
         if let Some(fit) = consider(route, exact) {

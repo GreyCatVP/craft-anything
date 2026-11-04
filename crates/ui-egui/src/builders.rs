@@ -33,10 +33,11 @@ pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
             return false;
         }
     };
+    let agent = craft_anything_ai::cli_agents::display_for(&picker.context.backend.config.model);
     if models.is_empty() {
-        ui.label(tr("OpenCode has no visible chat models. Connect a provider in OpenCode, then reload."));
+        ui.label(trf("No chat models are visible in {agent}. Check its setup, then reload.", &[("agent", &agent)]));
     }
-    let default = tr("OpenCode default");
+    let default = if picker.context.backend.config.model == "opencode" { tr("OpenCode default") } else { tr("Model default") };
     let selected = picker.model.as_deref().unwrap_or(&default);
     let response = egui::ComboBox::from_id_salt(("agent-model", &picker.context.backend.config.name))
         .icon(widgets::combo_icon)
@@ -47,18 +48,20 @@ pub fn agent_model_picker(ui: &mut Ui, picker: &mut AgentModelPicker) -> bool {
                 picker.thinking = None;
             }
             for model in models {
-                let label = format!("{} · {}", model.name, model.id);
+                let label = if model.name == model.id { model.name.clone() } else { format!("{} · {}", model.name, model.id) };
                 if ui.selectable_label(picker.model.as_ref() == Some(&model.id), label).clicked() && picker.model.as_ref() != Some(&model.id) {
                     picker.model = Some(model.id.clone());
                     picker.thinking = None;
                 }
             }
         });
-    widgets::named(response.response, "OpenCode model");
+    widgets::named(response.response, if picker.context.backend.config.model == "opencode" { "OpenCode model" } else { "Model" });
     let model = models.iter().find(|m| picker.model.as_ref() == Some(&m.id));
     let missing = picker.model.is_some() && model.is_none();
     if missing {
-        ui.label(RichText::new(tr("The saved model is no longer visible. Choose another model or the OpenCode default.")).color(t.warning));
+        ui.label(
+            RichText::new(trf("The saved model is no longer visible. Choose another model or the {agent} default.", &[("agent", &agent)])).color(t.warning),
+        );
     }
     let depths = model.map(|m| m.thinking.as_slice()).unwrap_or_default();
     ui.label(tr("Thinking depth"));
@@ -110,7 +113,7 @@ impl CraftApp {
             .flatten()
             .filter(|d| d.suggestion.kind == BackendKind::AgentCli && !d.needs_key)
             .map(|d| &d.suggestion)
-            .filter(|s| !self.backends.iter().any(|b| b.name == s.name))
+            .filter(|s| !craft_anything_ai::is_on(&self.backends, &s.name))
     }
 
     /// Every AI that can build: the ones set up and on, then agent apps found here.
@@ -137,9 +140,16 @@ impl CraftApp {
         let choices = self.builder_choices();
         let name = wanted.filter(|w| choices.iter().any(|c| c.name == *w)).map(str::to_string).or_else(|| self.default_builder())?;
         let Some(found) = self.found_agents().find(|b| b.name == name).cloned() else { return Some(name) };
-        match self.hub.add_backend(found.clone(), None) {
+        // Saved but switched off (#423): turn it on, keeping its program and folder, rather than
+        // saving a second copy over it.
+        let saved = self.backends.iter().any(|b| b.name == found.name);
+        let done = if saved { self.hub.set_enabled(&found.name, true).map(|_| ()) } else { self.hub.add_backend(found.clone(), None) };
+        match done {
             Ok(()) => {
-                self.backends.push(found);
+                match self.backends.iter_mut().find(|b| b.name == found.name) {
+                    Some(b) => b.enabled = true,
+                    None => self.backends.push(found),
+                }
                 Some(name)
             }
             Err(e) => {
@@ -178,18 +188,32 @@ impl CraftApp {
                 return;
             }
         };
+        let model = context.backend.options.cli_model.clone();
+        let thinking = context
+            .backend
+            .options
+            .cli_thinking
+            .or_else(|| context.backend.options.cli_reasoning_effort.and_then(|value| craft_anything_ai::Effort::parse(value.as_str())));
+        self.load_agent_model_catalog(context, model, thinking);
+    }
+
+    pub fn reload_agent_model(&mut self, name: &str) {
+        if let Some(picker) = self.agent_model_picker.as_ref().filter(|picker| picker.context.backend.config.name == name) {
+            self.load_agent_model_catalog(picker.context.clone(), picker.model.clone(), picker.thinking);
+        } else {
+            self.pick_agent_model(name);
+        }
+    }
+
+    fn load_agent_model_catalog(&mut self, context: craft_anything_ai::ModelContext, model: Option<String>, thinking: Option<craft_anything_ai::Effort>) {
         self.model_request = self.model_request.wrapping_add(1);
         let request = self.model_request;
-        self.agent_model_picker = Some(AgentModelPicker {
-            request,
-            model: context.backend.options.cli_model.clone(),
-            thinking: context.backend.options.cli_thinking,
-            context: context.clone(),
-            result: None,
-        });
+        self.agent_model_picker = Some(AgentModelPicker { request, model: model.clone(), thinking, context: context.clone(), result: None });
         let hub = self.hub.clone();
         self.jobs.spawn(tr("List an AI's models"), false, move |_| {
-            let result = hub.agent_models(&context);
+            let mut query = context.clone();
+            query.backend.options.cli_model = model;
+            let result = hub.agent_models(&query);
             Ok(crate::Done::AgentModelChoices { request, context, result })
         });
     }
@@ -207,10 +231,47 @@ impl CraftApp {
     /// Use `model` for an AI from now on.
     pub fn set_model(&mut self, name: &str, model: &str) {
         self.model_picker = None;
+        if let Some(state) = self.model_tuning.get_mut(name) {
+            state.saving = true;
+        }
         let (hub, name, model) = (self.hub.clone(), name.to_string(), model.to_string());
         self.jobs.spawn(tr("Change an AI's model"), false, move |_| {
-            hub.set_model(&name, &model).map_err(|e| e.message)?;
-            Ok(crate::backends(&hub))
+            let result = hub.set_model(&name, &model).and_then(|_| {
+                hub.options().get(&name).cloned().ok_or_else(|| craft_anything_engine::evidence::ToolError::invalid("The AI backend was removed."))
+            });
+            Ok(crate::Done::ModelChanged { name, model, result })
+        });
+    }
+
+    /// Populate the persistent model controls on a worker, once for each backend/model pair.
+    pub fn pick_model_options(&mut self, name: &str) {
+        let options = self.backend_options.get(name).cloned().unwrap_or_default();
+        self.model_tuning.insert(
+            name.into(),
+            crate::ModelTuningDraft {
+                backend: name.into(),
+                cli_model: options.cli_model.clone(),
+                choices: None,
+                context: options.cli_context,
+                saving: false,
+                error: None,
+            },
+        );
+        let (hub, name, cli_model) = (self.hub.clone(), name.to_string(), options.cli_model);
+        self.jobs.spawn(tr("Load model options"), false, move |_| {
+            let result = hub.model_tuning(&name);
+            Ok(crate::Done::ModelTuning { name, cli_model, result })
+        });
+    }
+
+    pub fn set_model_options(&mut self, params: craft_anything_ai::model_options::SetModelOptions) {
+        if let Some(state) = self.model_tuning.get_mut(&params.backend) {
+            state.saving = true;
+        }
+        let hub = self.hub.clone();
+        self.jobs.spawn(tr("Set model options"), false, move |_| {
+            let result = hub.set_model_options(&params);
+            Ok(crate::Done::ModelOptionsSaved { params, result })
         });
     }
 
@@ -229,9 +290,10 @@ impl CraftApp {
         let hub = self.hub.clone();
         let f = &self.server_form;
         let (name, address, model, key) = (f.name.trim().to_string(), f.address.clone(), f.model.trim().to_string(), Some(f.key.clone()));
+        let choices = self.backend_choices;
         self.jobs.spawn(trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_server(&name, &address, Some(model.as_str()).filter(|m| !m.is_empty()), key).map(|_| ());
-            Ok(crate::Done::BackendAdded { name, result })
+            Ok(crate::Done::BackendAdded { name, result, choices })
         });
     }
 
@@ -241,6 +303,16 @@ impl CraftApp {
         let (hub, name) = (self.hub.clone(), name.to_string());
         self.jobs.spawn(tr("Set an AI's program"), false, move |_| {
             hub.set_command(&name, program.as_deref()).map_err(|e| e.message)?;
+            Ok(crate::backends(&hub))
+        });
+    }
+
+    /// Keep an agent app's sign-in, settings and sessions in this folder, so the AI is another
+    /// account (`None`: its usual folder again).
+    pub fn set_agent_folder(&mut self, name: &str, folder: Option<String>) {
+        let (hub, name) = (self.hub.clone(), name.to_string());
+        self.jobs.spawn(tr("Set an AI's folder"), false, move |_| {
+            hub.set_config_dir(&name, folder.as_deref()).map_err(|e| e.message)?;
             Ok(crate::backends(&hub))
         });
     }
@@ -332,6 +404,16 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
         });
     } else if found.is_empty() {
         ui.label(RichText::new(tr("No coding agent was found on this computer yet.")).color(t.text_dim));
+        for hint in &app.detect_hints {
+            match hint {
+                craft_anything_ai::detect::DetectHint::ClaudeDesktopWithoutCli { .. } => ui.add(
+                    egui::Label::new(
+                        RichText::new(tr("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.")).color(t.text_dim),
+                    )
+                    .wrap(),
+                ),
+            };
+        }
     }
     for b in found {
         widgets::panel(&t).show(ui, |ui| {

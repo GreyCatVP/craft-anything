@@ -395,6 +395,15 @@ A simple snake game	Un jeu du serpent simple
 Enter a full web address, like example.com or https://example.com/page.	Saisissez une adresse web complète, comme example.com ou https://example.com/page.
 Make my own version	Créer ma propre version
 Just look inside	Juste regarder à l'intérieur
+Work on my project	Travailler sur mon projet
+Work on a project you already have	Travailler sur un projet que vous avez déjà
+Pick its folder, say what you want, then press Start.	Choisissez son dossier, dites ce que vous voulez, puis appuyez sur Démarrer.
+Where is your project?	Où est votre projet ?
+Choose your project's folder…	Choisir le dossier de votre projet…
+For example: add a dark mode	Par exemple : ajouter un mode sombre
+Pick your project's folder first.	Choisissez d'abord le dossier de votre projet.
+Pick your project's folder	Choisissez le dossier de votre projet
+That folder is empty. Pick the folder your project's files are in.	Ce dossier est vide. Choisissez le dossier où se trouvent les fichiers de votre projet.
 What do you want to make?	Que voulez-vous créer ?
 Choose what to recreate, say what you want, then press Start.	Choisissez quoi recréer, dites ce que vous voulez, puis appuyez sur Démarrer.
 What do you want to recreate?	Que voulez-vous recréer ?
@@ -934,3 +943,13 @@ a track	par morceau
 a megapixel	par mégapixel
 a second	par seconde
 a character	par caractère
+Providers	Fournisseurs
+Harnesses	Agents
+Nothing of this kind was found.	Rien de ce type n'a été trouvé.
+Another model	Autre modèle
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	L'application de bureau Claude est installée, mais la création nécessite Claude Code, son outil en ligne de commande distinct. Installez Claude Code, connectez-vous-y une fois dans un terminal, puis relancez la recherche.
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal est installé, mais sa chaîne d'outils Clang C++ intégrée est introuvable.
+Add Unreal's Linux C++ toolchain	Ajouter la chaîne d'outils C++ Linux d'Unreal
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Dans le dossier du moteur, exécutez Engine/Build/BatchFiles/Linux/SetupToolchain.sh pour installer sa chaîne d'outils Clang intégrée. Si vous compilez depuis les sources, Setup.sh télécharge à la place la chaîne d'outils native. Un Clang système peut ne pas correspondre à la version du moteur.
+Unreal is here, but it also needs Xcode.	Unreal est là, mais il lui faut aussi Xcode.
+About 60 GB, an Epic Games account, and Xcode.	Environ 60 Go, un compte Epic Games et Xcode.

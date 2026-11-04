@@ -6,6 +6,11 @@ Keep entries short: what happened, then the rule.
 
 ## Git and pull requests
 
+**Work began before its roadmap claim, on a branch without the required prefix.** Renaming the
+branch and recording the claim during PR preparation fixes coordination going forward, not the
+missed order. Create and publish the claim on a correctly named branch before implementation;
+never describe a late claim as compliance with the claim-before-work rule.
+
 **A commit landed on `main` without a PR.** `git switch main && git pull` was run with uncommitted
 changes: the switch succeeded, the pull refused, and the failure was read as "still on my branch".
 The next commit and `git push --force-with-lease` went to `main`.
@@ -40,6 +45,9 @@ added an app the new rule rejected; both were green on their own branch.
   And again with a new catalog: #555 added "Pausing…" to every catalog there was, and #486 (Russian)
   merged after it without it. A new language and a new UI string merged together need the string
   in the new catalog too.
+  And with a layout change: #687 moved coding agents onto their own tab of what Detect found, and
+  #664, merged next, tested a button on that list without picking the tab. Checking that two PRs
+  merge cleanly isn't checking that their tests pass together: run the UI tests on the merge.
 
 **A dependency change merged without its lockfile.** Changes were staged with
 `git add -A crates apps docs`, which leaves out the root `Cargo.lock`, so a new dependency reached
@@ -49,6 +57,17 @@ whenever a `Cargo.toml` changed.
 **A superseded PR on someone else's branch.** Rebasing it means force-pushing their branch. Replay it
 on a new branch, open a new PR that says it supersedes the old one, and comment on the old one.
 Don't close or rewrite other people's work without asking.
+
+**Review fixes pushed to a PR that had already merged.** #686 was merged hours before its review
+comments were acted on; the fixes went to its branch and the threads were answered "Fixed", while
+`main` had the code without them. Read `gh pr view --json state,headRefOid` before pushing to a PR's
+branch, and land anything late in a new PR from `main`.
+
+**A report checked against main, not the release it ran.** #736 (a build looping on an empty `app/`)
+was read against main, where the stop after two unchanged turns already existed, so it looked fixed.
+The reporter ran v0.3.0, which had neither that stop (#557) nor the empty-folder note (#749); both
+merged the day after it shipped. Before calling a report fixed or still open, find the release it
+names (`git merge-base --is-ancestor <fix> <release tag>`), and check the message text it quotes.
 
 ## Tests
 
@@ -101,9 +120,26 @@ After `scroll_to_me()`, run three steps before the click, and check the widget's
 same temp directory, and game detection walked up and found the game. Give each case its own
 `tempfile::tempdir()`.
 
+**A script written and run at once.** Tests that write a stand-in program and start it failed now
+and then on Linux with "Text file busy": another test thread was starting a child at that moment,
+and the child still held the new file open for writing. Starting a program goes through
+`process::spawn_retrying`, which tries a busy file again for a moment; don't add a sleep to a test
+instead.
+
 **Proving a refactor changed nothing.** Unit tests that check substrings can miss changed prompts.
 For a refactor that must keep output identical, dump the outputs for every combination before and
 after and compare them byte for byte (done for every brief across 162 combinations in R1.1).
+
+**A Windows-only test that no check ran.** #748 added a second Antigravity folder to the search
+path; the Windows test that counts those folders wasn't updated, and `main` stayed green because CI
+runs on Ubuntu, where `cfg(windows)` tests don't compile. When a change touches a list a
+`cfg(windows)` (or macOS) test checks, grep for it and run it on that system, or say in the PR that
+you couldn't.
+
+**A step moved to a worker, its test still counting frames.** #720 moved the picture size check
+off the UI thread; a UI test that added pictures, ran three frames and then looked kept passing on
+fast machines and failed in CI on unrelated PRs. When work moves to a worker, grep the tests that
+call it and make them `wait` for the result, not `run_steps(n)`.
 
 ## Building and running
 
@@ -243,6 +279,20 @@ observed (#251). A run that never started the thing it observes is a failure, no
 check the exit status before building evidence, and compile generated code (here, with Python)
 before trusting it. lldb itself was not run here.
 
+**A graphics default that drew on the other card.** egui-wgpu picks the discrete GPU unless told
+otherwise; on a Linux laptop whose integrated GPU drives the panel, every frame was copied across
+to it, the window took 20 s to open and the whole desktop lagged (#571). Forcing the low-power GPU
+instead breaks desktops whose monitors are on the discrete card. Draw on the GPU that drives the
+screen, read from the connected displays, and keep wgpu's environment variables as the override;
+when a window is slow to open, check which adapter `desktop.log` says it drew with.
+
+**A Metal version taken from the OS, not from the compiler.** wgpu-hal picks the Metal shading
+language from the macOS version alone; on a 2012 iMac under OpenCore Legacy Patcher, macOS 15 asked
+for `metal3.2`, the compiler stopped at 3.1, every shader failed and the window never opened (#742,
+upstream #10687). Our `[patch]` of wgpu-hal probes the compiler (`vendor/wgpu-hal/CRAFT_ANYTHING.md`).
+The advice on a lost device named `CRAFT_ANYTHING_RENDERER`, which only Windows reads: check that
+advice names only settings the platform actually reads. Not run on the reporter's Mac.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
@@ -277,6 +327,12 @@ reads files itself (`pending`, `secrets`, `layers`, `locks`, `tools --check`…)
 at the wrong tree (the cargo commands `ci` runs use the folder they're started in). Give every
 worktree its own `CARGO_TARGET_DIR`, and rebuild `xtask` (or delete it from `target/`) after
 sharing one.
+
+**A helper stopped only by a destructor.** The keep-awake helper was stopped when its guard was
+dropped; closing the desktop app during a build ended the process without dropping it, and the
+PowerShell loop kept the computer awake (its time limit was a week). A helper that outlives a
+crash is a leak: have it watch the process it serves and end by itself (`caffeinate -w`, a loop
+that checks the PID), and test by killing the owner, not by dropping the guard.
 
 **Stopping a long run leaves children behind** unless every program goes through
 `craft_anything_platform::process`. After stopping one, check that its child processes are gone.
@@ -502,6 +558,11 @@ and run `cargo xtask secrets` before every commit (the `.githooks/pre-commit` ho
 **An empty float sum is `-0.0`.** `iter().map(..).sum::<f64>()` over nothing gives `-0.0`, which
 `{:.2}` shows as "$-0.00". Sum money with `fold(0.0, ..)`.
 
+**A per-run budget that a retry resets.** The build's refinement cap (`max_rounds`) counted from zero on every
+run, while the round numbers carried over, so "Try again" bought six more checks each press and a build that never
+worked reached check 40 and 49 (#736). A limit that must hold across runs is a count saved with the project, and
+it's reset only by a new request. Test it with several runs in a row, not one.
+
 **Docs that drift.** `STATUS.md` described a branch 25 commits old and the tool count was stale.
 Update STATUS, the roadmap and generated docs (`cargo xtask tools`, `cargo xtask schemas`) in the
 same PR as the change.
@@ -535,6 +596,16 @@ Test the next serialized request as well as whether a tool ran.
 builder loop saved the reset only after a successful turn. A failed or cancelled turn had already
 removed the note, so reopening kept the old unchanged-turn count. Persist deferred request state
 on terminal errors too, outside provider retries; keep the original outcome if that save also fails.
+
+**Lower-casing a command, then comparing its paths.** Auto mode lower-cased a shell command to
+match keywords, then checked its paths against the project folder with that same text; Windows
+compares paths without case, so only a Mac showed it: deleting `/Users/…/app/Build` in the
+person's own project was refused. Match keywords on a lower-cased copy and compare paths as
+written; test a path rule with capitals and a folder outside the temp directory.
+The same check split the command at every space, quotes included, so `"…/MyGame Backup/x"`
+began with the project's path and went through; it had been noted as "only refuses too much"
+without trying a folder named like the project. Read arguments as the shell does, and test a
+path rule with the folder beside the target, not only the target.
 
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts
@@ -570,7 +641,49 @@ Neither failed a test or `cargo xtask i18n-coverage`, which sees only literal ke
 words around a number and leave the number (`price_words`), give a mid-sentence noun its own catalog
 entry (`type_noun`), and check each language's words through `tr` in `tests/i18n.rs`, not by eye.
 
+**An installer that downloaded what was already there.** Ghidra was found only on PATH and at two
+Linux folders, so an unzipped copy in Downloads, Program Files or a Homebrew cask was missed, and
+the install then downloaded the same release again (#740). Install folders are a search, not a
+list: scan the folders people keep such things in (`KnownRoot`, by folder name, a set number of
+levels down), and make an install use a copy already found outside our store. Test each layout
+(unzipped, cask, capitalised name) with temp folders, not the machine the test runs on.
+
 ## Agent tooling
+
+**Shared CLI efforts reached Claude unchanged.** Keep CLI-only levels available for agents, but
+normalize at the provider boundary; test serialized requests for known and unknown model families.
+
+**A sender could exceed its MCP receiver's target limit.** Bound the handoff to the receiver's
+accepted count and retain the active target; test the boundary, truncation order and remote mode.
+
+**A finding correction reset omitted confidence to inferred.** Edit defaults must preserve existing
+values unless explicitly changed; test omitted fields and every supplied confidence level.
+
+**Atomic replacements still lost concurrent investigation updates.** A process-local mutex and
+rename protect neither a cross-process revision check nor the whole read/modify/write sequence.
+Hold one OS file lock from load through every rendered write, use it for all writers, bound and
+cancel the wait, and test with separate processes. Never treat malformed state as an empty update.
+
+**An optional view refresh could fail the builder's turn.** Log cache-refresh errors and continue
+relaying agent events; only failures of the actual build belong on its fatal path.
+
+**Generic ACP errors named Copilot for every adapter.** Use the current agent's display name and
+the adapter's sign-in guidance; test an ACP-only adapter with and without that guidance.
+
+**An agent's findings existed only in its own session.** A separate MCP process started without
+the desktop's targets or a saved project, so its `fnd_*` records never reached the app. Local
+agent chats now attach a shared investigation, hand over target metadata and refresh snapshots
+after tool results. Test the child process's targets and the UI's finding ids, not only tool calls.
+
+**A headless egui check reached rendering and then failed in teardown.** The app's named fonts
+must be installed, and a test without a renderer must explicitly clear `output.textures_delta`.
+Use the repository's `run_ui` API and its font setup instead of assuming an older egui harness.
+
+**An ACP handshake passed while the tools were missing, and an empty tool list enabled them all.**
+Copilot CLI 1.0.105 initialized successfully but did not expose a server supplied only through
+ACP's `session/new`; explicit `--additional-mcp-config` made it available. An empty
+`--available-tools=` restored native tools instead of disabling them. Verify the tools actually
+sent to a fake local model, including the no-tools case, before trusting startup or argument tests.
 
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were
 mangled by the shell several times. Write multi-line edit scripts to a file and run the file.
@@ -649,3 +762,16 @@ malformed suffixes and non-call JSON examples whose strings contain protocol mar
 the selected row each frame, so the wheel's scroll was pulled back to it at once and the list
 kept jumping to the top (#584). Scroll something into view on the frame it changed (a key, a new
 query), never as a standing request.
+
+**A test wrote into the real config folder.** A helper that keeps one id per installation created
+opencode-session under settings::config_dir() when the first request was made, so running the
+tests left a file on the developer's machine and two runs could collide. Anything we persist goes
+through the hub's stores (AiHub::with_stores, Session::isolated), which tests point at a temp
+folder; production code never writes under the real config folder by hand.
+
+**A per-probe walk repeated expensive work on the same bytes.** CRC cpio verification was bounded
+inside one archive, but a firmware scan could rediscover overlapping, trailerless archives and
+sum the same payload repeatedly. Count checksum byte visits across the whole scan, poll its
+cancellation callback inside long sums, and distinguish skipped verification from a mismatch.
+Test overlapping candidates with correct checksums and a complete nested archive so a structural
+trailer cannot turn unchecked data into a high-confidence result.

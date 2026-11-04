@@ -6,6 +6,7 @@ use crate::i18n::{tr, trf};
 use crate::state::Modal;
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, Pick, widgets};
+use craft_anything_ai::rebuild::stacks;
 use craft_anything_engine::workspace::{self, ExistingFiles, FolderState, Workspace};
 use egui::{RichText, Ui, Vec2};
 use std::path::PathBuf;
@@ -58,6 +59,7 @@ fn clear(app: &mut CraftApp) {
     let d = &mut app.state.make;
     d.folder = None;
     d.folder_files = None;
+    d.folder_stack = None;
     d.existing = None;
 }
 
@@ -65,14 +67,7 @@ fn clear(app: &mut CraftApp) {
 /// they are (or uses the answer from Settings).
 pub fn picked(app: &mut CraftApp, folder: PathBuf) {
     match workspace::folder_state(&folder) {
-        Ok(FolderState::Project) => match Workspace::open(&folder) {
-            Ok(ws) => {
-                app.toast(tr("That folder is already a project, so it's open now."), false);
-                app.open_workspace(ws);
-                app.remember_project(&folder);
-            }
-            Err(e) => app.toast(e.for_people(), true),
-        },
+        Ok(FolderState::Project) => open_project(app, &folder),
         Ok(FolderState::Empty) => {
             clear(app);
             app.state.make.folder = Some(folder);
@@ -91,13 +86,49 @@ pub fn picked(app: &mut CraftApp, folder: PathBuf) {
     }
 }
 
+/// "Work on my project" picked a folder: its files are the app, edited in place (nothing asked).
+/// An existing project opens; an empty folder has nothing to work on.
+pub fn picked_own(app: &mut CraftApp, folder: PathBuf) {
+    // The dialog runs beside the window: a pick that ends after leaving the door is dropped, or
+    // a version made on Make would edit that folder.
+    if !app.state.make.mine {
+        return;
+    }
+    match workspace::folder_state(&folder) {
+        Ok(FolderState::Project) => open_project(app, &folder),
+        Ok(FolderState::Empty) => app.toast(tr("That folder is empty. Pick the folder your project's files are in."), true),
+        Ok(FolderState::HasFiles { names, count }) => {
+            clear(app);
+            let d = &mut app.state.make;
+            d.folder = Some(folder);
+            d.folder_files = Some((names, count));
+            choose(app, ExistingFiles::Edit);
+        }
+        Err(e) => app.toast(e.for_people(), true),
+    }
+}
+
+fn open_project(app: &mut CraftApp, folder: &std::path::Path) {
+    match Workspace::open(folder) {
+        Ok(ws) => {
+            app.toast(tr("That folder is already a project, so it's open now."), false);
+            app.open_workspace(ws);
+            app.remember_project(folder);
+        }
+        Err(e) => app.toast(e.for_people(), true),
+    }
+}
+
 /// Use the picked folder's files this way, unless something there is named like Craft Anything's
 /// own files: then the folder isn't used (nothing of theirs is ever replaced).
 fn choose(app: &mut CraftApp, choice: ExistingFiles) {
     let Some(folder) = app.state.make.folder.clone() else { return };
     let clash = workspace::clashes(&folder, choice);
     if clash.is_empty() {
-        app.state.make.existing = Some(choice);
+        let d = &mut app.state.make;
+        d.existing = Some(choice);
+        // Read here, once: the screens that use it are drawn every frame.
+        d.folder_stack = (choice == ExistingFiles::Edit).then(|| stacks::found_in(&folder)).flatten().map(|s| s.name.clone());
     } else {
         clear(app);
         let names = clash.join(", ");

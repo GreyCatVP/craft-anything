@@ -360,7 +360,7 @@ fn main() {
         ];
         a.state.backend = Some("Claude".into());
         a.builder = Some("Claude Code".into());
-        a.extractor = Some("Kimi K3 (OpenRouter)".into());
+        a.extractor = Some("Kimi K3.1 Pro (OpenRouter)".into());
         if error {
             a.toast("Couldn't save C:/Users/me/AppData/Roaming/craft-anything/config.toml: access is denied.", true);
         }

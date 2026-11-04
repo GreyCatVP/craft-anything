@@ -98,14 +98,96 @@ pub struct BackendOptions {
     /// OpenCode's model variant. Absent means the model's own default thinking depth.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_thinking: Option<Effort>,
+    /// Copilot's context tier. Unset keeps the CLI's own choice; token limits depend on the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_context: Option<CliContext>,
+    /// Copilot's full named reasoning range. Unset falls back to `effort` or the CLI default;
+    /// `none` is an explicit choice, not the absence of an override.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_reasoning_effort: Option<CliReasoningEffort>,
     /// Wall-clock limit in seconds for one agent CLI turn (default: 24 hours for a builder, which may
     /// analyse and build a big game; 30 minutes for questions).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
     /// Agent CLIs that speak ACP (`cli_agents::acp::ACP_AGENTS`): chat over it, one agent process
-    /// per conversation (off unless set).
+    /// per conversation (on for Copilot, off for other agents unless set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acp: Option<bool>,
+    /// Agent CLIs that keep their sign-in, settings and sessions in a folder of their own (Claude
+    /// Code's `CLAUDE_CONFIG_DIR`): the folder to use instead of their usual one, so each AI can be
+    /// another account. `~/` is the home folder; over SSH it's a folder on that computer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+}
+
+impl BackendOptions {
+    /// [`config_dir`](BackendOptions::config_dir) as written, if any (for another computer).
+    pub fn config_dir_text(&self) -> Option<&str> {
+        self.config_dir.as_deref().map(str::trim).filter(|d| !d.is_empty())
+    }
+
+    /// [`config_dir`](BackendOptions::config_dir) on this computer, with `~` as the home folder.
+    pub fn config_dir_here(&self) -> Option<std::path::PathBuf> {
+        config_dir_in(self.config_dir_text()?, dirs::home_dir())
+    }
+}
+
+/// `dir` with a leading `~` as `home`; `None` when it needs a home folder there isn't.
+pub(crate) fn config_dir_in(dir: &str, home: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    if dir == "~" {
+        return home;
+    }
+    match dir.strip_prefix("~/").or_else(|| dir.strip_prefix("~\\")) {
+        Some(rest) => home.map(|h| h.join(rest)),
+        None => Some(std::path::PathBuf::from(dir)),
+    }
+}
+
+/// A provider's context tier, not a guessed token count. Copilot reports each model's limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub enum CliContext {
+    #[serde(rename = "default")]
+    Standard,
+    #[serde(rename = "long_context")]
+    Long,
+}
+
+impl CliContext {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "default",
+            Self::Long => "long_context",
+        }
+    }
+}
+
+/// The CLI's named reasoning levels; these are not numeric thinking-token budgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CliReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl CliReasoningEffort {
+    pub const ALL: &'static [Self] = &[Self::None, Self::Minimal, Self::Low, Self::Medium, Self::High, Self::Xhigh, Self::Max];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
 }
 
 /// One configured backend.
@@ -174,6 +256,10 @@ pub struct AiConfig {
     pub fallback_chain: Vec<String>,
     /// Price overrides by model id.
     pub prices: BTreeMap<String, Price>,
+    /// This installation's OpenCode Go session id, made on first use and kept with the settings so
+    /// prompt caching survives restarts (and tests stay inside their own settings file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_id: Option<String>,
 }
 
 pub fn role_key(r: Role) -> &'static str {

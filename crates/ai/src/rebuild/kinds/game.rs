@@ -76,6 +76,10 @@ impl TargetKind for GameKind {
         // Paid, so only when the person turned it on for this project and a key is set up.
         let generated = asset_kind_allowed(cx, craft_anything_engines::assets::AssetKind::Image)
             && asset_kind_allowed(cx, craft_anything_engines::assets::AssetKind::Model3d);
+        if cx.ws.manifest.own_project() {
+            // Nothing to recreate: only the note on the asset types this project may generate.
+            return self.follow_up_sections(cx);
+        }
         let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
         s.extend(self.follow_up_sections(cx));
         s.push(screenshot::SCREENSHOT_CONTRACT.to_string());

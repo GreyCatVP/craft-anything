@@ -118,7 +118,15 @@ fn file_data(data: &[u8], ino: &Inode, limits: &Limits, img: &mut FsImage) -> Op
         }
         let comp = data.get(block_start..end)?;
         match crate::firmware::inflate(comp, true, BLK as u64, true) {
-            Ok(inf) => out.extend_from_slice(&inf.data.unwrap_or_default()),
+            Ok(inf) => {
+                let expected = ino.size.saturating_sub(i.saturating_mul(BLK)).min(BLK);
+                if inf.produced != expected as u64 {
+                    img.warn("cramfs block output does not match the file size");
+                    img.complete = false;
+                    return None;
+                }
+                out.extend_from_slice(&inf.data.unwrap_or_default());
+            }
             Err(_) => {
                 img.warn("cramfs block did not inflate");
                 img.complete = false;

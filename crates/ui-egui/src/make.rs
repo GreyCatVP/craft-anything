@@ -6,7 +6,7 @@ use crate::i18n::tr;
 use crate::state::MakeDraft;
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, Pick, icons, widgets};
-use craft_anything_engine::workspace::{Status, TargetRef};
+use craft_anything_engine::workspace::{ExistingFiles, Status, TargetRef};
 use egui::{Margin, RichText, Sense, Ui, Vec2};
 
 const SUGGESTIONS_WEB: &[&str] = &["Recreate this website", "Recreate it with darker colours"];
@@ -44,7 +44,11 @@ pub fn normalize_url(s: &str) -> String {
 }
 
 /// The target the draft will use: the picked one, the typed address, or an address in the request.
+/// "Work on my project" has none: an address in its request is a link to add, not an original.
 pub fn resolve_target(d: &MakeDraft) -> TargetRef {
+    if d.mine {
+        return TargetRef::None;
+    }
     if d.target != TargetRef::None {
         return d.target.clone();
     }
@@ -57,20 +61,47 @@ pub fn resolve_target(d: &MakeDraft) -> TargetRef {
 /// A game is being copied or made, so it's built with a game engine ("Build with").
 pub fn is_game(kinds: &craft_anything_ai::rebuild::KindRegistry, d: &MakeDraft) -> bool {
     use craft_anything_ai::rebuild::GameKind;
+    if let Some(stack) = own_stack(kinds, d) {
+        return craft_anything_engines::game::Builder::from_stack(stack).is_some();
+    }
     d.found.is_some()
         || (d.game && matches!(d.target, TargetRef::Local { .. }))
         || kinds.choose(&d.request, &resolve_target(d), false).is_some_and(|(k, _)| k.id() == GameKind::ID)
 }
 
-/// The front door: make your own version of something, or just look inside it.
+/// What the person's own files are built with, when they're the app and the request names no
+/// other stack (the run decides the same way: `project::first_stack`).
+pub fn own_stack<'a>(kinds: &craft_anything_ai::rebuild::KindRegistry, d: &'a MakeDraft) -> Option<&'a str> {
+    let own = d.existing == Some(ExistingFiles::Edit) && kinds.named(&d.request, &resolve_target(d)).is_none();
+    d.folder_stack.as_deref().filter(|_| own)
+}
+
+/// The front door: make your own version of something, work on a project you already have, or
+/// just look inside something.
 pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
     let t = Tokens::get(ui.ctx());
-    if let Some(i) = widgets::segmented_sized(ui, &["Make my own version", "Just look inside"], usize::from(app.state.make.look), 38.0, 12.5) {
-        app.state.make.look = i == 1;
+    let d = &mut app.state.make;
+    let door = if d.look { 2 } else { usize::from(d.mine) };
+    if let Some(i) = widgets::segmented_sized(ui, &["Make my own version", "Work on my project", "Just look inside"], door, 38.0, 12.5) {
+        let left = d.mine && i != 1;
+        (d.mine, d.look) = (i == 1, i == 2);
+        if d.mine {
+            // The person's own project: there's nothing to recreate.
+            (d.target, d.editing_url, d.found, d.builder, d.game) = (TargetRef::None, false, None, None, false);
+            d.url.clear();
+        }
+        if left && d.existing == Some(ExistingFiles::Edit) {
+            // A version made on Make never edits the project picked here.
+            (d.folder, d.folder_files, d.existing) = (None, None, None);
+        }
     }
     ui.add_space(18.0);
     if app.state.make.look {
         look(app, ui, w);
+        return;
+    }
+    if app.state.make.mine {
+        mine(app, ui, w);
         return;
     }
     ui.label(theme::heading(tr("What do you want to make?"), theme::TITLE));
@@ -103,46 +134,12 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         };
         // Websites are photographed for the builder; anything else looks right from pictures.
         let website = matches!(resolve_target(d), TargetRef::Website { .. }) || d.editing_url;
-        let previews = app.previews(ui.ctx(), &app.state.make.pictures.clone());
-        let out = crate::prompt_box::show(
-            ui,
-            &mut app.state.make.request,
-            &app.state.make.pictures,
-            crate::prompt_box::PromptBox {
-                name: "Say what you want",
-                hint: tr(hint),
-                rows: (3, 10),
-                attach: (!website).then_some("Add pictures of the original (optional: screenshots help it look right)"),
-                previews: &previews,
-                stop_button: None,
-                stopping: false,
-                send: false,
-                recall: false,
-                history: None,
-                font_size: theme::LEAD,
-            },
-        );
-        if let Some(i) = out.remove {
-            app.state.make.pictures.remove(i);
-        }
-        if out.attach {
-            app.pick(Pick::Pictures);
-        }
-        if out.paste {
-            app.paste_pictures(false);
-        }
-        let submit = out.send;
+        let submit = request_box(app, ui, hint, (!website).then_some("Add pictures of the original (optional: screenshots help it look right)"));
         if app.state.make.request.trim().is_empty() {
             ui.add_space(10.0);
             suggestions(app, ui);
         }
-        if is_game(&app.kinds, &app.state.make) {
-            ui.add_space(22.0);
-            crate::engine_ui::build_with(app, ui);
-            ui.add_space(14.0);
-            let on = app.state.make.generate_assets;
-            crate::engine_ui::assets_toggle(app, ui, on);
-        }
+        engine_choices(app, ui);
         ui.add_space(16.0);
         ui.horizontal(|ui| {
             crate::builders::built_by(app, ui);
@@ -159,6 +156,114 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         ui.add_space(10.0);
         crate::folders::make_line(app, ui);
     });
+}
+
+/// "Work on my project": the folder of a project the person already has, whose files the builder
+/// edits in place, and what to change. There's no original to pick, so no Clean room / Deep choice.
+fn mine(app: &mut CraftApp, ui: &mut Ui, w: f32) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(theme::heading(tr("Work on a project you already have"), theme::TITLE));
+    ui.add_space(6.0);
+    ui.label(RichText::new(tr("Pick its folder, say what you want, then press Start.")).size(theme::LEAD).color(t.text_dim));
+    ui.add_space(16.0);
+    widgets::card(&t).inner_margin(Margin::same(20)).show(ui, |ui| {
+        ui.set_width(w - 50.0);
+        step_title(ui, 1, "Where is your project?");
+        ui.add_space(12.0);
+        // A folder picked on Make for another use isn't this project's.
+        let d = &app.state.make;
+        let folder = d.folder.clone().filter(|_| d.existing == Some(ExistingFiles::Edit));
+        match &folder {
+            None => {
+                let size = Vec2::new(ui.available_width(), 60.0);
+                if widgets::choice_tile(ui, size, "folder", "Choose your project's folder…", "", false).clicked() {
+                    app.pick(Pick::OwnProject);
+                }
+            }
+            Some(f) => {
+                let place = f.display().to_string();
+                ui.horizontal(|ui| {
+                    icons::show(ui, "folder", 16.0, t.icon);
+                    ui.add(egui::Label::new(RichText::new(&place).font(theme::semibold(theme::BODY))).truncate()).on_hover_text(&place);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(RichText::new(tr("your files there are the app, edited in place")).size(theme::SMALL).color(t.text_dim));
+                    ui.label(RichText::new("·").size(theme::SMALL).color(t.text_faint));
+                    if widgets::link(ui, "Pick another folder…").clicked() {
+                        app.pick(Pick::OwnProject);
+                    }
+                });
+            }
+        }
+        ui.add_space(20.0);
+        step_title(ui, 2, "Say what you want");
+        ui.add_space(12.0);
+        let submit = request_box(app, ui, "For example: add a dark mode", Some("Attach pictures (or drop or paste them here)"));
+        engine_choices(app, ui);
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            crate::builders::built_by(app, ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let said = !app.state.make.request.trim().is_empty();
+                let ready = folder.is_some() && said && app.creating.is_none();
+                let start = widgets::primary_sized(ui, Some("sparkles"), "Start", ready, 50.0, 14.0);
+                let start = if ready {
+                    start
+                } else {
+                    start.on_disabled_hover_text(tr(if folder.is_none() { "Pick your project's folder first." } else { "Say what you want first." }))
+                };
+                if (start.clicked() || submit) && ready {
+                    app.start_make();
+                }
+            });
+        });
+    });
+}
+
+/// "Say what you want": the request, and the pictures that go with it (`attach` names the
+/// paperclip; `None` takes none). True when it was sent from the keyboard.
+fn request_box(app: &mut CraftApp, ui: &mut Ui, hint: &str, attach: Option<&str>) -> bool {
+    let previews = app.previews(ui.ctx(), &app.state.make.pictures.clone());
+    let out = crate::prompt_box::show(
+        ui,
+        &mut app.state.make.request,
+        &app.state.make.pictures,
+        crate::prompt_box::PromptBox {
+            name: "Say what you want",
+            hint: tr(hint),
+            rows: (3, 10),
+            attach,
+            previews: &previews,
+            stop_button: None,
+            stopping: false,
+            send: false,
+            recall: false,
+            history: None,
+            font_size: theme::LEAD,
+        },
+    );
+    if let Some(i) = out.remove {
+        app.state.make.pictures.remove(i);
+    }
+    if out.attach {
+        app.pick(Pick::Pictures);
+    }
+    if out.paste {
+        app.paste_pictures(false);
+    }
+    out.send
+}
+
+/// For a game: the engine it's built with, and whether the builder may generate its assets.
+fn engine_choices(app: &mut CraftApp, ui: &mut Ui) {
+    if is_game(&app.kinds, &app.state.make) {
+        ui.add_space(22.0);
+        crate::engine_ui::build_with(app, ui);
+        ui.add_space(14.0);
+        let on = app.state.make.generate_assets;
+        crate::engine_ui::assets_toggle(app, ui, on);
+    }
 }
 
 /// "Just look inside": what to look at, each opening straight away. Nothing is built or run.
@@ -428,6 +533,27 @@ mod tests {
     }
 
     #[test]
+    fn the_persons_own_files_say_whether_it_is_a_game() {
+        use crate::engine_ui::chosen;
+        use craft_anything_engines::game::Builder;
+        let kinds = craft_anything_ai::rebuild::KindRegistry::built_in();
+        let own = |stack: Option<&str>, request: &str| MakeDraft {
+            folder_stack: stack.map(str::to_string),
+            existing: Some(ExistingFiles::Edit),
+            request: request.into(),
+            ..Default::default()
+        };
+        let godot = own(Some("Godot"), "Fix the jump");
+        assert!(is_game(&kinds, &godot), "whatever the request's words say");
+        assert_eq!(chosen(&kinds, &godot), Some(Builder::Godot));
+        assert!(!is_game(&kinds, &own(Some("Python"), "Fix my game")), "no engine to get for a Python game");
+        assert_eq!(chosen(&kinds, &own(Some("Python"), "Fix my game with Godot")), Some(Builder::Godot), "the person's words come first");
+        assert!(is_game(&kinds, &own(None, "Fix my game")), "nothing read from the folder: the words decide");
+        let start_from = MakeDraft { existing: Some(ExistingFiles::StartFrom), ..own(Some("Python"), "Fix my game") };
+        assert!(is_game(&kinds, &start_from), "material to start from doesn't decide");
+    }
+
+    #[test]
     fn targets_from_the_draft() {
         let mut d = MakeDraft { request: "Please recreate https://example.com/pricing.".into(), ..Default::default() };
         assert_eq!(resolve_target(&d), TargetRef::Website { url: "https://example.com/pricing".into() });
@@ -437,5 +563,7 @@ mod tests {
         d.request = "a snake game".into();
         assert_eq!(resolve_target(&d), TargetRef::None);
         assert_eq!(normalize_url("http://x.y"), "http://x.y");
+        let own = MakeDraft { mine: true, request: "Link the footer to https://example.com".into(), ..Default::default() };
+        assert_eq!(resolve_target(&own), TargetRef::None, "an address in the request isn't an original");
     }
 }

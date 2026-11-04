@@ -86,6 +86,20 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Decode one modified UTF-8 code unit. Invalid bytes consume only themselves,
+/// so a damaged sequence cannot hide valid text or borrow missing bytes.
+pub(crate) fn mutf8_unit(bytes: &[u8]) -> (u16, usize) {
+    match bytes {
+        [a @ 0x00..=0x7f, ..] => (u16::from(*a), 1),
+        [0xc0, 0x80, ..] => (0, 2),
+        [a @ 0xc2..=0xdf, b @ 0x80..=0xbf, ..] => ((u16::from(*a & 0x1f) << 6) | u16::from(*b & 0x3f), 2),
+        [a @ 0xe0..=0xef, b @ 0x80..=0xbf, c @ 0x80..=0xbf, ..] if *a != 0xe0 || *b >= 0xa0 => {
+            ((u16::from(*a & 0x0f) << 12) | (u16::from(*b & 0x3f) << 6) | u16::from(*c & 0x3f), 3)
+        }
+        _ => (0xfffd, 1),
+    }
+}
+
 /// Decode base64 with optional padding and ASCII whitespace.
 /// Padding must finish the last quantum; data after it is never ignored.
 pub(crate) fn decode_base64(text: &str, url_safe: bool) -> Option<Vec<u8>> {

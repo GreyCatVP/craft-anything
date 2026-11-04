@@ -527,19 +527,21 @@ pub fn never_unasked(ws: Option<&Workspace>, tool: &str, input: &Value) -> Optio
             (system || ours).then(|| refuse("changes system files or Craft Anything's own records")).flatten()
         }
         "Bash" | "PowerShell" => {
-            let c = s("command").to_ascii_lowercase();
+            let command = s("command");
+            let c = command.to_ascii_lowercase();
             if PUBLISH.iter().any(|k| c.contains(k)) {
                 return refuse("publishes or pushes anything");
             }
             if SYSTEM_COMMANDS.iter().any(|k| c.contains(k)) {
                 return refuse("changes the system, its settings or its users, or shuts it down");
             }
-            if DELETES.iter().any(|k| c.contains(k)) && deletes_outside(&c, ws) {
+            // Paths keep their case: on a Mac or Linux `/Users/x` isn't `/users/x`.
+            if DELETES.iter().any(|k| c.contains(k)) && deletes_outside(&command, ws) {
                 return refuse("deletes anything outside the project or the temp folder");
             }
             None
         }
-        _ => None,
+        _ => refuse("uses a tool that has no automatic approval rule"),
     }
 }
 
@@ -584,15 +586,58 @@ const DELETES: &[&str] = &["rm ", "rmdir", "rd /s", "del ", "erase ", "remove-it
 fn deletes_outside(command: &str, ws: Option<&Workspace>) -> bool {
     let temp = std::env::temp_dir();
     let roots: Vec<PathBuf> = ws.map(|w| w.root.clone()).into_iter().chain([temp, PathBuf::from("/tmp"), PathBuf::from("c:/tmp")]).collect();
-    command.split(|c: char| c.is_whitespace() || c == '"' || c == '\'').any(|tok| {
-        if tok.contains("..") || tok.starts_with('~') || tok.contains("$home") || tok.contains("%userprofile%") || tok.contains("$env:") {
+    shell_words(command).iter().any(|tok| {
+        let tok = tok.as_str();
+        let lower = tok.to_ascii_lowercase();
+        if tok.contains("..") || tok.starts_with('~') || lower.contains("$home") || lower.contains("%userprofile%") || lower.contains("$env:") {
             return true;
         }
         // Git Bash writes C:\x as /c/x.
-        let tok = tok.strip_prefix("/c/").map(|r| format!("c:/{r}")).unwrap_or_else(|| tok.to_string());
+        let tok = tok.strip_prefix("/c/").or_else(|| tok.strip_prefix("/C/")).map(|r| format!("c:/{r}")).unwrap_or_else(|| tok.to_string());
         let absolute = tok.starts_with('/') || tok.get(1..3).is_some_and(|d| d == ":/" || d == ":\\");
         absolute && !roots.iter().any(|r| inside(r, Path::new(&tok)))
     })
+}
+
+/// A command's arguments the way a shell reads them: quoted text (`"a b"`, `'a b'`) and an escaped
+/// space (`a\ b`) stay in one argument, so a path with spaces is checked whole. A backslash before
+/// anything else is kept as it is (Windows paths).
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quote: Option<char> = None;
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => word.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                started = true;
+            }
+            None if c == '\\' && chars.peek().is_some_and(|n| n.is_whitespace()) => {
+                if let Some(n) = chars.next() {
+                    word.push(n);
+                }
+                started = true;
+            }
+            None if c.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            None => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
 }
 
 /// What the person said to an approval card.
@@ -1010,6 +1055,14 @@ mod tests {
     }
 
     #[test]
+    fn auto_mode_refuses_unknown_tools_that_may_publish_or_schedule() {
+        for tool in ["Artifact", "CronCreate", "ListAgents"] {
+            let result = never_unasked(None, tool, &json!({}));
+            assert!(result.is_some(), "{tool} must require the person's approval");
+        }
+    }
+
+    #[test]
     fn auto_mode_keeps_going_but_never_does_the_dangerous_things() {
         let (_d, w) = ws();
         let e = crate::Engine::new(crate::testing::session());
@@ -1047,6 +1100,60 @@ mod tests {
         let v = e.call("core_person_ask", json!({"question": "Blue or red?"}), crate::CallOptions::new(crate::Caller::Mcp)).unwrap().to_json();
         assert_eq!(v["result"]["answered"], false);
         assert!(v["result"]["note"].as_str().unwrap().contains("decide questions yourself"));
+    }
+
+    #[test]
+    fn auto_mode_deletes_inside_a_project_whose_path_has_capitals() {
+        // Regression: the command was lower-cased before its paths were compared, so on a Mac
+        // (`/Users/…`, `/var/folders/…/T/`) deleting the project's own build folder was refused.
+        let (_d, mut w) = ws();
+        w.root = PathBuf::from(if cfg!(windows) { "D:/Projects/MyGame" } else { "/Users/Me/Projects/MyGame" });
+        let root = w.root.display().to_string();
+        let rm = |cmd: String| never_unasked(Some(&w), "Bash", &json!({"command": cmd}));
+        assert_eq!(rm(format!("rm -rf \"{root}/app/Build\"")), None);
+        assert_eq!(rm(format!("RM -RF \"{root}/Intermediate\"")), None, "the command's own case doesn't matter");
+        assert!(rm(format!("rm -rf \"{root}/../Other\"")).is_some(), "climbing out is still refused");
+        assert!(rm("rm -rf $HOME/stuff".into()).is_some());
+        let elsewhere = if cfg!(windows) { "D:/Projects/Other" } else { "/Users/Me/Projects/Other" };
+        assert!(rm(format!("rm -rf \"{elsewhere}\"")).is_some(), "a neighbouring folder is still outside");
+    }
+
+    #[test]
+    fn auto_mode_reads_a_quoted_path_with_spaces_as_one_path() {
+        // Regression: arguments were split at every space, quotes included, so the first half of
+        // `"…/MyGame Backup/report"` read as the project folder and the folder beside it was deleted.
+        let (_d, mut w) = ws();
+        let projects = if cfg!(windows) { "D:/Unreal Projects" } else { "/Users/Me/Unreal Projects" };
+        w.root = PathBuf::from(format!("{projects}/MyGame"));
+        let rm = |cmd: String| never_unasked(Some(&w), "Bash", &json!({"command": cmd}));
+        for beside in [
+            format!("rm -rf \"{projects}/MyGame Backup/report\""),
+            format!("rm -rf '{projects}/MyGame Backup'"),
+            format!("rm -rf {}/MyGame\\ Backup", projects.replace(' ', "\\ ")),
+        ] {
+            assert!(rm(beside.clone()).is_some(), "{beside}");
+        }
+        for own in [
+            format!("rm -rf \"{projects}/MyGame/app/Build\""),
+            format!("rm -rf '{projects}/MyGame/Saved Games'"),
+            format!("rm -rf {}/MyGame/app/Build ./Intermediate", projects.replace(' ', "\\ ")),
+        ] {
+            assert_eq!(rm(own.clone()), None, "{own}");
+        }
+        // The case that went through: a parent without spaces, so the first half matched the project.
+        let plain = if cfg!(windows) { "D:/Projects" } else { "/Users/Me/Projects" };
+        w.root = PathBuf::from(format!("{plain}/MyGame"));
+        let beside = format!("rm -rf \"{plain}/MyGame Backup/report\"");
+        assert!(never_unasked(Some(&w), "Bash", &json!({"command": beside})).is_some(), "{beside}");
+    }
+
+    #[test]
+    fn shell_words_keep_quoted_and_escaped_spaces() {
+        assert_eq!(shell_words(r#"rm -rf "a b/c" 'd e' f\ g  h"#), ["rm", "-rf", "a b/c", "d e", "f g", "h"]);
+        assert_eq!(shell_words(r"del C:\x\y.txt"), ["del", r"C:\x\y.txt"], "Windows backslashes stay");
+        assert_eq!(shell_words(r#"rm "" x"#), ["rm", "", "x"]);
+        assert_eq!(shell_words("rm \"unclosed path"), ["rm", "unclosed path"]);
+        assert!(shell_words("   ").is_empty());
     }
 
     #[test]
