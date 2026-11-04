@@ -305,6 +305,17 @@ fn engines(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
+/// Keep both selectors in place while their model-specific choices load or fail. Loading is
+/// scheduled after drawing, and a failed lookup stays visible until explicitly retried.
+fn model_options_loading(ui: &mut Ui, backend: &str) {
+    ui.add_enabled_ui(false, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("Context window"));
+            egui::ComboBox::from_id_salt(("model-context", backend)).icon(widgets::combo_icon).selected_text(tr("Default")).show_ui(ui, |_| {});
+        });
+    });
+}
+
 /// Draw AI settings and model pickers, preserving drafts during contention and invalidating confirmed context changes.
 fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if app.agent_model_picker.as_ref().is_some_and(|p| app.hub.model_context(&p.context.backend.config.name).is_ok_and(|current| current != p.context)) {
@@ -320,9 +331,13 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
+    let mut save_folder = None;
+    // Taken out while the rows borrow the app, and put back after them.
+    let mut folder_drafts = std::mem::take(&mut app.folder_inputs);
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
     let mut chosen_effort = None;
     let (mut pick_agent_model, mut chosen_agent_model, mut remote_program) = (None, None, None);
+    let (mut tune_models, mut save_tuning) = (Vec::new(), None);
     // The AI whose Remove was pressed once: asked again before its key is deleted.
     let confirm_id = egui::Id::new("remove-ai");
     let confirming: Option<String> = ui.data(|d| d.get_temp(confirm_id));
@@ -358,6 +373,41 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                             }
                         });
                     }
+                    // The folder it keeps its sign-in in (Claude Code's CLAUDE_CONFIG_DIR), typed
+                    // so `~/` and hidden folders work, here or over SSH: another folder is another
+                    // account. Saved on Enter or when the field is left; empty is its usual one.
+                    if craft_anything_ai::folder_var(b).is_some() {
+                        let saved = app.backend_options.get(&b.name).and_then(|o| o.config_dir.clone()).unwrap_or_default();
+                        let id = egui::Id::new(("agent-folder", &b.name));
+                        // What was typed stays until it's saved (or refused, so it can be fixed).
+                        if folder_drafts.get(&b.name).is_some_and(|d| d.trim() == saved) && !ui.memory(|m| m.has_focus(id)) {
+                            folder_drafts.remove(&b.name);
+                        }
+                        let mut text = folder_drafts.get(&b.name).cloned().unwrap_or_else(|| saved.clone());
+                        ui.add_space(4.0);
+                        let label = ui.label(RichText::new(tr("Claude Code folder (CLAUDE_CONFIG_DIR)")).size(theme::CAPTION).color(t.text_dim));
+                        ui.label(
+                            RichText::new(tr("Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder."))
+                                .color(t.text_faint)
+                                .size(theme::CAPTION),
+                        );
+                        let r = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut text)
+                                    .id(id)
+                                    .hint_text("~/.claude")
+                                    .desired_width(260.0)
+                                    .frame(widgets::text_field_frame_compact(&t)),
+                            )
+                            .labelled_by(label.id);
+                        if r.changed() {
+                            folder_drafts.insert(b.name.clone(), text.clone());
+                        }
+                        if r.lost_focus() && text.trim() != saved {
+                            save_folder = Some((b.name.clone(), text.trim().to_string()));
+                        }
+                        ui.add_space(4.0);
+                    }
                     // How hard it thinks: the Claude API and Claude Code take every Claude level.
                     let effort = craft_anything_ai::effort_in_use(b, app.backend_options.get(&b.name));
                     if b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty()) {
@@ -377,12 +427,19 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     // Which model it uses, and the ones it can be set to (#123).
                     if live_catalog {
                         let options = app.backend_options.get(&b.name);
-                        let current = options.and_then(|o| o.cli_model.as_deref()).map(str::to_string).unwrap_or_else(|| tr("OpenCode default"));
+                        let current = options
+                            .and_then(|o| o.cli_model.as_deref())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| if b.model == "opencode" { tr("OpenCode default") } else { tr("Model default") });
                         ui.label(trf("Model: {model}", &[("model", &current)]));
                         let thinking = options.and_then(|o| o.cli_thinking).map(|d| d.title().to_string()).unwrap_or_else(|| tr("Model default"));
                         ui.label(format!("{}: {thinking}", tr("Thinking depth")));
                         if let Some(picker) = app.agent_model_picker.as_mut().filter(|p| p.context.backend.config.name == b.name) {
-                            if crate::builders::agent_model_picker(ui, picker) {
+                            let previous = picker.model.clone();
+                            let apply = crate::builders::agent_model_picker(ui, picker);
+                            if picker.model != previous && craft_anything_ai::cli_agents::adapter_for(&b.model).model_catalog_depends_on_selection() {
+                                pick_agent_model = Some(b.name.clone());
+                            } else if apply {
                                 chosen_agent_model = Some((b.name.clone(), picker.model.clone(), picker.thinking));
                             }
                             ui.horizontal(|ui| {
@@ -421,6 +478,18 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                             }
                                         }
                                     });
+                                    // A model the list doesn't offer: a newer one, a variant such as
+                                    // `opusplan`, or one another harness serves (#470).
+                                    let id = egui::Id::new(("other-model", &b.name));
+                                    let mut other = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
+                                    let label = ui.label(RichText::new(tr("Another model")).color(t.text_faint).size(theme::CAPTION));
+                                    let r = ui.add(egui::TextEdit::singleline(&mut other).desired_width(140.0)).labelled_by(label.id);
+                                    let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    if (widgets::link(ui, "Use").clicked() || entered) && !other.trim().is_empty() && other.trim() != current {
+                                        chosen_model = Some((b.name.clone(), other.trim().to_string()));
+                                        other.clear();
+                                    }
+                                    ui.data_mut(|d| d.insert_temp(id, other));
                                     if widgets::link(ui, "Cancel").clicked() {
                                         close_picker = true;
                                     }
@@ -437,6 +506,48 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                 });
                             }
                         });
+                    }
+                    if craft_anything_ai::model_options::supported(b) {
+                        if let Some(draft) = app.model_tuning.get_mut(&b.name) {
+                            if let Some(choices) = &draft.choices {
+                                let mut changed = false;
+                                ui.add_enabled_ui(!draft.saving, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(tr("Context window"));
+                                        let label = draft
+                                            .context
+                                            .and_then(|value| choices.context.iter().find(|choice| choice.value == value))
+                                            .map(|choice| tr(&choice.label))
+                                            .unwrap_or_else(|| tr("Default"));
+                                        egui::ComboBox::from_id_salt(("model-context", &b.name)).icon(widgets::combo_icon).selected_text(label).show_ui(
+                                            ui,
+                                            |ui| {
+                                                changed |= ui.selectable_value(&mut draft.context, None, tr("Default")).changed();
+                                                for choice in &choices.context {
+                                                    changed |= ui.selectable_value(&mut draft.context, Some(choice.value), tr(&choice.label)).changed();
+                                                }
+                                            },
+                                        );
+                                    });
+                                });
+                                if changed {
+                                    save_tuning = Some(draft.params());
+                                }
+                            } else {
+                                model_options_loading(ui, &b.name);
+                                if let Some(error) = &draft.error {
+                                    ui.add(egui::Label::new(RichText::new(error).color(t.danger)).wrap());
+                                    if icons::button(ui, "refresh-cw", 24.0, false, "Load model options").clicked() {
+                                        tune_models.push(b.name.clone());
+                                    }
+                                } else {
+                                    ui.spinner();
+                                }
+                            }
+                        } else {
+                            model_options_loading(ui, &b.name);
+                            tune_models.push(b.name.clone());
+                        }
                     }
                 });
             });
@@ -506,6 +617,10 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if let Some(name) = usual_program {
         app.set_agent_program(&name, None);
     }
+    app.folder_inputs = folder_drafts;
+    if let Some((name, folder)) = save_folder {
+        app.set_agent_folder(&name, Some(folder));
+    }
     if let Some(name) = pick_model {
         app.pick_model(&name);
     }
@@ -513,7 +628,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         app.set_agent_program(&name, Some(program));
     }
     if let Some(name) = pick_agent_model {
-        app.pick_agent_model(&name);
+        app.reload_agent_model(&name);
     }
     if let Some((name, model, thinking)) = chosen_agent_model {
         app.set_agent_model(&name, model, thinking);
@@ -527,6 +642,12 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if close_picker {
         app.model_picker = None;
         app.agent_model_picker = None;
+    }
+    for name in tune_models {
+        app.pick_model_options(&name);
+    }
+    if let Some(params) = save_tuning {
+        app.set_model_options(params);
     }
     if let Some(name) = remove {
         ui.data_mut(|d| d.remove::<String>(confirm_id));
@@ -542,8 +663,15 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         app.set_role(craft_anything_ai::Role::Extractor, e);
     }
     ui.add_space(8.0);
+    let detected = app.detected.clone().unwrap_or_default();
+    let mut tab = {
+        let (providers, harnesses) = crate::detect_tabs::counts(&detected);
+        crate::detect_tabs::resolve(app.state.detect_tab, providers, harnesses)
+    };
     ui.horizontal(|ui| {
         widgets::caption(ui, "Found on this computer");
+        ui.add_space(12.0);
+        tab = crate::detect_tabs::bar(ui, &mut app.state.detect_tab, &detected);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if app.detecting {
                 ui.add(crate::widgets::Spinner::new().color(t.accent));
@@ -553,14 +681,17 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         });
     });
     ui.add_space(4.0);
-    let detected = app.detected.clone().unwrap_or_default();
     if detected.is_empty() && !app.detecting {
         ui.label(
             RichText::new(tr("Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below."))
                 .color(t.text_faint),
         );
     }
-    for d in detected {
+    let shown = detected.iter().filter(|d| crate::detect_tabs::tab_of(d) == tab).count();
+    if shown == 0 && !detected.is_empty() && !app.detecting {
+        ui.label(RichText::new(tr("Nothing of this kind was found.")).color(t.text_faint));
+    }
+    for d in detected.into_iter().filter(|d| crate::detect_tabs::tab_of(d) == tab) {
         let configured = app.backends.iter().any(|b| b.name == d.suggestion.name);
         widgets::panel(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -572,12 +703,24 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if configured {
                         widgets::pill(ui, "Added", t.success, t.raised);
+                        // Claude Code once more, to give it another account's folder.
+                        if craft_anything_ai::folder_var(&d.suggestion).is_some()
+                            && widgets::link(ui, "Add another").on_hover_text(tr("Add it again, to choose another account's folder for it.")).clicked()
+                        {
+                            let taken = |n: &String| app.backends.iter().any(|b| &b.name == n);
+                            if let Some(name) = (2..100).map(|i| format!("{} {i}", d.suggestion.name)).find(|n| !taken(n)) {
+                                app.add_backend(craft_anything_ai::BackendConfig { name, ..d.suggestion.clone() }, None);
+                            }
+                        }
                     } else if !d.needs_key && widgets::primary(ui, "Add").clicked() {
                         app.add_backend(d.suggestion.clone(), None);
                     }
                 });
             });
-            if d.needs_key && !configured {
+            // A subscription key is worth pasting even when the environment already has one, so a
+            // different key can be used without restarting the app.
+            let pastable = d.needs_key || d.suggestion.base_url.as_deref().is_some_and(craft_anything_ai::openai::is_opencode_go);
+            if pastable && !configured {
                 ui.horizontal(|ui| {
                     let key = app.key_inputs.entry(d.suggestion.name.clone()).or_default();
                     ui.add(
@@ -603,7 +746,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
 
 /// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by
 /// its address (#54, #98). The server is asked for its models before it's added.
-fn server_form(app: &mut CraftApp, ui: &mut Ui) {
+/// The first run's AI step shows it too.
+pub(crate) fn server_form(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(14.0);
     widgets::caption(ui, "Add an AI by its address");
@@ -871,6 +1015,77 @@ mod tests {
     use crate::{Done, builders::AgentModelPicker, demo, jobs::Finished};
     use craft_anything_ai::{BackendConfig, BackendKind};
 
+    #[test]
+    fn identical_model_names_are_shown_once_in_the_shared_picker() {
+        use craft_anything_ai::{AgentModel, BackendEntry, ModelContext};
+        use egui_kittest::{Harness, kittest::Queryable};
+        let context = ModelContext {
+            backend: BackendEntry {
+                config: BackendConfig {
+                    name: "Test agent".into(),
+                    kind: BackendKind::AgentCli,
+                    model: "copilot".into(),
+                    base_url: None,
+                    ssh_host: None,
+                    enabled: true,
+                },
+                options: Default::default(),
+            },
+            directory: None,
+        };
+        let mut picker = AgentModelPicker {
+            request: 1,
+            context,
+            model: None,
+            thinking: None,
+            result: Some(Ok(vec![
+                AgentModel { id: "auto".into(), name: "auto".into(), thinking: Vec::new() },
+                AgentModel { id: "provider/model".into(), name: "Friendly name".into(), thinking: Vec::new() },
+            ])),
+        };
+        let mut harness = Harness::builder().build_ui(move |ui| {
+            theme::install_fonts(ui.ctx());
+            crate::builders::agent_model_picker(ui, &mut picker);
+        });
+        harness.get_by_label("Model").click();
+        harness.run_steps(3);
+        assert!(harness.query_by_label("auto").is_some());
+        assert!(harness.query_by_label("auto · auto").is_none());
+        assert!(harness.query_by_label("Friendly name · provider/model").is_some());
+    }
+
+    #[test]
+    fn shared_picker_warnings_name_the_configured_agent() {
+        use craft_anything_ai::{BackendEntry, ModelContext};
+        use egui_kittest::{Harness, kittest::Queryable};
+        for (agent, name) in [("copilot", "GitHub Copilot"), ("opencode", "OpenCode")] {
+            let context = ModelContext {
+                backend: BackendEntry {
+                    config: BackendConfig {
+                        name: "Test".into(),
+                        kind: BackendKind::AgentCli,
+                        model: agent.into(),
+                        base_url: None,
+                        ssh_host: None,
+                        enabled: true,
+                    },
+                    options: Default::default(),
+                },
+                directory: None,
+            };
+            let mut picker = AgentModelPicker { request: 1, context, model: Some("missing-model".into()), thinking: None, result: Some(Ok(Vec::new())) };
+            let harness = Harness::builder().build_ui(move |ui| {
+                theme::install_fonts(ui.ctx());
+                crate::builders::agent_model_picker(ui, &mut picker);
+            });
+            harness.get_by_label(format!("No chat models are visible in {name}. Check its setup, then reload.").as_str());
+            harness.get_by_label(format!("The saved model is no longer visible. Choose another model or the {name} default.").as_str());
+            if agent == "copilot" {
+                assert!(harness.query_by_label("The saved model is no longer visible. Choose another model or the OpenCode default.").is_none());
+            }
+        }
+    }
+
     /// Busy frames retain matching catalogue results, ignore older requests and defer context invalidation until readable.
     #[test]
     fn a_busy_session_keeps_the_picker_and_its_matching_result() {
@@ -904,5 +1119,198 @@ mod tests {
         app.hub.set_enabled("OpenCode", false).unwrap();
         draw(&mut app);
         assert!(app.agent_model_picker.is_none(), "a confirmed settings change still invalidates the picker");
+    }
+
+    /// An AI that finishes connecting is chosen, unless another choice (here "No AI for now") was
+    /// made while it connected.
+    #[test]
+    fn a_late_add_does_not_undo_a_choice_made_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Beginner, false));
+        let added = |choices| Ok(Done::BackendAdded { name: "Home server".into(), result: Ok(()), choices });
+        let started = app.backend_choices;
+        app.choose_backend(None);
+        app.handle_done(Finished { job: 0, result: added(started) });
+        assert_eq!(app.state.backend, None, "the late add must not override No AI for now");
+        app.handle_done(Finished { job: 0, result: added(app.backend_choices) });
+        assert_eq!(app.state.backend.as_deref(), Some("Home server"), "with no choice meanwhile, the added AI is chosen");
+        // Two adds at once: the first one's selection isn't a choice, so the second is selected too.
+        let started = app.backend_choices;
+        let other = |choices| Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices });
+        app.handle_done(Finished { job: 0, result: added(started) });
+        app.handle_done(Finished { job: 0, result: other(started) });
+        assert_eq!(app.state.backend.as_deref(), Some("Laptop"), "the add that finished last is selected");
+    }
+
+    /// A chat started while an AI connects is a choice too: the add doesn't switch AI under it.
+    #[test]
+    fn a_late_add_does_not_stop_a_chat_started_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Experienced, true));
+        // A closed local port: the chat starts, and its request fails without leaving this computer.
+        let config = BackendConfig {
+            name: "Box".into(),
+            kind: BackendKind::OpenaiCompatible,
+            model: "m".into(),
+            base_url: Some("http://127.0.0.1:9/v1".into()),
+            ssh_host: None,
+            enabled: true,
+        };
+        app.hub.add_backend(config, None).unwrap();
+        app.state.backend = Some("Box".into());
+        let started = app.backend_choices;
+        app.send("Hi");
+        assert!(app.conversation.is_some(), "the chat started");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "the chat's AI stays chosen");
+        assert!(app.conversation.is_some(), "the chat keeps going");
+        // A follow-up in a chat that started before the add counts the same way.
+        let started = app.backend_choices;
+        app.send("And then?");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "a follow-up keeps its AI");
+        assert!(app.conversation.is_some(), "the follow-up's answer keeps going");
+    }
+}
+
+#[cfg(test)]
+mod model_options_tests {
+    use super::*;
+    use craft_anything_ai::config::{CliContext, CliReasoningEffort};
+    use craft_anything_ai::model_options::{ModelOption, ModelTuning};
+
+    fn app_with_backend() -> CraftApp {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, false));
+        app.engine.session().settings.ai = Default::default();
+        app.backends = vec![craft_anything_ai::BackendConfig {
+            name: "Copilot test".into(),
+            kind: BackendKind::AgentCli,
+            model: "copilot".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        }];
+        app
+    }
+
+    fn render(app: &mut CraftApp) -> String {
+        let context = egui::Context::default();
+        crate::theme::install_fonts(&context);
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| ai(app, ui));
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some(text.galley.text().to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn model_controls_use_shared_thinking_and_separate_context_without_loading_a_cli() {
+        let mut app = app_with_backend();
+        let mut draft = crate::ModelTuningDraft {
+            backend: "Copilot test".into(),
+            cli_model: Some("test-model".into()),
+            choices: None,
+            context: Some(CliContext::Long),
+            saving: false,
+            error: None,
+        };
+        draft.set_choices(ModelTuning {
+            model: "test-model".into(),
+            context: vec![ModelOption { value: CliContext::Long, label: "1M".into(), description: None }],
+            reasoning: vec![ModelOption { value: CliReasoningEffort::High, label: "high".into(), description: None }],
+        });
+        app.model_tuning.insert(draft.backend.clone(), draft);
+        let text = render(&mut app);
+        assert!(text.contains("Context window") && text.contains("Thinking depth") && text.contains("1M") && !text.contains("Reasoning"), "{text}");
+        assert_eq!(app.model_tuning["Copilot test"].params().context, Some(CliContext::Long));
+    }
+
+    #[test]
+    fn model_controls_are_always_visible_and_discovery_is_not_requeued_each_frame() {
+        let mut app = app_with_backend();
+        let text = render(&mut app);
+        assert!(text.contains("Context window") && text.contains("Thinking depth"), "{text}");
+        let jobs = app.jobs.list.len();
+        assert!(app.model_tuning.contains_key("Copilot test"));
+        render(&mut app);
+        assert_eq!(app.jobs.list.len(), jobs);
+        app.model_tuning.get_mut("Copilot test").unwrap().error = Some("Discovery unavailable".into());
+        let text = render(&mut app);
+        assert!(text.contains("Context window") && text.contains("Thinking depth") && text.contains("Discovery unavailable"), "{text}");
+        assert_eq!(app.jobs.list.len(), jobs, "failed discovery waits for an explicit retry");
+    }
+
+    #[test]
+    fn model_option_changes_save_without_closing_the_controls() {
+        let mut app = app_with_backend();
+        app.hub.add_backend(app.backends[0].clone(), None).unwrap();
+        app.backend_options = app.hub.options();
+        let state = crate::ModelTuningDraft {
+            backend: "Copilot test".into(),
+            cli_model: None,
+            choices: None,
+            context: Some(CliContext::Long),
+            saving: false,
+            error: None,
+        };
+        let params = state.params();
+        app.model_tuning.insert(state.backend.clone(), state);
+        app.set_model_options(params);
+        assert!(app.model_tuning["Copilot test"].saving);
+        let started = std::time::Instant::now();
+        while app.model_tuning["Copilot test"].saving && started.elapsed() < std::time::Duration::from_secs(3) {
+            for finished in app.jobs.poll() {
+                app.handle_done(finished);
+            }
+            std::thread::park_timeout(std::time::Duration::from_millis(5));
+        }
+        assert!(!app.model_tuning["Copilot test"].saving);
+        assert_eq!(app.hub.options()["Copilot test"].cli_context, Some(CliContext::Long));
+        assert_eq!(app.backend_options["Copilot test"].cli_thinking, None);
+    }
+
+    #[test]
+    fn choosing_a_model_automatically_repopulates_its_options() {
+        let mut app = app_with_backend();
+        app.hub
+            .add_backend_with(
+                craft_anything_ai::BackendEntry {
+                    config: app.backends[0].clone(),
+                    options: craft_anything_ai::BackendOptions {
+                        cli_model: Some("old-model".into()),
+                        command: Some("craft-anything-no-such-test-agent".into()),
+                        ..Default::default()
+                    },
+                },
+                None,
+            )
+            .unwrap();
+        app.backend_options = app.hub.options();
+        app.model_tuning.insert(
+            "Copilot test".into(),
+            crate::ModelTuningDraft {
+                backend: "Copilot test".into(),
+                cli_model: Some("old-model".into()),
+                choices: None,
+                context: None,
+                saving: false,
+                error: Some("Old choices".into()),
+            },
+        );
+        let mut options = app.backend_options["Copilot test"].clone();
+        options.cli_model = Some("new-model".into());
+        app.hub.add_backend_with(craft_anything_ai::BackendEntry { config: app.backends[0].clone(), options }, None).unwrap();
+        let result = crate::backends(&app.hub);
+        app.handle_done(crate::jobs::Finished { job: 0, result: Ok(result) });
+        assert_eq!(app.backend_options["Copilot test"].cli_model.as_deref(), Some("new-model"));
+        assert!(!app.model_tuning.contains_key("Copilot test"));
+        let text = render(&mut app);
+        assert!(text.contains("new-model") && text.contains("Context window") && text.contains("Thinking depth"), "{text}");
+        assert_eq!(app.model_tuning["Copilot test"].cli_model.as_deref(), Some("new-model"));
+        assert_eq!(app.model_tuning["Copilot test"].error, None);
     }
 }

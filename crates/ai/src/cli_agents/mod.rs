@@ -11,6 +11,9 @@
 pub mod acp;
 pub mod adapters;
 pub mod models;
+mod shared;
+
+pub(crate) use shared::SharedConversation;
 
 pub use acp::AcpConversation;
 pub use adapters::{AgentAdapter, AgentAdapters, ArgsCx};
@@ -38,6 +41,7 @@ pub const MCP_NAME: &str = "craft-anything";
 pub const KNOWN: &[(&str, &str, &str)] = &[
     ("claude-code", "claude", "Claude Code"),
     ("codex", "codex", "Codex"),
+    ("copilot", "copilot", "GitHub Copilot"),
     ("gemini-cli", "gemini", "Gemini CLI"),
     ("antigravity", "agy", "Antigravity"),
     ("opencode", "opencode", "OpenCode"),
@@ -49,6 +53,36 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
 
 pub fn program_for(agent: &str) -> String {
     KNOWN.iter().find(|(id, _, _)| *id == agent).map(|(_, p, _)| p.to_string()).unwrap_or_else(|| agent.to_string())
+}
+
+/// The program a backend runs: the one chosen for it, else the agent's usual name. A chosen path
+/// that's gone from this computer is looked for again (#721): an agent that installs each version
+/// in a folder of its own (Codex's `bin/<build>/codex.exe`) moves on every update, so the same file
+/// in the newest folder beside the old one is used, else the usual name on PATH. On another
+/// computer (ssh) the chosen command is used as it is.
+pub fn program_of(config: &BackendConfig, options: &BackendOptions) -> String {
+    let usual = program_for(&config.model);
+    let Some(chosen) = options.command.as_deref().map(str::trim).filter(|c| !c.is_empty()) else { return usual };
+    let local = config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
+    let path = Path::new(chosen);
+    if !local || path.parent().is_none_or(|p| p.as_os_str().is_empty()) || path.exists() {
+        return chosen.to_string();
+    }
+    moved_program(path).or_else(|| craft_anything_platform::which(&usual).map(|_| usual)).unwrap_or_else(|| chosen.to_string())
+}
+
+/// The same file in the most recently changed sibling of its missing folder, if there is one.
+fn moved_program(missing: &Path) -> Option<String> {
+    let file = missing.file_name()?;
+    let versions = missing.parent()?.parent()?;
+    std::fs::read_dir(versions)
+        .ok()?
+        .flatten()
+        .take(256)
+        .map(|e| e.path().join(file))
+        .filter(|p| p.is_file())
+        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+        .map(|p| p.display().to_string())
 }
 
 pub fn display_for(agent: &str) -> String {
@@ -130,10 +164,10 @@ pub fn check_builder_tools(adapter: &dyn AgentAdapter, agent: &str, options: &Ba
 /// The requested transport, shared by builder preflight and execution. ACP cannot carry explicit
 /// catalogue model/variant selections yet, so those must pass the native adapter's checks.
 fn selected_acp_args(adapter: &dyn AgentAdapter, agent: &str, options: &BackendOptions) -> Option<&'static [&'static str]> {
-    if adapter.has_model_catalog() && (options.cli_model.is_some() || options.cli_thinking.is_some()) {
+    if adapter.has_model_catalog() && !adapter.requires_acp() && (options.cli_model.is_some() || options.cli_thinking.is_some()) {
         return None;
     }
-    acp::acp_args(agent).filter(|_| options.acp == Some(true))
+    acp::acp_args(agent).filter(|_| options.acp.unwrap_or_else(|| adapter.requires_acp()))
 }
 
 fn toml_string(s: &str) -> String {
@@ -212,27 +246,46 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool 
 /// The fix for a sign-in failure, in plain words. Sign-in always happens in Claude Code itself;
 /// we never see or handle the account.
 pub fn sign_in_hint(message: &str) -> Option<String> {
-    sign_in_hint_in(message, adapters::in_flatpak())
+    sign_in_hint_in(message, adapters::in_flatpak(), None)
 }
 
-/// [`sign_in_hint`] for a Flatpak or not. In a Flatpak, Claude Code keeps its sign-in and
-/// conversations in a folder of the app's own (#506), so signing in from a normal terminal signs
-/// in the other copy: it's done through the sandbox, with that folder.
-fn sign_in_hint_in(message: &str, flatpak: bool) -> Option<String> {
+/// [`sign_in_hint`] for a Flatpak or not, and for Claude Code in a folder chosen for it
+/// (`folder`), whose sign-in is its own: the command signs in there. In a Flatpak, Claude Code
+/// keeps its sign-in and conversations in a folder of the app's own (#506), so signing in from a
+/// normal terminal signs in the other copy: it's done through the sandbox, with that folder.
+pub(crate) fn sign_in_hint_in(message: &str, flatpak: bool, folder: Option<&Path>) -> Option<String> {
     let m = message.to_ascii_lowercase();
     let wants_sign_in = ["authenticat", "oauth", "log in", "login", "not logged", "api key", "unauthorized"].iter().any(|w| m.contains(w));
     if !wants_sign_in {
         return None;
     }
-    Some(if flatpak {
-        format!("Sign in to Claude Code inside this app's sandbox: open a terminal and run `{FLATPAK_SIGN_IN}`, then try again.")
-    } else {
-        "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string()
+    let folder = folder.map(|f| f.to_string_lossy().into_owned());
+    Some(match (flatpak, folder) {
+        (true, None) => format!("Sign in to Claude Code inside this app's sandbox: open a terminal and run `{FLATPAK_SIGN_IN}`, then try again."),
+        (true, Some(f)) => format!(
+            "Sign in to Claude Code inside this app's sandbox, in the folder chosen for it: open a terminal and run `{}`, then try again.",
+            flatpak_sign_in(&crate::ssh::shell_quote(&f))
+        ),
+        (false, None) => "Sign in to Claude Code: open a terminal and run `claude auth login` (or start `claude` and type /login), then try again.".to_string(),
+        (false, Some(f)) if cfg!(windows) => format!(
+            "Sign in to Claude Code in the folder chosen for it: open PowerShell and run `$env:CLAUDE_CONFIG_DIR='{}'; claude auth login`, then try again.",
+            f.replace('\'', "''")
+        ),
+        (false, Some(f)) => format!(
+            "Sign in to Claude Code in the folder chosen for it: open a terminal and run `CLAUDE_CONFIG_DIR={} claude auth login`, then try again.",
+            crate::ssh::shell_quote(&f)
+        ),
     })
 }
 
 /// Signing in for the Claude Code that a Flatpak build starts: the same folder it will use.
 const FLATPAK_SIGN_IN: &str = "flatpak run --command=sh ai.storyteller.craft-anything -c 'CLAUDE_CONFIG_DIR=\"$XDG_DATA_HOME/craft-anything/claude\" \"$HOME/.local/bin/claude\" auth login'";
+
+/// [`FLATPAK_SIGN_IN`] for a chosen folder, already quoted for the sandbox's shell.
+fn flatpak_sign_in(quoted: &str) -> String {
+    let inner = format!("CLAUDE_CONFIG_DIR={quoted} \"$HOME/.local/bin/claude\" auth login");
+    format!("flatpak run --command=sh ai.storyteller.craft-anything -c {}", crate::ssh::shell_quote(&inner))
+}
 
 /// Words in an API's answer when the installed Claude Code is older than the model it was asked
 /// to use (#165).
@@ -241,6 +294,12 @@ pub const TOO_OLD_FOR_MODEL: &str = "does not support this model";
 /// Claude Code's failure in plain words, and its fix when the person can make one: a version too
 /// old for the model (#165), or a sign-in.
 pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
+    claude_code_failure_in(why, None)
+}
+
+/// [`claude_code_failure`] for Claude Code in a folder chosen for it (`folder`), whose sign-in is
+/// its own.
+pub(crate) fn claude_code_failure_in(why: &str, folder: Option<&Path>) -> (String, Option<String>) {
     if why.to_ascii_lowercase().contains(TOO_OLD_FOR_MODEL) {
         return (
             format!("Claude Code is too old for the model it was asked to use ({}).", why.chars().take(200).collect::<String>()),
@@ -250,7 +309,7 @@ pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
             ),
         );
     }
-    (format!("Claude Code stopped: {why}"), sign_in_hint(why))
+    (format!("Claude Code stopped: {why}"), sign_in_hint_in(why, adapters::in_flatpak(), folder))
 }
 
 /// Variables a Claude Code session sets for its own child processes. When Craft Anything itself
@@ -377,6 +436,8 @@ pub struct CliSpec {
     pub beginner: bool,
     /// The working folder (and, without `builder`, the investigation handed to our MCP server).
     pub project: Option<PathBuf>,
+    /// The desktop's open targets, active last; the MCP child restores them before serving.
+    pub targets: Vec<craft_anything_engine::target::TargetContext>,
     /// Build mode: the agent may edit files in the working folder.
     pub builder: Option<Builder>,
     /// A saved agent session to continue.
@@ -389,7 +450,7 @@ pub struct CliSpec {
     pub preamble: Option<String>,
     /// How each agent CLI is driven.
     pub adapters: AgentAdapters,
-    /// A question about a build: read-only, and a resumed session is forked and not kept, so the
+    /// A question about a build: read-only, with a fresh session or an unkept fork, so the
     /// builder's own session is never changed. Only adapters that
     /// [answer questions](adapters::AgentAdapter::answers_questions) take it.
     pub question: bool,
@@ -417,6 +478,13 @@ fn mcp_for(spec: &CliSpec, remote: bool) -> McpCommand {
     if spec.deep && spec.builder.is_some() {
         mcp.args.push("--all-tools".into());
     }
+    if !remote {
+        for target in spec.targets.iter().skip(spec.targets.len().saturating_sub(128)) {
+            if let Ok(target) = serde_json::to_string(target) {
+                mcp.args.extend(["--target".into(), target]);
+            }
+        }
+    }
     mcp
 }
 
@@ -427,6 +495,7 @@ impl CliSpec {
             options,
             beginner,
             project,
+            targets: Vec::new(),
             builder: None,
             resume: None,
             deep: false,
@@ -438,8 +507,8 @@ impl CliSpec {
     }
 }
 
-/// The conversation for a chat with an agent CLI: over ACP when the backend asks for it and the
-/// agent speaks it (a local, non-building run), else one CLI run per message.
+/// The conversation for a chat with an agent CLI: over ACP when the backend enables or requires
+/// it and the agent speaks it (a local, non-building run), else one CLI run per message.
 pub fn conversation(spec: CliSpec) -> Box<dyn Conversation> {
     match acp_for(&spec).filter(|_| spec.builder.is_none()) {
         // In Clean room the agent's own file, shell and web requests are refused, not put to the
@@ -451,8 +520,8 @@ pub fn conversation(spec: CliSpec) -> Box<dyn Conversation> {
 }
 
 /// The conversation for a builder run: over ACP (permission requests decided by `approver`, the
-/// approval policy) when the backend asks for it and the agent speaks it, else one CLI run per
-/// message (approvals through our approval tool).
+/// approval policy) when the backend enables or requires it and the agent speaks it, else one
+/// CLI run per message (approvals through our approval tool).
 pub fn builder_conversation(spec: CliSpec, approver: acp::Approver) -> Box<dyn Conversation> {
     match acp_for(&spec) {
         Some(c) => Box::new(c.with_approver(approver)),
@@ -460,21 +529,82 @@ pub fn builder_conversation(spec: CliSpec, approver: acp::Approver) -> Box<dyn C
     }
 }
 
-/// An ACP conversation for `spec`, when its backend asks for ACP (`acp = true`), runs locally
-/// and its agent speaks ACP.
+/// An ACP conversation for a local backend that enables or requires ACP. The adapter chooses
+/// the tool restrictions for this access mode; questions omit MCP startup flags and never load
+/// the builder's session. Unsupported routes return to the CLI runner, which refuses ACP-only agents.
 fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     let agent = spec.config.model.clone();
-    let local = spec.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let adapter = spec.adapters.for_agent(&agent);
+    if spec.question && !adapter.answers_questions() {
+        return None;
+    }
+    let local = spec.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let acp_args = selected_acp_args(adapter.as_ref(), &agent, &spec.options).filter(|_| local)?;
-    let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
-    let mut args = spec.options.args.clone();
+    let program = program_of(&spec.config, &spec.options);
+    let access = match (spec.question, spec.deep, spec.builder.is_some()) {
+        (true, true, _) => Access::Question,
+        (true, false, _) => Access::CleanRoomQuestion,
+        (false, true, true) => Access::Build,
+        (false, false, true) => Access::CleanRoomBuild,
+        _ => Access::Analyse,
+    };
+    let mut args = adapter.acp_options(&spec.options, access);
     args.extend(acp_args.iter().map(|a| a.to_string()));
     args.extend(acp::model_args(&agent, spec.options.cli_model.as_deref()));
     let cwd = spec.project.clone().or_else(|| std::env::current_dir().ok()).unwrap_or_else(std::env::temp_dir);
     let mcp = mcp_for(spec, false);
+    if !spec.question {
+        args.extend(adapter.acp_mcp_options(&mcp));
+    }
     let preamble = spec.preamble.clone().unwrap_or_else(|| crate::prompt::cli_preamble(spec.beginner));
-    Some(AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, spec.resume.clone()).with_preamble(preamble).with_logs(spec.logs.clone()))
+    Some(
+        AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, if spec.question { None } else { spec.resume.clone() })
+            .with_validation(adapter.validate_options(&spec.options))
+            .with_adapter(adapter)
+            .with_question(spec.question)
+            .with_preamble(preamble)
+            .with_logs(spec.logs.clone()),
+    )
+}
+
+/// Copilot's selectable models from a fresh local ACP session, with `auto` offered once at the
+/// front. No MCP server or model prompt is sent, and a stale model override can't prevent the
+/// catalogue from loading. Blocking, with a 15-second metadata wait: call off the UI thread.
+pub fn acp_model_choices(config: &BackendConfig, options: &BackendOptions) -> Result<Vec<String>, ToolError> {
+    let mut spec = CliSpec::new(config.clone(), options.clone(), false, None);
+    spec.question = true;
+    spec.options.cli_model = None;
+    spec.options.cli_context = None;
+    spec.options.cli_reasoning_effort = None;
+    spec.options.effort = None;
+    let conversation = acp_for(&spec).ok_or_else(|| ToolError::invalid("This agent needs a local ACP connection to list its models."))?;
+    let mut models = conversation.model_choices(Duration::from_secs(15))?;
+    models.retain(|model| model != "auto");
+    models.insert(0, "auto".into());
+    Ok(models)
+}
+
+/// Discover settings for the backend's selected model, without a tool server or model prompt.
+pub fn acp_model_tuning(config: &BackendConfig, options: &BackendOptions, stop: &Stop) -> Result<crate::model_options::ModelTuning, ToolError> {
+    stop.check()?;
+    let metadata = acp_model_metadata(config, options, None, stop)?;
+    Ok(crate::model_options::ModelTuning::from_metadata(metadata.current_model, &metadata.config_options))
+}
+
+pub(crate) fn acp_model_metadata(
+    config: &BackendConfig,
+    options: &BackendOptions,
+    directory: Option<&Path>,
+    stop: &Stop,
+) -> Result<acp::ModelMetadata, ToolError> {
+    let mut spec = CliSpec::new(config.clone(), options.clone(), false, directory.map(Path::to_path_buf));
+    spec.question = true;
+    spec.options.cli_context = None;
+    spec.options.cli_reasoning_effort = None;
+    spec.options.cli_thinking = None;
+    spec.options.effort = None;
+    let conversation = acp_for(&spec).ok_or_else(|| ToolError::invalid("Model settings need a local ACP connection."))?;
+    conversation.model_metadata_with_stop(Duration::from_secs(15), stop)
 }
 
 /// A conversation backed by an agent CLI. Each message is one CLI run; Claude Code runs resume
@@ -569,13 +699,17 @@ fn agent_env(builder: bool, effort: Option<crate::model::Effort>) -> Vec<(&'stat
 }
 
 /// The command run on another computer over SSH. ssh passes on none of our environment, so it is
-/// set there with `env`.
-fn remote_command(program: &str, args: Vec<String>, env: &[(&'static str, String)]) -> Vec<String> {
-    let mut cmd = vec!["env".to_string()];
-    cmd.extend(env.iter().map(|(k, v)| format!("{k}={v}")));
-    cmd.push(program.to_string());
-    cmd.extend(args);
-    cmd
+/// set there with `env`. The result is the line for the remote shell, every word quoted, except
+/// that a value starting with `~/` gets that computer's home folder (a quoted `~` is just a name).
+fn remote_command(program: &str, args: Vec<String>, env: &[(&'static str, String)]) -> String {
+    use crate::ssh::shell_quote;
+    let set = env.iter().map(|(k, v)| match v.strip_prefix("~/") {
+        Some(rest) => format!("{k}=\"$HOME\"/{}", shell_quote(rest)),
+        None if v == "~" => format!("{k}=\"$HOME\""),
+        None => shell_quote(&format!("{k}={v}")),
+    });
+    let words = std::iter::once(program.to_string()).chain(args).map(|a| shell_quote(&a));
+    std::iter::once("env".to_string()).chain(set).chain(words).collect::<Vec<_>>().join(" ")
 }
 
 /// The run's shared state: the session it continues and reports, whether the agent's flags were
@@ -609,9 +743,22 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let RunState { session, verified, lost, failure } = state;
     let name = spec.config.name.clone();
     let agent = spec.config.model.clone();
-    let program = spec.options.command.clone().unwrap_or_else(|| program_for(&agent));
+    let program = program_of(&spec.config, &spec.options);
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
-    let mut adapter = spec.adapters.for_agent(&agent);
+    // A folder chosen for it is on the computer it runs on: on another one, it's set below.
+    let mut adapter = match remote {
+        None => spec.adapters.for_backend(&agent, &spec.options),
+        Some(_) => spec.adapters.for_agent(&agent),
+    };
+    if adapter.requires_acp() {
+        let sign_in = adapter.sign_in_fix().map(|fix| format!(" {fix}")).unwrap_or_default();
+        let _ = tx.send(AgentEvent::Error {
+            message: format!("{name} requires a local ACP connection."),
+            remediation: Some(format!("Run {} on this computer, remove the SSH host and do not disable ACP.{sign_in}", display_for(&agent))),
+            log: None,
+        });
+        return nothing_done(&name);
+    }
     if let Err(e) = adapter.check_native_options(&spec.options) {
         let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
         return nothing_done(&name);
@@ -669,16 +816,15 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     // 30 minutes and a background build at 10).
     let (turn, quiet) = if builder { (24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60) };
     let mut env = agent_env(builder, spec.options.effort);
-    // Under a Flatpak, Claude Code gets a folder it can write its conversations to (#506); on
-    // another computer over SSH it keeps its own.
-    if remote.is_none()
-        && let Some(dir) = adapters::flatpak_claude_dir()
+    // Here the adapter's process runs the agent in its folder (`AgentAdapter::in_folder`); on
+    // another computer over SSH it's the folder chosen there, else the agent keeps its own.
+    if remote.is_some()
+        && let (Some(var), Some(dir)) = (adapter.folder_var(), spec.options.config_dir_text())
     {
-        let _ = std::fs::create_dir_all(&dir);
-        env.push(("CLAUDE_CONFIG_DIR", dir.to_string_lossy().into_owned()));
+        env.push((var, dir.to_string()));
     }
     let (prog, argv) = match &remote {
-        Some(host) => ("ssh".to_string(), crate::ssh::ssh_args(host, &remote_command(&program, args, &env))),
+        Some(host) => ("ssh".to_string(), crate::ssh::ssh_line_args(host, remote_command(&program, args, &env))),
         None => (program.clone(), args),
     };
     let _ =
@@ -949,6 +1095,33 @@ impl Drop for CliConversation {
 mod tests {
     use super::*;
 
+    /// #721: Codex's desktop app keeps its CLI in `bin/<build>/codex.exe` and moves it on every
+    /// update; a backend set to the old path kept failing on a file that was gone.
+    #[test]
+    fn a_chosen_program_that_moved_with_an_update_is_found_again() {
+        let d = tempfile::tempdir().unwrap();
+        let bin = d.path().join("Codex/bin");
+        let new = bin.join("build-2").join("codex.exe");
+        std::fs::create_dir_all(new.parent().unwrap()).unwrap();
+        std::fs::write(&new, b"").unwrap();
+        let gone = bin.join("build-1").join("codex.exe");
+        let config = |ssh: Option<&str>| BackendConfig {
+            name: "Codex".into(),
+            kind: crate::BackendKind::AgentCli,
+            model: "codex".into(),
+            base_url: None,
+            ssh_host: ssh.map(str::to_string),
+            enabled: true,
+        };
+        let chosen = |p: &Path| BackendOptions { command: Some(p.display().to_string()), ..Default::default() };
+        assert_eq!(program_of(&config(None), &chosen(&gone)), new.display().to_string(), "the same file in the newer build folder");
+        assert_eq!(program_of(&config(None), &chosen(&new)), new.display().to_string(), "a path that's there is used as it is");
+        assert_eq!(program_of(&config(Some("box")), &chosen(&gone)), gone.display().to_string(), "another computer's path isn't checked here");
+        assert_eq!(program_of(&config(None), &BackendOptions::default()), "codex", "nothing chosen: the usual name");
+        let bare = BackendOptions { command: Some("my-codex".into()), ..Default::default() };
+        assert_eq!(program_of(&config(None), &bare), "my-codex", "a bare name is left to PATH");
+    }
+
     #[test]
     fn failed_craft_tool_server_is_reported_from_its_init_status() {
         let mut p = StreamParser::new(adapter_for("claude-code"));
@@ -1001,10 +1174,27 @@ mod tests {
         assert_eq!(adapters::flatpak_claude_dir_in(true, true, data()), None, "their own choice stays");
         assert_eq!(adapters::flatpak_claude_dir_in(false, false, data()), None, "a normal install keeps ~/.claude");
         assert_eq!(adapters::flatpak_claude_dir_in(true, false, None), None);
-        let hint = sign_in_hint_in("Not logged in", true).unwrap();
+        let hint = sign_in_hint_in("Not logged in", true, None).unwrap();
         assert!(hint.contains("flatpak run") && hint.contains("CLAUDE_CONFIG_DIR") && hint.contains("auth login"), "{hint}");
-        assert!(sign_in_hint_in("Not logged in", false).unwrap().contains("`claude auth login`"));
-        assert_eq!(sign_in_hint_in("all fine", true), None);
+        assert!(sign_in_hint_in("Not logged in", false, None).unwrap().contains("`claude auth login`"));
+        assert_eq!(sign_in_hint_in("all fine", true, None), None);
+    }
+
+    /// Claude Code in a folder chosen for it signs in there: the fix names that folder, quoted.
+    #[test]
+    fn signing_in_claude_code_in_its_chosen_folder_names_the_folder() {
+        let folder = Path::new("/Users/someone/Claude work");
+        let hint = sign_in_hint_in("Not logged in", false, Some(folder)).unwrap();
+        if cfg!(windows) {
+            assert!(hint.contains("$env:CLAUDE_CONFIG_DIR='/Users/someone/Claude work'; claude auth login"), "{hint}");
+        } else {
+            assert!(hint.contains("`CLAUDE_CONFIG_DIR='/Users/someone/Claude work' claude auth login`"), "{hint}");
+        }
+        let hint = sign_in_hint_in("Not logged in", true, Some(folder)).unwrap();
+        assert!(hint.starts_with("Sign in to Claude Code inside this app's sandbox, in the folder") && hint.contains("Claude work"), "{hint}");
+        assert!(!hint.contains("XDG_DATA_HOME"), "the chosen folder, not the sandbox's own: {hint}");
+        let (_, fix) = claude_code_failure_in("Invalid API key · Please run /login", Some(folder));
+        assert!(fix.is_some_and(|f| f.contains("Claude work")));
     }
 
     /// Over SSH our environment doesn't reach the other computer, so the chosen effort (and Claude
@@ -1014,13 +1204,65 @@ mod tests {
         let env = agent_env(true, Some(crate::model::Effort::Max));
         assert!(env.contains(&("CLAUDE_CODE_EFFORT_LEVEL", "max".to_string())));
         assert!(env.contains(&("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS", "0".to_string())));
-        let cmd = remote_command("claude", vec!["-p".into(), "hi".into()], &env);
-        assert_eq!(cmd.first().map(String::as_str), Some("env"));
-        assert!(cmd.contains(&"CLAUDE_CODE_EFFORT_LEVEL=max".to_string()));
-        assert_eq!(cmd[cmd.len() - 3..], ["claude", "-p", "hi"]);
-        let line = crate::ssh::ssh_args("box", &cmd).pop().unwrap_or_default();
-        assert!(line.starts_with("env ") && line.contains("CLAUDE_CODE_EFFORT_LEVEL=max") && line.ends_with("claude -p hi"), "{line}");
+        let line = remote_command("claude", vec!["-p".into(), "it's".into()], &env);
+        assert!(line.starts_with("env ") && line.contains(" CLAUDE_CODE_EFFORT_LEVEL=max ") && line.ends_with(" claude -p 'it'\\''s'"), "{line}");
+        assert_eq!(crate::ssh::ssh_line_args("box", line.clone()).pop(), Some(line));
         assert!(agent_env(false, None).contains(&("CLAUDE_CODE_EFFORT_LEVEL", "high".to_string())), "high unless chosen");
+    }
+
+    /// A folder under `~/` is in the other computer's home: its shell expands it, which it won't
+    /// do for a quoted `~`. Anything else stays quoted.
+    #[test]
+    fn a_folder_over_ssh_is_in_the_other_computers_home() {
+        let set = |v: &str| remote_command("claude", vec![], &[("CLAUDE_CONFIG_DIR", v.to_string())]);
+        assert_eq!(set("~/.claude-work"), "env CLAUDE_CONFIG_DIR=\"$HOME\"/.claude-work claude");
+        assert_eq!(set("~/Claude work"), "env CLAUDE_CONFIG_DIR=\"$HOME\"/'Claude work' claude");
+        assert_eq!(set("~"), "env CLAUDE_CONFIG_DIR=\"$HOME\" claude");
+        assert_eq!(set("/srv/claude/a b"), "env 'CLAUDE_CONFIG_DIR=/srv/claude/a b' claude");
+        assert_eq!(set("/x/~/$(rm)"), "env 'CLAUDE_CONFIG_DIR=/x/~/$(rm)' claude");
+    }
+
+    /// A sign-in that stopped working is told apart from none by the account `.claude.json` still
+    /// names; anything else there names none.
+    #[test]
+    fn claude_code_was_signed_in_when_its_settings_name_an_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".claude.json");
+        let names = |text: &[u8]| {
+            std::fs::write(&file, text).unwrap();
+            adapters::claude_names_account(&file)
+        };
+        assert!(names(br#"{"numStartups":3,"oauthAccount":{"accountUuid":"0000","emailAddress":"someone@example.com"}}"#));
+        for none in [&br#"{"numStartups":3}"#[..], br#"{"oauthAccount":null}"#, br#"{"oauthAccount":"x"}"#, b"not json", b"", b"[1,2]"] {
+            assert!(!names(none), "{}", String::from_utf8_lossy(none));
+        }
+        assert!(!adapters::claude_names_account(&dir.path().join("missing.json")));
+        assert!(!adapter_for("codex").signed_in_before());
+    }
+
+    /// Claude Code in a chosen folder runs, checks its sign-in and keeps its sessions there; an
+    /// agent without such a folder is the same as before.
+    #[test]
+    fn claude_code_uses_the_folder_chosen_for_it() {
+        let config = tempfile::tempdir().unwrap();
+        let id = "0e4a6b1c-1111-4222-8333-944455556666";
+        let folder = config.path().join("projects").join("-somewhere");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(format!("{id}.jsonl")), "{}\n").unwrap();
+        let options = crate::BackendOptions { config_dir: Some(config.path().display().to_string()), ..Default::default() };
+        let claude = AgentAdapters::built_in().for_backend("claude-code", &options);
+        assert_eq!(claude.session_file(id), Some(folder.join(format!("{id}.jsonl"))));
+        assert!(claude.sign_in_fix().is_some_and(|f| f.contains(&config.path().display().to_string())), "signs in there");
+        assert_eq!(claude.folder_var(), Some("CLAUDE_CONFIG_DIR"));
+        assert!(!claude.signed_in_before(), "nothing there names an account");
+        std::fs::write(config.path().join(".claude.json"), r#"{"oauthAccount":{"accountUuid":"0000"},"projects":{}}"#).unwrap();
+        assert!(claude.signed_in_before(), "its own folder's .claude.json, not the usual one");
+        let codex = AgentAdapters::built_in().for_backend("codex", &options);
+        assert_eq!((codex.folder_var(), codex.ids()), (None, adapter_for("codex").ids()));
+        assert_eq!(crate::config::config_dir_in("~/a/b", Some("/home/u".into())), Some(std::path::PathBuf::from("/home/u/a/b")));
+        assert_eq!(crate::config::config_dir_in("~", Some("/home/u".into())), Some(std::path::PathBuf::from("/home/u")));
+        assert_eq!(crate::config::config_dir_in("~/a", None), None, "no home to put it in");
+        assert_eq!(crate::config::config_dir_in("/srv/c", None), Some(std::path::PathBuf::from("/srv/c")));
     }
     use crate::BackendKind;
 
@@ -2045,6 +2287,116 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         assert!(reg.for_agent("claude").resumes() && !reg.for_agent("codex").resumes() && reg.for_agent("antigravity").resumes());
         // Registering an adapter for an existing id replaces that one.
         reg.register(Arc::new(EchoAgent));
-        assert_eq!(format!("{reg:?}"), r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "echo-agent"]"#);
+        assert_eq!(format!("{reg:?}"), r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "copilot", "echo-agent"]"#);
+    }
+
+    #[test]
+    fn copilot_defaults_to_local_acp_without_changing_other_agents() {
+        let config =
+            BackendConfig { name: "Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+        let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+        assert!(acp_for(&spec).is_some());
+        assert_eq!(program_for("copilot"), "copilot");
+        assert_eq!(display_for("copilot"), "GitHub Copilot");
+        spec.options.acp = Some(false);
+        assert!(acp_for(&spec).is_none());
+        spec.options.acp = Some(true);
+        spec.config.ssh_host = Some("build-machine".into());
+        assert!(acp_for(&spec).is_none());
+        spec.config.ssh_host = None;
+        spec.options.acp = None;
+        spec.config.model = "gemini-cli".into();
+        assert!(acp_for(&spec).is_none());
+        spec.options.acp = Some(true);
+        assert!(acp_for(&spec).is_some());
+        spec.question = true;
+        assert!(acp_for(&spec).is_none());
+        spec.config.model = "copilot".into();
+        assert!(acp_for(&spec).is_some());
+    }
+
+    #[test]
+    fn mcp_target_handoff_is_bounded_and_keeps_the_active_target_last() {
+        use craft_anything_engine::{TargetKind, target::TargetContext};
+        let directory = tempfile::tempdir().unwrap();
+        for count in [0, 128, 129, 130] {
+            let config =
+                BackendConfig { name: "Test".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: None, enabled: true };
+            let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+            spec.targets = (0..count)
+                .map(|index| TargetContext {
+                    path: directory.path().join(format!("target-{index}")),
+                    sha256: format!("{index:064x}"),
+                    kind: TargetKind::Elf,
+                    raw: None,
+                })
+                .collect();
+            let command = mcp_for(&spec, false);
+            let shared: Vec<TargetContext> =
+                command.args.windows(2).filter(|pair| pair[0] == "--target").map(|pair| serde_json::from_str(&pair[1]).unwrap()).collect();
+            assert_eq!(shared.len(), count.min(128));
+            assert_eq!(
+                shared.iter().map(|target| &target.path).collect::<Vec<_>>(),
+                spec.targets.iter().skip(count.saturating_sub(128)).map(|target| &target.path).collect::<Vec<_>>()
+            );
+            assert_eq!(shared.last().map(|target| &target.path), spec.targets.last().map(|target| &target.path));
+            assert!(!mcp_for(&spec, true).args.iter().any(|argument| argument == "--target"));
+        }
+    }
+
+    #[test]
+    fn copilot_never_falls_back_to_native_or_ssh_execution() {
+        for host in [None, Some("build-machine".to_string())] {
+            let config =
+                BackendConfig { name: "Copilot".into(), kind: BackendKind::AgentCli, model: "copilot".into(), base_url: None, ssh_host: host, enabled: true };
+            let options = BackendOptions { acp: Some(false), command: Some("no-such-copilot-xyz".into()), ..Default::default() };
+            let spec = CliSpec::new(config, options, false, None);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let state = RunState { session: Arc::default(), verified: Arc::default(), lost: Arc::default(), failure: Arc::default() };
+            let done = run_cli(&spec, "hello", false, &sender, &Stop::default(), &state);
+            let mut output: Vec<_> = receiver.try_iter().collect();
+            output.push(done);
+            assert!(matches!(&output[..], [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }] if message.contains("local ACP")));
+        }
+    }
+
+    #[test]
+    fn acp_only_refusals_use_the_registered_adapters_sign_in_guidance() {
+        struct AcpOnlyAgent(Option<&'static str>);
+        impl AgentAdapter for AcpOnlyAgent {
+            fn ids(&self) -> &'static [&'static str] {
+                &["test-acp-agent"]
+            }
+            fn args(&self, _context: &ArgsCx) -> Vec<String> {
+                Vec::new()
+            }
+            fn requires_acp(&self) -> bool {
+                true
+            }
+            fn sign_in_fix(&self) -> Option<String> {
+                self.0.map(str::to_string)
+            }
+        }
+        for guidance in [None, Some("Use test-agent sign-in.")] {
+            let config = BackendConfig {
+                name: "Test agent".into(),
+                kind: BackendKind::AgentCli,
+                model: "test-acp-agent".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            };
+            let mut spec = CliSpec::new(config, BackendOptions::default(), false, None);
+            spec.adapters.register(Arc::new(AcpOnlyAgent(guidance)));
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let state = RunState { session: Arc::default(), verified: Arc::default(), lost: Arc::default(), failure: Arc::default() };
+            let done = run_cli(&spec, "hello", false, &sender, &Stop::default(), &state);
+            let mut output: Vec<_> = receiver.try_iter().collect();
+            output.push(done);
+            let [AgentEvent::Error { remediation: Some(fix), .. }, AgentEvent::TurnDone { .. }] = output.as_slice() else { panic!("{output:?}") };
+            assert!(fix.contains("test-acp-agent") && fix.contains("remove the SSH host") && fix.contains("do not disable ACP"), "{fix}");
+            assert!(!fix.to_lowercase().contains("copilot"), "{fix}");
+            assert_eq!(fix.contains("Use test-agent sign-in."), guidance.is_some());
+        }
     }
 }

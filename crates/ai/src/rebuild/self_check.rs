@@ -119,7 +119,12 @@ impl Worker {
         let Some((kind, good_enough)) = self.self_check.clone() else { return Ok(()) };
         let asks = Inbox::new(asks_dir(&ws.root));
         for r in asks.pending() {
-            self.step(ws, Step::Build, Status::Building, "The builder is checking its work against the original…")?;
+            let checking = if ws.manifest.target == TargetRef::None {
+                "The builder is checking its work…"
+            } else {
+                "The builder is checking its work against the original…"
+            };
+            self.step(ws, Step::Build, Status::Building, checking)?;
             let (text, line) = match self.run_checks(ws, kind.as_ref(), SELF_CHECK_ROUND) {
                 Ok(checks) => {
                     let line = format!("The builder checked its work: {}.", summary(&checks, good_enough));

@@ -14,12 +14,14 @@ How to work:
 - Keep three lists apart in your answers: what was observed, what you infer, and what is still unknown.
 - Static analysis never shows that code actually ran. Only tools that run the target can show that, and they ask the user first.
 - Never repeat an identical call that already failed or already answered.
-- If a tool you need isn't in your list, call list_toolsets, then enable_toolset.
+- If a tool you need isn't in your list, call list_toolsets, then enable_toolset.";
 
+/// The memory loop, for a model that has the Core tools it names (a lean local builder doesn't).
+const MEMORY: &str = "\
 Working memory (the investigation files):
 1. The current brief, plan, hypotheses, findings and handoff are below. Read them before acting; if a handoff exists, resume from it instead of starting over.
 2. On a new question, call core_brief_write and core_plan_update before any analysis tool.
-3. After each batch of tool calls, keep the memory current: core_plan_update step statuses, core_hypothesis_record / core_hypothesis_update as claims are tested, core_finding_record once something is settled (findings must cite evidence ids).
+3. After each batch of tool calls, keep the memory current: core_plan_update step statuses, core_hypothesis_record / core_hypothesis_update as claims are tested, core_finding_record once something is settled (findings must cite evidence ids). Correct an existing finding with core_finding_edit, keeping its id and citing the evidence for the correction; pass based_on_revision from core_investigation_show.
 4. Before you finish your reply, call core_handoff_write: where things stand, what's next, and traps to avoid.
 5. Reports come from findings and evidence, never from chat alone.";
 
@@ -30,21 +32,24 @@ const EXPERIENCED: &str = "\
 The user is experienced. Be terse and precise: addresses, symbol names, evidence ids, no hand-holding.";
 
 /// Build the system prompt. `investigation` is the JSON of `core_investigation_show` at conversation
-/// start (part of the stable, cached prefix).
-pub fn system_prompt(beginner: bool, clean_room: bool, investigation: &str) -> String {
+/// start (part of the stable, cached prefix). `memory` is false when the model isn't offered the
+/// memory tools: told to call `core_brief_write` first, a small model asks for it and does nothing
+/// else (#417).
+pub fn system_prompt(beginner: bool, clean_room: bool, investigation: &str, memory: bool) -> String {
     let mode = if clean_room {
         "Analysis mode: Clean room. Nothing inside a target is looked at (its code, files or page source): only the tools that work from outside run, and the rest are refused. If the question needs a look inside, say so: the person can switch on Deep mode."
     } else {
         "Analysis mode: Deep. Use every tool that helps: our own engines read a target's code, files and pages, and Ghidra adds its decompiler when it's installed. Evidence records which engine produced it."
     };
-    format!("{METHOD}\n\n{}\n\n{mode}\n\n## Investigation so far\n{investigation}\n", if beginner { BEGINNER } else { EXPERIENCED })
+    let memory = if memory { format!("\n\n{MEMORY}") } else { String::new() };
+    format!("{METHOD}{memory}\n\n{}\n\n{mode}\n\n## Investigation so far\n{investigation}\n", if beginner { BEGINNER } else { EXPERIENCED })
 }
 
 /// Preamble for an agent CLI, which brings its own system prompt: we add our method and memory
 /// loop, and point it at our MCP tools.
 pub fn cli_preamble(beginner: bool) -> String {
     format!(
-        "{METHOD}\n\n{}\n\nUse the craft-anything MCP tools for all analysis (start with core_investigation_show).\n\n## Request\n",
+        "{METHOD}\n\n{MEMORY}\n\n{}\n\nUse the craft-anything MCP tools for all analysis (start with core_session_show, core_targets_list and core_investigation_show). The MCP server shares this investigation with the app; use its open targets and recorded findings rather than inventing ids or maintaining a separate findings file.\n\n## Request\n",
         if beginner { BEGINNER } else { EXPERIENCED }
     )
 }
@@ -61,11 +66,22 @@ mod tests {
 
     #[test]
     fn prompt_switches_mode_and_effort() {
-        let b = system_prompt(true, true, "{}");
+        let b = system_prompt(true, true, "{}", true);
         assert!(b.contains("plain, everyday words") && b.contains("Clean room") && b.contains("core_handoff_write"));
-        let e = system_prompt(false, false, "{\"brief\":null}");
+        let e = system_prompt(false, false, "{\"brief\":null}", true);
         assert!(e.contains("terse") && e.contains("Deep") && e.contains("{\"brief\":null}"));
         assert_eq!(choose_effort(None), Effort::High, "high by default, even for a quick question");
         assert_eq!(choose_effort(Some(Effort::Medium)), Effort::Medium, "an explicit setting wins");
+    }
+
+    #[test]
+    fn a_prompt_without_memory_tools_names_none_of_them() {
+        let lean = system_prompt(false, true, "{}", false);
+        for tool in ["core_brief_write", "core_plan_update", "core_handoff_write", "core_finding_record"] {
+            assert!(!lean.contains(tool), "{tool} isn't offered, so it isn't asked for");
+        }
+        assert!(lean.contains("Cite evidence ids") && lean.contains("Clean room"), "the method stays");
+        let cli = cli_preamble(false);
+        assert!(cli.contains("core_brief_write") && cli.contains("core_handoff_write"), "agent apps get the memory loop");
     }
 }

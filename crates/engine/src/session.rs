@@ -128,6 +128,53 @@ impl Session {
 
     // ---- targets ----
 
+    /// Metadata for a local MCP child, with the active target last so restoring the list also
+    /// restores selection. No file bytes or analysis caches cross the process boundary.
+    pub fn shared_targets(&self) -> Vec<crate::target::TargetContext> {
+        let active = self.active().ok().map(|target| &target.target.path);
+        let mut targets: Vec<_> = self.targets().map(|target| crate::target::TargetContext::from_target(&target.target)).collect();
+        targets.sort_by_key(|target| active == Some(&target.path));
+        targets
+    }
+
+    /// Restore a bounded target handoff before serving MCP. Validate every target before
+    /// changing the session; the last entry is the desktop's active target.
+    pub fn restore_targets(&mut self, targets: &[crate::target::TargetContext]) -> Result<(), ToolError> {
+        if targets.len() > 128 {
+            return Err(ToolError::invalid("At most 128 targets can be shared with an agent."));
+        }
+        let opened: Result<Vec<_>, _> = targets.iter().map(|target| target.open(self.clean_room())).collect();
+        for target in opened? {
+            self.add_target(target);
+        }
+        Ok(())
+    }
+
+    /// Give an external agent a durable store shared with this session. Existing projects stay
+    /// open; unsaved evidence, unknowns and investigation memory are copied before attaching a
+    /// new project. Call on a worker: creating and refreshing projects does disk I/O.
+    pub fn ensure_shared_project(&mut self) -> Result<std::path::PathBuf, ToolError> {
+        if let Some(project) = &self.project {
+            return Ok(project.root.clone());
+        }
+        let investigation = crate::tools::investigation_tools::load(self);
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|error| ToolError::internal(error.to_string()))?;
+        let root = self.config_dir().join("investigations").join(format!("session-{}.cany", stamp.as_nanos()));
+        let project = Project::create(&root, "Investigation", crate::project::Purpose::default())?;
+        for evidence in self.ledger() {
+            project.store_evidence(evidence)?;
+        }
+        for unknown in self.unknowns() {
+            project.store_unknown(unknown)?;
+        }
+        self.project = Some(project);
+        if let Err(error) = crate::tools::investigation_tools::save_new_project(self, investigation) {
+            self.project = None;
+            return Err(error);
+        }
+        Ok(root)
+    }
+
     pub fn add_target(&mut self, target: Target) -> TargetId {
         let id = target.id.clone();
         let annotations = self.project.as_ref().and_then(|p| p.load_annotations(&target.sha256).ok()).unwrap_or_default();
@@ -298,6 +345,8 @@ impl Session {
             self.ledger.insert(ev.id.clone(), ev);
         }
         self.project = Some(project);
+        let investigation = crate::tools::investigation_tools::load(self);
+        crate::tools::investigation_tools::cache(self, investigation);
         Ok(())
     }
 }

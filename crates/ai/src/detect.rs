@@ -19,6 +19,10 @@ fn cfg(name: &str, kind: BackendKind, model: &str) -> BackendConfig {
     BackendConfig { name: name.into(), kind, model: model.into(), base_url: None, ssh_host: None, enabled: true }
 }
 
+fn cfg_at(name: &str, kind: BackendKind, model: &str, base: &str) -> BackendConfig {
+    BackendConfig { base_url: Some(base.into()), ..cfg(name, kind, model) }
+}
+
 /// Environment keys that are set.
 pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
     let mut out = Vec::new();
@@ -29,6 +33,17 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
     ] {
         if get(var).is_some_and(|v| !v.trim().is_empty()) {
             out.push(Detected { suggestion: cfg(name, kind, model), reason: format!("Found {var} in your environment"), needs_key: false });
+        }
+    }
+    // Hosted APIs we know by name. Offered only when their key is already set, like OpenAI and
+    // Anthropic, so a paid service is never advertised to someone who has no key for it.
+    for p in crate::providers::PROVIDERS {
+        if let Some(var) = p.key_names().find(|var| get(var).is_some_and(|v| !v.trim().is_empty())) {
+            out.push(Detected {
+                suggestion: cfg_at(p.name, p.kind, p.default_model, p.base_url),
+                reason: format!("Found {var} in your environment"),
+                needs_key: false,
+            });
         }
     }
     // A Google AI Studio key is free and the easiest one to get (#646): always offered, found or pasted.
@@ -53,6 +68,16 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
         },
         needs_key: !found,
     });
+    // OpenCode Go: a paid subscription, so it is offered only when its key is already set. Gemini
+    // and Kimi are offered keyless because they are general model APIs.
+    let go = ["OPENCODEGO_API_KEY", "OPENCODE_GO_API_KEY"].iter().any(|v| get(v).is_some_and(|k| !k.trim().is_empty()));
+    if go {
+        out.push(Detected {
+            suggestion: cfg_at(OPENCODE_GO_NAME, BackendKind::OpenaiCompatible, crate::openai::OPENCODE_GO_DEFAULT_MODEL, crate::openai::OPENCODE_GO_BASE),
+            reason: "OpenCode Go, with its key in your environment".into(),
+            needs_key: false,
+        });
+    }
     out
 }
 
@@ -60,6 +85,9 @@ pub fn env_keys(get: impl Fn(&str) -> Option<String>) -> Vec<Detected> {
 pub const KIMI_NAME: &str = "Kimi K3.1 Pro (OpenRouter)";
 /// Name given to a Google AI Studio (Gemini API key) backend.
 pub const GEMINI_NAME: &str = "Gemini (Google AI Studio)";
+
+/// The name OpenCode Go is added under.
+pub const OPENCODE_GO_NAME: &str = "OpenCode Go (subscription)";
 
 /// Is something listening at this URL's host:port? (bounded TCP connect)
 pub fn port_open(base_url: &str, timeout: Duration) -> bool {
@@ -308,18 +336,32 @@ mod tests {
     #[test]
     fn env_detection() {
         let d = env_keys(|v| (v == "OPENROUTER_API_KEY").then(|| "k".to_string()));
-        assert_eq!(d.len(), 3);
-        assert_eq!(d[0].suggestion.kind, BackendKind::Openrouter);
-        assert!(d[0].reason.contains("OPENROUTER_API_KEY"));
+        let find = |name: &str| d.iter().find(|x| x.suggestion.name == name).unwrap_or_else(|| panic!("{name} offered"));
+        assert!(find("OpenRouter").reason.contains("OPENROUTER_API_KEY"));
         // Gemini is always offered; without its key it asks for one.
-        assert!(d[1].suggestion.kind == BackendKind::Gemini && d[1].needs_key);
-        // Kimi K3.1 Pro rides on the same key, so it needs none of its own.
-        assert_eq!((d[2].suggestion.model.as_str(), d[2].needs_key), (crate::openai::KIMI_K3_1, false));
-        // Without a key, Gemini and Kimi K3.1 Pro are still offered, asking for one.
+        assert!(find(GEMINI_NAME).needs_key);
+        // Kimi K3.1 Pro rides on the OpenRouter key, so it needs none of its own.
+        assert!(!find(KIMI_NAME).needs_key);
+        // A paid subscription is not advertised to someone who has no key for it.
+        assert!(d.iter().all(|x| x.suggestion.name != OPENCODE_GO_NAME));
+        // Without any key, everything that can be pasted is still offered.
         let none = env_keys(|_| Some("  ".into()));
-        assert_eq!(none.len(), 2);
-        assert!(none[0].needs_key && none[0].suggestion.name == GEMINI_NAME);
-        assert!(none[1].needs_key && none[1].suggestion.name == KIMI_NAME);
+        assert!(none.iter().all(|x| x.needs_key));
+        for name in [GEMINI_NAME, KIMI_NAME] {
+            assert!(none.iter().any(|x| x.suggestion.name == name), "{name} offered");
+        }
+    }
+
+    /// OpenCode Go is offered when its key is set, under either of its environment names.
+    #[test]
+    fn opencode_go_is_offered_only_with_its_key() {
+        for var in ["OPENCODEGO_API_KEY", "OPENCODE_GO_API_KEY"] {
+            let d = env_keys(|v| (v == var).then(|| "k".to_string()));
+            let go = d.iter().find(|x| x.suggestion.name == OPENCODE_GO_NAME).expect("OpenCode Go offered");
+            assert!(!go.needs_key);
+            assert_eq!(go.suggestion.base_url.as_deref(), Some(crate::openai::OPENCODE_GO_BASE));
+            assert_eq!(go.suggestion.model.as_str(), crate::openai::OPENCODE_GO_DEFAULT_MODEL);
+        }
     }
 
     #[test]
@@ -329,6 +371,19 @@ mod tests {
         assert!(!g.needs_key && g.reason.contains("GEMINI_API_KEY"));
         assert_eq!(g.suggestion.model, crate::openai::GEMINI_DEFAULT_MODEL);
         assert!(BackendKind::Gemini.needs_key());
+    }
+
+    /// A named provider is offered when its key is set, with its own base URL and default model.
+    #[test]
+    fn a_provider_key_offers_that_provider() {
+        let d = env_keys(|v| (v == "MOONSHOT_API_KEY").then(|| "k".to_string()));
+        let p = d.iter().find(|x| x.suggestion.name == "Moonshot").expect("Moonshot offered");
+        assert!(!p.needs_key);
+        assert!(p.reason.contains("MOONSHOT_API_KEY"));
+        assert_eq!(p.suggestion.base_url.as_deref(), Some("https://api.moonshot.ai/v1"));
+        assert_eq!(p.suggestion.model.as_str(), "kimi-k3.1-pro");
+        // A key that nobody has does not add a row.
+        assert!(d.iter().all(|x| x.suggestion.name != "DeepSeek"));
     }
 
     #[test]

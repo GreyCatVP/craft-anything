@@ -10,6 +10,7 @@
 pub mod builders;
 pub mod chat;
 pub mod demo;
+pub mod detect_tabs;
 pub mod engine_ui;
 pub mod evidence_ui;
 pub mod first_run;
@@ -165,6 +166,20 @@ pub enum Done {
         context: craft_anything_ai::ModelContext,
         result: Result<Vec<craft_anything_ai::AgentModel>, ToolError>,
     },
+    ModelTuning {
+        name: String,
+        cli_model: Option<String>,
+        result: Result<craft_anything_ai::model_options::ModelTuning, ToolError>,
+    },
+    ModelChanged {
+        name: String,
+        model: String,
+        result: Result<craft_anything_ai::BackendOptions, ToolError>,
+    },
+    ModelOptionsSaved {
+        params: craft_anything_ai::model_options::SetModelOptions,
+        result: Result<(), ToolError>,
+    },
     Picked {
         pick: Pick,
         path: Option<PathBuf>,
@@ -177,6 +192,14 @@ pub enum Done {
     Pasted {
         project: Option<PathBuf>,
         files: Vec<PathBuf>,
+        /// The first picture over 20 MB, if any (checked on the worker that read the paste).
+        refused: Option<String>,
+    },
+    /// Picture sizes were checked on a worker, before the UI attaches them.
+    PicturesChecked {
+        files: Vec<PathBuf>,
+        refused: Option<String>,
+        target: crate::project::PictureTarget,
     },
     /// The game engines on this computer were listed.
     GameEngines(craft_anything_engines::game::Inventory),
@@ -206,6 +229,8 @@ pub enum Done {
     BackendAdded {
         name: String,
         result: Result<(), ToolError>,
+        /// `CraftApp::backend_choices` when the add started: a choice made since then stands.
+        choices: u64,
     },
     /// The projects folder was listed.
     Projects(Vec<craft_anything_engine::workspace::Workspace>),
@@ -264,6 +289,8 @@ pub enum Pick {
     ProjectsDir,
     /// The folder a new project starts in (it may already have the person's files).
     ProjectFolder,
+    /// The folder of a project the person already has ("Work on my project").
+    OwnProject,
     /// Another folder whose projects are listed (Settings).
     ExtraProjectsDir,
     /// Pictures of the original to match (several at once).
@@ -289,6 +316,32 @@ pub struct TargetInfo {
     pub bytes: Arc<[u8]>,
 }
 
+/// Cached choices and editable values for one backend/model. Changes save immediately; controls
+/// stay in place while discovery or a save is pending, and failures retain a retryable state.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModelTuningDraft {
+    pub backend: String,
+    pub cli_model: Option<String>,
+    pub choices: Option<craft_anything_ai::model_options::ModelTuning>,
+    pub context: Option<craft_anything_ai::config::CliContext>,
+    #[serde(default)]
+    pub saving: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ModelTuningDraft {
+    /// Drop an override the selected model does not advertise before presenting its controls.
+    pub fn set_choices(&mut self, choices: craft_anything_ai::model_options::ModelTuning) {
+        self.context = self.context.filter(|value| choices.context.iter().any(|choice| choice.value == *value));
+        self.choices = Some(choices);
+    }
+
+    pub fn params(&self) -> craft_anything_ai::model_options::SetModelOptions {
+        craft_anything_ai::model_options::SetModelOptions { backend: self.backend.clone(), expected_cli_model: self.cli_model.clone(), context: self.context }
+    }
+}
+
 /// The last snapshot of the session, refreshed whenever the lock is free and something changed.
 #[derive(Debug, Clone, Default)]
 pub struct SessionView {
@@ -299,6 +352,8 @@ pub struct SessionView {
     pub ledger: Vec<Evidence>,
     pub ledger_len: usize,
     pub unknowns: Vec<Unknown>,
+    /// Recorded answers (`fnd_*`), distinct from the evidence ledger that supports them.
+    pub findings: Vec<craft_anything_engine::tools::investigation_tools::Finding>,
     pub project: Option<String>,
     pub project_allows: Vec<String>,
 }
@@ -378,14 +433,19 @@ pub struct CraftApp {
     pub model_picker: Option<(String, Option<Vec<String>>)>,
     pub agent_model_picker: Option<builders::AgentModelPicker>,
     model_request: u64,
+    pub model_tuning: std::collections::BTreeMap<String, ModelTuningDraft>,
     /// The agent app whose program the file dialog is choosing.
     pub picking_program_for: Option<String>,
+    /// Claude Code folders being typed in Settings → AI, by AI, until they're saved.
+    pub folder_inputs: std::collections::BTreeMap<String, String>,
     /// The backend the person chose to build with (Settings → AI), if any.
     pub builder: Option<String>,
     /// The backend chosen to take a game's files out in Deep mode, if any.
     pub extractor: Option<String>,
     pub detected: Option<Vec<Detected>>,
     pub detecting: bool,
+    /// Counts AI choices, so an add that finishes later doesn't undo one made meanwhile.
+    pub backend_choices: u64,
     pub log: Vec<LogLine>,
     pub key_inputs: std::collections::BTreeMap<String, String>,
     /// Settings → AI's "Add an AI by its address" form. Not kept with the UI state: its key goes
@@ -398,6 +458,14 @@ pub struct CraftApp {
     pub drafts: std::collections::HashMap<u64, project::Draft>,
     /// A picture still being pasted into the open project's prompt box (`paste_pictures`).
     pub pending_paste: Option<project::PendingPaste>,
+    /// Picture-size checks still running for each project's prompt box, and for Make. Send and
+    /// Make Start wait only for their own destination.
+    pending_attach_checks: std::collections::BTreeMap<PathBuf, usize>,
+    pending_make_checks: usize,
+    /// Projects whose Send is waiting for their own picture checks to finish.
+    send_after_checks: std::collections::BTreeSet<PathBuf>,
+    /// The Make draft Start was pressed for, while its picture checks finish.
+    start_after_pictures: Option<state::MakeDraft>,
     /// Each project's building time and AI use, every build together (read from its usage.json).
     pub usage: std::collections::HashMap<PathBuf, usage::ProjectClock>,
     /// All AI use since the app opened: builds and chat.
@@ -485,17 +553,24 @@ impl CraftApp {
             model_picker: None,
             agent_model_picker: None,
             model_request: 0,
+            model_tuning: Default::default(),
             picking_program_for: None,
+            folder_inputs: Default::default(),
             builder: None,
             extractor: None,
             detected: None,
             detecting: false,
+            backend_choices: 0,
             log: Vec::new(),
             key_inputs: Default::default(),
             server_form: ServerForm::default(),
             runs: craft_anything_ai::rebuild::RunSet::new(craft_anything_engine::settings::BuildSettings::default().parallel),
             drafts: Default::default(),
             pending_paste: None,
+            pending_attach_checks: Default::default(),
+            pending_make_checks: 0,
+            send_after_checks: Default::default(),
+            start_after_pictures: None,
             usage: Default::default(),
             session_usage: Default::default(),
             workspace: None,
@@ -764,6 +839,7 @@ impl CraftApp {
             },
             ledger_len: s.ledger_len(),
             unknowns: s.unknowns().take(500).cloned().collect(),
+            findings: craft_anything_engine::tools::investigation_tools::cached(&s).findings,
             project: s.project.as_ref().map(|p| p.meta.name.clone()),
             project_allows: s.project.as_ref().map(|p| p.meta.allowed_tools.clone()).unwrap_or_default(),
         };
@@ -1007,6 +1083,7 @@ impl CraftApp {
                 Pick::TargetFolder => pollster::block_on(d.set_title(tr("Pick the app or game folder")).pick_folder()),
                 Pick::ProjectsDir => pollster::block_on(d.set_title(tr("Where should new projects go?")).pick_folder()),
                 Pick::ProjectFolder => pollster::block_on(d.set_title(tr("Pick the folder for this project")).pick_folder()),
+                Pick::OwnProject => pollster::block_on(d.set_title(tr("Pick your project's folder")).pick_folder()),
                 Pick::ExtraProjectsDir => pollster::block_on(d.set_title(tr("Pick a folder with projects in it")).pick_folder()),
                 Pick::GameFolder => pollster::block_on(d.set_title(tr("Pick the game's folder")).pick_folder()),
                 Pick::SavePicture => pollster::block_on(d.set_title(tr("Save the picture")).add_filter("PNG", &["png"]).set_file_name(&suggested).save_file()),
@@ -1111,13 +1188,20 @@ impl CraftApp {
     pub fn add_backend(&mut self, config: BackendConfig, key: Option<String>) {
         let hub = self.hub.clone();
         let name = config.name.clone();
+        let choices = self.backend_choices;
         self.jobs.spawn(i18n::trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_backend(config, key);
-            Ok(Done::BackendAdded { name, result })
+            Ok(Done::BackendAdded { name, result, choices })
         });
     }
 
     pub fn choose_backend(&mut self, name: Option<String>) {
+        self.backend_choices = self.backend_choices.wrapping_add(1);
+        self.select_backend(name);
+    }
+
+    /// Select a backend without counting it as the person's choice (an add that finished).
+    fn select_backend(&mut self, name: Option<String>) {
         if self.state.backend != name {
             self.state.backend = name;
             if let Some(mut c) = self.conversation.take() {
@@ -1133,6 +1217,11 @@ impl CraftApp {
             return;
         }
         self.state.chat.push(ChatItem::User(text.clone()));
+        if self.state.backend.is_some() {
+            // Each message to this AI is a choice too: an AI that finishes connecting meanwhile
+            // doesn't take over (and stop) the answer.
+            self.backend_choices = self.backend_choices.wrapping_add(1);
+        }
         if self.state.backend.is_some() && self.conversation.is_none() {
             match self.hub.start(self.state.backend.as_deref(), self.beginner()) {
                 Ok(c) => self.conversation = Some(c),
@@ -1190,6 +1279,7 @@ impl CraftApp {
             match e {
                 AgentEvent::ToolFinished { .. } => self.view_dirty = true,
                 AgentEvent::TurnDone { backend, input_tokens, output_tokens, cost_usd, cost_is_estimate } => {
+                    self.view_dirty = true;
                     self.session_usage.add_turn(input_tokens, output_tokens, cost_usd, cost_is_estimate);
                     let cost = cost_usd.map(|c| format!(", ${c:.4}")).unwrap_or_default();
                     self.log(false, format!("{backend}: {input_tokens} in / {output_tokens} out{cost}"));
@@ -1356,6 +1446,10 @@ impl CraftApp {
                 self.builder = builder;
                 self.extractor = extractor;
                 self.backend_options = options;
+                self.model_tuning.retain(|name, state| {
+                    self.backends.iter().any(|backend| backend.name == *name && craft_anything_ai::model_options::supported(backend))
+                        && self.backend_options.get(name).and_then(|options| options.cli_model.as_ref()) == state.cli_model.as_ref()
+                });
             }
             Done::ModelChoices { name, result } => match result {
                 // Kept only while the picker is still open for that AI.
@@ -1373,13 +1467,75 @@ impl CraftApp {
                     picker.result = Some(result.map_err(|e| e.for_people()));
                 }
             }
-            Done::BackendAdded { name, result } => match result {
+            Done::ModelTuning { name, cli_model, result } => {
+                let current = self.backend_options.get(&name).and_then(|options| options.cli_model.clone());
+                if self.model_tuning.get(&name).is_some_and(|state| state.cli_model == cli_model) {
+                    if current != cli_model {
+                        self.model_tuning.remove(&name);
+                    } else {
+                        match result {
+                            Ok(choices) => {
+                                if let Some(draft) = self.model_tuning.get_mut(&name) {
+                                    draft.set_choices(choices);
+                                }
+                            }
+                            Err(error) => {
+                                if let Some(state) = self.model_tuning.get_mut(&name) {
+                                    state.error = Some(error.for_people());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Done::ModelChanged { name, model, result } => match result {
+                Ok(options) => {
+                    if let Some(backend) = self.backends.iter_mut().find(|backend| backend.name == name) {
+                        if backend.kind != craft_anything_ai::BackendKind::AgentCli {
+                            backend.model = model;
+                        }
+                        self.backend_options.insert(name.clone(), options);
+                    }
+                    self.model_tuning.remove(&name);
+                }
+                Err(error) => {
+                    if let Some(state) = self.model_tuning.get_mut(&name) {
+                        state.saving = false;
+                    }
+                    self.toast(error.for_people(), true);
+                }
+            },
+            Done::ModelOptionsSaved { params, result } => {
+                let current = self.backend_options.get(&params.backend).and_then(|options| options.cli_model.clone());
+                if current == params.expected_cli_model {
+                    if result.is_ok()
+                        && let Some(options) = self.backend_options.get_mut(&params.backend)
+                    {
+                        options.cli_context = params.context;
+                    }
+                    if let Some(state) = self.model_tuning.get_mut(&params.backend) {
+                        state.saving = false;
+                        if result.is_err()
+                            && let Some(options) = self.backend_options.get(&params.backend)
+                        {
+                            state.context = options.cli_context;
+                        }
+                    }
+                }
+                if let Err(error) = result {
+                    self.toast(error.for_people(), true);
+                }
+            }
+            Done::BackendAdded { name, result, choices } => match result {
                 Ok(()) => {
                     if self.server_form.name.trim() == name {
                         self.server_form = ServerForm::default();
                     }
                     self.toast(i18n::trf("{name} is ready", &[("name", &name)]), false);
-                    self.choose_backend(Some(name));
+                    // Picking another AI (or none) while this one connected wins.
+                    if choices == self.backend_choices {
+                        self.select_backend(Some(name));
+                    }
                     self.refresh_backends();
                 }
                 Err(e) => self.toast(e.for_people(), true),
@@ -1405,6 +1561,7 @@ impl CraftApp {
                             self.refresh_projects();
                         }
                         Pick::ProjectFolder => folders::picked(self, path),
+                        Pick::OwnProject => folders::picked_own(self, path),
                         Pick::ExtraProjectsDir => self.add_project_folder(path),
                         Pick::GameFolder => game_files::folder_picked(self, path),
                         Pick::SavePicture => game_files::save_to(self, path),
@@ -1412,15 +1569,15 @@ impl CraftApp {
                             if let Some(name) = self.picking_program_for.take() {
                                 self.set_agent_program(&name, Some(path.display().to_string()));
                             }
-                        }
-                        // Several files: these come back as Done::Pictures / Done::ToAttach.
+                        } // Several files: these come back as Done::Pictures / Done::ToAttach.
                         Pick::Pictures | Pick::Attach => {}
                     }
                 }
             }
             Done::Pictures(files) => self.add_pictures(files),
             Done::ToAttach(files) => self.attach(files),
-            Done::Pasted { project, files } => self.pasted(project, files),
+            Done::Pasted { project, files, refused } => self.pasted(project, files, refused),
+            Done::PicturesChecked { files, refused, target } => self.pictures_checked(files, refused, target),
             Done::Attached { root, text, attachments, files } => self.deliver(root, text, attachments, files),
             Done::GameEngines(inv) => self.engines_found(inv),
             Done::GameFound { path, found } => {
@@ -1582,6 +1739,8 @@ impl CraftApp {
         self.stuck_banner(ui, &ctx);
         if !self.settings.first_run_done {
             egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas)).show(ui, |ui| guard_ui(ui, "first run", |ui| first_run::show(self, ui)));
+            // An AI added from the first run reports a failure here (a wrong address or key).
+            self.toasts(&ctx);
             titlebar::window_edge(&ctx);
             titlebar::resize_edges(&ctx);
             return;

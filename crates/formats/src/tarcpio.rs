@@ -275,6 +275,19 @@ fn mode_kind(mode: u32) -> MemberKind {
 /// Walk a cpio archive (newc `070701`, crc `070702`, odc `070707`). `None` when the first header
 /// is not one of these.
 pub fn cpio(data: &[u8], max_members: usize) -> Option<Listing> {
+    cpio_with_checksum(data, max_members, &mut |body| CpioChecksum::Value(body.iter().fold(0u32, |sum, &byte| sum.wrapping_add(u32::from(byte)))))
+}
+
+/// A checksum sum, or the reason a caller stopped verification before completing it.
+#[derive(Clone, Copy)]
+pub(crate) enum CpioChecksum {
+    Value(u32),
+    Skipped,
+    Cancelled,
+}
+
+/// Let a scanner share its checksum work allowance and cancellation across overlapping probes.
+pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut dyn FnMut(&[u8]) -> CpioChecksum) -> Option<Listing> {
     let r = Reader::new(data);
     let format = match r.slice(0, 6)? {
         b"070701" => "cpio-newc",
@@ -341,12 +354,17 @@ pub fn cpio(data: &[u8], max_members: usize) -> Option<Listing> {
             break;
         }
         if format == "cpio-crc" {
-            match h.get(102..110).and_then(hex_field).and_then(|n| u32::try_from(n).ok()) {
+            match h.get(102..110).filter(|field| field.iter().all(u8::is_ascii_hexdigit)).and_then(hex_field).and_then(|n| u32::try_from(n).ok()) {
                 Some(expected) => {
                     if let Some(body) = r.slice(data_off, size) {
-                        let actual = body.iter().fold(0u32, |sum, &byte| sum.wrapping_add(u32::from(byte)));
-                        if actual != expected {
-                            out.warnings.push(format!("{name}: data checksum mismatch (stored {expected:08x}, computed {actual:08x})"));
+                        match checksum(body) {
+                            CpioChecksum::Value(actual) => {
+                                if actual != expected {
+                                    out.warnings.push(format!("{name}: data checksum mismatch (stored {expected:08x}, computed {actual:08x})"));
+                                }
+                            }
+                            CpioChecksum::Skipped => out.warnings.push(format!("{name}: data checksum not verified (scan byte budget exhausted)")),
+                            CpioChecksum::Cancelled => return None,
                         }
                     }
                 }

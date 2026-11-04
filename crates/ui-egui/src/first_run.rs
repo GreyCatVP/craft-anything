@@ -120,6 +120,7 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
     }
     ui.add_space(10.0);
     let detected: Vec<Detected> = app.detected.clone().unwrap_or_default();
+    let tab = crate::detect_tabs::bar(ui, &mut app.state.detect_tab, &detected);
     let list_h = (ui.ctx().content_rect().height() - 330.0).clamp(220.0, 520.0);
     egui::ScrollArea::vertical().max_height(list_h).show(ui, |ui| {
         ui.set_width(width);
@@ -130,11 +131,18 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
             });
             ui.add_space(8.0);
         }
-        for d in &detected {
+        ui.add_space(4.0);
+        let mut shown = 0;
+        for d in detected.iter().filter(|d| crate::detect_tabs::tab_of(d) == tab) {
             brain_card(app, ui, d);
             ui.add_space(8.0);
+            shown += 1;
         }
-        if !app.detecting && detected.is_empty() {
+        if !app.detecting && shown == 0 && !detected.is_empty() {
+            ui.label(RichText::new(tr("Nothing of this kind was found.")).color(t.text_faint));
+        }
+        // Once an AI is added by its address, "we didn't find one" no longer applies.
+        if !app.detecting && detected.is_empty() && app.backends.is_empty() {
             widgets::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
@@ -147,6 +155,9 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
             });
             ui.add_space(8.0);
         }
+        // A model server on another computer can't be found by looking here (#54, #98).
+        crate::settings_ui::server_form(app, ui);
+        ui.add_space(8.0);
         // "No AI for now"
         let none_on = app.state.backend.is_none();
         let r = option_row(ui, "circle-stop", "No AI for now", "The built-in engines still show you everything they find.", none_on);
@@ -207,7 +218,10 @@ fn brain_card(app: &mut CraftApp, ui: &mut Ui, d: &Detected) {
                 }
             });
         });
-        if d.needs_key && !configured {
+        // A subscription key is worth pasting even when the environment already has one, so a
+        // different key can be used without restarting the app.
+        let pastable = d.needs_key || d.suggestion.base_url.as_deref().is_some_and(craft_anything_ai::openai::is_opencode_go);
+        if pastable && !configured {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let key = app.key_inputs.entry(name.clone()).or_default();

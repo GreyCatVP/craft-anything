@@ -1853,6 +1853,54 @@ mod picking_up_a_build {
         assert!(ok);
         assert_eq!(prompts_given(&b), asked, "and it isn't asked to build again");
     }
+
+    /// #736: a builder that says it built the site while app/ has no files stops after two
+    /// unchanged turns, and the build check and the stop both say nothing was written. The
+    /// reporter's release had no such stop, so its check ran 40+ times.
+    #[test]
+    fn an_empty_app_with_a_claimed_build_stops_and_says_nothing_was_written() {
+        let b = bench();
+        let mut ws = Workspace::create(&b.projects, "x", "A website for a bakery", TargetRef::None).unwrap();
+        ws.manifest.agent_session = Some("session-1".into());
+        ws.save().unwrap();
+        std::fs::create_dir_all(ws.capture_dir()).unwrap();
+        std::fs::create_dir_all(ws.app_dir()).unwrap();
+        // The stand-in answers "Done." and writes nothing, as the reported builder did.
+        let opts = RunOptions { backend: Some("Stand-in".into()), ..RunOptions::default() };
+        let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), opts).unwrap();
+        let ok = loop {
+            match run.rx.recv_timeout(Duration::from_secs(60)) {
+                Ok(RunEvent::Finished { ok, .. }) => break ok,
+                Ok(_) => {}
+                Err(e) => panic!("the run went away: {e}"),
+            }
+        };
+        assert!(!ok);
+        assert_eq!(prompts_given(&b), 2, "a third unchanged turn would spend more without progress");
+        let saved = Workspace::open(&ws.root).unwrap();
+        let build = saved.manifest.checks.iter().find(|c| c.check == CheckResult::BUILD).expect("the build check ran");
+        assert!(build.note.contains("app/ has no files yet, so the builder hasn't written the project."), "{}", build.note);
+        let feed = feed::load(&saved);
+        assert!(
+            feed.iter().any(|i| matches!(i, feed::FeedItem::Error { message, .. }
+                if message.contains("changed no files in app/") && message.contains("app/ has no files yet"))),
+            "the stop says app/ is empty: {feed:?}"
+        );
+    }
+
+    /// The empty-folder wording is only for an empty app/: a folder with files gets the plain stop.
+    #[test]
+    fn the_stop_names_an_empty_app_and_only_then() {
+        let b = bench();
+        let ws = worked_on(&b);
+        let empty = no_build_progress(&ws);
+        assert!(empty.message.contains("app/ has no files yet"), "{empty:?}");
+        assert!(empty.remediation.as_deref().is_some_and(|r| r.contains("asks for the project's files in app/")), "{empty:?}");
+        std::fs::write(ws.app_dir().join("index.html"), "<h1>Bakery</h1>").unwrap();
+        let written = no_build_progress(&ws);
+        assert!(!written.message.contains("has no files"), "{written:?}");
+        assert_eq!(written.message, "The build stopped after two builder turns changed no files in app/.");
+    }
 }
 
 fn check_worker(ws: &Workspace, deep: bool) -> Worker {
@@ -2575,6 +2623,71 @@ fn a_project_started_in_a_picked_folder_stays_in_the_list() {
 }
 
 #[test]
+fn a_project_edited_in_place_keeps_what_its_files_are_built_with() {
+    use craft_anything_engine::workspace::ExistingFiles::{Edit, StartFrom};
+    let first = |file: &str, request: &str, existing| {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join(file), "").unwrap();
+        let ws = Workspace::create_at(d.path(), "Mine", request, TargetRef::None, Some(existing)).unwrap();
+        project::first_stack(&KindRegistry::built_in(), &ws, false)
+    };
+    assert_eq!(first("project.godot", "Fix my game's jump", Edit), Some("Godot"), "not the Unity its words would get");
+    assert_eq!(first("requirements.txt", "Add a settings page", Edit), Some("Python"), "not the app kind's default");
+    assert_eq!(first("requirements.txt", "Move it to Electron", Edit), Some("Electron"), "the person's words come first");
+    assert_eq!(first("notes.md", "Fix my game's jump", Edit), Some("Unity"), "nothing to read: as for a new project");
+    assert_eq!(first("project.godot", "Fix my game's jump", StartFrom), Some("Unity"), "material to start from doesn't decide");
+}
+
+/// A folder of the person's own with this file in it, as a project of `existing`.
+fn own_folder(file: &str, existing: craft_anything_engine::workspace::ExistingFiles) -> (tempfile::TempDir, Workspace) {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join(file), "<p>hi</p>").unwrap();
+    let ws = Workspace::create_at(d.path(), "Mine", "Add a contact form", TargetRef::None, Some(existing)).unwrap();
+    (d, ws)
+}
+
+#[test]
+fn a_persons_own_project_is_judged_by_its_own_build_and_tests_whatever_its_kind() {
+    use craft_anything_engine::workspace::ExistingFiles::Edit;
+    let (_d, ws) = own_folder("index.html", Edit);
+    let r = check_worker(&ws, false).run_checks(&ws, &GameKind, 1).unwrap();
+    assert_eq!(r.iter().map(|c| c.check.as_str()).collect::<Vec<_>>(), [CheckResult::BUILD, kinds::own::OwnTestsCheck::ID]);
+    assert!(r.iter().all(|c| c.passed), "{r:?}");
+    assert!(r[1].note.starts_with("No tests ran"), "says what wasn't run: {}", r[1].note);
+}
+
+#[test]
+fn a_persons_own_project_is_asked_for_nothing_it_would_add_for_our_sake() {
+    use craft_anything_engine::workspace::ExistingFiles::{Edit, StartFrom};
+    let (_d, mut own) = own_folder("main.py", Edit);
+    for k in ["app", "game"] {
+        let b = brief(&own, k, false, false, None, false, None);
+        assert!(!b.contains("--screenshot") && !b.contains("--self-test") && !b.contains("MECHANICS.md"), "{k}: {b}");
+        assert!(b.contains("its own build and tests") && !b.contains(kind(k).goal()), "{k}: {b}");
+    }
+    own.manifest.stack = "Unity".into();
+    let b = brief(&own, "game", false, false, Some(Path::new("/x/Unity")), false, None);
+    assert!(!b.contains("CraftBuild") && b.contains("keep to what the project already uses") && b.contains("/x/Unity"), "{b}");
+    own.manifest.generate_assets = true;
+    let b = brief(&own, "game", false, false, None, true, None);
+    assert!(b.contains("Assets/Generated/") && !b.contains("--screenshot"), "what the person turned on still reaches it: {b}");
+    let (_d, beside) = own_folder("main.py", StartFrom);
+    let b = brief(&beside, "app", false, false, None, false, None);
+    assert!(b.contains("--screenshot") && !b.contains("its own build and tests"), "a new app beside the files proves itself: {b}");
+}
+
+#[test]
+fn a_site_stack_with_nothing_to_recreate_is_a_website() {
+    let vite = "React + TypeScript (Vite)";
+    assert_eq!(kind_of("Add a contact form", &TargetRef::None, "Plain HTML and CSS"), "website");
+    assert_eq!(kind_of("A calculator in react", &TargetRef::None, vite), "website", "it can't be started as a program");
+    assert_eq!(kind_of("Add a high score to my game", &TargetRef::None, vite), "game", "the person's words come first");
+    assert_eq!(kind_of("Add a settings page", &TargetRef::None, "Python"), "app");
+    assert_eq!(kind_of("Add a settings page", &TargetRef::None, "Electron"), "app", "a window, not a site");
+    assert_eq!(kind_of("Copy this tool", &TargetRef::Local { path: "/x/tool".into() }, vite), "app", "an original decides");
+}
+
+#[test]
 fn the_extractors_transcript_is_one_of_craft_anythings_own_files() {
     assert!(craft_anything_engine::workspace::OWN_NAMES.contains(&brief::EXTRACT_TRANSCRIPT), "a picked folder with this name would be overwritten");
 }
@@ -2800,4 +2913,12 @@ fn the_builders_conversation_travels_with_the_project() {
     w.keep_session(&ws, &adapter);
     let said: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Agent(AgentEvent::Status { text }) = e { Some(text) } else { None }).collect();
     assert!(said.iter().any(|t| t.contains("Couldn't keep a copy")), "{said:?}");
+}
+
+/// A coding agent that was signed in once and no longer is says so, rather than "isn't signed in",
+/// which reads as if the person never did.
+#[test]
+fn a_sign_in_that_stopped_working_is_called_that() {
+    assert_eq!(not_signed_in("claude-code", false), "Claude Code isn't signed in on this computer.");
+    assert_eq!(not_signed_in("claude-code", true), "Claude Code's sign-in on this computer has expired or was signed out.");
 }

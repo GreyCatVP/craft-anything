@@ -38,7 +38,16 @@ pub fn read(data: &[u8], limits: &Limits) -> FsImage {
         return img;
     };
     let mut visited: Vec<usize> = Vec::new();
-    walk(data, root, "", limits, &mut img, &mut visited, 0);
+    // A dot-named root is the container itself, not a child to skip with `.` and `..`.
+    let root_container = r.u32_be(root).is_some_and(|kind| kind & 7 == 1)
+        && root.checked_add(16).and_then(|at| name_at(data, at, limits.max_name)).is_some_and(|(name, _)| name == "." || name.is_empty());
+    if root_container {
+        visited.push(root);
+        let first = root.checked_add(4).and_then(|at| r.u32_be(at)).unwrap_or(0) as usize;
+        walk(data, first, "", limits, &mut img, &mut visited, 0);
+    } else {
+        walk(data, root, "", limits, &mut img, &mut visited, 0);
+    }
     img
 }
 

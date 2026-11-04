@@ -805,12 +805,27 @@ fn ledger(app: &mut CraftApp, ui: &mut Ui) {
         panel_title(ui, "Evidence ledger", Some(app.view.ledger_len));
     });
     ui.add_space(4.0);
-    if app.view.ledger.is_empty() {
+    if app.view.ledger.is_empty() && app.view.findings.is_empty() {
         widgets::empty_state(ui, "shield-check", "No evidence yet", "Every finding is saved here with how sure we are.");
         return;
     }
     let mut pick = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        if !app.view.findings.is_empty() {
+            panel_title(ui, "findings", Some(app.view.findings.len()));
+            for finding in &app.view.findings {
+                ui.add_space(6.0);
+                ui.label(RichText::new(&finding.id).font(theme::mono(12.0)).color(t.accent));
+                ui.add(egui::Label::new(&finding.statement).wrap());
+                ui.label(RichText::new(finding.confidence.plain_label()).color(t.text_dim).size(theme::CAPTION));
+                for id in &finding.evidence_ids {
+                    if widgets::link(ui, id).clicked() {
+                        pick = Some(id.clone());
+                    }
+                }
+                ui.separator();
+            }
+        }
         for e in &app.view.ledger {
             let selected = app.state.selected_evidence.as_ref() == Some(&e.id);
             if evidence_ui::ledger_row(ui, e, selected) {
@@ -867,7 +882,7 @@ fn status_line(app: &CraftApp, ui: &mut Ui) {
     let n = app.jobs.running().filter(|j| j.visible).count();
     let text = if n > 0 { crate::i18n::trf("{n} job(s) running", &[("n", &n.to_string())]) } else { tr("Ready") };
     ui.label(RichText::new(text).color(t.text_faint).size(theme::CAPTION));
-    ui.label(RichText::new(format!("· {} {}", app.view.ledger_len, tr("findings"))).color(t.text_faint).size(theme::CAPTION));
+    ui.label(RichText::new(format!("· {} {}", app.view.findings.len(), tr("findings"))).color(t.text_faint).size(theme::CAPTION));
 }
 
 fn bottom(app: &mut CraftApp, ui: &mut Ui) {
@@ -971,6 +986,32 @@ fn log_view(app: &CraftApp, ui: &mut Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_findings_render_even_without_evidence_rows() {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, false));
+        app.view.findings = vec![craft_anything_engine::tools::investigation_tools::Finding {
+            id: "fnd_1".into(),
+            statement: "A recorded answer from the shared investigation".into(),
+            evidence_ids: Vec::new(),
+            confidence: craft_anything_engine::evidence::Confidence::Observed,
+        }];
+        app.view.ledger.clear();
+        let context = egui::Context::default();
+        crate::theme::install_fonts(&context);
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| ledger(&mut app, ui));
+        output.textures_delta.clear();
+        let text = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some(text.galley.text().to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("fnd_1") && text.contains("A recorded answer"), "{text}");
+    }
 
     #[test]
     fn rows_are_found_in_common_shapes() {

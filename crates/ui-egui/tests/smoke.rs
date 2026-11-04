@@ -59,6 +59,31 @@ fn first_run_walks_through_four_screens() {
     h.get_by_label("Just look inside");
 }
 
+/// A model server on another computer can be added from the first run's AI step, without
+/// leaving for Settings.
+#[test]
+fn first_run_ai_step_can_add_a_server_by_its_address() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.get_by_label("I'm new to this").click();
+    h.run_steps(3);
+    assert_eq!(h.state().state.first_run, FirstRunStep::Brain);
+    let _ = h.get_by_label("Server address");
+    let _ = h.get_by_label("AI name");
+    // The demo already has an AI, so "we didn't find one" isn't said.
+    assert!(h.query_by_label("We didn't find an AI on this computer yet").is_none());
+}
+
+/// A message (such as a server that couldn't be reached) shows on the first run too.
+#[test]
+fn first_run_shows_messages() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.state_mut().toast("Couldn't reach the server", true);
+    h.run_steps(3);
+    let _ = h.get_by_label("Couldn't reach the server");
+}
+
 /// #231: at the smallest window the app allows, Purpose's Continue was below the window with
 /// nothing to scroll; it scrolls into view above the footer and works.
 #[test]
@@ -406,8 +431,7 @@ fn the_prompt_box_sends_on_enter_with_its_pictures() {
     });
     h.run_steps(3);
     h.state_mut().attach(vec![pic.clone(), d.path().join("notes.txt"), pic]);
-    h.run_steps(2);
-    assert_eq!(h.state().state.project_attachments.len(), 1, "pictures only, once each");
+    assert!(wait(&mut h, |a| a.state.project_attachments.len() == 1), "pictures only, once each: {:?}", h.state().state.project_attachments);
     h.get_by_label("shot.png");
     h.get_by_label("Ask for a change").focus();
     h.run_steps(2);
@@ -434,6 +458,41 @@ fn the_prompt_box_sends_on_enter_with_its_pictures() {
         "{:?}",
         h.state().state.feed
     );
+}
+
+#[test]
+fn an_oversized_picture_is_refused_when_attached() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let small = d.path().join("ok.png");
+    std::fs::write(&small, b"png").unwrap();
+    let big = d.path().join("huge.png");
+    std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+    let ws = Workspace::create(&d.path().join("projects"), "Game", "Recreate this game", TargetRef::None).unwrap();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.workspace = Some(ws);
+        a.state.screen = Screen::Project;
+        a
+    });
+    h.run_steps(3);
+    h.state_mut().attach(vec![small, big]);
+    assert!(wait(&mut h, |a| a.state.toasts.iter().any(|(t, err)| *err && t.contains("20 MB"))), "{:?}", h.state().state.toasts);
+    assert!(h.state().state.project_attachments.is_empty(), "the valid picture is not half-attached");
+}
+
+#[test]
+fn an_oversized_picture_is_refused_in_the_make_draft() {
+    let d = tempfile::tempdir().unwrap();
+    let small = d.path().join("ok.png");
+    std::fs::write(&small, b"png").unwrap();
+    let big = d.path().join("huge.png");
+    std::fs::File::create(&big).unwrap().set_len(20 * 1024 * 1024 + 1).unwrap();
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, true)));
+    h.run_steps(2);
+    h.state_mut().add_pictures(vec![small, big]);
+    assert!(wait(&mut h, |a| a.state.toasts.iter().any(|(t, err)| *err && t.contains("20 MB"))), "{:?}", h.state().state.toasts);
+    assert!(h.state().state.make.pictures.is_empty(), "the valid picture is not half-added");
 }
 
 #[test]
@@ -471,7 +530,8 @@ fn pictures_of_the_original_go_with_the_draft_then_into_the_project() {
     // "Nothing — start fresh" is picked: the request box offers pictures (not for websites).
     h.get_by_label("Add pictures of the original (optional: screenshots help it look right)");
     h.state_mut().add_pictures(vec![pic.clone(), notes, pic.clone()]);
-    h.run_steps(3);
+    // Their sizes are checked on a worker first (#720).
+    assert!(wait(&mut h, |a| !a.state.make.pictures.is_empty()), "checked on a worker, then added");
     assert_eq!(h.state().state.make.pictures, vec![pic.clone()], "pictures only, once each");
     h.get_by_label("original.webp");
     h.get_by_label("Remove original.webp").click();
@@ -1029,6 +1089,31 @@ fn an_ais_model_is_changed_in_settings() {
     assert!(h.state().model_picker.is_none(), "the picker closes once a model is chosen");
 }
 
+/// #470: a model the list doesn't offer can be typed in.
+#[test]
+fn a_model_the_list_doesnt_offer_can_be_typed_in() {
+    let url = model_server();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.hub.add_server("Box", &url, Some("nomic-embed-text"), None).unwrap();
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box")));
+    h.run_steps(2);
+    h.get_by_label("Change…").click();
+    assert!(wait(&mut h, |a| a.model_picker.as_ref().is_some_and(|(_, m)| m.is_some())));
+    h.run_steps(2);
+    h.get_by_label("Another model").click();
+    h.run_steps(1);
+    h.get_by_label("Another model").type_text("my-own-model");
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box" && b.model == "my-own-model")));
+}
+
 /// #54, #98: an AI server on another computer is added by its address in Settings → AI, with a
 /// model that can chat, and the form empties once it's added.
 #[test]
@@ -1157,6 +1242,56 @@ fn opencode_picker_offers_only_the_selected_models_thinking_depths() {
     h.get_by_label("Low");
     assert!(h.query_by_label("Max").is_none());
     assert!(h.query_by_label("Xhigh").is_none());
+}
+
+/// Claude Code's folder (its sign-in, so its account) is chosen in Settings → AI, and a second
+/// Claude Code can be added for a second account.
+#[test]
+fn claude_codes_account_folder_is_set_in_settings() {
+    use craft_anything_ai::{BackendConfig, BackendKind};
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        let cfg = BackendConfig {
+            name: "Claude Code".into(),
+            kind: BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        a.hub.add_backend(cfg, None).unwrap();
+        a.detected = Some(demo::detected());
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code")));
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    // Typed, `~/` and all, and saved on Enter.
+    let field = "Claude Code folder (CLAUDE_CONFIG_DIR)";
+    h.get_by_label(field).focus();
+    h.run_steps(2);
+    h.get_by_label(field).type_text("~/.claude-work");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    let chosen = |a: &CraftApp| a.backend_options.get("Claude Code").and_then(|o| o.config_dir.clone());
+    assert!(wait(&mut h, |a| chosen(a).as_deref() == Some("~/.claude-work")));
+    h.run_steps(2);
+    assert_eq!(h.get_by_label(field).value().as_deref(), Some("~/.claude-work"), "shows what's saved");
+    assert!(h.state().folder_inputs.is_empty(), "nothing left being typed");
+    // A relative folder is refused; the saved one stays.
+    h.state_mut().set_agent_folder("Claude Code", Some("claude-work".into()));
+    h.run_steps(4);
+    assert_eq!(chosen(h.state()).as_deref(), Some("~/.claude-work"));
+    // Emptied, it's the usual folder again.
+    h.state_mut().set_agent_folder("Claude Code", Some(String::new()));
+    assert!(wait(&mut h, |a| chosen(a).is_none()));
+    // Added already, so it's offered again under the next free name, on the coding agents' tab.
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Harnesses);
+    h.run_steps(2);
+    h.get_by_label("Add another").click();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
 }
 
 #[test]
@@ -1886,6 +2021,99 @@ fn a_new_project_can_start_in_a_folder_that_already_has_the_persons_files() {
     h.run_steps(2);
 }
 
+/// "Work on my project": the person's own folder, its files edited in place without a question,
+/// and the project named after it. An empty folder isn't taken; a folder that's a project opens.
+#[test]
+fn the_front_door_works_on_a_project_the_person_already_has() {
+    use craft_anything_ai::rebuild::StandIns;
+    use craft_anything_engine::workspace::{ExistingFiles, TargetRef, Workspace};
+    let (d, mine, empty) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(mine.path().join("index.html"), "<p>hi</p>").unwrap();
+    let runs = StandIns::new();
+    let (dir, r) = (d.path().to_path_buf(), runs.clone());
+    let mut h = harness(move || stand_in_app(dir, &r));
+    h.run_steps(2);
+    h.state_mut().state.make.target = TargetRef::Website { url: "https://example.com".into() };
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    assert!(h.state().state.make.mine && !h.state().state.make.look);
+    assert_eq!(h.state().state.make.target, TargetRef::None, "nothing to recreate");
+    h.get_by_label("Work on a project you already have");
+    h.state_mut().state.make.request = "Add a contact form".into();
+    h.run_steps(2);
+    h.get_by_label("Start").click();
+    h.run_steps(2);
+    assert!(h.state().creating.is_none() && h.state().workspace.is_none(), "Start waits for a folder");
+
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), empty.path().to_path_buf());
+    h.run_steps(2);
+    assert!(h.state().state.make.folder.is_none(), "an empty folder has nothing to work on");
+    assert!(h.state().state.toasts.iter().any(|(text, err)| *err && text.contains("empty")));
+
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.run_steps(3);
+    assert!(h.state().state.modal.is_none(), "nothing asked: they're the app");
+    assert_eq!(h.state().state.make.existing, Some(ExistingFiles::Edit));
+    assert_eq!(h.state().settings.existing_files, None, "the answer in Settings is left alone");
+    h.get_by_label("Pick another folder…");
+
+    // Make never edits the folder picked here, and coming back asks for it again.
+    h.get_by_label("Make my own version").click();
+    h.run_steps(3);
+    assert!(h.state().state.make.folder.is_none() && h.state().state.make.existing.is_none());
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    assert!(h.state().state.make.folder.is_none(), "a dialog that ends after leaving the door is dropped");
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    h.get_by_label("Choose your project's folder…");
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.state_mut().state.make.request = "Link the footer to https://example.com".into();
+    h.run_steps(3);
+    h.get_by_label("Start").click();
+    assert!(wait(&mut h, |a| a.creating.is_none() && a.workspace.is_some()), "made on a worker");
+    let ws = Workspace::open(mine.path()).expect("the project is the person's folder");
+    assert!(ws.manifest.app_in_root && ws.app_dir() == mine.path());
+    assert_eq!(ws.manifest.target, TargetRef::None, "an address in the request isn't an original");
+    assert_eq!(ws.manifest.name, mine.path().file_name().unwrap().to_string_lossy(), "named after its folder");
+    assert_eq!(std::fs::read_to_string(mine.path().join("index.html")).unwrap(), "<p>hi</p>");
+    assert_eq!(runs.started(), [mine.path().to_path_buf()]);
+    assert_eq!(std::fs::read_dir(d.path()).map(|r| r.count()).unwrap_or(0), 0, "nothing in the projects folder");
+
+    // Back on the door, the same folder is a project now, so it opens.
+    h.state_mut().state.make.mine = true;
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.run_steps(2);
+    assert!(h.state().state.toasts.iter().any(|(text, err)| !*err && text.contains("already a project")));
+    h.state_mut().pause();
+    assert!(runs.finish(mine.path()));
+    h.run_steps(2);
+}
+
+/// A Godot project's files decide its engine: Start gets Godot, never the Unity that a request
+/// reading as a game would.
+#[test]
+fn work_on_my_project_builds_with_the_engine_its_folder_uses() {
+    use craft_anything_engines::game::{Builder, Inventory};
+    use craft_anything_ui_egui::state::Modal;
+    let mine = tempfile::tempdir().unwrap();
+    std::fs::write(mine.path().join("project.godot"), "").unwrap();
+    let mut h = harness_sized(egui::vec2(1280.0, 1120.0), || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.game_engines = Some(Inventory::default());
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.state_mut().state.make.request = "Fix my game's jump".into();
+    h.run_steps(3);
+    assert_eq!(h.state().state.make.folder_stack.as_deref(), Some("Godot"));
+    h.get_by_label("Start").click();
+    h.run_steps(4);
+    assert_eq!(h.state().state.modal, Some(Modal::Engine(Builder::Godot)));
+}
+
 #[test]
 fn settings_list_projects_from_more_folders_and_remove_them_from_the_list_only() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
@@ -1944,6 +2172,69 @@ fn a_paragraph_is_drawn_as_one_piece_of_text() {
 }
 
 #[test]
+fn long_agent_answers_do_not_push_the_conversation_under_the_sidebar() {
+    use craft_anything_ui_egui::state::FeedItem;
+    fn text_rects(shape: &egui::Shape, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| text_rects(s, out)),
+            egui::Shape::Text(text) if text.galley.text().contains("file:///") || text.galley.text().contains("long_component_") => {
+                out.push(shape.visual_bounding_rect());
+            }
+            _ => {}
+        }
+    }
+    let long_path = format!("C:\\Example\\{}\\source.rs", "long_component_".repeat(40));
+    let long_link = format!("[source.rs](file:///C:/Example/{}/source.rs)", "nested_module/".repeat(40));
+    let replies = [
+        long_link,
+        format!("`{long_path}`"),
+        format!("```text\n{long_path}\n```"),
+        "servidor IPC [engine.rs](file:///C:/Users/alice/MyDrive1/Documents/Craft%20Anything/demo1/app/src/engine.rs).".to_string(),
+        include_str!("fixtures/message-width.md").to_string(),
+    ];
+    for size in [egui::vec2(1920.0, 1032.0), egui::vec2(1280.0, 820.0)] {
+        for in_chat in [false, true] {
+            for (case, reply) in replies.iter().enumerate() {
+                let reply = reply.clone();
+                let mut h = harness_sized(size, move || {
+                    let mut a = demo::app(demo::engine(Mode::Beginner, true));
+                    if in_chat {
+                        demo::fill_ask(&mut a);
+                        a.state.chat = vec![ChatItem::Assistant { text: "Before the long answer".into(), backend: None, streaming: false }];
+                    } else {
+                        demo::fill_project(&mut a);
+                        a.state.feed = vec![FeedItem::Agent { text: "Before the long answer".into(), streaming: false }];
+                    }
+                    a
+                });
+                h.run_steps(3);
+                if in_chat {
+                    h.state_mut().state.chat.push(ChatItem::Assistant { text: reply.clone(), backend: None, streaming: false });
+                    h.state_mut().state.chat.push(ChatItem::Assistant { text: "After the long answer".into(), backend: None, streaming: false });
+                } else {
+                    h.state_mut().state.feed.push(FeedItem::Agent { text: reply.clone(), streaming: false });
+                    h.state_mut().state.feed.push(FeedItem::Agent { text: "After the long answer".into(), streaming: false });
+                }
+                h.run_steps(4);
+                let composer = h.get_by_label(if in_chat { "Ask a question" } else { "Ask for a change" }).rect();
+                let mut long = Vec::new();
+                for shape in &h.output().shapes {
+                    text_rects(&shape.shape, &mut long);
+                }
+                assert!(!long.is_empty(), "the answer was not painted");
+                let after = h.get_by_label("After the long answer").rect();
+                assert!(
+                    long.iter().all(|r| r.left() >= composer.left() - 2.0 && r.right() <= composer.right() + 2.0)
+                        && after.left() >= composer.left() - 1.0
+                        && after.right() <= composer.right() + 1.0,
+                    "the answer displaced the conversation: long={long:?}, answer={after:?}, composer={composer:?}, size={size:?}, chat={in_chat}, case={case}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn make_says_who_builds_and_a_picked_builder_stays_with_the_project() {
     use craft_anything_ai::{BackendConfig, BackendKind, rebuild::StandIns};
     use craft_anything_engine::workspace::Workspace;
@@ -1989,10 +2280,12 @@ fn with_nothing_to_build_with_start_offers_what_was_found_instead_of_a_dead_end(
     h.run_steps(3);
     h.get_by_label("Building needs a coding agent such as Claude Code, or an AI with an API key.");
     h.state_mut().state.make.request = "A notes app".into();
+    // The fixture supplies discovery results; keep host detection out of this UI test.
+    h.state_mut().detecting = true;
     h.state_mut().start_make();
     h.run_steps(2);
     assert_eq!(h.state().state.modal, Some(Modal::NeedBuilder { start: true }));
-    // Found on this computer meanwhile (detection runs when the dialog opens).
+    // The simulated discovery has now found an agent.
     h.state_mut().detecting = false;
     h.state_mut().detected = Some(demo::detected());
     h.run_steps(2);

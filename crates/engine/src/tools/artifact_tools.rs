@@ -237,7 +237,12 @@ pub(crate) fn unique_suffix(seed: &str, attempt: u32) -> String {
 
 /// Create a new private directory in the system temp folder.
 pub(crate) fn fresh_temp_dir(prefix: &str) -> Result<PathBuf, ToolError> {
-    let base = std::env::temp_dir();
+    fresh_dir_in(&std::env::temp_dir(), prefix)
+}
+
+/// Create a new private directory in `base`, making `base` first when it's missing.
+pub(crate) fn fresh_dir_in(base: &Path, prefix: &str) -> Result<PathBuf, ToolError> {
+    std::fs::create_dir_all(base).map_err(|e| ToolError::io(base.display(), e))?;
     for attempt in 0..16 {
         let p = base.join(format!("{prefix}-{}", unique_suffix(prefix, attempt)));
         #[cfg(unix)]

@@ -551,27 +551,40 @@ pub fn rich_text(ui: &mut Ui, text: &str, with_glossary: bool) {
             continue;
         }
         if let Some(h) = trimmed.strip_prefix("### ").or_else(|| trimmed.strip_prefix("## ")).or_else(|| trimmed.strip_prefix("# ")) {
-            ui.label(RichText::new(h).font(theme::semibold(body.size + 2.0)));
+            ui.add(egui::Label::new(RichText::new(h).font(theme::semibold(body.size + 2.0))).wrap());
             continue;
         }
         let (bullet, rest) = match trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
             Some(r) => (true, r),
             None => (false, trimmed),
         };
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            if bullet {
-                ui.label(RichText::new("  •  ").color(t.accent));
-            }
-            inline(ui, rest, with_glossary, &body, &t);
-        });
+        paragraph(ui, rest, bullet, with_glossary, &body, &t);
     }
     if in_code && !code.is_empty() {
         code_block(ui, &code, &t);
     }
 }
 
-fn inline(ui: &mut Ui, text: &str, with_glossary: bool, body: &egui::FontId, t: &Tokens) {
+struct GlossarySpan {
+    start: usize,
+    end: usize,
+    word: String,
+    meaning: &'static str,
+}
+
+fn paragraph(ui: &mut Ui, text: &str, bullet: bool, with_glossary: bool, body: &egui::FontId, t: &Tokens) {
+    // Shape the whole paragraph together. Separate wrapping labels interleaved with glossary
+    // widgets can move the row's left edge backwards when a later run starts with a long link.
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width().max(1.0);
+    job.first_row_min_height = ui.spacing().interact_size.y;
+    let mut spans = Vec::new();
+    let mut at = 0;
+    if bullet {
+        let prefix = "  •  ";
+        job.append(prefix, 0.0, egui::TextFormat { font_id: body.clone(), color: t.accent, ..Default::default() });
+        at += prefix.chars().count();
+    }
     // Split on ** and ` markers; alternate plain/bold and plain/code.
     let mut bold = false;
     for (bi, part) in text.split("**").enumerate() {
@@ -584,38 +597,77 @@ fn inline(ui: &mut Ui, text: &str, with_glossary: bool, body: &egui::FontId, t: 
                 continue;
             }
             if code {
-                ui.label(RichText::new(piece).font(theme::mono(body.size - 1.0)).color(t.accent_ink).background_color(t.code_bg));
+                job.append(
+                    piece,
+                    0.0,
+                    egui::TextFormat { font_id: theme::mono(body.size - 1.0), color: t.accent_ink, background: t.code_bg, ..Default::default() },
+                );
+                at += piece.chars().count();
                 continue;
             }
             let font = if bold { theme::semibold(body.size) } else { body.clone() };
+            let format = egui::TextFormat { font_id: font, color: t.text, ..Default::default() };
             if with_glossary {
                 for (run, meaning) in glossary::segments(piece) {
-                    match meaning {
-                        Some(m) => {
-                            widgets::glossary_word(ui, &run, m, font.clone());
-                        }
-                        None => words(ui, &run, &font, t),
+                    let end = at + run.chars().count();
+                    job.append(&run, 0.0, format.clone());
+                    if let Some(meaning) = meaning {
+                        spans.push(GlossarySpan { start: at, end, word: run, meaning });
                     }
+                    at = end;
                 }
             } else {
-                words(ui, piece, &font, t);
+                job.append(piece, 0.0, format);
+                at += piece.chars().count();
             }
         }
     }
-}
-
-/// A run of text as one label: in a wrapping row egui starts it where the last one ended and
-/// breaks it between words, so a paragraph isn't one widget per word.
-fn words(ui: &mut Ui, text: &str, font: &egui::FontId, t: &Tokens) {
-    if !text.is_empty() {
-        ui.add(egui::Label::new(RichText::new(text).font(font.clone()).color(t.text)).wrap());
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let response = ui.add(egui::Label::new(galley.clone()));
+    if !ui.is_rect_visible(response.rect) {
+        return;
+    }
+    let hover = response.hover_pos();
+    let mut meaning = None;
+    for span in &spans {
+        let mut rows: Vec<egui::Rect> = Vec::new();
+        for index in span.start..span.end {
+            let from = galley.pos_from_cursor(egui::text::CCursor { index: egui::text::CharIndex(index), prefer_next_row: true });
+            let to = galley.pos_from_cursor(egui::text::CCursor { index: egui::text::CharIndex(index + 1), prefer_next_row: false });
+            if from.top() != to.top() {
+                continue;
+            }
+            let rect = egui::Rect::from_min_max(from.min, egui::pos2(to.left().max(from.left()), from.bottom()));
+            if let Some(last) = rows.last_mut().filter(|last| last.top() == rect.top()) {
+                *last = last.union(rect);
+            } else {
+                rows.push(rect);
+            }
+        }
+        for rect in rows {
+            let rect = rect.translate(response.rect.min.to_vec2());
+            let mut x = rect.left();
+            while x < rect.right() {
+                ui.painter().hline(x..=(x + 2.0).min(rect.right()), rect.bottom() - 1.0, egui::Stroke::new(1.0, t.accent));
+                x += 4.0;
+            }
+            if hover.is_some_and(|pos| rect.contains(pos)) {
+                meaning = Some(span);
+            }
+        }
+    }
+    if let Some(span) = meaning {
+        response.on_hover_ui(|ui| {
+            ui.label(RichText::new(&span.word).font(theme::semibold(theme::SMALL)));
+            ui.label(tr(span.meaning));
+        });
     }
 }
 
 fn code_block(ui: &mut Ui, code: &str, t: &Tokens) {
     egui::Frame::new().fill(t.code_bg).corner_radius(t.r()).inner_margin(Margin::same(10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(RichText::new(code.trim_end()).font(theme::mono(12.5)).color(t.text));
+        ui.add(egui::Label::new(RichText::new(code.trim_end()).font(theme::mono(12.5)).color(t.text)).wrap());
     });
 }
 

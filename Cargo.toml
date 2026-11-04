@@ -92,3 +92,8 @@ codegen-units = 1
 debug = false
 strip = true
 panic = "abort"
+
+# wgpu-hal with a Metal shader-language probe (Craft Anything #742; upstream wgpu #10687).
+# Remove this once the upstream wgpu release picks a Metal version the compiler accepts. See vendor/wgpu-hal/CRAFT_ANYTHING.md.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal" }

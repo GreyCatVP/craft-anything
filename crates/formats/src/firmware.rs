@@ -7,6 +7,7 @@
 
 use crate::bytes::Reader;
 use crate::common::entropy;
+use crate::tarcpio::CpioChecksum;
 use miniz_oxide::inflate::stream::{InflateState, inflate as mz_inflate};
 use miniz_oxide::{DataFormat, MZError, MZFlush, MZStatus};
 use serde::Serialize;
@@ -311,6 +312,10 @@ struct Scanner<'a> {
     probes: BTreeMap<&'static str, usize>,
     opts: &'a ScanOptions,
     inflate_left: u64,
+    checksum_left: usize,
+    checksum_exhausted: bool,
+    stop: &'a dyn Fn() -> bool,
+    cancelled: bool,
     exhausted: Vec<&'static str>,
 }
 
@@ -791,9 +796,21 @@ impl<'a> Scanner<'a> {
         if !matches!(self.r.u8(i + 5)?, b'1' | b'2' | b'7') || !self.probe("cpio") {
             return None;
         }
-        let l = crate::tarcpio::cpio(self.data.get(i..)?, 1_000_000)?;
+        let data = self.data;
+        let before = self.checksum_left;
+        let mut skipped = false;
+        let l = crate::tarcpio::cpio_with_checksum(data.get(i..)?, 1_000_000, &mut |body| {
+            let result = self.cpio_checksum(body);
+            skipped |= matches!(result, CpioChecksum::Skipped);
+            result
+        })?;
         if l.members.is_empty() && !l.complete {
             return None;
+        }
+        let mut details = json!({"members": l.members.len(), "complete": l.complete, "warnings": l.warnings});
+        if l.format == "cpio-crc" {
+            details["checksum_validation_skipped"] = json!(skipped);
+            details["checksum_bytes_visited"] = json!(before.saturating_sub(self.checksum_left));
         }
         Some(reg(
             i,
@@ -801,10 +818,29 @@ impl<'a> Scanner<'a> {
             l.format,
             Family::Archive,
             format!("cpio archive ({}), {} member(s)", l.format.trim_start_matches("cpio-"), l.members.len()),
-            if l.complete { "high" } else { "medium" },
+            if l.complete && !skipped { "high" } else { "medium" },
             Unpack::Members,
-            json!({"members": l.members.len(), "complete": l.complete, "warnings": l.warnings}),
+            details,
         ))
+    }
+
+    /// Sum at most one input's worth of CRC member bytes across the entire scan.
+    fn cpio_checksum(&mut self, body: &[u8]) -> CpioChecksum {
+        let mut sum = 0u32;
+        for chunk in body.chunks(64 << 10) {
+            if (self.stop)() {
+                self.cancelled = true;
+                return CpioChecksum::Cancelled;
+            }
+            let count = chunk.len().min(self.checksum_left);
+            sum = chunk.iter().take(count).fold(sum, |sum, &byte| sum.wrapping_add(u32::from(byte)));
+            self.checksum_left = self.checksum_left.saturating_sub(count);
+            if count < chunk.len() {
+                self.checksum_exhausted = true;
+                return CpioChecksum::Skipped;
+            }
+        }
+        CpioChecksum::Value(sum)
     }
 
     fn squashfs(&mut self, i: usize, be: bool) -> Option<Region> {
@@ -1499,11 +1535,23 @@ impl<'a> Scanner<'a> {
     }
 }
 
-/// Scan `data` for recognised regions. `stop` is polled every MiB; when it returns true the scan
-/// ends early with `cancelled` set. A region with a confirmed length hides its interior from the
-/// scan (nested content is found by scanning the region again after extraction).
+/// Scan `data` for recognised regions. `stop` is polled every MiB and every 64 KiB during CPIO
+/// checksum sums; when it returns true the scan ends early with `cancelled` set. CRC member sums
+/// share a byte allowance equal to the input length; skipped verification is reported. A region
+/// with a confirmed length hides its interior (nested content is found after extraction).
 pub fn scan(data: &[u8], opts: &ScanOptions, stop: &dyn Fn() -> bool) -> ScanResult {
-    let mut s = Scanner { data, r: Reader::new(data), probes: BTreeMap::new(), opts, inflate_left: opts.inflate_budget, exhausted: Vec::new() };
+    let mut s = Scanner {
+        data,
+        r: Reader::new(data),
+        probes: BTreeMap::new(),
+        opts,
+        inflate_left: opts.inflate_budget,
+        checksum_left: data.len(),
+        checksum_exhausted: false,
+        stop,
+        cancelled: false,
+        exhausted: Vec::new(),
+    };
     let mut out = ScanResult::default();
     let mut skip_until = 0usize;
     let mut i = 0usize;
@@ -1513,6 +1561,10 @@ pub fn scan(data: &[u8], opts: &ScanOptions, stop: &dyn Fn() -> bool) -> ScanRes
             break;
         }
         let found = s.try_backref(i).filter(|r| r.offset as usize >= skip_until).or_else(|| s.try_at(i));
+        if s.cancelled {
+            out.cancelled = true;
+            break;
+        }
         if let Some(r) = found {
             if out.regions.len() >= opts.max_regions {
                 out.truncated = true;
@@ -1537,6 +1589,9 @@ pub fn scan(data: &[u8], opts: &ScanOptions, stop: &dyn Fn() -> bool) -> ScanRes
     out.probes_exhausted = s.exhausted;
     if !out.probes_exhausted.is_empty() {
         out.warnings.push(format!("probe budget spent for: {} (later candidates were not checked)", out.probes_exhausted.join(", ")));
+    }
+    if s.checksum_exhausted {
+        out.warnings.push("cpio CRC checksum byte budget spent (some member data was not verified)".into());
     }
     out
 }

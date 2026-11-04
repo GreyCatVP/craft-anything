@@ -85,6 +85,8 @@ Add a folder…	Добавить папку…
 Add a plugin	Добавить плагин
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Добавьте «мозг» ИИ, и я прочитаю для вас эти доказательства, отвечу на дополнительные вопросы и укажу на доказательства.
 Add an AI by its address	Добавить ИИ по адресу
+Add another	Добавить ещё
+Add it again, to choose another account's folder for it.	Добавить ещё раз, чтобы выбрать для него папку другой учётной записи.
 Add more info. The builder reads it at its next step.	Добавьте больше информации. Конструктор прочитает её на следующем шаге.
 Add pictures	Добавить изображения
 Add pictures of the original	Добавить изображения оригинала
@@ -130,6 +132,7 @@ App	Приложение
 App details on device	Сведения о приложении на устройстве
 Apple apps	Приложения Apple
 Apply	Применить
+Apply model options	Применить параметры модели
 Approve an agent action	Одобрить действие агента
 Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Приложения и игры: продолжать уточнение, пока они не станут похожи на ваши изображения настолько. Выключено — сходство только сообщается.
 Architectures	Архитектуры
@@ -232,6 +235,7 @@ Choose what the builder's questions get	Выберите, что получаю�
 Choose what to recreate, say what you want, then press Start.	Выберите, что пересоздать, скажите, что хотите, затем нажмите «Старт».
 Choose…	Выбрать…
 Classes	Классы
+Claude Code folder (CLAUDE_CONFIG_DIR)	Папка Claude Code (CLAUDE_CONFIG_DIR)
 Clean room	Чистая комната
 Clean room / Deep	Чистая комната / Глубокий
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Режим «Чистая комната» никогда не читает код, файлы или исходник страницы оригинала. Режим «Глубокий» читает их всеми инструментами Craft Anything.
@@ -271,6 +275,7 @@ Connect to a browser	Подключиться к браузеру
 Connect {name}	Подключить {name}
 Connected devices	Подключённые устройства
 Connected phone	Подключённый телефон
+Context window	Окно контекста
 Continue	Продолжить
 Contradicted	Опровергнуто
 Control-flow graph: a map of every path a function can take, like a flowchart.	Граф потока управления: карта всех путей, по которым может пройти функция, как блок-схема.
@@ -320,6 +325,7 @@ Deep	Глубокий
 Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	Режим «Глубокий» теперь декомпилирует с помощью Ghidra. Первый просмотр большой программы может занять несколько минут.
 Deep mode on	Включён режим «Глубокий»
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Глубокий: мы читаем его код, файлы и исходник страницы всеми имеющимися инструментами, а также Ghidra, если он установлен. Нажмите, чтобы переключить.
+Default	По умолчанию
 Delete a project	Удалить проект
 Delete it	Удалить
 Delete the project	Удалить проект
@@ -392,6 +398,7 @@ Export a report (Markdown)	Экспортировать отчёт (Markdown)
 Export captured scripts	Экспортировать записанные скрипты
 Export evidence	Экспортировать доказательства
 Export report	Экспортировать отчёт
+Extended	Расширенный
 Extract an archive	Распаковать архив
 Extract firmware	Извлечь прошивку
 Extract with this	Извлечь с помощью этого
@@ -556,6 +563,7 @@ It's mine, or I'm allowed to look	Это моё, или мне разрешен�
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	Его копия удалена вместе со всем, что там было сохранено. Сам проект остаётся как есть.
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	Его папка удалена со всем содержимым: тем, что было собрано, проверками и перепиской.
 Its own code	Его собственный код
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Свой вход, настройки и разговоры: другая папка — другая учётная запись. Пусто: обычная папка.
 Java archive overview	Обзор архива Java
 Java class	Класс Java
 Java method bytecode and pseudo-Java	Байт-код метода Java и псевдо-Java
@@ -568,6 +576,15 @@ Jobs ({n})	Задания ({n})
 Just a question: nothing was changed. Answered by	Просто вопрос: ничего не изменилось. Отвечено:
 Just ask	Просто спросите
 Just look inside	Просто загляните внутрь
+Work on my project	Работать над своим проектом
+Work on a project you already have	Работать над проектом, который у вас уже есть
+Pick its folder, say what you want, then press Start.	Выберите его папку, скажите, что хотите, затем нажмите «Старт».
+Where is your project?	Где ваш проект?
+Choose your project's folder…	Выберите папку вашего проекта…
+For example: add a dark mode	Например: добавить тёмную тему
+Pick your project's folder first.	Сначала выберите папку проекта.
+Pick your project's folder	Выберите папку проекта
+That folder is empty. Pick the folder your project's files are in.	Эта папка пуста. Выберите папку, в которой лежат файлы вашего проекта.
 Keep going without asking	Продолжать без вопросов
 Keep it	Сохранить
 Keep it in the sidebar to open any time, whatever later builds change.	Оставить в боковой панели, чтобы открывать в любое время, несмотря на изменения в последующих сборках.
@@ -621,6 +638,7 @@ List strings	Список строк
 Live: the project's latest build	В реальном времени: последняя сборка проекта
 Load a picture	Загрузить изображение
 Load a screenshot	Загрузить скриншот
+Load model options	Загрузить параметры модели
 Loading…	Загрузка…
 Log	Журнал
 Look again	Искать снова
@@ -669,6 +687,7 @@ Minimise	Свернуть
 Mode	Режим
 Model	Модель
 Model default	По умолчанию для модели
+Model options	Параметры модели
 Model: {model}	Модель: {model}
 Modules	Модули
 More detail	Подробнее
@@ -778,6 +797,8 @@ Open the installer app	Открыть приложение-установщик
 Open the website	Открыть веб-сайт
 Open {name}	Открыть {name}
 OpenCode default	По умолчанию для OpenCode
+No chat models are visible in {agent}. Check its setup, then reload.	В {agent} нет доступных моделей для чата. Проверьте настройки и обновите список.
+The saved model is no longer visible. Choose another model or the {agent} default.	Сохранённая модель больше не доступна. Выберите другую модель или модель {agent} по умолчанию.
 OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	В OpenCode нет доступных моделей для чата. Подключите провайдера в OpenCode и обновите список.
 OpenCode model	Модель OpenCode
 Opened {name}	Открыто: {name}
@@ -880,6 +901,7 @@ Read the project	Читать проект
 Reading what's inside…	Чтение того, что внутри…
 Ready	Готово
 Ready: {what} is on this computer.	Готово: {what} есть на этом компьютере.
+Reasoning	Рассуждение
 Rebuild status	Состояние пересборки
 Record a finding	Записать находку
 Record a hypothesis	Записать гипотезу
@@ -985,7 +1007,9 @@ Send now	Отправить сейчас
 Server address	Адрес сервера
 Session status	Состояние сессии
 Set a project's asset budget	Установить бюджет ресурсов проекта
+Set an AI's folder	Установить папку ИИ
 Set an AI's program	Установить программу ИИ
+Set model options	Задать параметры модели
 Set one up	Настроить
 Set up a brain…	Настроить «мозг»…
 Set up a builder	Настроить конструктор
@@ -995,6 +1019,7 @@ Show a project	Показать проект
 Show folder	Показать папку
 Show me everything	Показать всё
 Show me the proof	Покажи мне доказательство
+Show model options	Показать параметры модели
 Show pinned builds	Показать закреплённые сборки
 Show settings	Показать настройки
 Show the answer	Показать ответ
@@ -1018,6 +1043,7 @@ Some plugins couldn't be read:	Некоторые плагины не удало
 Something a program borrows from the operating system or a library, like "open a file".	То, что программа берёт взаймы у операционной системы или библиотеки, например «открыть файл».
 Something a program or library offers for other programs to use.	То, что программа или библиотека предлагает другим программам для использования.
 Source	Источник
+Standard	Стандартный
 Start	Старт
 Start a Frida session	Запустить сессию Frida
 Start a GDB session	Запустить сессию GDB
@@ -1152,6 +1178,7 @@ Unreal IoStore	IoStore Unreal
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal собирает игры с помощью Xcode от Apple, бесплатного в App Store.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal есть здесь, но ему также нужны инструменты C++ Visual Studio.
 Unreal pak	Пак Unreal
+Update a finding	Обновить вывод
 Update a hypothesis	Обновить гипотезу
 Update an open question	Обновить открытый вопрос
 Update the checklist	Обновить контрольный список
@@ -1386,3 +1413,7 @@ your files there are the app, edited in place	ваши файлы там — э�
 … {} older	… {} старых
 ← Back	← Назад
 ↑↓ to move · Enter to run · Esc to close	↑↓ для перемещения · Enter для запуска · Esc для закрытия
+Providers	Провайдеры
+Harnesses	Агенты
+Nothing of this kind was found.	Ничего такого не найдено.
+Another model	Другая модель

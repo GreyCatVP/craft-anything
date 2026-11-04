@@ -8,9 +8,10 @@
 //! process; [`AcpConversation`] runs it against the agent through `craft_anything_platform`.
 
 use super::{McpCommand, display_for};
+use crate::model::Stop;
 use crate::{AgentEvent, Conversation, FailureKind, TurnFailure};
 use craft_anything_platform::sync::Mutex;
-use craft_anything_platform::{Process, RunningProcess, StdinMode};
+use craft_anything_platform::{RunningProcess, StdinMode};
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
@@ -19,7 +20,7 @@ use std::process::ChildStdin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Agents known to speak ACP, and the arguments that start them in that mode.
 pub const ACP_AGENTS: &[(&str, &[&str])] = &[
@@ -29,6 +30,7 @@ pub const ACP_AGENTS: &[(&str, &[&str])] = &[
     ("goose", &["acp"]),
     ("hermes", &["acp"]),
     ("maki", &["acp"]),
+    ("copilot", &["--acp", "--stdio"]),
 ];
 
 /// Agents whose ACP mode takes the backend's model (`cli_model`), and the flag after the ACP
@@ -80,6 +82,13 @@ pub type Approver = Arc<dyn Fn(&str, &Value) -> bool + Send + Sync>;
 /// so nothing of the agent's own is let through.
 pub fn clean_room_chat_approver() -> Approver {
     Arc::new(|tool, _input| !matches!(tool, "Read" | "Write" | "Bash" | "WebFetch"))
+}
+
+/// Session metadata only: no prompt is sent to discover a model's selectable settings.
+pub struct ModelMetadata {
+    pub models: Vec<String>,
+    pub current_model: String,
+    pub config_options: Vec<Value>,
 }
 
 /// An ACP tool call in the approval policy's shape.
@@ -136,6 +145,14 @@ pub struct AcpCore {
     /// Permission requests go to an approver ([`Out::Decide`]) instead of the person's chat.
     decides: bool,
     failure: Option<TurnFailure>,
+    /// A read-only question: no MCP server and no permission escalation into a build.
+    question: bool,
+    /// The adapter's startup remediation. Sign-in itself stays outside the ACP connection.
+    sign_in_fix: Option<String>,
+    /// Model ids advertised by the opened or loaded session, not a local guess at its catalogue.
+    models: Vec<String>,
+    current_model: String,
+    config_options: Vec<Value>,
 }
 
 impl AcpCore {
@@ -156,6 +173,11 @@ impl AcpCore {
             tools: HashMap::new(),
             decides: false,
             failure: None,
+            question: false,
+            sign_in_fix: None,
+            models: Vec::new(),
+            current_model: String::new(),
+            config_options: Vec::new(),
         }
     }
 
@@ -214,7 +236,7 @@ impl AcpCore {
     }
 
     fn mcp_servers(&self) -> Value {
-        json!([{"name": super::MCP_NAME, "command": self.mcp.command, "args": self.mcp.args, "env": []}])
+        if self.question { json!([]) } else { json!([{"name": super::MCP_NAME, "command": self.mcp.command, "args": self.mcp.args, "env": []}]) }
     }
 
     /// One line from the agent.
@@ -238,6 +260,8 @@ impl AcpCore {
     }
 
     fn turn_done(&self) -> Out {
+        // This client has no attributable ACP usage totals. Leave the cost unknown instead of
+        // treating another provider's prices, or a session-wide total, as this turn's bill.
         Out::Event(AgentEvent::TurnDone { backend: self.backend.clone(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false })
     }
 
@@ -257,8 +281,9 @@ impl AcpCore {
                 Some(-32602..=-32600) => FailureKind::Configuration,
                 _ => FailureKind::Unknown,
             }));
-            let fix = matches!(kind, Pending::Initialize | Pending::NewSession)
-                .then(|| format!("Check that {} is installed and signed in: run it once in a terminal.", self.agent_name));
+            let fix = matches!(kind, Pending::Initialize | Pending::NewSession).then(|| {
+                self.sign_in_fix.clone().unwrap_or_else(|| format!("Check that {} is installed and signed in: run it once in a terminal.", self.agent_name))
+            });
             return self.fail(format!("{}: {text}", self.agent_name), fix);
         }
         let result = msg.get("result").unwrap_or(&Value::Null);
@@ -278,6 +303,18 @@ impl AcpCore {
                 }
             }
             Pending::NewSession | Pending::LoadSession => {
+                self.current_model = result.pointer("/models/currentModelId").and_then(Value::as_str).unwrap_or_default().to_string();
+                self.config_options = result.get("configOptions").and_then(Value::as_array).cloned().unwrap_or_default();
+                // The running agent decides what's available to this account. Entries without
+                // an id can't be selected, so skip them rather than inventing one from a label.
+                self.models = result
+                    .pointer("/models/availableModels")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|model| model.get("modelId").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect();
                 if let Some(sid) = result.get("sessionId").and_then(Value::as_str) {
                     self.session = Some(sid.to_string());
                 }
@@ -310,6 +347,11 @@ impl AcpCore {
             // We offer no file system or terminal to the agent; it does its own.
             let err = json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't offered by this client")}});
             return vec![Out::Send(err.to_string())];
+        }
+        if self.question {
+            // Startup already limits the tools; a question cannot ask for broader access or
+            // turn an unexpected permission request into an approval card for the person.
+            return vec![Out::Send(json!({"jsonrpc": "2.0", "id": id, "result": {"outcome": {"outcome": "cancelled"}}}).to_string())];
         }
         let call = params.get("toolCall").unwrap_or(&Value::Null);
         let s = |k: &str| call.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -466,6 +508,8 @@ impl Shared {
 pub struct AcpConversation {
     program: String,
     args: Vec<String>,
+    /// Process setup and startup guidance from the same registered adapter that chose the flags.
+    adapter: Arc<dyn super::AgentAdapter>,
     agent: String,
     backend: String,
     cwd: PathBuf,
@@ -480,9 +524,84 @@ pub struct AcpConversation {
     preamble: String,
     logs: Option<PathBuf>,
     failure: Option<TurnFailure>,
+    /// Suppress MCP attachment and refuse permission requests; startup flags restrict native tools.
+    question: bool,
+    /// Report invalid backend settings through the conversation before starting a child process.
+    validation_error: Option<craft_anything_evidence::ToolError>,
 }
 
 impl AcpConversation {
+    /// Open a session and read its model catalogue without sending a prompt. Waits for metadata
+    /// until `timeout`, carrying startup errors back to the caller; dropping this temporary
+    /// conversation stops its process. Blocking: call off the UI thread.
+    pub fn model_choices(self, timeout: Duration) -> Result<Vec<String>, craft_anything_evidence::ToolError> {
+        self.model_metadata(timeout).map(|metadata| metadata.models)
+    }
+
+    /// Read a fresh session's selected model and configuration choices without a model turn.
+    /// Blocking and bounded, with the same process cleanup as model catalogue discovery.
+    pub fn model_metadata(self, timeout: Duration) -> Result<ModelMetadata, craft_anything_evidence::ToolError> {
+        self.model_metadata_with_stop(timeout, &Stop::default())
+    }
+
+    pub(crate) fn model_metadata_with_stop(mut self, timeout: Duration, stop: &Stop) -> Result<ModelMetadata, craft_anything_evidence::ToolError> {
+        stop.check()?;
+        self.spawn()?;
+        self.busy.store(true, Ordering::SeqCst);
+        let started = Instant::now();
+        loop {
+            stop.check()?;
+            let ready = self.lock().as_ref().filter(|shared| shared.core.ready).map(|shared| ModelMetadata {
+                models: shared.core.models.clone(),
+                current_model: shared.core.current_model.clone(),
+                config_options: shared.core.config_options.clone(),
+            });
+            if let Some(metadata) = ready {
+                return Ok(metadata);
+            }
+            for event in self.poll() {
+                if let AgentEvent::Error { message, remediation, .. } = event {
+                    let error = craft_anything_evidence::ToolError::unavailable(message);
+                    return Err(match remediation {
+                        Some(fix) => error.with_remediation(fix),
+                        None => error,
+                    });
+                }
+            }
+            if started.elapsed() >= timeout {
+                return Err(self.model_metadata_timeout());
+            }
+            std::thread::park_timeout(Duration::from_millis(10));
+        }
+    }
+
+    fn model_metadata_timeout(&self) -> craft_anything_evidence::ToolError {
+        craft_anything_evidence::ToolError::unavailable(format!("{} did not list its models before the deadline.", display_for(&self.agent)))
+            .with_remediation(self.adapter.sign_in_fix().unwrap_or_else(|| "Check the agent in a terminal, then try again.".into()))
+    }
+
+    /// Keep an adapter's settings check until the conversation starts. A failure is reported
+    /// through the usual events without launching a process or changing the person's settings.
+    pub fn with_validation(mut self, result: Result<(), craft_anything_evidence::ToolError>) -> Self {
+        self.validation_error = result.err();
+        self
+    }
+
+    /// A read-only question: attach no MCP server and refuse permission requests. The caller
+    /// must also choose a fresh session and restrictive agent flags; this switch alone doesn't
+    /// prevent native tools from running without a permission request.
+    pub fn with_question(mut self, question: bool) -> Self {
+        self.question = question;
+        self
+    }
+
+    /// Use the selected registry adapter for process setup and startup remediation. This keeps
+    /// custom adapters and test stand-ins on the same path as the built-in agents.
+    pub fn with_adapter(mut self, adapter: Arc<dyn super::AgentAdapter>) -> Self {
+        self.adapter = adapter;
+        self
+    }
+
     /// Where to write a log if the agent stops unexpectedly ([`crate::failure_log`]).
     pub fn with_logs(mut self, logs: Option<PathBuf>) -> Self {
         self.logs = logs;
@@ -508,6 +627,7 @@ impl AcpConversation {
         AcpConversation {
             program,
             args,
+            adapter: super::adapter_for(agent),
             agent: agent.into(),
             backend: backend.into(),
             cwd,
@@ -522,6 +642,8 @@ impl AcpConversation {
             preamble: String::new(),
             logs: None,
             failure: None,
+            question: false,
+            validation_error: None,
         }
     }
 
@@ -531,9 +653,14 @@ impl AcpConversation {
 
     /// Start the agent and send `initialize`.
     fn spawn(&mut self) -> Result<(), craft_anything_evidence::ToolError> {
+        if let Some(error) = &self.validation_error {
+            return Err(error.clone());
+        }
         let name = display_for(&self.agent);
         let resume = self.lock().as_ref().and_then(|s| s.core.session_id()).or_else(|| self.resume.clone());
         let mut core = AcpCore::new(&self.backend, &name, self.cwd.clone(), self.mcp.clone(), resume);
+        core.question = self.question;
+        core.sign_in_fix = self.adapter.sign_in_fix();
         if self.approver.is_some() {
             core = core.deciding();
         }
@@ -541,7 +668,9 @@ impl AcpConversation {
         let (shared, tx, busy) = (self.shared.clone(), self.tx.clone(), self.busy.clone());
         let shared_err = self.shared.clone();
         let tx_err = tx.clone();
-        let mut proc = Process::new(&self.program)
+        let mut proc = self
+            .adapter
+            .process(&self.program)
             .args(&self.args)
             .cwd(&self.cwd)
             .stdin(StdinMode::Piped)
@@ -579,6 +708,7 @@ impl AcpConversation {
             let outs = s.core.start();
             s.apply(outs, &self.shared, &self.tx, &self.busy);
         }
+        let _ = self.tx.send(AgentEvent::Status { text: "Usage totals are unavailable over ACP. Check usage and billing in the agent CLI.".into() });
         Ok(())
     }
 
@@ -699,6 +829,56 @@ impl Drop for AcpConversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copilot_uses_stdio_acp() {
+        assert_eq!(acp_args("copilot"), Some(["--acp", "--stdio"].as_slice()));
+        assert!(acp_args("unknown-agent").is_none());
+    }
+
+    #[test]
+    fn copilot_authentication_stays_in_its_cli() {
+        let mut core = core(None);
+        core.sign_in_fix = super::super::adapter_for("copilot").sign_in_fix();
+        core.start();
+        let output = events(core.line(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Authentication required"}}"#));
+        assert!(
+            matches!(&output[0], AgentEvent::Error { remediation: Some(fix), .. } if fix.contains("copilot login") && fix.contains("restart Craft Anything"))
+        );
+    }
+
+    #[test]
+    fn copilot_model_choices_come_from_the_session_not_a_fixed_catalogue() {
+        let mut core = core(None);
+        core.start();
+        core.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        core.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"copilot-test","models":{"availableModels":[{"modelId":"model-one","name":"One"},{"modelId":"model-two","name":"Two"},{"name":"missing-id"}]}}}"#);
+        assert_eq!(core.models, ["model-one", "model-two"]);
+        assert!(core.ready);
+    }
+
+    #[test]
+    fn model_metadata_deadlines_name_the_current_agent() {
+        for (agent, name) in [("gemini-cli", "Gemini CLI"), ("copilot", "GitHub Copilot")] {
+            let mcp = McpCommand { command: "not-started".into(), args: Vec::new(), notes: None };
+            let conversation = AcpConversation::new("Test", agent, "not-started".into(), Vec::new(), PathBuf::new(), mcp, None);
+            let error = conversation.model_metadata_timeout();
+            assert_eq!(error.message, format!("{name} did not list its models before the deadline."));
+            assert_eq!(error.remediation.unwrap().contains("copilot login"), agent == "copilot");
+        }
+    }
+
+    #[test]
+    fn a_read_only_question_opens_a_fresh_session_without_mcp_and_refuses_permissions() {
+        let mut core = core(None);
+        core.question = true;
+        core.start();
+        let new = sent(&core.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#));
+        assert_eq!(new[0]["method"], "session/new");
+        assert_eq!(new[0]["params"]["mcpServers"], json!([]));
+        let reply = sent(&core.line(r#"{"jsonrpc":"2.0","id":"permission","method":"session/request_permission","params":{"toolCall":{"kind":"edit"},"options":[{"optionId":"allow","kind":"allow_once"}]}}"#));
+        assert_eq!(reply[0]["result"]["outcome"]["outcome"], "cancelled");
+    }
 
     fn core(resume: Option<&str>) -> AcpCore {
         let mcp = McpCommand { command: "/opt/ca/craft-anything-cli".into(), args: vec!["mcp".into()], notes: None };

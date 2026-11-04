@@ -20,6 +20,8 @@ const XML_RESOURCE_MAP: u16 = 0x0180;
 const MAX_STRINGS: usize = 1_000_000;
 /// Longest string kept (characters).
 const MAX_STRING: usize = 64 * 1024;
+/// Most extra UTF-8 length candidates examined across one string pool.
+const MAX_RECOVERY_PROBES: usize = 65_536;
 /// Most XML nodes decoded.
 const MAX_NODES: usize = 200_000;
 /// Deepest element nesting tracked.
@@ -57,31 +59,49 @@ impl StringPool {
 
     /// Parse the pool whose chunk starts at `off`.
     pub fn parse(data: &[u8], off: usize) -> Result<StringPool, FormatError> {
+        let mut recovery_left = MAX_RECOVERY_PROBES;
+        Self::parse_with_recovery_budget(data, off, &mut recovery_left)
+    }
+
+    fn parse_with_recovery_budget(data: &[u8], off: usize, recovery_left: &mut usize) -> Result<StringPool, FormatError> {
         let r = Reader::new(data);
-        let (t, _h, size) = chunk(&r, off).ok_or_else(|| FormatError::Truncated("string pool header".into()))?;
+        let (t, hdr, size) = chunk(&r, off).ok_or_else(|| FormatError::Truncated("string pool header".into()))?;
         if t != RES_STRING_POOL {
             return Err(FormatError::Malformed(format!("expected a string pool, found chunk type {t:#x}")));
         }
-        let end = off + size;
-        let count = r.u32_le(off + 8).ok_or_else(|| FormatError::Truncated("string pool".into()))? as usize;
-        let flags = r.u32_le(off + 16).ok_or_else(|| FormatError::Truncated("string pool".into()))?;
-        let strings_start = r.u32_le(off + 20).ok_or_else(|| FormatError::Truncated("string pool".into()))? as usize;
-        let utf8 = flags & (1 << 8) != 0;
-        let hdr = usize::from(r.u16_le(off + 2).unwrap_or(28));
-        if count.saturating_mul(4) > size {
-            return Err(FormatError::Malformed(format!("string pool declares {count} strings in {size} bytes")));
+        if hdr < 28 {
+            return Err(FormatError::Malformed("string pool header is smaller than 28 bytes".into()));
         }
-        let base = off.checked_add(strings_start).ok_or_else(|| FormatError::Malformed("string data offset".into()))?;
+        let r = Reader::new(r.slice(off, size).ok_or_else(|| FormatError::Truncated("string pool".into()))?);
+        let count = r.u32_le(8).ok_or_else(|| FormatError::Truncated("string pool".into()))? as usize;
+        let styles = r.u32_le(12).ok_or_else(|| FormatError::Truncated("string pool".into()))? as usize;
+        let flags = r.u32_le(16).ok_or_else(|| FormatError::Truncated("string pool".into()))?;
+        let strings_start = r.u32_le(20).ok_or_else(|| FormatError::Truncated("string pool".into()))? as usize;
+        let styles_start = r.u32_le(24).ok_or_else(|| FormatError::Truncated("string pool".into()))? as usize;
+        let utf8 = flags & (1 << 8) != 0;
+        let offsets_end = count
+            .checked_add(styles)
+            .and_then(|n| n.checked_mul(4))
+            .and_then(|n| hdr.checked_add(n))
+            .ok_or_else(|| FormatError::Malformed("string pool offset tables are too large".into()))?;
+        if offsets_end > size || strings_start > size || (count != 0 && strings_start < offsets_end) {
+            return Err(FormatError::Malformed("string pool offset tables or string data lie outside their area".into()));
+        }
+        if (styles != 0 && styles_start == 0) || (styles_start != 0 && (styles_start < offsets_end || styles_start < strings_start || styles_start > size)) {
+            return Err(FormatError::Malformed("string pool style data lie outside their area".into()));
+        }
+        let end = if styles_start == 0 { size } else { styles_start };
+        let string_bytes = r.slice(strings_start, end - strings_start).ok_or_else(|| FormatError::Truncated("string data".into()))?;
+        let strings_reader = Reader::new(string_bytes);
         let mut strings = Vec::with_capacity(count.min(MAX_STRINGS).min(65_536));
         for i in 0..count.min(MAX_STRINGS) {
-            let so = r.u32_le(off + hdr + i * 4).ok_or_else(|| FormatError::Truncated("string offsets".into()))? as usize;
-            let at = base.saturating_add(so);
-            let s = if at >= end {
+            let at = r.u32_le(hdr + i * 4).ok_or_else(|| FormatError::Truncated("string offsets".into()))? as usize;
+            let s = if at >= string_bytes.len() {
                 None
             } else if utf8 {
-                utf8_string(&r, at, end)
+                utf8_string(&strings_reader, at, string_bytes.len(), recovery_left)
             } else {
-                utf16_string(&r, at, end)
+                utf16_string(&strings_reader, at, string_bytes.len())
             };
             strings.push(s.unwrap_or_default());
         }
@@ -99,12 +119,24 @@ fn utf8_len(r: &Reader<'_>, at: usize) -> Option<(usize, usize)> {
     }
 }
 
-fn utf8_string(r: &Reader<'_>, at: usize, end: usize) -> Option<String> {
+fn utf8_string(r: &Reader<'_>, at: usize, end: usize, recovery_left: &mut usize) -> Option<String> {
     let (_chars, n1) = utf8_len(r, at)?;
-    let (bytes, n2) = utf8_len(r, at.checked_add(n1)?)?;
+    let (mut bytes, n2) = utf8_len(r, at.checked_add(n1)?)?;
     let start = at.checked_add(n1 + n2)?;
-    if start.checked_add(bytes)? > end {
-        return None;
+    // Older AAPT keeps only the low 15 length bits; probe matching lengths inside this pool.
+    loop {
+        let terminator = start.checked_add(bytes)?;
+        if terminator >= end {
+            return None;
+        }
+        // The declared candidate costs one read per entry, already bounded by MAX_STRINGS.
+        if bytes >= 0x8000 {
+            *recovery_left = recovery_left.checked_sub(1)?;
+        }
+        if r.u8(terminator)? == 0 {
+            break;
+        }
+        bytes = bytes.checked_add(0x8000)?;
     }
     let b = r.slice(start, bytes.min(MAX_STRING * 4))?;
     Some(String::from_utf8_lossy(b).into_owned())
@@ -114,7 +146,8 @@ fn utf16_string(r: &Reader<'_>, at: usize, end: usize) -> Option<String> {
     let u0 = usize::from(r.u16_le(at)?);
     let (len, hdr) = if u0 & 0x8000 != 0 { (((u0 & 0x7fff) << 16) | usize::from(r.u16_le(at + 2)?), 4) } else { (u0, 2) };
     let start = at.checked_add(hdr)?;
-    if start.checked_add(len.checked_mul(2)?)? > end {
+    let terminator = start.checked_add(len.checked_mul(2)?)?;
+    if terminator.checked_add(2)? > end || r.u16_le(terminator)? != 0 {
         return None;
     }
     let n = len.min(MAX_STRING);
@@ -661,6 +694,115 @@ pub fn manifest(doc: &Document) -> Manifest {
 mod tests {
     use super::*;
     use craft_anything_testkit::android as fx;
+
+    fn pool_with_offsets(offsets: &[u32], string_data: &[u8]) -> Vec<u8> {
+        let start = 28 + offsets.len() * 4;
+        let mut data = vec![0; start];
+        data[..2].copy_from_slice(&RES_STRING_POOL.to_le_bytes());
+        data[2..4].copy_from_slice(&28u16.to_le_bytes());
+        data[8..12].copy_from_slice(&(offsets.len() as u32).to_le_bytes());
+        data[16..20].copy_from_slice(&0x100u32.to_le_bytes());
+        data[20..24].copy_from_slice(&(start as u32).to_le_bytes());
+        for (i, offset) in offsets.iter().enumerate() {
+            let at = 28 + i * 4;
+            data[at..at + 4].copy_from_slice(&offset.to_le_bytes());
+        }
+        data.extend_from_slice(string_data);
+        data.resize(data.len().next_multiple_of(4), b'x');
+        let size = data.len() as u32;
+        data[4..8].copy_from_slice(&size.to_le_bytes());
+        data
+    }
+
+    fn append_legacy_ascii(data: &mut Vec<u8>, len: usize) -> u32 {
+        let offset = data.len() as u32;
+        let encoded = [0x80 | ((len >> 8) & 0x7f) as u8, (len & 0xff) as u8];
+        data.extend_from_slice(&encoded);
+        data.extend_from_slice(&encoded);
+        data.resize(data.len() + len, b'x');
+        data.push(0);
+        offset
+    }
+
+    #[test]
+    fn repeated_offsets_share_the_utf8_recovery_budget() {
+        let mut strings = Vec::new();
+        let long = append_legacy_ascii(&mut strings, 0x8000);
+        let short = strings.len() as u32;
+        strings.extend_from_slice(b"\x02\x02ok\0");
+        let data = pool_with_offsets(&[long, long, long, short], &strings);
+        let mut left = 2;
+        let parsed = StringPool::parse_with_recovery_budget(&data, 0, &mut left).unwrap();
+        assert_eq!(left, 0);
+        assert_eq!(parsed.declared, 4);
+        assert_eq!(parsed.strings.len(), 4);
+        assert_eq!(parsed.get(0).map(str::len), Some(0x8000));
+        assert_eq!(parsed.get(1), parsed.get(0));
+        assert_eq!(parsed.get(2), Some(""));
+        assert_eq!(parsed.get(3), Some("ok"));
+    }
+
+    #[test]
+    fn distinct_offsets_share_the_utf8_recovery_budget() {
+        let mut strings = Vec::new();
+        let mut offsets: Vec<u32> = (0..3).map(|_| append_legacy_ascii(&mut strings, 0x8000)).collect();
+        offsets.push(strings.len() as u32);
+        strings.extend_from_slice(b"\x02\x02ok\0");
+        let data = pool_with_offsets(&offsets, &strings);
+        let mut left = 2;
+        let parsed = StringPool::parse_with_recovery_budget(&data, 0, &mut left).unwrap();
+        assert_eq!(left, 0);
+        assert_eq!(parsed.get(0).map(str::len), Some(0x8000));
+        assert_eq!(parsed.get(1).map(str::len), Some(0x8000));
+        assert_eq!(parsed.get(2), Some(""));
+        assert_eq!(parsed.get(3), Some("ok"));
+    }
+
+    #[test]
+    fn utf8_recovery_stops_before_a_probe_without_credit() {
+        let mut strings = Vec::new();
+        let long = append_legacy_ascii(&mut strings, 0x10000);
+        let short = strings.len() as u32;
+        strings.extend_from_slice(b"\x02\x02ok\0");
+        let data = pool_with_offsets(&[long, short], &strings);
+        for (allowance, length, remaining) in [(0, 0, 0), (1, 0, 0), (2, 0x10000, 0), (3, 0x10000, 1)] {
+            let mut left = allowance;
+            let parsed = StringPool::parse_with_recovery_budget(&data, 0, &mut left).unwrap();
+            assert_eq!(left, remaining);
+            assert_eq!(parsed.get(0).map(str::len), Some(length));
+            assert_eq!(parsed.get(1), Some("ok"));
+        }
+    }
+
+    #[test]
+    fn short_strings_and_out_of_bounds_candidates_spend_no_recovery_probes() {
+        let data = pool_with_offsets(&[0, 5], b"\x80\0\x80\0x\x02\x02ok\0");
+        let mut left = 7;
+        let parsed = StringPool::parse_with_recovery_budget(&data, 0, &mut left).unwrap();
+        assert_eq!(left, 7);
+        assert_eq!(parsed.get(0), Some(""));
+        assert_eq!(parsed.get(1), Some("ok"));
+    }
+
+    #[test]
+    fn default_pool_budget_stops_repeated_recovery_before_later_long_strings() {
+        let mut strings = vec![b'x'; 2 * 0x8000 + 16];
+        strings[..4].copy_from_slice(&[0x80, 0, 0x80, 0]);
+        let long = append_legacy_ascii(&mut strings, 0x8000);
+        let short = strings.len() as u32;
+        strings.extend_from_slice(b"\x02\x02ok\0");
+        // Offset zero has three in-bounds extra candidates, all nonzero.
+        let repeated = MAX_RECOVERY_PROBES / 3 + 1;
+        let mut offsets = vec![0; repeated];
+        offsets.extend([long, short]);
+        let data = pool_with_offsets(&offsets, &strings);
+        let parsed = StringPool::parse(&data, 0).unwrap();
+        assert_eq!(parsed.declared, repeated + 2);
+        assert_eq!(parsed.strings.len(), repeated + 2);
+        assert!(parsed.strings[..repeated].iter().all(String::is_empty));
+        assert_eq!(parsed.get(repeated as u32), Some(""));
+        assert_eq!(parsed.get((repeated + 1) as u32), Some("ok"));
+    }
 
     #[test]
     fn decodes_manifest() {
