@@ -147,6 +147,9 @@ impl TargetKind for WebsiteKind {
         } else if cx.says(&[" website", " web page", " webpage", " landing page", " site ", " webseite", " internetseite", "网站", "網站", "网页", "網頁"])
         {
             Some(50)
+        } else if matches!(cx.target, TargetRef::None) && stacks::get(cx.stack).is_some_and(|s| s.site) {
+            // Built as a site with nothing to recreate: "add a contact form" never says website.
+            Some(30)
         } else {
             None
         }

@@ -2590,6 +2590,52 @@ fn a_project_edited_in_place_keeps_what_its_files_are_built_with() {
     assert_eq!(first("project.godot", "Fix my game's jump", StartFrom), Some("Unity"), "material to start from doesn't decide");
 }
 
+/// A folder of the person's own with this file in it, as a project of `existing`.
+fn own_folder(file: &str, existing: craft_anything_engine::workspace::ExistingFiles) -> (tempfile::TempDir, Workspace) {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join(file), "<p>hi</p>").unwrap();
+    let ws = Workspace::create_at(d.path(), "Mine", "Add a contact form", TargetRef::None, Some(existing)).unwrap();
+    (d, ws)
+}
+
+#[test]
+fn a_persons_own_project_is_judged_by_its_own_build_and_tests_whatever_its_kind() {
+    use craft_anything_engine::workspace::ExistingFiles::Edit;
+    let (_d, ws) = own_folder("index.html", Edit);
+    let r = check_worker(&ws, false).run_checks(&ws, &GameKind, 1).unwrap();
+    assert_eq!(r.iter().map(|c| c.check.as_str()).collect::<Vec<_>>(), [CheckResult::BUILD, kinds::own::OwnTestsCheck::ID]);
+    assert!(r.iter().all(|c| c.passed), "{r:?}");
+    assert!(r[1].note.starts_with("No tests ran"), "says what wasn't run: {}", r[1].note);
+}
+
+#[test]
+fn a_persons_own_project_is_asked_for_nothing_it_would_add_for_our_sake() {
+    use craft_anything_engine::workspace::ExistingFiles::{Edit, StartFrom};
+    let (_d, mut own) = own_folder("main.py", Edit);
+    for kind in ["app", "game"] {
+        let b = brief(&own, kind, false, false, None, false, None);
+        assert!(!b.contains("--screenshot") && !b.contains("--self-test") && !b.contains("MECHANICS.md"), "{kind}: {b}");
+        assert!(b.contains("its own build and tests"), "{kind}: {b}");
+    }
+    own.manifest.generate_assets = true;
+    let b = brief(&own, "game", false, false, None, true, None);
+    assert!(b.contains("assets/generated/") && !b.contains("--screenshot"), "what the person turned on still reaches it: {b}");
+    let (_d, beside) = own_folder("main.py", StartFrom);
+    let b = brief(&beside, "app", false, false, None, false, None);
+    assert!(b.contains("--screenshot") && !b.contains("its own build and tests"), "a new app beside the files proves itself: {b}");
+}
+
+#[test]
+fn a_site_stack_with_nothing_to_recreate_is_a_website() {
+    let vite = "React + TypeScript (Vite)";
+    assert_eq!(kind_of("Add a contact form", &TargetRef::None, "Plain HTML and CSS"), "website");
+    assert_eq!(kind_of("A calculator in react", &TargetRef::None, vite), "website", "it can't be started as a program");
+    assert_eq!(kind_of("Add a high score to my game", &TargetRef::None, vite), "game", "the person's words come first");
+    assert_eq!(kind_of("Add a settings page", &TargetRef::None, "Python"), "app");
+    assert_eq!(kind_of("Add a settings page", &TargetRef::None, "Electron"), "app", "a window, not a site");
+    assert_eq!(kind_of("Copy this tool", &TargetRef::Local { path: "/x/tool".into() }, vite), "app", "an original decides");
+}
+
 #[test]
 fn the_extractors_transcript_is_one_of_craft_anythings_own_files() {
     assert!(craft_anything_engine::workspace::OWN_NAMES.contains(&brief::EXTRACT_TRANSCRIPT), "a picked folder with this name would be overwritten");

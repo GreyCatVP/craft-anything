@@ -1,26 +1,78 @@
 //! Building a project with its own tools (cargo, npm, or the game engine's), for [`BuildCheck`].
-//! A plain static site has no build, and passes as it is.
+//! A plain static site has no build, and passes as it is. A person's own project builds and tests
+//! itself the way its toolchain says.
 
 use super::*;
+
+/// Run a step of a project's build in `app`: whether it succeeded, and what it printed.
+fn run_in(app: &Path, prog: &Path, args: &[String], minutes: u64, stop: &CancelToken) -> Result<(bool, String), String> {
+    let s = stop.clone();
+    craft_anything_platform::Process::new(prog)
+        .args(args)
+        .cwd(app)
+        .timeout(Duration::from_secs(minutes * 60))
+        // Engines go quiet for long stretches (shader compiles, cooking, a cold cargo build).
+        .idle_timeout(Duration::from_secs(60 * 60))
+        .stdout_cap(8 << 20)
+        .cancel_when(move || s.is_cancelled())
+        .run()
+        .map(|o| (o.success, format!("{}{}", o.stdout_text(), o.stderr_text())))
+        .map_err(|e| e.message)
+}
+
+/// Run one of a toolchain's commands in `app`.
+fn run_tool(app: &Path, tool: &stacks::Toolchain, command: &[String], minutes: u64, stop: &CancelToken) -> Result<(bool, String), String> {
+    let Some((program, args)) = command.split_first() else { return Err(format!("{} has no such command.", tool.name)) };
+    let local = tool.local_programs.iter().map(|p| app.join(p)).find(|p| p.is_file());
+    let system = tool.windows_program.as_ref().filter(|_| cfg!(windows)).unwrap_or(program);
+    run_in(app, local.as_deref().unwrap_or(Path::new(system)), args, minutes, stop)
+}
+
+/// A person's own project: its engine's build, else its toolchain's, else a static site. One we
+/// know no way to build isn't a failure, and the note says nothing ran.
+pub(super) fn own_build_check(app: &Path, place: &str, stack: &str, editor: Option<&Path>, stop: &CancelToken) -> (bool, String) {
+    let engine = engine_for(stack, app).is_some();
+    match stacks::toolchain_in(app).filter(|_| !engine) {
+        Some(tool) => own_build(app, tool, stop),
+        None if engine || static_site(app) => build_check(app, place, stack, editor, stop),
+        None => (true, "Nothing was built: Craft Anything doesn't know how to build this kind of project.".into()),
+    }
+}
+
+fn own_build(app: &Path, tool: &stacks::Toolchain, stop: &CancelToken) -> (bool, String) {
+    match run_tool(app, tool, &tool.build, 2 * 60, stop) {
+        Ok((true, _)) => (true, format!("`{}` passed.", tool.build.join(" "))),
+        Ok((false, out)) => (false, format!("Build failed: {}", error_lines(&out))),
+        Err(e) => (false, format!("Couldn't run the build: {e}")),
+    }
+}
+
+/// A person's own project: run its tests. Output that says none ran isn't a failure, and neither
+/// is a project we know no way to test, and the note says so.
+pub(super) fn own_tests_check(app: &Path, tool: Option<&stacks::Toolchain>, stop: &CancelToken) -> (bool, String) {
+    let Some(tool) = tool else { return (true, "No tests ran: Craft Anything doesn't know how to test this kind of project.".into()) };
+    match run_tool(app, tool, &tool.test, 30, stop) {
+        Ok((true, _)) => (true, format!("`{}` passed.", tool.test.join(" "))),
+        Ok((false, out)) => match tool.no_tests.iter().find(|n| out.contains(n.as_str())) {
+            Some(why) => (true, format!("No tests ran: {why}.")),
+            None => (false, format!("The project's tests failed:\n{}", last_lines(&out, 20))),
+        },
+        Err(e) => (false, format!("Couldn't run the tests: {e}")),
+    }
+}
+
+/// The last `n` lines with something on them: where a test run sums up what failed.
+fn last_lines(out: &str, n: usize) -> String {
+    let mut lines: Vec<&str> = out.lines().rev().filter(|l| !l.trim().is_empty()).take(n).collect();
+    lines.reverse();
+    lines.join("\n")
+}
 
 /// For non-website builds: run the project's build (its engine's own, for Unity, Unreal and
 /// Godot) and report whether it succeeded, with a note (the first error lines when it didn't).
 /// `place` says where `app` is, for messages (`Workspace::app_place`).
 pub(super) fn build_check(app: &Path, place: &str, stack: &str, editor: Option<&Path>, stop: &CancelToken) -> (bool, String) {
-    let run = |prog: &Path, args: &[String], minutes: u64| {
-        let s = stop.clone();
-        craft_anything_platform::Process::new(prog)
-            .args(args)
-            .cwd(app)
-            .timeout(Duration::from_secs(minutes * 60))
-            // Engines go quiet for long stretches (shader compiles, cooking, a cold cargo build).
-            .idle_timeout(Duration::from_secs(60 * 60))
-            .stdout_cap(8 << 20)
-            .cancel_when(move || s.is_cancelled())
-            .run()
-            .map(|o| (o.success, format!("{}{}", o.stdout_text(), o.stderr_text())))
-            .map_err(|e| format!("Couldn't run the build: {}", e.message))
-    };
+    let run = |prog: &Path, args: &[String], minutes: u64| run_in(app, prog, args, minutes, stop).map_err(|e| format!("Couldn't run the build: {e}"));
     let app_s = app.display().to_string();
     let built = || packaged_program(&app.join("Build")).is_some();
     let result: Result<(bool, String), String> = match (engine_for(stack, app), editor) {
@@ -163,6 +215,63 @@ pub(super) fn error_lines(out: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in toolchain whose build and tests are this shell line.
+    #[cfg(unix)]
+    fn stand_in(line: &str, no_tests: &[&str]) -> stacks::Toolchain {
+        let command = ["sh", "-c", line].map(String::from).to_vec();
+        stacks::Toolchain { build: command.clone(), test: command, no_tests: no_tests.iter().map(|s| s.to_string()).collect(), ..Default::default() }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_persons_own_tests_decide_and_no_tests_is_no_failure() {
+        let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
+        let tests = |tool: &stacks::Toolchain| own_tests_check(d.path(), Some(tool), &stop);
+        assert!(tests(&stand_in("exit 0", &[])).0);
+        let (passed, note) = tests(&stand_in("echo 'adds: 4 is not 5'; echo; echo '1 failed'; exit 1", &[]));
+        assert!(!passed && note.ends_with("adds: 4 is not 5\n1 failed"), "the summary, not only lines saying error: {note}");
+        let (passed, note) = tests(&stand_in("echo no tests here; exit 5", &["no tests here"]));
+        assert!(passed && note.starts_with("No tests ran"), "{note}");
+        let missing = stacks::Toolchain { test: vec!["no-such-program-here".into()], ..Default::default() };
+        let (passed, note) = tests(&missing);
+        assert!(!passed && note.starts_with("Couldn't run the tests"), "{note}");
+        let (passed, note) = own_tests_check(d.path(), None, &stop);
+        assert!(passed && note.starts_with("No tests ran"), "{note}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_projects_own_copy_of_the_program_comes_first() {
+        let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
+        std::os::unix::fs::symlink("/bin/sh", d.path().join("own-sh")).unwrap();
+        let test = ["no-such-program-here", "-c", "echo 'error: from its own copy'; exit 1"].map(String::from).to_vec();
+        let tool = stacks::Toolchain { test, local_programs: vec!["not-here".into(), "own-sh".into()], ..Default::default() };
+        let (passed, note) = own_tests_check(d.path(), Some(&tool), &stop);
+        assert!(!passed && note.contains("from its own copy"), "{note}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_persons_own_build_is_judged_by_its_toolchain() {
+        let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
+        assert!(own_build(d.path(), &stand_in("exit 0", &[]), &stop).0);
+        let (passed, note) = own_build(d.path(), &stand_in("echo 'error: no such file'; exit 2", &[]), &stop);
+        assert!(!passed && note.contains("no such file"), "{note}");
+    }
+
+    #[test]
+    fn a_persons_own_project_with_nothing_to_build_says_so() {
+        let stop = CancelToken::default();
+        let notes = tempfile::tempdir().unwrap();
+        std::fs::write(notes.path().join("notes.md"), "ideas").unwrap();
+        let (passed, note) = own_build_check(notes.path(), "the project folder", stacks::BUILDERS_CHOICE, None, &stop);
+        assert!(passed && note.starts_with("Nothing was built"), "{note}");
+        let site = tempfile::tempdir().unwrap();
+        std::fs::write(site.path().join("index.html"), "<p>hi</p>").unwrap();
+        let (passed, note) = own_build_check(site.path(), "the project folder", "Plain HTML and CSS", None, &stop);
+        assert!(passed && note.contains("static site"), "{note}");
+    }
 
     #[test]
     fn the_build_follows_what_was_built_not_the_stack_picked_first() {

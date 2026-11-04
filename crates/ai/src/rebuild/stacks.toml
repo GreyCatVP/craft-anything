@@ -15,8 +15,18 @@
 # the others in this order, so "Builder's choice" takes any project whose dependencies name no
 # stack here: the builder keeps to what's there.
 #
+# `site` marks a stack whose build is a website, so a project built with it and with nothing to
+# recreate is one, whatever its request says.
+#
 # A `[[library]]` is a component or styling library asked for on top of a stack ("shadcn",
 # "tailwind"): its `steps` are added to the stack's for the `stacks` it works with.
+#
+# A `[[toolchain]]` says how a project builds and tests itself, by the file that names the tool
+# (the first in this order wins), so a person's own project can be checked in any language.
+# `build` and `test` are a program and its arguments, run in the project's folder; `no_tests` is
+# what its output says when no tests ran, which isn't a failure; `local_programs` are the
+# project's own copies of the program, used first when one's there; `windows_program` is its
+# name on Windows, where it differs.
 
 [[stack]]
 name = "Builder's choice"
@@ -31,6 +41,7 @@ steps = "Use Electron, with TypeScript or JavaScript (a bundler such as Vite is 
 
 [[stack]]
 name = "Next.js + TypeScript"
+site = true
 asked_by = [" nextjs ", " next js ", " use next ", " using next ", " in next "]
 uses = ["next"]
 steps = "Use Next.js (App Router) + React + TypeScript, exported as a static site. Create the project files directly in app/: package.json with next, react and react-dom and the script \"build\": \"next build\"; next.config.mjs with output: 'export', trailingSlash: true and images: { unoptimized: true }; tsconfig.json; src/app/layout.tsx and src/app/page.tsx, with one folder per other page under src/app/. Load the original's fonts with next/font. Use nothing a static export can't serve (API routes, server actions, middleware, dynamic routes without generateStaticParams). Then run `npm install` and `npm run build` from app/ until it succeeds; the output must be app/out and must work when served as static files."
@@ -42,6 +53,7 @@ found_by = ["pyproject.toml", "requirements.txt", "setup.py"]
 
 [[stack]]
 name = "React + TypeScript (Vite)"
+site = true
 asked_by = [" in typescript", " in react", " with react", " in javascript", " vite "]
 uses = ["vite"]
 needs = ["react"]
@@ -49,6 +61,7 @@ steps = "Use Vite + React + TypeScript. Create the project files directly in app
 
 [[stack]]
 name = "Plain HTML and CSS"
+site = true
 asked_by = [" html and css ", " plain html ", " no frameworks ", " no javascript ", " no build step ", " static html "]
 found_by = ["index.html"]
 steps = "Use plain HTML, CSS and a little JavaScript only if the page needs it: no framework, no bundler, no build step. Create the project directly in app/: index.html at the top, one .css file (and .js only if needed) beside it, with each other page at its own path (about.html, contact.html). Link the stylesheet with a relative path. Then check that the pages open and look right when served as static files; there is nothing to build."
@@ -98,3 +111,57 @@ name = "Tailwind CSS"
 asked_by = [" tailwind ", " tailwindcss "]
 stacks = ["Next.js + TypeScript", "React + TypeScript (Vite)", "Electron", "Builder's choice"]
 steps = "Style with Tailwind CSS (v4, through @tailwindcss/postcss for Next.js or @tailwindcss/vite for Vite), with the original's colours, fonts, text sizes, spacing and breakpoints from capture.json as theme tokens in an @theme block."
+
+[[toolchain]]
+name = "Rust"
+found_by = ["Cargo.toml"]
+build = ["cargo", "build", "--quiet"]
+test = ["cargo", "test", "--quiet"]
+
+[[toolchain]]
+name = "Node.js"
+found_by = ["package.json"]
+build = ["npm", "run", "build", "--if-present"]
+test = ["npm", "test"]
+no_tests = ["no test specified", "Missing script"]
+windows_program = "npm.cmd"
+
+[[toolchain]]
+name = "Python"
+found_by = ["pyproject.toml", "requirements.txt", "setup.py"]
+build = ["python3", "-m", "compileall", "-q", "-x", '[\\/](\.?venv|node_modules|\.git)[\\/]', "."]
+test = ["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+no_tests = ["no tests ran", "No module named pytest"]
+local_programs = [".venv/bin/python", "venv/bin/python", ".venv/Scripts/python.exe", "venv/Scripts/python.exe"]
+windows_program = "python"
+
+[[toolchain]]
+name = "Go"
+found_by = ["go.mod"]
+build = ["go", "build", "./..."]
+test = ["go", "test", "./..."]
+
+[[toolchain]]
+name = ".NET"
+found_by = ["*.sln", "*.csproj"]
+build = ["dotnet", "build", "--nologo", "-v", "q"]
+test = ["dotnet", "test", "--nologo", "-v", "q"]
+
+[[toolchain]]
+name = "Maven"
+found_by = ["pom.xml"]
+build = ["mvn", "-q", "-B", "compile"]
+test = ["mvn", "-q", "-B", "test"]
+
+[[toolchain]]
+name = "Gradle"
+found_by = ["build.gradle", "build.gradle.kts"]
+build = ["gradle", "-q", "assemble"]
+test = ["gradle", "-q", "test"]
+
+[[toolchain]]
+name = "Make"
+found_by = ["Makefile"]
+build = ["make"]
+test = ["make", "test"]
+no_tests = ["No rule to make target", "don't know how to make test"]

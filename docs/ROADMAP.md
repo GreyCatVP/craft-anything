@@ -578,11 +578,20 @@ Owner: open · Status: in progress
       whose dependencies name no stack there is left to the builder. A request that read as a game
       used to ask for Unity even in a Godot project, and an app got the kind's default
       — claimed: xerenon, branch bugfix/r2.7-stack-from-files; PR #755
-- [ ] What a project edited in place is checked by: its kind still comes from the request's words,
-      so a website or a Python tool whose request doesn't say so is an app, and the app check then
-      fails with "There's no built program to start yet" (read in the code, not run). Let the
-      folder's stack decide the kind too, and say what "ready" means for a person's own project
+- [x] A person's own project (edited in place, nothing to recreate) is judged by what it does for
+      itself: its own build, then its own tests, through `[[toolchain]]` in `stacks.toml` (Rust,
+      Node.js, Python, Go, .NET, Maven, Gradle, Make). Nothing is added to it for our sake: no
+      `--screenshot`, `--self-test` or mechanics sheet. A site stack with nothing to recreate is a
+      website, whatever the request says
       — claimed: xerenon, branch feature/r2.7-own-project-checks
+- [ ] Run the Go, .NET, Maven and Gradle rows of `[[toolchain]]` on real projects, and every row
+      on Windows (`windows_program`): Rust, Node.js, Python and Make were run for real, on a Mac
+      only
+- [ ] A person's own tests that already failed before their request fail the check too, so the
+      builder is sent to fix them. If that proves a nuisance, run them once before the first turn
+      and hold it only to what it broke
+- [ ] A new project in Python, Go or the like still fails the build check ("No project to build
+      found") and has no program for the screenshot check: `[[toolchain]]` could build it too
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress

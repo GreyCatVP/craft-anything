@@ -115,8 +115,9 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
     let names = m.start_files.join(", ");
     let own = craft_anything_engine::workspace::OWN_NAMES.join(", ");
     Some(if m.app_in_root {
+        let checked = if m.own_project() { " It's checked by running its own build and tests: add nothing to it for Craft Anything's sake." } else { "" };
         format!(
-            "This project's app is the person's own folder, the project workspace itself, and it already has their files ({names}). Wherever these instructions say app/, use the workspace folder itself (./): work on their files in place, keep what works and change only what the request needs; never start over, delete or replace their work, and don't create an app/ folder. Craft Anything keeps its own records beside their files ({own}): leave those alone."
+            "This project's app is the person's own folder, the project workspace itself, and it already has their files ({names}). Wherever these instructions say app/, use the workspace folder itself (./): work on their files in place, keep what works and change only what the request needs; never start over, delete or replace their work, and don't create an app/ folder. Craft Anything keeps its own records beside their files ({own}): leave those alone.{checked}"
         )
     } else {
         format!(
@@ -259,7 +260,7 @@ pub(super) fn pictures_note(ws: &Workspace, kind: &dyn TargetKind) -> Option<Str
         "The person added {} picture(s) of the original: {names}. They show the result they expect. Open every one with the Read tool before you plan, and match what they show: the camera or view, the on-screen layout (menus, HUD, panels) and where each part sits, the colours and lighting, the look of surfaces and characters, and the proportions and scale. Make your own artwork in that style; don't trace or copy logos, characters or other artwork from them.",
         pics.len()
     );
-    if kind.self_screenshots() {
+    if kind.self_screenshots() && !ws.manifest.own_project() {
         s.push_str(" After each build, run the program with --screenshot to a file inside app/ (for example app/shots/now.png), open that picture with Read, compare it with each picture of the original, and fix the biggest differences first.");
     }
     Some(s)
