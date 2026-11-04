@@ -1286,7 +1286,9 @@ mod tests {
             std::fs::File::options().write(true).open(f).unwrap().set_modified(old).unwrap();
         }
         let third = save_pasted_picture(dir.path(), 2, 1, vec![0; 8], std::slice::from_ref(&second)).unwrap();
-        assert!(!p.exists() && second.exists() && third.exists());
+        // In the same millisecond as the first, the third takes the name its removal freed.
+        assert!((third == p || !p.exists()) && second.exists() && third.exists());
+        assert_ne!(std::fs::read(&third).ok(), Some(bytes), "the first paste is gone");
         let mut names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
         names.sort();
         assert_eq!(names.len(), 2, "no temp files left behind: {names:?}");

@@ -258,6 +258,13 @@ instead breaks desktops whose monitors are on the discrete card. Draw on the GPU
 screen, read from the connected displays, and keep wgpu's environment variables as the override;
 when a window is slow to open, check which adapter `desktop.log` says it drew with.
 
+**A Metal version taken from the OS, not from the compiler.** wgpu-hal picks the Metal shading
+language from the macOS version alone; on a 2012 iMac under OpenCore Legacy Patcher, macOS 15 asked
+for `metal3.2`, the compiler stopped at 3.1, every shader failed and the window never opened (#742,
+upstream #10687). Our `[patch]` of wgpu-hal probes the compiler (`vendor/wgpu-hal/CRAFT_ANYTHING.md`).
+The advice on a lost device named `CRAFT_ANYTHING_RENDERER`, which only Windows reads: check that
+advice names only settings the platform actually reads. Not run on the reporter's Mac.
+
 **A Mac app that couldn't find Claude Code, and offered a GitHub key instead.** An app opened from
 the Dock gets the system's short `PATH`, not the shell's, so `claude` in `~/.local/bin` wasn't
 found; "Built by" then fell back to "Claude Code on github.com-work", an `~/.ssh/config` alias
