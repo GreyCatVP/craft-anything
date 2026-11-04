@@ -658,6 +658,9 @@ Owner: maintainers · Status: in progress
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
 Gaps found while using the app for real projects.
+- [ ] Keep New project's content column fixed when the vertical scrollbar appears or disappears,
+      so switching between Make and Just look inside never shifts the page horizontally
+      — claimed: Codex, branch bugfix/r2.9-home-scrollbar-gutter
 - [x] Agent paragraphs with glossary terms and long file links wrap together without pushing
       their card or later messages under the sidebar (#523); Project and Ask bounds checked at two sizes
       — claimed: carl-dourado, branch hotfix/r2.9-523-message-width
