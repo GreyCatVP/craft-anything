@@ -986,6 +986,104 @@ fn a_limit_is_edited_in_the_row() {
     assert_eq!(stored_type(&root, Model3d).map(|t| t.limit_on), Some(true));
 }
 
+/// Selects what is in a limit field and types `text` over it.
+fn type_into_field(h: &mut Harness<'static, CraftApp>, label: &str, text: &str) {
+    h.get_by_label(label).click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.get_by_label(label).type_text(text);
+    h.run_steps(2);
+}
+
+/// A limit is changed while the project's ledger is damaged: the new limit is saved with the project
+/// and the ledger is left exactly as it was, still reported as unreadable.
+#[test]
+fn a_limit_is_edited_while_the_ledger_is_damaged() {
+    use craft_anything_engines::assets::AssetKind::Image;
+    let d = tempfile::tempdir().unwrap();
+    let ws = project_with_two_types(d.path());
+    let root = ws.root.clone();
+    let ledger = root.join("assets.json");
+    let damaged = b"{not-json";
+    std::fs::write(&ledger, damaged).unwrap();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    assert!(wait(&mut h, |a| a.facts.assets_error.is_some()), "the ledger is read, and found damaged");
+    h.run_steps(2);
+    h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
+    type_into_field(&mut h, "Pictures limit", "750");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 750.0)));
+    assert_eq!(stored_type(&root, Image).map(|t| (t.limit, t.limit_on)), Some((750.0, true)), "craft.json has the new limit");
+    assert_eq!(std::fs::read(&ledger).unwrap(), damaged, "the ledger is as it was");
+    // Switching the limit off is a change of the project too, and also leaves the ledger alone.
+    h.run_steps(3);
+    h.get_by_label("Pictures limit switch").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.types[&Image].limit_on)));
+    assert_eq!(stored_type(&root, Image).map(|t| (t.limit, t.limit_on)), Some((750.0, false)));
+    assert_eq!(std::fs::read(&ledger).unwrap(), damaged);
+    h.run_steps(3);
+    h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
+}
+
+/// A limit field shows the limit to the hundredth; going into it and out again changes nothing, so
+/// a limit with more places is not rounded by a visit. A fraction of a credit is shown as a number
+/// that can be typed back, and is not called a wrong amount while the field has the focus.
+#[test]
+fn visiting_a_limit_field_does_not_round_the_limit() {
+    use craft_anything_engines::assets::AssetKind::Image;
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = project_with_two_types(d.path());
+    ws.set_person(|m| {
+        if let Some(t) = m.assets.types.get_mut(&Image) {
+            t.limit = 0.456;
+        }
+    })
+    .unwrap();
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("0.46"));
+    // In and out, to another field: nothing is saved.
+    h.get_by_label("Pictures limit").click();
+    h.run_steps(2);
+    h.get_by_label("3D models limit").click();
+    h.run_steps(8);
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.456), "the limit is as it was");
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("0.46"));
+    // Typing what is shown is no change either.
+    type_into_field(&mut h, "Pictures limit", "0.46");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(8);
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.456));
+    // A different amount is a change.
+    type_into_field(&mut h, "Pictures limit", "0.7");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 0.7)));
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.7));
+    // A fraction of a credit is shown as a number, which is a limit.
+    type_into_field(&mut h, "Pictures limit", "0.004");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 0.004)));
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("0.004"));
+    h.get_by_label("Pictures limit").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Enter an amount from 0 to 10000000 credits.").is_none(), "what the field shows is an amount");
+    h.get_by_label("3D models limit").click();
+    h.run_steps(8);
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.004), "and visiting it leaves it as it is");
+}
+
 /// A type's provider and model are chosen in its row from the lists the providers gave: another
 /// provider starts the count afresh in its own unit, another model of the same provider keeps it, a
 /// model picked again has its stored price refreshed, and Off stops the type.
@@ -1310,13 +1408,16 @@ fn a_default_changed_while_the_providers_are_asked_reaches_the_session_and_the_f
     const CHILD: &str = "CRAFT_ANYTHING_HELD_SETTINGS_TEST";
     let Some(dir) = std::env::var_os(CHILD) else {
         let dir = tempfile::tempdir().unwrap();
-        Process::new(std::env::current_exe().unwrap())
+        let out = Process::new(std::env::current_exe().unwrap())
             .args(["--exact", "a_default_changed_while_the_providers_are_asked_reaches_the_session_and_the_file", "--nocapture"])
             .env(CHILD, dir.path())
             .env("CRAFT_ANYTHING_CONFIG_DIR", dir.path())
             .timeout(Duration::from_secs(120))
             .run_checked()
             .unwrap();
+        // A name that matches no test also exits cleanly, having run nothing.
+        let said = out.stdout_text();
+        assert!(said.contains("1 passed"), "the child ran the test: {said}");
         return;
     };
     let dir = std::path::PathBuf::from(dir);

@@ -748,12 +748,17 @@ fn used_of<'a>(facts: &'a Facts, ws: &Workspace, kind: AssetKind, t: &TypeAssets
     }
 }
 
-/// A number of credits: "120", "0.5", "under 0.01".
+/// A number of credits to the hundredth: "120", "0.5".
+fn credits_number(x: f64) -> String {
+    format!("{x:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// A number of credits used: "120", "0.5", "under 0.01".
 fn credits_words(x: f64) -> String {
     if x > 0.0 && x < 0.005 {
         return tr("under 0.01");
     }
-    format!("{x:.2}").trim_end_matches('0').trim_end_matches('.').to_string()
+    credits_number(x)
 }
 
 /// What has been used, in the unit's own look: "$0.40" for dollars, a plain number for credits.
@@ -764,11 +769,13 @@ fn used_words(unit: Unit, x: f64) -> String {
     }
 }
 
-/// A limit as its field shows it: "$5.00", or "500".
+/// A limit as its field shows it: "$5.00", or "500". Always something that can be typed back as a
+/// limit, so a fraction of a credit is written out ("0.004"), never as "under 0.01".
 fn limit_text(unit: Unit, x: f64) -> String {
     match unit {
         Unit::Usd => format!("${x:.2}"),
-        Unit::Credits => credits_words(x),
+        Unit::Credits if x > 0.0 && x < 0.005 => format!("{x}"),
+        Unit::Credits => credits_number(x),
     }
 }
 
@@ -848,8 +855,11 @@ fn limit_field(ui: &mut Ui, id: egui::Id, name: &str, unit: Unit, stored: f64, s
     }
     let mut typed = None;
     if response.lost_focus() {
+        // Only text that differs from what the field showed is a new limit: the field shows a limit
+        // to the hundredth, and going in and out of it must not round the one that is stored.
+        let changed = text.trim() != limit_text(unit, stored);
         match parse_limit(&text, unit) {
-            Some(x) if x != stored => typed = Some(x),
+            Some(x) if changed && x != stored => typed = Some(x),
             _ => text = limit_text(unit, stored),
         }
     }
@@ -2409,7 +2419,8 @@ mod tests {
     }
 
     /// A broken ledger is shown as unavailable until repaired, never as an empty spending history, and
-    /// is not written over; the limits can still be read and edited meanwhile.
+    /// is not written over; the limits are still shown meanwhile (that they can still be edited is
+    /// checked with the whole app, in the smoke tests).
     #[test]
     fn a_broken_ledger_is_reported_without_resetting_usage() {
         use egui_kittest::kittest::Queryable;
@@ -2500,6 +2511,15 @@ mod tests {
         assert_eq!(
             (used_words(Unit::Credits, 120.0).as_str(), used_words(Unit::Credits, 0.0).as_str(), used_words(Unit::Credits, 0.004).as_str()),
             ("120", "0", "under 0.01")
+        );
+        // A limit is written so that it can be typed back: a fraction of a credit in full, never "under 0.01".
+        for x in [0.004, 0.0001, 0.0049, 0.5, 0.456, 120.0, 10_000_000.0] {
+            let shown = limit_text(Unit::Credits, x);
+            assert!(parse_limit(&shown, Unit::Credits).is_some(), "{x} is shown as {shown:?}, which is not a limit");
+        }
+        assert_eq!(
+            (limit_text(Unit::Credits, 0.004).as_str(), limit_text(Unit::Credits, 0.0).as_str(), limit_text(Unit::Credits, 0.456).as_str()),
+            ("0.004", "0", "0.46")
         );
         // A limit is typed as a number; a dollar amount may start with the sign; nothing else goes.
         for (text, unit, expected) in [
