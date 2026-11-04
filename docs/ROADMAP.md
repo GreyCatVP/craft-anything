@@ -583,7 +583,7 @@ Owner: open · Status: in progress
       Node.js, Python, Go, .NET, Maven, Gradle, Make). Nothing is added to it for our sake: no
       `--screenshot`, `--self-test` or mechanics sheet. A site stack with nothing to recreate is a
       website, whatever the request says
-      — claimed: xerenon, branch feature/r2.7-own-project-checks
+      — claimed: xerenon, branch feature/r2.7-own-project-checks; PR #760
 - [ ] Run the Go, .NET, Maven and Gradle rows of `[[toolchain]]` on real projects, and every row
       on Windows (`windows_program`): Rust, Node.js, Python and Make were run for real, on a Mac
       only
