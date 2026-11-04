@@ -303,6 +303,10 @@ Privacy & Security → Open Anyway.
 
 RISC-V (riscv64): `craft-anything-<ver>-linux-riscv64.tar.gz`, a tarball only.
 
+The AppImage carries the CLI too: run `<AppImage> --cli <command>` (for example
+`<AppImage> --cli mcp` for an MCP client), or make a link to the AppImage named
+`craft-anything-cli` and run that.
+
 ### FreeBSD
 
 | Build | File |

@@ -26,11 +26,16 @@ pub fn can_install() -> bool {
 }
 
 /// Ghidra's headless launcher: in the folder the person picked (Ghidra's own folder, or one that
-/// holds it), then the managed install, then PATH, then where system packages put it.
+/// holds it), then the managed install, then PATH, then where system packages put it, then the
+/// folders where an unpacked copy is usually kept (#740).
 pub fn headless(install_dir: Option<&Path>, store: &Path) -> Option<PathBuf> {
     headless_configured(install_dir, store)
         .or_else(|| crate::find_on_path(&["analyzeHeadless.bat", "analyzeHeadless"]))
         .or_else(|| crate::well_known(ID).into_iter().find(|p| p.is_file()))
+        .or_else(|| {
+            let e = crate::engine(ID)?;
+            crate::find_in_known_roots(ID, e.host_exes(), &e.known_root_folders())
+        })
 }
 
 /// Ghidra's headless launcher in the folder the person picked or the managed install only: what
@@ -57,6 +62,11 @@ pub fn java_home(java_home: Option<&Path>, store: &Path) -> Option<PathBuf> {
 /// store, then point Ghidra at that Java. `progress` gets (what, bytes so far, total); a step with
 /// no bytes (0, `None`) is setting up. Returns the headless launcher.
 pub fn install(store: &Path, cancel: Option<Cancel>, progress: &dyn Fn(&str, u64, Option<u64>)) -> Result<PathBuf, ToolError> {
+    // Ghidra is already on this computer, outside our store (PATH, a system package, an unzipped
+    // copy in Downloads…): use it rather than download the same release again (#740).
+    if let Some(found) = headless(None, store).filter(|p| !p.starts_with(store)) {
+        return Ok(found);
+    }
     let (Some(ghidra), Some(java)) = (pin(ID), pin("java")) else {
         return Err(ToolError::new(ErrorCode::NotSupported, "Ghidra can't be installed for you on this computer.")
             .with_remediation(format!("Install Ghidra {VERSION} from {PAGE}, then choose its folder in Settings → Engines.")));

@@ -478,6 +478,18 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                             }
                                         }
                                     });
+                                    // A model the list doesn't offer: a newer one, a variant such as
+                                    // `opusplan`, or one another harness serves (#470).
+                                    let id = egui::Id::new(("other-model", &b.name));
+                                    let mut other = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
+                                    let label = ui.label(RichText::new(tr("Another model")).color(t.text_faint).size(theme::CAPTION));
+                                    let r = ui.add(egui::TextEdit::singleline(&mut other).desired_width(140.0)).labelled_by(label.id);
+                                    let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    if (widgets::link(ui, "Use").clicked() || entered) && !other.trim().is_empty() && other.trim() != current {
+                                        chosen_model = Some((b.name.clone(), other.trim().to_string()));
+                                        other.clear();
+                                    }
+                                    ui.data_mut(|d| d.insert_temp(id, other));
                                     if widgets::link(ui, "Cancel").clicked() {
                                         close_picker = true;
                                     }
@@ -734,7 +746,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
 
 /// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by
 /// its address (#54, #98). The server is asked for its models before it's added.
-fn server_form(app: &mut CraftApp, ui: &mut Ui) {
+/// The first run's AI step shows it too.
+pub(crate) fn server_form(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(14.0);
     widgets::caption(ui, "Add an AI by its address");
@@ -1106,6 +1119,55 @@ mod tests {
         app.hub.set_enabled("OpenCode", false).unwrap();
         draw(&mut app);
         assert!(app.agent_model_picker.is_none(), "a confirmed settings change still invalidates the picker");
+    }
+
+    /// An AI that finishes connecting is chosen, unless another choice (here "No AI for now") was
+    /// made while it connected.
+    #[test]
+    fn a_late_add_does_not_undo_a_choice_made_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Beginner, false));
+        let added = |choices| Ok(Done::BackendAdded { name: "Home server".into(), result: Ok(()), choices });
+        let started = app.backend_choices;
+        app.choose_backend(None);
+        app.handle_done(Finished { job: 0, result: added(started) });
+        assert_eq!(app.state.backend, None, "the late add must not override No AI for now");
+        app.handle_done(Finished { job: 0, result: added(app.backend_choices) });
+        assert_eq!(app.state.backend.as_deref(), Some("Home server"), "with no choice meanwhile, the added AI is chosen");
+        // Two adds at once: the first one's selection isn't a choice, so the second is selected too.
+        let started = app.backend_choices;
+        let other = |choices| Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices });
+        app.handle_done(Finished { job: 0, result: added(started) });
+        app.handle_done(Finished { job: 0, result: other(started) });
+        assert_eq!(app.state.backend.as_deref(), Some("Laptop"), "the add that finished last is selected");
+    }
+
+    /// A chat started while an AI connects is a choice too: the add doesn't switch AI under it.
+    #[test]
+    fn a_late_add_does_not_stop_a_chat_started_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Experienced, true));
+        // A closed local port: the chat starts, and its request fails without leaving this computer.
+        let config = BackendConfig {
+            name: "Box".into(),
+            kind: BackendKind::OpenaiCompatible,
+            model: "m".into(),
+            base_url: Some("http://127.0.0.1:9/v1".into()),
+            ssh_host: None,
+            enabled: true,
+        };
+        app.hub.add_backend(config, None).unwrap();
+        app.state.backend = Some("Box".into());
+        let started = app.backend_choices;
+        app.send("Hi");
+        assert!(app.conversation.is_some(), "the chat started");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "the chat's AI stays chosen");
+        assert!(app.conversation.is_some(), "the chat keeps going");
+        // A follow-up in a chat that started before the add counts the same way.
+        let started = app.backend_choices;
+        app.send("And then?");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "a follow-up keeps its AI");
+        assert!(app.conversation.is_some(), "the follow-up's answer keeps going");
     }
 }
 

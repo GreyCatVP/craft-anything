@@ -58,6 +58,11 @@ whenever a `Cargo.toml` changed.
 on a new branch, open a new PR that says it supersedes the old one, and comment on the old one.
 Don't close or rewrite other people's work without asking.
 
+**Review fixes pushed to a PR that had already merged.** #686 was merged hours before its review
+comments were acted on; the fixes went to its branch and the threads were answered "Fixed", while
+`main` had the code without them. Read `gh pr view --json state,headRefOid` before pushing to a PR's
+branch, and land anything late in a new PR from `main`.
+
 ## Tests
 
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
@@ -558,6 +563,13 @@ computer (and under the folder) that started it; a project synced to another com
 three more times. Anything a project keeps must still work where the folder goes: keep what the id
 points to as well (`agent-session.jsonl`), tell "not here" apart from a failure by a typed signal
 (`Conversation::session_lost`), and never retry what can't succeed.
+
+**An installer that downloaded what was already there.** Ghidra was found only on PATH and at two
+Linux folders, so an unzipped copy in Downloads, Program Files or a Homebrew cask was missed, and
+the install then downloaded the same release again (#740). Install folders are a search, not a
+list: scan the folders people keep such things in (`KnownRoot`, by folder name, a set number of
+levels down), and make an install use a copy already found outside our store. Test each layout
+(unzipped, cask, capitalised name) with temp folders, not the machine the test runs on.
 
 ## Agent tooling
 

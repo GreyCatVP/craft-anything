@@ -59,6 +59,31 @@ fn first_run_walks_through_four_screens() {
     h.get_by_label("Just look inside");
 }
 
+/// A model server on another computer can be added from the first run's AI step, without
+/// leaving for Settings.
+#[test]
+fn first_run_ai_step_can_add_a_server_by_its_address() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.get_by_label("I'm new to this").click();
+    h.run_steps(3);
+    assert_eq!(h.state().state.first_run, FirstRunStep::Brain);
+    let _ = h.get_by_label("Server address");
+    let _ = h.get_by_label("AI name");
+    // The demo already has an AI, so "we didn't find one" isn't said.
+    assert!(h.query_by_label("We didn't find an AI on this computer yet").is_none());
+}
+
+/// A message (such as a server that couldn't be reached) shows on the first run too.
+#[test]
+fn first_run_shows_messages() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.state_mut().toast("Couldn't reach the server", true);
+    h.run_steps(3);
+    let _ = h.get_by_label("Couldn't reach the server");
+}
+
 /// #231: at the smallest window the app allows, Purpose's Continue was below the window with
 /// nothing to scroll; it scrolls into view above the footer and works.
 #[test]
@@ -1064,6 +1089,31 @@ fn an_ais_model_is_changed_in_settings() {
     assert!(h.state().model_picker.is_none(), "the picker closes once a model is chosen");
 }
 
+/// #470: a model the list doesn't offer can be typed in.
+#[test]
+fn a_model_the_list_doesnt_offer_can_be_typed_in() {
+    let url = model_server();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.hub.add_server("Box", &url, Some("nomic-embed-text"), None).unwrap();
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box")));
+    h.run_steps(2);
+    h.get_by_label("Change…").click();
+    assert!(wait(&mut h, |a| a.model_picker.as_ref().is_some_and(|(_, m)| m.is_some())));
+    h.run_steps(2);
+    h.get_by_label("Another model").click();
+    h.run_steps(1);
+    h.get_by_label("Another model").type_text("my-own-model");
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box" && b.model == "my-own-model")));
+}
+
 /// #54, #98: an AI server on another computer is added by its address in Settings → AI, with a
 /// model that can chat, and the form empties once it's added.
 #[test]
@@ -2006,15 +2056,31 @@ fn the_front_door_works_on_a_project_the_person_already_has() {
     assert_eq!(h.state().state.make.existing, Some(ExistingFiles::Edit));
     assert_eq!(h.state().settings.existing_files, None, "the answer in Settings is left alone");
     h.get_by_label("Pick another folder…");
+
+    // Make never edits the folder picked here, and coming back asks for it again.
+    h.get_by_label("Make my own version").click();
+    h.run_steps(3);
+    assert!(h.state().state.make.folder.is_none() && h.state().state.make.existing.is_none());
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    assert!(h.state().state.make.folder.is_none(), "a dialog that ends after leaving the door is dropped");
+    h.get_by_label("Work on my project").click();
+    h.run_steps(3);
+    h.get_by_label("Choose your project's folder…");
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    h.state_mut().state.make.request = "Link the footer to https://example.com".into();
+    h.run_steps(3);
     h.get_by_label("Start").click();
     assert!(wait(&mut h, |a| a.creating.is_none() && a.workspace.is_some()), "made on a worker");
     let ws = Workspace::open(mine.path()).expect("the project is the person's folder");
     assert!(ws.manifest.app_in_root && ws.app_dir() == mine.path());
+    assert_eq!(ws.manifest.target, TargetRef::None, "an address in the request isn't an original");
     assert_eq!(ws.manifest.name, mine.path().file_name().unwrap().to_string_lossy(), "named after its folder");
     assert_eq!(std::fs::read_to_string(mine.path().join("index.html")).unwrap(), "<p>hi</p>");
     assert_eq!(runs.started(), [mine.path().to_path_buf()]);
     assert_eq!(std::fs::read_dir(d.path()).map(|r| r.count()).unwrap_or(0), 0, "nothing in the projects folder");
 
+    // Back on the door, the same folder is a project now, so it opens.
+    h.state_mut().state.make.mine = true;
     craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
     h.run_steps(2);
     assert!(h.state().state.toasts.iter().any(|(text, err)| !*err && text.contains("already a project")));

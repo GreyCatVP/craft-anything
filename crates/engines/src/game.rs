@@ -544,6 +544,8 @@ pub struct Places {
     pub home: Option<PathBuf>,
     /// An explicit Unreal installation root, preferred over registered installations when valid.
     pub unreal_root: Option<PathBuf>,
+    /// Explicit Visual Studio or VC toolset directories (`VSINSTALLDIR`, `VCINSTALLDIR`, `VCToolsInstallDir`).
+    pub vs_roots: Vec<PathBuf>,
     pub applications: Option<PathBuf>,
     /// Craft Anything's own engine store (where it puts Godot).
     pub store: PathBuf,
@@ -561,6 +563,7 @@ impl Places {
             app_data: env("APPDATA"),
             home: env("HOME").or_else(|| env("USERPROFILE")),
             unreal_root: env("UE_ROOT"),
+            vs_roots: [env("VSINSTALLDIR"), env("VCINSTALLDIR"), env("VCToolsInstallDir")].into_iter().flatten().collect(),
             applications: cfg!(target_os = "macos").then(|| PathBuf::from("/Applications")),
             store,
             use_path: true,
@@ -733,14 +736,50 @@ fn cpp_tools(p: &Places, unreal: Option<&Installed>) -> bool {
     if p.applications.as_ref().is_some_and(|a| a.join("Xcode.app").exists()) {
         return true;
     }
-    // Visual Studio <year>/<edition>/VC/Tools/MSVC, in either Program Files.
-    if p.program_files.iter().flat_map(|pf| subdirs(&pf.join("Microsoft Visual Studio"))).flat_map(|y| subdirs(&y)).any(|e| e.join("VC/Tools/MSVC").is_dir()) {
+    // Visual Studio <year>/<edition>/VC/Tools/MSVC in Program Files, instances registered in
+    // ProgramData, or an explicit Visual Studio / VC developer environment.
+    if p.program_files
+        .iter()
+        .flat_map(|pf| subdirs(&pf.join("Microsoft Visual Studio")))
+        .flat_map(|y| subdirs(&y))
+        .chain(vs_instance_roots(p))
+        .chain(p.vs_roots.iter().filter(|r| r.is_absolute()).cloned())
+        .any(|root| has_msvc_tools(&root))
+    {
         return true;
     }
     // A system clang can have the wrong version or sysroot. Look inside the selected Linux engine.
     let Some(unreal) = unreal.filter(|i| i.program.ends_with("Engine/Binaries/Linux/UnrealEditor")) else { return false };
     let Some(root) = unreal.program.ancestors().nth(4) else { return false };
     subdirs(&root.join("Engine/Extras/ThirdPartyNotUE/SDKs/HostLinux/Linux_x64")).iter().any(|sdk| sdk.join("x86_64-unknown-linux-gnu/bin/clang++").is_file())
+}
+
+/// Visual Studio installation roots registered by the Visual Studio Installer under `ProgramData`.
+fn vs_instance_roots(p: &Places) -> Vec<PathBuf> {
+    let Some(program_data) = &p.program_data else { return Vec::new() };
+    let mut roots = Vec::new();
+    for inst in subdirs(&program_data.join("Microsoft/VisualStudio/Packages/_Instances")) {
+        let Some(bytes) = head(&inst.join("state.json"), 4 << 20) else { continue };
+        let slice = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(slice) else { continue };
+        for key in ["installationPath", "resolvedInstallationPath"] {
+            if let Some(root) = v[key].as_str().map(|s| PathBuf::from(s.trim())).filter(|r| r.is_absolute()) {
+                roots.push(root);
+            }
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+/// Whether a Visual Studio installation root, `VC` directory, or `VCToolsInstallDir` contains MSVC tools.
+fn has_msvc_tools(dir: &Path) -> bool {
+    has_msvc_compiler(dir) || ["VC/Tools/MSVC", "Tools/MSVC"].iter().flat_map(|rel| subdirs(&dir.join(rel))).any(|ver| has_msvc_compiler(&ver))
+}
+
+fn has_msvc_compiler(toolset: &Path) -> bool {
+    subdirs(&toolset.join("bin")).iter().flat_map(|h| subdirs(h)).any(|a| a.join("cl.exe").is_file())
 }
 
 // ---- getting one ---------------------------------------------------------------------------------
@@ -1050,9 +1089,84 @@ mod tests {
         assert_eq!(inv.best(Builder::Unreal).unwrap().version, "5.4");
         assert!(inv.unity_hub.is_some() && inv.epic_launcher.is_none());
         assert!(!inv.ready(Builder::Unreal), "Unreal also needs C++ tools");
-        touch(&pf, "Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40/x", b"");
+        std::fs::create_dir_all(pf.join("Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40")).unwrap();
+        assert!(!inventory(&p).ready(Builder::Unreal), "an empty MSVC version folder has no compiler");
+        touch(&pf, "Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40/bin/Hostx64/x64/cl.exe", b"");
         assert!(inventory(&p).ready(Builder::Unreal));
         assert!(!inv.ready(Builder::Rust), "PATH isn't searched here");
+    }
+
+    #[test]
+    fn visual_studio_instance_state_finds_cpp_tools_outside_program_files() {
+        let d = tempfile::tempdir().unwrap();
+        let program_data = d.path().join("ProgramData");
+        let ue = d.path().join("UE_5.8");
+        let vs_custom = d.path().join("Development C++");
+        let vs_dotnet_only = d.path().join("VS DotNet Only");
+        touch(&ue, "Engine/Binaries/Win64/UnrealEditor.exe", b"");
+        touch(
+            &program_data,
+            "Epic/UnrealEngineLauncher/LauncherInstalled.dat",
+            serde_json::json!({"InstallationList": [{"AppName": "UE_5.8", "InstallLocation": ue}]}).to_string().as_bytes(),
+        );
+        std::fs::create_dir_all(vs_dotnet_only.join("VC/Tools/MSVC/14.40")).unwrap();
+        touch(&program_data, "Microsoft/VisualStudio/Packages/_Instances/broken/state.json", b"{not json");
+        touch(
+            &program_data,
+            "Microsoft/VisualStudio/Packages/_Instances/relative/state.json",
+            br#"{"installationPath":"relative/vs","resolvedInstallationPath":""}"#,
+        );
+        touch(
+            &program_data,
+            "Microsoft/VisualStudio/Packages/_Instances/dotnet/state.json",
+            serde_json::json!({"installationPath": vs_dotnet_only}).to_string().as_bytes(),
+        );
+        let mut state = b"\xef\xbb\xbf".to_vec();
+        state.extend(
+            serde_json::json!({
+                "installationVersion": "18.9.12120.119",
+                "installationPath": vs_custom,
+            })
+            .to_string()
+            .into_bytes(),
+        );
+        touch(&program_data, "Microsoft/VisualStudio/Packages/_Instances/459883f2/state.json", &state);
+        std::fs::create_dir_all(vs_custom.join("VC/Tools/MSVC/14.51.36231")).unwrap();
+
+        let places = Places { program_data: Some(program_data), ..Default::default() };
+        let inv = inventory(&places);
+        assert_eq!(inv.best(Builder::Unreal).unwrap().version, "5.8");
+        assert!(!inv.cpp_tools, "an empty MSVC version directory without cl.exe does not establish C++ readiness");
+        assert!(!inv.ready(Builder::Unreal));
+
+        touch(&vs_custom, "VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe", b"");
+        let inv = inventory(&places);
+        assert!(inv.cpp_tools, "MSVC inside a custom Visual Studio installationPath must be recognized");
+        assert!(inv.ready(Builder::Unreal));
+    }
+
+    #[test]
+    fn visual_studio_developer_environment_roots_find_cpp_tools() {
+        let d = tempfile::tempdir().unwrap();
+        let ue = d.path().join("UE_5.8");
+        touch(&ue, "Engine/Binaries/Win64/UnrealEditor.exe", b"");
+        let vc_dir = d.path().join("CustomVS/VC");
+        let vc_tools = vc_dir.join("Tools/MSVC/14.51.36231");
+        std::fs::create_dir_all(&vc_tools).unwrap();
+
+        let mut places = Places {
+            unreal_root: Some(ue),
+            vs_roots: vec![PathBuf::from("relative/vc"), d.path().join("missing"), vc_dir.clone(), vc_tools.clone()],
+            ..Default::default()
+        };
+        assert!(!inventory(&places).ready(Builder::Unreal), "an empty Tools/MSVC/<version> or VCToolsInstallDir without cl.exe is not ready");
+
+        touch(&vc_tools, "bin/HostX64/x64/cl.exe", b"");
+        places.vs_roots = vec![vc_tools];
+        assert!(inventory(&places).ready(Builder::Unreal), "VCToolsInstallDir with cl.exe makes Unreal ready");
+
+        places.vs_roots = vec![vc_dir];
+        assert!(inventory(&places).ready(Builder::Unreal), "VCINSTALLDIR with Tools/MSVC/<version>/bin/<Host>/<arch>/cl.exe makes Unreal ready");
     }
 
     #[test]

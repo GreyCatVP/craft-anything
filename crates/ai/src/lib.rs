@@ -909,7 +909,7 @@ impl AiHub {
         let e = self.entry(name)?;
         let start = Instant::now();
         if e.config.kind == BackendKind::AgentCli {
-            let program = e.options.command.clone().unwrap_or_else(|| cli_agents::program_for(&e.config.model));
+            let program = cli_agents::program_of(&e.config, &e.options);
             let p = match e.config.ssh_host.as_deref().filter(|h| !h.trim().is_empty()) {
                 Some(h) => craft_anything_platform::Process::new("ssh").args(ssh::ssh_args(h, &[program.clone(), "--version".into()])),
                 None => craft_anything_platform::Process::new(&program).arg("--version"),
@@ -1020,7 +1020,7 @@ fn reach(e: &BackendEntry, key: Option<String>) -> Result<u64, String> {
             }
         }
         BackendKind::AgentCli => {
-            let program = e.options.command.clone().unwrap_or_else(|| cli_agents::program_for(&e.config.model));
+            let program = cli_agents::program_of(&e.config, &e.options);
             craft_anything_platform::which(&program).map(|_| ()).ok_or_else(|| format!("{program} isn't on PATH"))
         }
     };

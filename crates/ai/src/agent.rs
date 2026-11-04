@@ -516,19 +516,28 @@ impl AgentLoop {
     /// Make room when the conversation has outgrown its budget: trim old tool results first; when
     /// that isn't enough, replace the oldest part with a summary the model writes. Return the
     /// successful summary call's usage so the message and build account for it too.
-    fn fit_context(&mut self, system: &str) -> Option<(Usage, Option<f64>)> {
+    fn fit_context(&mut self, system: &str, tools: &[ToolDef]) -> Option<(Usage, Option<f64>)> {
         let budget = self.context_budget();
         let estimate = context::estimate_tokens(&self.history).max(1);
+        // Without a reported count (a local server often sends none), the system prompt and tool
+        // schemas are added from their text; with one, it already includes them.
+        let unreported = (self.last_input == 0).then(|| context::estimate_overhead(system, tools));
         // Reported input includes prompt/tool overhead. Add the history accumulated since it
         // was measured; comparing only with the current estimate can miss that growth.
-        let size = if self.last_input > 0 { self.last_input.saturating_add(estimate.saturating_sub(self.last_history_estimate)) } else { estimate };
+        let size = match unreported {
+            None => self.last_input.saturating_add(estimate.saturating_sub(self.last_history_estimate)),
+            Some(overhead) => estimate.saturating_add(overhead),
+        };
         if size <= budget {
             return None;
         }
         // Use the same approximate scale to judge the trimmed history before the next turn.
         let scale = size as f64 / estimate as f64;
         let trimmed = context::trim_old(&mut self.history);
-        let after = (context::estimate_tokens(&self.history) as f64 * scale) as u64;
+        let after = match unreported {
+            None => (context::estimate_tokens(&self.history) as f64 * scale) as u64,
+            Some(overhead) => context::estimate_tokens(&self.history).saturating_add(overhead),
+        };
         self.last_input = 0;
         self.last_history_estimate = 0;
         self.host.journal("context", json!({"action": "trim", "blocks": trimmed, "tokens_before": size, "tokens_after": after, "budget": budget}));
@@ -590,7 +599,7 @@ impl AgentLoop {
     ) -> Option<crate::model::TurnResult> {
         loop {
             // A fallback can have a smaller window than the backend that just failed.
-            if let Some((usage, cost)) = self.fit_context(system) {
+            if let Some((usage, cost)) = self.fit_context(system, tools) {
                 msg_usage.add(usage);
                 *msg_cost = match (*msg_cost, cost) {
                     (Some(a), Some(b)) => Some(a + b),
@@ -1332,6 +1341,45 @@ pub(crate) mod tests {
         assert!(events.iter().any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "done")), "{events:?}");
         let journal = host.journal.lock().unwrap();
         assert!(journal.iter().any(|(kind, entry)| kind == "context" && entry["budget"] == budget && entry["blocks"] == 1));
+    }
+
+    /// #731: a local server that reports no usage left the system prompt and tool schemas out of the
+    /// count, so a conversation past its budget was never trimmed. They are counted from their text
+    /// now; with nothing large in them, nothing is trimmed.
+    #[test]
+    fn an_unreported_turn_counts_the_system_prompt_and_tools() {
+        let host = Arc::new(FakeHost { calls: Mutex::default(), journal: Mutex::default() });
+        let script = Scripted { turns: VecDeque::new(), seen: Arc::new(Mutex::new(Vec::new())) };
+        let (events, _) = std::sync::mpsc::channel();
+        let mut agent = AgentLoop {
+            host: host.clone(),
+            chain: vec![ModelSlot { name: "Local".into(), model: Box::new(script), local: true, effort: None, max_turns: 5, context_tokens: 1000 }],
+            current: 0,
+            history: vec![Msg::user_text("Build it")],
+            system: None,
+            enabled: BTreeSet::from([Toolset::Core]),
+            cfg: LoopConfig::default(),
+            events,
+            waiters: Arc::default(),
+            stop: Stop::default(),
+            cancel: Arc::new(Mutex::new(CancelToken::default())),
+            meter: Meter::default(),
+            last_input: 0,
+            last_history_estimate: 0,
+            failure: Arc::default(),
+            failed_builds: 0,
+        };
+        let tools = [ToolDef { name: "look".into(), description: "x".repeat(4000), schema: json!({"type": "object"}) }];
+
+        assert!(agent.fit_context("A short system prompt.", &[]).is_none());
+        assert!(host.journal.lock().unwrap().is_empty(), "a small prompt is not judged");
+
+        agent.fit_context(&"s".repeat(4000), &tools);
+        let journal = host.journal.lock().unwrap();
+        let (kind, entry) = journal.first().expect("the oversized prompt is judged");
+        assert_eq!(kind, "context");
+        assert_eq!(entry["budget"], 1000);
+        assert!(entry["tokens_before"].as_u64().is_some_and(|n| n > 2000), "{entry}");
     }
 
     #[test]

@@ -392,6 +392,16 @@ fn spawn_error_for(name: &str, program: &OsStr, e: std::io::Error, remediation: 
 
 fn spawn_error_kind(name: &str, program: &OsStr, e: std::io::Error, kind: std::io::ErrorKind, remediation: Option<&str>) -> ToolError {
     match kind {
+        // A program given by its path (a saved setting, say) that isn't there: PATH has nothing to
+        // do with it, and an update may have moved it (Codex desktop does on every update, #721).
+        std::io::ErrorKind::NotFound if std::path::Path::new(program).parent().is_some_and(|p| !p.as_os_str().is_empty()) => {
+            ToolError::new(ErrorCode::EngineMissing, format!("{name} should be at {}, but there's no file there.", program.to_string_lossy()))
+                .with_remediation(format!(
+                    "It may have moved, for example after an update. {}",
+                    remediation.map(str::to_string).unwrap_or_else(|| format!("Install {name}, or set its full path in Settings."))
+                ))
+                .with_details(serde_json::json!({"program": program.to_string_lossy(), "reason": "path_missing"}))
+        }
         std::io::ErrorKind::NotFound => ToolError::new(ErrorCode::EngineMissing, format!("{name} isn't installed or isn't on your PATH."))
             .with_remediation(remediation.map(str::to_string).unwrap_or_else(|| format!("Install {name}, or set its full path in Settings.")))
             .with_details(serde_json::json!({"program": program.to_string_lossy(), "reason": "not_found"})),
@@ -1287,6 +1297,26 @@ mod error_tests {
             duration: Duration::ZERO,
         };
         assert_eq!(nonzero_error("OpenCode", &out).message, "OpenCode stopped with exit code 1: error: No provider is set up");
+    }
+
+    /// #721: a saved path to a program that an update moved said "isn't installed or isn't on your
+    /// PATH", which pointed away from the setting that was out of date. It names the path; a bare
+    /// name still talks about PATH.
+    #[test]
+    fn a_program_path_with_no_file_says_the_path_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("bin").join("0.165.0").join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let err = Process::new(gone.as_os_str()).remediation("Install Codex, or choose its program in Settings → AI.").run().unwrap_err();
+        assert_eq!(err.code, ErrorCode::EngineMissing, "still a missing program, so a builder turn isn't retried");
+        assert!(err.message.contains(&*gone.to_string_lossy()) && err.message.contains("no file there"), "{}", err.message);
+        assert!(!err.message.contains("PATH"), "{}", err.message);
+        let remediation = err.remediation.unwrap_or_default();
+        assert!(remediation.contains("moved") && remediation.contains("Settings → AI"), "{remediation}");
+        assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("path_missing"));
+
+        let err = Process::new("craft-anything-no-such-program").run().unwrap_err();
+        assert!(err.message.contains("isn't on your PATH"), "{}", err.message);
+        assert_eq!(err.details.as_ref().and_then(|d| d["reason"].as_str()), Some("not_found"));
     }
 }
 

@@ -229,6 +229,8 @@ pub enum Done {
     BackendAdded {
         name: String,
         result: Result<(), ToolError>,
+        /// `CraftApp::backend_choices` when the add started: a choice made since then stands.
+        choices: u64,
     },
     /// The projects folder was listed.
     Projects(Vec<craft_anything_engine::workspace::Workspace>),
@@ -442,6 +444,8 @@ pub struct CraftApp {
     pub extractor: Option<String>,
     pub detected: Option<Vec<Detected>>,
     pub detecting: bool,
+    /// Counts AI choices, so an add that finishes later doesn't undo one made meanwhile.
+    pub backend_choices: u64,
     pub log: Vec<LogLine>,
     pub key_inputs: std::collections::BTreeMap<String, String>,
     /// Settings → AI's "Add an AI by its address" form. Not kept with the UI state: its key goes
@@ -454,6 +458,14 @@ pub struct CraftApp {
     pub drafts: std::collections::HashMap<u64, project::Draft>,
     /// A picture still being pasted into the open project's prompt box (`paste_pictures`).
     pub pending_paste: Option<project::PendingPaste>,
+    /// Picture-size checks still running for each project's prompt box, and for Make. Send and
+    /// Make Start wait only for their own destination.
+    pending_attach_checks: std::collections::BTreeMap<PathBuf, usize>,
+    pending_make_checks: usize,
+    /// Projects whose Send is waiting for their own picture checks to finish.
+    send_after_checks: std::collections::BTreeSet<PathBuf>,
+    /// The Make draft Start was pressed for, while its picture checks finish.
+    start_after_pictures: Option<state::MakeDraft>,
     /// Each project's building time and AI use, every build together (read from its usage.json).
     pub usage: std::collections::HashMap<PathBuf, usage::ProjectClock>,
     /// All AI use since the app opened: builds and chat.
@@ -548,12 +560,17 @@ impl CraftApp {
             extractor: None,
             detected: None,
             detecting: false,
+            backend_choices: 0,
             log: Vec::new(),
             key_inputs: Default::default(),
             server_form: ServerForm::default(),
             runs: craft_anything_ai::rebuild::RunSet::new(craft_anything_engine::settings::BuildSettings::default().parallel),
             drafts: Default::default(),
             pending_paste: None,
+            pending_attach_checks: Default::default(),
+            pending_make_checks: 0,
+            send_after_checks: Default::default(),
+            start_after_pictures: None,
             usage: Default::default(),
             session_usage: Default::default(),
             workspace: None,
@@ -1171,13 +1188,20 @@ impl CraftApp {
     pub fn add_backend(&mut self, config: BackendConfig, key: Option<String>) {
         let hub = self.hub.clone();
         let name = config.name.clone();
+        let choices = self.backend_choices;
         self.jobs.spawn(i18n::trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_backend(config, key);
-            Ok(Done::BackendAdded { name, result })
+            Ok(Done::BackendAdded { name, result, choices })
         });
     }
 
     pub fn choose_backend(&mut self, name: Option<String>) {
+        self.backend_choices = self.backend_choices.wrapping_add(1);
+        self.select_backend(name);
+    }
+
+    /// Select a backend without counting it as the person's choice (an add that finished).
+    fn select_backend(&mut self, name: Option<String>) {
         if self.state.backend != name {
             self.state.backend = name;
             if let Some(mut c) = self.conversation.take() {
@@ -1193,6 +1217,11 @@ impl CraftApp {
             return;
         }
         self.state.chat.push(ChatItem::User(text.clone()));
+        if self.state.backend.is_some() {
+            // Each message to this AI is a choice too: an AI that finishes connecting meanwhile
+            // doesn't take over (and stop) the answer.
+            self.backend_choices = self.backend_choices.wrapping_add(1);
+        }
         if self.state.backend.is_some() && self.conversation.is_none() {
             match self.hub.start(self.state.backend.as_deref(), self.beginner()) {
                 Ok(c) => self.conversation = Some(c),
@@ -1497,13 +1526,16 @@ impl CraftApp {
                     self.toast(error.for_people(), true);
                 }
             }
-            Done::BackendAdded { name, result } => match result {
+            Done::BackendAdded { name, result, choices } => match result {
                 Ok(()) => {
                     if self.server_form.name.trim() == name {
                         self.server_form = ServerForm::default();
                     }
                     self.toast(i18n::trf("{name} is ready", &[("name", &name)]), false);
-                    self.choose_backend(Some(name));
+                    // Picking another AI (or none) while this one connected wins.
+                    if choices == self.backend_choices {
+                        self.select_backend(Some(name));
+                    }
                     self.refresh_backends();
                 }
                 Err(e) => self.toast(e.for_people(), true),
@@ -1707,6 +1739,8 @@ impl CraftApp {
         self.stuck_banner(ui, &ctx);
         if !self.settings.first_run_done {
             egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas)).show(ui, |ui| guard_ui(ui, "first run", |ui| first_run::show(self, ui)));
+            // An AI added from the first run reports a failure here (a wrong address or key).
+            self.toasts(&ctx);
             titlebar::window_edge(&ctx);
             titlebar::resize_edges(&ctx);
             return;
