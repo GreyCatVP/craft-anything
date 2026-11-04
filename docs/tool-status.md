@@ -19,7 +19,7 @@ we don't have); source reviewed · **New** = added since the audit, unit-tested 
 | JavaScript / Electron | 7 | 1 | 0 | 2 | runtime attach needs a debuggable app |
 | Application graphs, comparison, reconstruction | 12 | 3 | 0 | 2 | |
 | Managed (.NET) | 7 | 0 | 0 | 0 | no C# decompiler (IL + structure only) |
-| Java | 6 | 0 | 0 | 0 | `java_vineflower_decompile` verified on a real JAR (Commons IO 2.16.1, OpenJDK 21, Linux) |
+| Java | 6 | 0 | 0 | 0 | `java_vineflower_decompile` verified on a real JAR (Commons IO 2.16.1, OpenJDK 21.0.12.1, Linux) |
 | Android (static) | 9 | 0 | 0 | 4 | JADX/Apktool/JEB paths unverified |
 | Android device (adb) | 2 | 0 | 0 | 23 | no device attached |
 | Apple | 8 | 0 | 0 | 6 | synthetic Mach-O/plist only; runtime tools macOS-only, except `runtime_ui_read` and `runtime_ui_walkthrough_record`, which also read and drive Windows apps (UI Automation; tested against a WinForms window) |
@@ -81,7 +81,7 @@ Fixed:
 - Rizin debug sessions (`native_rizin_session_begin`, `_command_run`, `_show`, `_end`): **New**.
   Start, registers, error lines and close checked with Rizin 0.9.1 on Windows; the debugged
   program's own console output isn't captured.
-- Vineflower (`java_vineflower_decompile`): **Verified** on Linux x86-64 with OpenJDK 21.0.12
+- Vineflower (`java_vineflower_decompile`): **Verified** on Linux x86-64 with OpenJDK 21.0.12.1
   and the pinned Vineflower 1.12.0, against Apache Commons IO 2.16.1 (497 KB, 374 entries):
   253 source files, exit 0. `org.apache.commons.io.FileUtils` came back at 1,350 lines, and the
   class and its file-reading methods are present. Not checked: Windows, macOS, a `.class` input,
