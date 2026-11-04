@@ -393,7 +393,7 @@ fn generation_permitted(ws: &Workspace) -> Result<(), ToolError> {
 /// Explain which provider lacks credentials and offer a fallback that requires no paid assets.
 fn no_key(provider: &str) -> ToolError {
     ToolError::new(ErrorCode::BadSettings, format!("No {provider} key is set up for this asset operation.")).with_remediation(format!(
-        "Make these assets with simple shapes and colours instead, and tell the person they can add a {provider} key in Settings → AI for realistic ones."
+        "Make these assets with simple shapes and colours instead, and tell the person they can add a {provider} key in Settings → Builds → Asset provider keys for realistic ones."
     ))
 }
 

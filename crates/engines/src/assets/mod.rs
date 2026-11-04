@@ -201,7 +201,7 @@ pub trait AssetProvider: Send + Sync {
     fn key_env(&self) -> Option<&'static str> {
         None
     }
-    /// Where the person gets a key (shown as a link in Settings → AI).
+    /// Where the person gets a key (shown as a link in Settings → Builds → Asset provider keys).
     fn keys_page(&self) -> Option<&'static str> {
         None
     }
