@@ -1382,7 +1382,6 @@ Paste your {name} API secret	粘贴你的 {name} API 密钥机密
 Save asset settings	保存素材设置
 Key needed	需要密钥
 Manage provider keys	管理服务商密钥
-Save budget	保存预算
 Saving asset settings…	正在保存素材设置…
 Asset spending is unavailable. Repair assets.json before generating.	无法读取素材支出。请先修复 assets.json，再生成素材。
 1 hour ago	1 小时前

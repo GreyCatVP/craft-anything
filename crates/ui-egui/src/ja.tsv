@@ -840,7 +840,6 @@ Paste your {name} API secret	{name} の API シークレットを貼り付け
 Save asset settings	素材設定を保存
 Key needed	キーが必要
 Manage provider keys	プロバイダーのキーを管理
-Save budget	予算を保存
 Saving asset settings…	素材設定を保存中…
 Asset spending is unavailable. Repair assets.json before generating.	素材の支出を読み取れません。生成する前に assets.json を修復してください。
 1 hour ago	1 時間前

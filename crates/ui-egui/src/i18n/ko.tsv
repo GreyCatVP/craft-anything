@@ -1381,7 +1381,6 @@ Paste your {name} API secret	{name} API 시크릿 붙여넣기
 Save asset settings	에셋 설정 저장
 Key needed	키 필요
 Manage provider keys	제공자 키 관리
-Save budget	예산 저장
 Saving asset settings…	에셋 설정 저장 중…
 Asset spending is unavailable. Repair assets.json before generating.	에셋 지출 기록을 읽을 수 없습니다. 생성하기 전에 assets.json을 고치세요.
 1 hour ago	1시간 전

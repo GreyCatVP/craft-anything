@@ -1381,7 +1381,6 @@ Paste your {name} API secret	Вставьте секрет API {name}
 Save asset settings	Сохранить настройки ресурсов
 Key needed	Нужен ключ
 Manage provider keys	Управлять ключами провайдеров
-Save budget	Сохранить бюджет
 Saving asset settings…	Сохраняем настройки ресурсов…
 Asset spending is unavailable. Repair assets.json before generating.	Расходы на ресурсы недоступны. Исправьте assets.json перед генерацией.
 1 hour ago	1 час назад
