@@ -1129,8 +1129,32 @@ impl Worker {
 }
 
 fn no_build_progress(ws: &Workspace) -> ToolError {
-    ToolError::new(ErrorCode::OverLimit, format!("The build stopped after two builder turns changed no files in {}.", ws.app_place()))
-        .with_remediation("Send a new request with a concrete correction, or edit the app's files before trying again.")
+    let stop = format!("The build stopped after two builder turns changed no files in {}.", ws.app_place());
+    // #736: an empty app/ means the builder never wrote the project, whatever its replies said.
+    if app_is_empty(ws) {
+        ToolError::new(ErrorCode::OverLimit, format!("{stop} {}", no_files_yet(ws)))
+            .with_remediation("Send a new request that asks for the project's files in app/ (such as package.json and index.html), or try another builder.")
+    } else {
+        ToolError::new(ErrorCode::OverLimit, stop)
+            .with_remediation("Send a new request with a concrete correction, or edit the app's files before trying again.")
+    }
+}
+
+/// Whether the builder has written nothing into app/ (#736). A project folder always holds the
+/// workspace's own files, so only app/ can be empty.
+fn app_is_empty(ws: &Workspace) -> bool {
+    !ws.manifest.app_in_root && folder_is_empty(&ws.app_dir())
+}
+
+/// Whether a folder holds nothing: no files or folders, or no folder at all.
+fn folder_is_empty(dir: &Path) -> bool {
+    std::fs::read_dir(dir).map(|mut entries| entries.next().is_none()).unwrap_or(true)
+}
+
+/// Said when app/ is empty, so a builder that claims it built the project can't hide that nothing
+/// was written (#736).
+fn no_files_yet(ws: &Workspace) -> String {
+    format!("{} has no files yet, so the builder hasn't written the project.", ws.app_place())
 }
 
 /// Why a coding agent can't build: never signed in, or signed in `before` with a sign-in that no

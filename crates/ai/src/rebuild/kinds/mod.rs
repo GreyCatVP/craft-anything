@@ -235,6 +235,8 @@ impl Check for BuildCheck {
     }
     fn run(&self, cx: &mut CheckCx) -> Result<CheckResult, ToolError> {
         let (passed, note) = build_check(&cx.ws.app_dir(), cx.ws.app_place(), &cx.ws.manifest.stack, cx.editor(), cx.stop());
+        // #736: a failed build of an empty app/ says first that nothing was written.
+        let note = if !passed && app_is_empty(cx.ws) { format!("{} {note}", no_files_yet(cx.ws)) } else { note };
         Ok(CheckResult::new(self.id(), cx.round, passed, note))
     }
 }

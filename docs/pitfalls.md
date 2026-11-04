@@ -63,6 +63,12 @@ comments were acted on; the fixes went to its branch and the threads were answer
 `main` had the code without them. Read `gh pr view --json state,headRefOid` before pushing to a PR's
 branch, and land anything late in a new PR from `main`.
 
+**A report checked against main, not the release it ran.** #736 (a build looping on an empty `app/`)
+was read against main, where the stop after two unchanged turns already existed, so it looked fixed.
+The reporter ran v0.3.0, which had neither that stop (#557) nor the empty-folder note (#749); both
+merged the day after it shipped. Before calling a report fixed or still open, find the release it
+names (`git merge-base --is-ancestor <fix> <release tag>`), and check the message text it quotes.
+
 ## Tests
 
 **A test started a real download on a contributor's machine.** A test called `engines_install` for

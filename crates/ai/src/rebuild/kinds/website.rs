@@ -728,11 +728,6 @@ fn missing_site_note(place: &str, empty: bool) -> String {
     )
 }
 
-/// Whether a folder holds nothing: no files or folders, or no folder at all.
-fn folder_is_empty(dir: &std::path::Path) -> bool {
-    std::fs::read_dir(dir).map(|mut entries| entries.next().is_none()).unwrap_or(true)
-}
-
 impl Check for WebVisualCheck {
     fn id(&self) -> &'static str {
         CheckResult::WEB_VISUAL
@@ -742,9 +737,7 @@ impl Check for WebVisualCheck {
         let (ws, round) = (cx.ws, cx.round);
         let widths = cx.build_settings().widths();
         let Some(site) = site_dir(&ws.app_dir()) else {
-            // In a project folder the workspace's own files are there, so only app/ can be empty.
-            let empty = !ws.manifest.app_in_root && folder_is_empty(&ws.app_dir());
-            return Ok(CheckResult::new(self.id(), round, false, missing_site_note(ws.app_place(), empty)));
+            return Ok(CheckResult::new(self.id(), round, false, missing_site_note(ws.app_place(), app_is_empty(ws))));
         };
         let base = cx.serve_preview(&site)?;
         let out = ws.checks_dir().join(format!("round-{round}"));

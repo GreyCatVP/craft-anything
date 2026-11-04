@@ -1853,6 +1853,54 @@ mod picking_up_a_build {
         assert!(ok);
         assert_eq!(prompts_given(&b), asked, "and it isn't asked to build again");
     }
+
+    /// #736: a builder that says it built the site while app/ has no files stops after two
+    /// unchanged turns, and the build check and the stop both say nothing was written. The
+    /// reporter's release had no such stop, so its check ran 40+ times.
+    #[test]
+    fn an_empty_app_with_a_claimed_build_stops_and_says_nothing_was_written() {
+        let b = bench();
+        let mut ws = Workspace::create(&b.projects, "x", "A website for a bakery", TargetRef::None).unwrap();
+        ws.manifest.agent_session = Some("session-1".into());
+        ws.save().unwrap();
+        std::fs::create_dir_all(ws.capture_dir()).unwrap();
+        std::fs::create_dir_all(ws.app_dir()).unwrap();
+        // The stand-in answers "Done." and writes nothing, as the reported builder did.
+        let opts = RunOptions { backend: Some("Stand-in".into()), ..RunOptions::default() };
+        let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), opts).unwrap();
+        let ok = loop {
+            match run.rx.recv_timeout(Duration::from_secs(60)) {
+                Ok(RunEvent::Finished { ok, .. }) => break ok,
+                Ok(_) => {}
+                Err(e) => panic!("the run went away: {e}"),
+            }
+        };
+        assert!(!ok);
+        assert_eq!(prompts_given(&b), 2, "a third unchanged turn would spend more without progress");
+        let saved = Workspace::open(&ws.root).unwrap();
+        let build = saved.manifest.checks.iter().find(|c| c.check == CheckResult::BUILD).expect("the build check ran");
+        assert!(build.note.contains("app/ has no files yet, so the builder hasn't written the project."), "{}", build.note);
+        let feed = feed::load(&saved);
+        assert!(
+            feed.iter().any(|i| matches!(i, feed::FeedItem::Error { message, .. }
+                if message.contains("changed no files in app/") && message.contains("app/ has no files yet"))),
+            "the stop says app/ is empty: {feed:?}"
+        );
+    }
+
+    /// The empty-folder wording is only for an empty app/: a folder with files gets the plain stop.
+    #[test]
+    fn the_stop_names_an_empty_app_and_only_then() {
+        let b = bench();
+        let ws = worked_on(&b);
+        let empty = no_build_progress(&ws);
+        assert!(empty.message.contains("app/ has no files yet"), "{empty:?}");
+        assert!(empty.remediation.as_deref().is_some_and(|r| r.contains("asks for the project's files in app/")), "{empty:?}");
+        std::fs::write(ws.app_dir().join("index.html"), "<h1>Bakery</h1>").unwrap();
+        let written = no_build_progress(&ws);
+        assert!(!written.message.contains("has no files"), "{written:?}");
+        assert_eq!(written.message, "The build stopped after two builder turns changed no files in app/.");
+    }
 }
 
 fn check_worker(ws: &Workspace, deep: bool) -> Worker {
