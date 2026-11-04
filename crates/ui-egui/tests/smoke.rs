@@ -2011,6 +2011,8 @@ fn the_front_door_works_on_a_project_the_person_already_has() {
     h.get_by_label("Make my own version").click();
     h.run_steps(3);
     assert!(h.state().state.make.folder.is_none() && h.state().state.make.existing.is_none());
+    craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
+    assert!(h.state().state.make.folder.is_none(), "a dialog that ends after leaving the door is dropped");
     h.get_by_label("Work on my project").click();
     h.run_steps(3);
     h.get_by_label("Choose your project's folder…");
@@ -2027,6 +2029,8 @@ fn the_front_door_works_on_a_project_the_person_already_has() {
     assert_eq!(runs.started(), [mine.path().to_path_buf()]);
     assert_eq!(std::fs::read_dir(d.path()).map(|r| r.count()).unwrap_or(0), 0, "nothing in the projects folder");
 
+    // Back on the door, the same folder is a project now, so it opens.
+    h.state_mut().state.make.mine = true;
     craft_anything_ui_egui::folders::picked_own(h.state_mut(), mine.path().to_path_buf());
     h.run_steps(2);
     assert!(h.state().state.toasts.iter().any(|(text, err)| !*err && text.contains("already a project")));

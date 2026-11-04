@@ -87,6 +87,11 @@ pub fn picked(app: &mut CraftApp, folder: PathBuf) {
 /// "Work on my project" picked a folder: its files are the app, edited in place (nothing asked).
 /// An existing project opens; an empty folder has nothing to work on.
 pub fn picked_own(app: &mut CraftApp, folder: PathBuf) {
+    // The dialog runs beside the window: a pick that ends after leaving the door is dropped, or
+    // a version made on Make would edit that folder.
+    if !app.state.make.mine {
+        return;
+    }
     match workspace::folder_state(&folder) {
         Ok(FolderState::Project) => open_project(app, &folder),
         Ok(FolderState::Empty) => app.toast(tr("That folder is empty. Pick the folder your project's files are in."), true),
