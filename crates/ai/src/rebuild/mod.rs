@@ -246,7 +246,7 @@ impl RebuildRun {
             editor: None,
             notes: notes.clone(),
             feed: feed.clone(),
-            assets: hub.has_asset_keys(),
+            assets: hub.can_make_assets(),
             decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
@@ -422,8 +422,8 @@ struct Worker {
     editor: Option<PathBuf>,
     notes: Arc<Mutex<Vec<Note>>>,
     feed: Arc<Mutex<feed::FeedLog>>,
-    /// An asset provider's key is set up, so the builder can generate pictures and 3D models if the
-    /// project allows it.
+    /// An asset provider's key is set up (or a ComfyUI server, which needs none), so the builder can
+    /// generate pictures and 3D models if the project allows it.
     assets: bool,
     /// The builder has decompiled something this run (Deep mode requires it).
     decompiled: bool,

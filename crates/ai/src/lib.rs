@@ -720,10 +720,16 @@ impl AiHub {
         Ok(removed)
     }
 
-    /// Some built-in asset provider has a key, so builds can generate assets.
-    pub fn has_asset_keys(&self) -> bool {
+    /// Builds can generate assets: some built-in asset provider has a key, or pictures come from
+    /// the person's own ComfyUI server (the picture model, with an address), which needs none.
+    pub fn can_make_assets(&self) -> bool {
+        let comfy = {
+            let s = self.engine.session();
+            let a = &s.settings.assets;
+            a.image_model.as_deref() == Some(craft_anything_engines::assets::comfyui::ID) && !a.comfyui.address.trim().is_empty()
+        };
         let providers = craft_anything_engines::assets::AssetProviders::built_in();
-        providers.ids().into_iter().any(|id| self.has_asset_key(&providers, id))
+        comfy || providers.ids().into_iter().any(|id| self.has_asset_key(&providers, id))
     }
 
     /// Save an asset provider's key (keychain first). Returns where it went.
