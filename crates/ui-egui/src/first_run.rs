@@ -141,7 +141,8 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
         if !app.detecting && shown == 0 && !detected.is_empty() {
             ui.label(RichText::new(tr("Nothing of this kind was found.")).color(t.text_faint));
         }
-        if !app.detecting && detected.is_empty() {
+        // Once an AI is added by its address, "we didn't find one" no longer applies.
+        if !app.detecting && detected.is_empty() && app.backends.is_empty() {
             widgets::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
@@ -154,6 +155,9 @@ fn brain(app: &mut CraftApp, ui: &mut Ui, width: f32) {
             });
             ui.add_space(8.0);
         }
+        // A model server on another computer can't be found by looking here (#54, #98).
+        crate::settings_ui::server_form(app, ui);
+        ui.add_space(8.0);
         // "No AI for now"
         let none_on = app.state.backend.is_none();
         let r = option_row(ui, "circle-stop", "No AI for now", "The built-in engines still show you everything they find.", none_on);

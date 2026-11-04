@@ -50,7 +50,7 @@ The project should be easy to fork and bend. New features land behind a seam, no
 | Milestone | Goal | Owner | Where it stands (2026-11-02) |
 |---|---|---|---|
 | M0 Foundations | Docs match the code, licences checked, one live end-to-end run | maintainers | Done |
-| M1 Extensibility | Seams for target kinds, checks, builders, asset providers, engines, plugins | maintainers | Done, except engine pins (R1.5) and Unreal's Linux guidance (R1.6) |
+| M1 Extensibility | Seams for target kinds, checks, builders, asset providers, engines, plugins | maintainers | Done, except engine pins (R1.5) |
 | M2 Product completeness | Every kind of target gets study → build → check → refine with a real check | maintainers | Websites complete; apps and games build and run; API-key builds have never run live (R5.5); agents other than Claude Code are only partly wired (R2.2) |
 | M3 Engine depth | More tools, and the known partial ones | open | 314 tools; the open lane |
 | M4 Release | Packaging, signing, a managed tier | maintainers | v0.3.0 released, signed, on every platform; a macOS CLI question and the managed tier remain |
@@ -84,7 +84,7 @@ Issues are ranked by people affected and how badly, after leaving out what's alr
 | 3 | R2.4 Runtime study, R2.5 Behaviour checks | scripted input (R2.4) before R2.5's sheet check | Makes "ready" mean more for apps and games |
 | 3 | R2.7, R2.8 | — | Small gaps left in finished work |
 | 3 | R2.9 Everyday use, R2.10 Pinned builds | — | Open to anyone at any time; most lines stand alone |
-| 3 | R1.5, R1.6 | — | Small leftovers |
+| 3 | R1.5 | — | Small leftovers |
 | Any | M3: R3.3, R3.9, R3.11 | — | Open lane |
 | Later | R4.1 macOS CLI, R4.2 Managed tier | **decision** | Not before M5 |
 
@@ -97,17 +97,19 @@ Owner: maintainers · Status: todo
 Two reported failures, the Windows start-up crash (#414) and a builder resuming another's
 session (#471), are fixed on `main` and still broken for everyone on 0.3.0. This is the
 cheapest help we can give anyone, so nothing below should hold it up for long.
-- [ ] #490 has changes requested: a JSON object given to `--left` or `--right` becomes text, and
-      its new test passes without the fix. Merge it once that's fixed, or decline it; it doesn't
-      hold up the release. What it reports is 0.2.0's, fixed by #93 (`f6725c2`): on Windows the
+- [x] #490 merged (`549ae5e`) with the CLI fix the review asked for: a string-or-object input is
+      `any`, so a JSON object given to `--left` stays an object (tested both ways). What it reports
+      is 0.2.0's, fixed by #93 (`f6725c2`): on Windows the
       published 0.3.0 CLI with Claude Code 2.1.179 mounted 314 of 315 tools (the 315th is the
       approval tool, which Claude Code doesn't list but calls), and a real Deep build reached Ready
       with `core_action_approve` answering five prompts. The reporter was asked for `--version`.
       macOS is still owed (R5.7)
-- [ ] Cut the next release (`docs/releasing.md`). 0.3.0 lacks `0748ef1` (#414: Windows starts DX12
-      only, the crash behind "it won't open"), `1e8f661` (#471: a builder never continues another
-      builder's session) and `3357daf` (#430: Claude Code's message on stdin). Take #357 (R5.2) too
-      if it's ready
+- [ ] Cut the next release (`docs/releasing.md`). The version is 0.4.0 (#526) and `main` at
+      `fb7ac86` is green, but pushing `release` is refused: its ruleset blocks every update and
+      lists no one who may bypass it. A maintainer who can push it (or adds a bypass) goes next.
+      0.3.0 lacks `0748ef1` (#414: Windows starts DX12 only, the crash behind "it won't open"),
+      `1e8f661` (#471: a builder never continues another builder's session) and `3357daf` (#430:
+      Claude Code's message on stdin)
 - [ ] See that the launcher offers the new version: #74, #104 and #420 installed through it, and
       nothing in this repository says how it picks one
 - [ ] After it ships, close what it fixes: #166, #346, #420, #478. #74, #104 and #222 give no
@@ -155,20 +157,26 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       fails on a Mac for that. `real_binary_end_to_end_if_present` fails there too, expecting
       `/bin/ls` to be Linux: both fixed (#357)
 - [ ] **decision** First-time contributors' CI: GitHub holds their runs for approval, so their PRs
-      show no `gate` run (#490 and #413 among them, and #413 holds up #455). Approve each push, or
+      show no `gate` run (#490 and #413 were among them). Approve each push, or
       change the repository's approval setting
-- [ ] Merge order the PR list doesn't show: #413 before #455; #193 before #482 and #486 (all change
-      the language list); #491 before #492 (same file). #433 and #468 look redundant with #421 and
-      #500: ask their authors
+- [ ] #193 changes the language list that #486 (merged) changed too: it needs a rebase. #468 looks
+      redundant with #500: ask its author
 - [ ] **decision** Wide PRs with no roadmap line: #416 (project goals, 34 files, cites an R2.11 that
       doesn't exist; that id stays free for it) and #503 (two asset providers and spending controls,
       37 files, cites the finished R1.4). Decide whether we want them before more is built on them
 - [ ] **decision** Replies don't reach people who file through the ticket relay (each such ticket
       says so), yet the bot asks them for details. About half the open issues came that way. Get
       replies back to them, or stop asking
+- [ ] `which::tests::usual_windows_dirs_come_after_path` (platform) fails on a Windows machine
+      whose environment adds a folder (10 found, 9 expected, "nothing twice"), on `main` too; and
+      `capture::console_tests::reads_what_the_program_drew_and_stops_at_the_deadline` failed once
+      with the whole platform suite running and passes alone. Find what each depends on
 - [ ] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes fails when several crates'
       tests run at once and passes alone: it writes a script and runs it straight away, which a
       busy machine can refuse while another test's child still holds the file open
+- [ ] `a_remote_query_expands_only_the_remote_working_directory` (ai crate) fails on a Mac: the
+      temp folder is `/var/…`, a link to `/private/var/…`, and the shell's `$PWD` gives the second.
+      Compare with the folder's canonical path
 - [ ] Revisit the two advisory exceptions in `deny.toml`: `rsa` (no fix; we only verify with public
       keys) when rsa 0.10 lands, and unmaintained `zbus_names`/`zvariant` (Linux-only via keyring
       and accesskit) when those move on. `deny.toml`'s comments say this is tracked in R0.3: point
@@ -211,23 +219,72 @@ Every round spends the person's money or quota. One that can't do anything shoul
       9.4M tokens in 19 minutes of the first stage, never compiled). Try again carries on
 - [ ] **decision** Whether a build gets a token or cost limit of its own, beyond rounds and that
       stop (#399): a model that changes code without ever running a build isn't caught by it
-- [ ] Check live that the stop fires on a real API-backend build and the message reads well
+- [ ] Check live that the stop fires on a real API-backend build and the message reads well. It
+      fired on a local Ollama build (the same built-in loop) after two turns that changed nothing
+      in `app/` ("The build stopped after two builder turns changed no files in app/…"); an
+      API-key build is still owed
+- [x] #736: the build check and the stop message say when `app/` is empty, so a builder that
+      claims a build can't hide that nothing was written. v0.3.0 (the reporter's release) had no
+      stop after two unchanged turns (#557, merged after it); main stops, and this adds the
+      empty-folder wording to the build check (it failed first, before #749's website check) and
+      to the stop message — claimed: claude, branch bugfix/r5.3-empty-app-loop
+
+- [x] A build whose checks keep finding no working build stops after 10 in a row, across "Try again"
+      presses, until a new request starts the count again (`NOT_WORKING_CHECK_LIMIT`, kept in craft.json as
+      `not_working_checks`). "Try again" used to start six more rounds every time with nothing counted across
+      runs, so #736's build went on to check 40 and 49 times. A run at the limit stops before a builder turn.
+      The unchanged-turn guard already stops a builder that writes nothing; #736's exact Windows run (gemini-cli)
+      is not reproduced here. An empty `app/` is named as having no files yet (#771's wording) and the builder is asked to
+      write the project and show its build's output, not to fix a build (`NO_PROJECT_PROMPT`). — claimed: fabox-os, branch bugfix/736-stop-empty-build-loop
+- [ ] Live-check #736 on Windows with gemini-cli: an empty app/ and a builder that claims `npm run build`
+      stops after two turns (or 10 checks) with the "no files yet" note, and Try again doesn't restart it
 
 ### R5.4 Local models can build
 Owner: open · Status: todo
 The built-in agent loop assumes a capable tool-calling model. Reports #24, #44, #110, #403, #417 and
 #498 say otherwise (#44's backend is a guess; #116 may be the same), and no local model build has
 been run live.
-- [ ] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
-      STATUS.md which models it worked with. Do this first: it shows which of the lines below matter
+- [x] A live local build through Ollama, small target, to Ready or to a clear stop, and note in
+      STATUS.md which models it worked with: Ollama 0.40.7 with `qwen2.5-coder:14b` on Windows
+      (RTX 5090, 32k context, no prompt cut) stops clearly at "No project to build found in app/
+      yet", twice. The lines below say why
 - [x] A builder on a local model is offered 13 tools (about 10,000 characters of descriptions)
       instead of 33-41 (23,000-30,000): the Build tools and the Core tools the brief names, not the
       study set a model explores with instead of writing (#417, `LOCAL_BUILDER_CORE`). Measured as
       text, not on a model; Ollama's default context (4k) was too small for the old list alone
-- [ ] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
-      after this: does it call `build_file_write` now? If it still doesn't, the model can't build
-- [ ] An assistant turn with no text sends `content: null` (`openai.rs`), which likely causes #403's
-      `invalid message content type: <nil>`: send an empty string
+- [x] Run #417's case live (Ollama, `qwen2.5-coder:14b`, "a scientific calculator") before and
+      after this: does it call `build_file_write` now? If it still doesn't, the model can't build.
+      Yes, with the three fixes below: over about 50 calls it wrote `app/Cargo.toml` (eframe), fixed
+      the two errors the checks reported, and check 3 said "Build succeeded". But `src/main.rs` was
+      still cargo's "Hello, world!": no calculator was written, and the screenshot check rightly
+      failed it at the round limit (#753)
+- [x] The system prompt told every model to call `core_brief_write` and `core_plan_update` first and
+      `core_handoff_write` last, tools a lean local builder isn't offered, so the model asked only
+      for `core_brief_write` and did nothing else for three checks. A lean builder's prompt leaves
+      the memory steps out; live, the same model then used the Build tools
+- [x] A call written after a sentence ("Let's list the files.\n```json {…}```") isn't run: #554
+      reads a reply that is only the JSON. Half the model's calls came this way and the turn ended
+      with nothing done. A reply that ends in complete `json` fences, each a call to an offered
+      tool, with only words before or between them, now runs them all (`fenced_calls`, ids
+      `react_N` as other text calls); words after the last fence, other code, an unclosed fence or
+      a tool that wasn't offered keep it text (#753)
+- [ ] A local builder spends its rounds on the project file and never writes the app: run 4 had a
+      compiling `Cargo.toml` by check 3, its last, with `main.rs` still "Hello, world!". See whether
+      more rounds get there, or whether a small model needs the window and the `--screenshot`
+      option written for it (a template in the Rust steps)
+- [x] The model ran `cargo new app` in `app/` (commands run there), so the project landed in
+      `app/app/` and every check said "No project to build found in app/ yet". The check now says
+      where a cargo or npm project one folder down is, and the Rust steps say `app/Cargo.toml`,
+      not a folder inside `app/` (a brief can't say `cargo init`: not every builder's commands
+      start in `app/`). Live, with calls after a sentence run too, the model then made
+      `app/Cargo.toml` and the build compiled (#751)
+- [ ] The model reads file paths from the project folder and commands from `app/` as one base:
+      it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`. Say the
+      folder in `build_command_run`'s result (or its description) so the two can't be mixed up
+- [ ] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
+      Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out
+- [x] An assistant turn with no text sends an empty string, not `content: null`, which Ollama
+      refused as `invalid message content type: <nil>` (#403, #536)
 - [x] Understand a tool call a model writes as JSON in its text (#417; implementation `dfe9a4db2dcb3e27edbd67311cbb4202584e7af6`). The fallback protocol reads
       only `Action:` and `Action Input:` lines, so anything else ends the turn with nothing done
 - [x] Preserve `length` and `content_filter` stop reasons on native tool-call streams; a parsed
@@ -250,9 +307,17 @@ been run live.
 - [x] Do not select an embedding, ranking or transcription model as a chat backend when a local server has no chat models — claimed: Afloat16, branch bugfix/r5.4-nonchat-model-detection-20261103
 - [x] Recognize specialised model file paths and numeric task-name versions during local chat setup
       — claimed: Afloat16, branch bugfix/r5.4-model-task-identifiers-20261103
+- [x] The first run's AI step can add a model server on another computer by its address (llama.cpp,
+      Ollama or LM Studio on a home server), the same form as Settings → AI
+- [ ] A chat sent while a llama.cpp router is still loading the model ended after 31 s with "The
+      answer stream ended early." and no next step (seen once live, 27B model); say the server may
+      still be loading it and to try again in a minute
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
+- [ ] `rebuild --backend <an API backend>` still adds the first agent app it finds to the person's
+      settings and prints "Using Claude Code (…)": `ensure_agent` (`rebuild_cmd.rs`) runs whenever no
+      agent app is set up, though this run won't use one. Run it only when the build needs one
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
@@ -344,14 +409,24 @@ yet, and the quick start is how every new person begins.
 
 ### R1.5 External engine trait in L3
 Owner: open · Status: in progress
+- [x] Find Chrome, Brave, Chromium and Edge installed as Flatpaks on Linux (system and per-user
+      exports), and keep a Flatpak or Snap browser's private profile in the home folder its
+      sandbox shares, since its /tmp is its own (#747). Unit-tested; not run on a real Flatpak
 - [ ] More pins once their hashes are checked against the publisher: Chromium (no published
       checksums found yet), Rizin for Linux (the tar.xz unpacks to ~800 MB, so it needs streaming
       extraction) and macOS (a .pkg)
 
 ### R1.6 Headless first
 Owner: maintainers · Status: in progress
-- [ ] Give Linux-specific Clang guidance in Unreal's guided installer when the bundled compiler
+- [x] Give Linux-specific Clang guidance in Unreal's guided installer when the bundled compiler
       is missing (the requirements summary is already platform-specific).
+      — claimed: AlexJoaquimPereira, branch `bugfix/r1.6-linux-unreal-clang`
+- [x] Give macOS the right C++ guidance when Xcode is missing: the status line and
+      requirements summary now name Xcode, matching the guided step.
+- [x] Find Visual Studio's C++ tools on Windows when Visual Studio is installed outside Program
+      Files (through the Visual Studio Installer's `ProgramData` instance state or developer
+      environment variables, #669, [PR #726](https://github.com/storytold/craft-anything/pull/726))
+      — claimed: riyaz, branch `bugfix/r1.6-windows-vs-cpp-tools`
 
 ---
 
@@ -359,6 +434,15 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
+- [x] A saved agent program path that no longer exists (Codex desktop moves its CLI to a new
+      build folder on every update) says so and names the path, instead of "isn't installed or
+      isn't on your PATH" (#721); it stays a missing program, so a builder turn isn't retried
+- [x] A relative program path started in another folder is looked up where it was started
+      before it's reported as missing (Unix: a script whose interpreter is missing was said to
+      have no file there)
+- [ ] When a saved Codex desktop path is gone, offer the CLI found in its newest build folder
+      (asking first, never replacing a custom program silently), and let Detect/Test check the
+      configured program itself (#721)
 - [x] GitHub Copilot through its own CLI login and ACP, without credential import:
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
@@ -484,11 +568,25 @@ Owner: open · Status: in progress
 - [ ] #105, #135, #259, #385 and #423 predate 0.3.0, which looks in more places, and came through
       the ticket relay, so nobody can ask them for `doctor` output. Close them pointing at 0.3.0,
       and add search paths only for a new report that has that output
-- [ ] Say plainly when what's found is the Claude desktop app rather than the `claude` program
+- [x] #423: an agent that is set up but switched off is never offered again, so "No coding agent was
+      found" stays on screen with Claude installed: the setup card and "Look again" leave out every saved
+      AI by name, on or off. Offer a switched-off agent as found and turn it on, keeping its options.
+      Cause is not confirmed on the reporter's machine (needs their config.toml); the fix covers the
+      switched-off case that the code leaves out (`is_on`, `leave_out_set_up`, `builder_backend`). — claimed: fabox-os,
+      branch bugfix/423-disabled-agent-not-offered
+- [x] Say plainly when what's found is the Claude desktop app rather than the `claude` program
       (#259, a guess at its cause)
-- [ ] macOS: `/Applications/Antigravity.app` ended up as the agent's command (#467); find what
-      writes it (no code for it was found; maybe the file picker)
+- [ ] macOS: check that `Claude.app` is where the desktop app is found (#259's hint is untried there)
+- [x] macOS: `/Applications/Antigravity.app` ended up as the agent's command (#467). Found: the "Where is
+      the program?" picker (`pick_file`) returns the bundle, and `set_command` saved any path. Refuse a
+      folder or app bundle when it's saved (`set_command`), and don't run one that was saved before
+      (`program_of` uses the usual name). Tests: `an_app_bundle_is_refused_as_an_agents_program`, `program_of`
+      cases. — claimed: fabox-os, branch bugfix/467-agent-program-app-bundle
 - [x] Windows: look in `%LOCALAPPDATA%\agy\bin` too (#62) — claimed: Afloat16, branch bugfix/r2.2-antigravity-search-20261103
+- [x] Windows: `usual_windows_dirs_come_after_path` counts Antigravity's second folder (#748
+      added it; the test runs only on Windows, which CI doesn't)
+- [ ] CI runs the tests on Ubuntu only, so `cfg(windows)` tests (search paths, consoles, Job
+      Objects) are checked only on contributors' machines: run them on a Windows runner too
 - [ ] "Claude Code on <ssh host>" is offered for any SSH host, whether or not it has Claude Code
       (#62)
 - [ ] Gemini CLI's sign-in reportedly refuses individuals now (#400): check, and stop recommending
@@ -523,12 +621,27 @@ Owner: open · Status: in progress
 - [x] The website check's missing-site note names every place `site_dir` accepts (dist/, build/,
       out/, or a plain index.html with no package.json) and the app's real place, "app/" or "the
       project folder" (#494)
-- [ ] A project edited in place (Work on my project, or `rebuild --existing edit`) gets its stack
-      from the request's words, as a new one does: a request that reads as a game asks for Unity
-      unless it names another engine, even when the folder is a Godot project, and a run with no
-      stack picks the kind's default (`kinds.choose`); `stacks::used_in` reads only package.json,
-      after the first turn. Read the stack from the folder's own files first (`project.godot`,
-      `Cargo.toml`, `pyproject.toml`, `package.json`…)
+- [x] A project edited in place (Work on my project, or `rebuild --existing edit`) keeps what its
+      files are built with, unless the request names another stack: an engine's project file, then
+      package.json and Cargo.toml dependencies, then `found_by` in `stacks.toml`, and a project
+      whose dependencies name no stack there is left to the builder. A request that read as a game
+      used to ask for Unity even in a Godot project, and an app got the kind's default
+      — claimed: xerenon, branch bugfix/r2.7-stack-from-files; PR #755
+- [x] A person's own project (edited in place, nothing to recreate) is judged by what it does for
+      itself: its own build, then its own tests, through `[[toolchain]]` in `stacks.toml` (Rust,
+      Node.js, Python, Go, .NET, Maven, Gradle, Make). Nothing is added to it for our sake: no
+      `--screenshot`, `--self-test` or mechanics sheet. A site stack with nothing to recreate is a
+      website, whatever the request says
+      — claimed: xerenon, branch feature/r2.7-own-project-checks; PR #760
+- [ ] Run the Go, .NET, Maven and Gradle rows of `[[toolchain]]` on real projects, and every row
+      on Windows (`windows_program`): Rust, Node.js, Python and Make were run for real, on a Mac
+      only. Also a person's own Unity project: it's opened in batch mode, which should exit with
+      an error when its scripts don't compile (not run: no Unity on that machine)
+- [ ] A person's own tests that already failed before their request fail the check too, so the
+      builder is sent to fix them. If that proves a nuisance, run them once before the first turn
+      and hold it only to what it broke
+- [ ] A new project in Python, Go or the like still fails the build check ("No project to build
+      found") and has no program for the screenshot check: `[[toolchain]]` could build it too
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
@@ -554,6 +667,16 @@ Gaps found while using the app for real projects.
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
       total, so a forked answer shows none; count questions in the project's usage
 - [ ] "Make this change" on an answer that suggests one (sends it as a normal message)
+- [x] #504: the builder's plan card can be folded away with its X, or with `project_plan_fold`
+      (between builds: a fold during a build can be overwritten by its next save). The steps stay
+      in the conversation (`FEED_VERSION` 4, `FeedItem::PlanDismissed`), and a later run's
+      checklist shows again — claimed: claude, branch bugfix/r2.9-plan-card-dismiss
+- [ ] A run that ends with steps still open marks them as stopped on its card, instead of
+      showing "Doing" until someone folds it (#504: Claude's runs left the plan unticked)
+- [x] #666: a long line in a feed's tool-work row (a Deep-mode decompile, a status note) ran off
+      the window and pushed the feed left; the header title can't wrap in egui, so it's the note's
+      first line now, cut at 90 characters, and the full note wraps in the body — claimed: claude,
+      branch bugfix/r2.9-feed-text-overflow
 - [ ] **decision** A program started from the CLI (`project_play`) keeps the shell's output pipe
       open, so the command doesn't return until it closes (#207). Every fix found needs `unsafe` or
       an unstable API: an exception to rule 9, or a limit we document. Meanwhile a reproducing test
@@ -566,14 +689,19 @@ Gaps found while using the app for real projects.
 - [x] Release the keep-awake helper before a rebuild reports `Finished`, waiting up to five seconds
       for its supervised cleanup and logging a timeout. Real subprocess stand-ins checked on Linux (#541)
       — claimed: Afloat16, branch bugfix/r2.9-keep-awake-cleanup-20261103
-- [ ] Recheck keep-awake cleanup with a real Windows CLI `rebuild`: the helper once outlived it by
-      more than 9 minutes and held the caller's output pipe; not reproduced in 8 more runs. The
-      bounded cleanup change has been checked with Linux stand-ins, not this Windows incident
+- [x] Recheck keep-awake cleanup with a real Windows CLI `rebuild`: the helper once outlived it by
+      more than 9 minutes and held the caller's output pipe; not reproduced in 8 more runs. Found:
+      closing the desktop app during a build ends it without dropping the guard, and the helper
+      (an endless PowerShell loop, started with a week's time limit) carried on. It now ends by
+      itself once the process it serves is gone: the Windows loop checks that process every 30 s,
+      and macOS uses `caffeinate -w`. Live on Windows: a CLI build killed outright, its helper
+      ended 30 s later. Not run on a Mac
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
-- [ ] Claude Code's own extras: its Ultracode switch (a setting, not an effort level; the
-      effort environment variable we use can't turn it on) and its model names beyond the list
-      (`opusplan`, `[1m]` variants) offered in Settings → AI; `ai model` already takes any name
+- [ ] Claude Code's Ultracode switch (a setting, not an effort level; the effort environment
+      variable we use can't turn it on)
+- [x] A model the list doesn't offer (`opusplan`, `[1m]` variants, one another harness serves) can
+      be typed in beside the model list in Settings → AI, as `ai model` already allowed (#470)
 - [x] The preview server answers only requests addressed to this computer (a Host and Origin
       check against DNS rebinding), streams large files instead of reading them into memory,
       sends no body for HEAD on a missing file, and caps open connections and the time a
@@ -594,6 +722,28 @@ Gaps found while using the app for real projects.
       refused and a folder that's already a project opens. Until now that was only reachable
       through "Choose a folder…" under Make's Start, on a screen that asks what to recreate
       — claimed: xerenon, branch feature/r2.9-work-on-my-project; PR #686
+- [x] Leaving "Work on my project" forgets a folder it would edit in place and drops a folder
+      dialog that ends later, so a version made on Make can't edit that project, and an address
+      in its request isn't read as an original to recreate (review of #686) — claimed: xerenon, branch bugfix/r2.9-own-project-review; PR #750
+- [x] Choose Claude Code's folder (`CLAUDE_CONFIG_DIR`) per AI, so one computer can build with
+      two Claude accounts; an app opened from the Dock never sees the shell's variable. Settings →
+      AI (a typed folder, and Add another) and `ai folder`; live-checked from the CLI with an empty
+      folder (not signed in, and the fix names the folder) overriding the shell's own variable,
+      and by a build in the app with a typed `~/` folder. A sign-in that expired says so instead
+      of "isn't signed in" (the folder's `.claude.json` still names the account)
+      — claimed: Claude (Opus 5.5), branch feature/claude-config-dir
+- [ ] A live build with two Claude Code AIs signed in to two accounts, and one over SSH with a
+      `~/` folder (the remote line is unit-tested, not run on another computer)
+
+- [ ] Keep the builder-availability smoke regression independent of live agent discovery.
+      — claimed: Afloat16, branch test/r2.9-builder-discovery-fixture-20261104
+      Test fixture implemented with controlled discovery; automated validation remains pending.
+- [x] macOS: a menu bar with the app's own actions (open a file or folder, new project, settings,
+      Simple / Advanced, Clean room / Deep, the command palette, help); the system's menu bar
+      showed only the app menu
+      — claimed: sanketdofe, branch feature/r2.9-macos-menu-bar
+- [ ] macOS: an Edit menu (Undo, Cut, Copy, Paste, Select All). The keys work in text boxes, but
+      the system's Edit items need the text box to answer them, so they'd show greyed out today
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -669,6 +819,14 @@ Owner: open · Status: in progress
       ROMFS dot roots, cramfs, ext and JFFS2 sizes and holes, PyInstaller modules outside their
       PYZ, JSON config edits (comments kept, every duplicate key removed), and UDP, TCP, DNS over
       TCP, pcapng and TLS lengths (#688–#715, by Afloat16)
+
+- [x] Address the combined parser review: preserve partial Java reference coverage,
+      enforce DEX signed 32-bit LEB128 limits, recover legacy AAPT UTF-8 lengths within
+      their pool with a shared recovery probe limit, and distinguish missing ext indirect
+      metadata from sparse holes.
+      — claimed: Afloat16, branch bugfix/r3.12-parser-review-followups-main-20261104
+      Shared-budget revision `29c48e03` passed [full Linux CI](https://github.com/storytold/craft-anything/actions/runs/41762780268).
+      The merge with main `41d2175e` awaits a new CI run.
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress

@@ -75,11 +75,11 @@ fn block_bytes<'a>(data: &'a [u8], sb: &Sb, block: u64) -> Option<&'a [u8]> {
 }
 
 /// Collect the physical block numbers for logical blocks 0..n of an inode, via block pointers or
-/// an extent tree. Unmapped logical blocks are `None` (sparse → zeros).
-fn file_block_map(data: &[u8], sb: &Sb, inode_off: u64, flags: u32, nblocks: u64, img: &mut FsImage) -> Vec<Option<u64>> {
+/// an extent tree. Unmapped logical blocks are `None` (sparse → zeros); unreadable indirect
+/// metadata makes the whole map unavailable rather than turning unknown mappings into holes.
+fn file_block_map(data: &[u8], sb: &Sb, inode_off: u64, flags: u32, nblocks: u64, img: &mut FsImage) -> Option<Vec<Option<u64>>> {
     let r = Reader::new(data);
-    let ib = usize::try_from(inode_off).ok().and_then(|o| o.checked_add(40));
-    let Some(ib) = ib else { return Vec::new() };
+    let ib = usize::try_from(inode_off).ok().and_then(|o| o.checked_add(40))?;
     let n = usize::try_from(nblocks.min(1 << 20)).unwrap_or(0);
     let mut map = vec![None; n];
     if flags & 0x8_0000 != 0 {
@@ -103,33 +103,38 @@ fn file_block_map(data: &[u8], sb: &Sb, inode_off: u64, flags: u32, nblocks: u64
                 set(&mut logical, p, &mut map);
             }
         }
-        // Single indirect.
-        if let Some(ind) = r.u32_le(ib + 48).filter(|&p| p != 0) {
-            read_indirect(data, sb, u64::from(ind), 1, per, &mut logical, &mut map);
+        // Each root owns its full logical span, including when its pointer is zero.
+        for (level, slot, first) in [(1, 48, 12), (2, 52, 12 + per)] {
+            logical = first;
+            if let Some(root) = r.u32_le(ib + slot).filter(|&p| p != 0)
+                && let Err(block) = read_indirect(data, sb, u64::from(root), level, per, &mut logical, &mut map)
+            {
+                img.warn(format!("ext: indirect block {block} is unavailable; file data not recovered"));
+                img.complete = false;
+                return None;
+            }
         }
-        // The single-indirect span still occupies its logical blocks when its root is absent.
-        logical = 12 + per;
-        // Double indirect.
-        if let Some(dind) = r.u32_le(ib + 52).filter(|&p| p != 0) {
-            read_indirect(data, sb, u64::from(dind), 2, per, &mut logical, &mut map);
-        }
-        if r.u32_le(ib + 56).is_some_and(|p| p != 0) {
+        if nblocks > 12 + per + per * per && r.u32_le(ib + 56).is_some_and(|p| p != 0) {
             img.warn("ext: triple-indirect blocks are not followed");
             img.complete = false;
+            return None;
         }
     }
-    map
+    Some(map)
 }
 
-fn read_indirect(data: &[u8], sb: &Sb, block: u64, level: u8, per: u64, logical: &mut u64, map: &mut Vec<Option<u64>>) {
+fn read_indirect(data: &[u8], sb: &Sb, block: u64, level: u8, per: u64, logical: &mut u64, map: &mut Vec<Option<u64>>) -> Result<(), u64> {
     if *logical as usize >= map.len() {
-        return;
+        return Ok(());
     }
-    let Some(b) = block_bytes(data, sb, block) else { return };
+    let b = block_bytes(data, sb, block).ok_or(block)?;
     let r = Reader::new(b);
     for i in 0..per {
-        let Some(off) = usize::try_from(i.saturating_mul(4)).ok() else { break };
-        let Some(ptr) = r.u32_le(off) else { break };
+        if *logical as usize >= map.len() {
+            return Ok(());
+        }
+        let off = usize::try_from(i.saturating_mul(4)).map_err(|_| block)?;
+        let ptr = r.u32_le(off).ok_or(block)?;
         if ptr == 0 {
             *logical += if level == 1 { 1 } else { per };
             continue;
@@ -142,12 +147,10 @@ fn read_indirect(data: &[u8], sb: &Sb, block: u64, level: u8, per: u64, logical:
             }
             *logical += 1;
         } else {
-            read_indirect(data, sb, u64::from(ptr), level - 1, per, logical, map);
-        }
-        if *logical as usize >= map.len() {
-            return;
+            read_indirect(data, sb, u64::from(ptr), level - 1, per, logical, map)?;
         }
     }
+    Ok(())
 }
 
 fn extents(data: &[u8], sb: &Sb, node_off: usize, map: &mut Vec<Option<u64>>, depth_guard: u8, img: &mut FsImage) {
@@ -200,7 +203,7 @@ fn file_data(data: &[u8], sb: &Sb, inode_off: u64, flags: u32, size: u64, limits
         return None;
     }
     let nblocks = size.div_ceil(sb.block_size);
-    let map = file_block_map(data, sb, inode_off, flags, nblocks, img);
+    let map = file_block_map(data, sb, inode_off, flags, nblocks, img)?;
     let mut out = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
     for phys in &map {
         match phys {

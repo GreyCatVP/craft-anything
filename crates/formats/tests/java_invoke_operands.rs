@@ -1,3 +1,4 @@
+use craft_anything_formats::java_class;
 use craft_anything_formats::java_ops::{decode, decode_one};
 
 #[test]
@@ -34,4 +35,42 @@ fn valid_and_truncated_invocations_keep_their_boundaries() {
     assert!(complete);
     assert_eq!(instructions.len(), 3);
     assert_eq!(instructions[2].pc, 10);
+}
+
+fn reference_class() -> java_class::ClassFile {
+    let mut class = java_class::parse(&craft_anything_testkit::java::hello_class()).unwrap();
+    class.methods.retain(|method| method.name == "run");
+    class
+}
+
+#[test]
+fn malformed_invocations_mark_reference_scans_incomplete() {
+    let valid = reference_class();
+    let (expected, incomplete) = java_class::references(&valid, "java/io/PrintStream", None, 10);
+    assert!(!incomplete);
+    assert_eq!(expected.len(), 1);
+    for invalid in [[0xb9, 0, 1, 0, 0], [0xb9, 0, 1, 1, 1], [0xba, 0, 1, 1, 0], [0xba, 0, 1, 0, 1]] {
+        let mut class = valid.clone();
+        let code = &mut class.methods[0].code.as_mut().unwrap().bytecode;
+        let later_reference = code.clone();
+        *code = invalid.to_vec();
+        code.extend_from_slice(&later_reference);
+        let (found, incomplete) = java_class::references(&class, "java/io/PrintStream", None, 10);
+        assert!(found.is_empty());
+        assert!(incomplete, "invalid invocation must not hide an unfinished reference scan: {invalid:?}");
+    }
+}
+
+#[test]
+fn incomplete_scans_keep_earlier_references_and_scan_other_methods() {
+    let mut class = reference_class();
+    let mut later_method = class.methods[0].clone();
+    later_method.name = "later".into();
+    class.methods[0].code.as_mut().unwrap().bytecode.extend_from_slice(&[0xba, 0, 1, 1, 0]);
+    class.methods.push(later_method);
+    let (found, incomplete) = java_class::references(&class, "java/io/PrintStream", None, 10);
+    assert!(incomplete);
+    assert_eq!(found.len(), 2);
+    assert!(found[0].caller.contains(".run:("));
+    assert!(found[1].caller.contains(".later:("));
 }

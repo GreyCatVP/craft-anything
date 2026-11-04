@@ -22,6 +22,8 @@ mkdir -p "$APPDIR/usr/share/icons"
 cp -R "$ROOT/assets/app-icon/hicolor" "$APPDIR/usr/share/icons/"
 printf '#!/bin/sh\necho "stub: $*"\n' >"$APPDIR/usr/bin/craft-anything"
 chmod +x "$APPDIR/usr/bin/craft-anything"
+printf '#!/bin/sh\necho "cli: $*"\n' >"$APPDIR/usr/bin/craft-anything-cli"
+chmod +x "$APPDIR/usr/bin/craft-anything-cli"
 
 APPIMAGE="$TMP/craft-anything test.AppImage" # spaces on purpose: Exec must stay quoted
 : >"$APPIMAGE"
@@ -95,4 +97,19 @@ out="$(APPIMAGE="$odd" "$APPDIR/AppRun" x)" || fail "launch with an odd path exi
 [ "$out" = "stub: x" ] || fail "odd path: $out"
 [ ! -e "$XDG_DATA_HOME" ] || fail "integrated an AppImage path that needs escaping"
 
-echo "AppRun desktop integration ok"
+# 10. `--cli` runs the bundled CLI with the rest of the arguments, and integrates nothing (#723).
+rm -rf "$XDG_DATA_HOME"
+out="$("$APPDIR/AppRun" --cli mcp --project "a b.cany")" || fail "--cli exited non-zero"
+[ "$out" = "cli: mcp --project a b.cany" ] || fail "--cli not routed to the CLI: $out"
+[ ! -e "$XDG_DATA_HOME" ] || fail "a CLI run integrated the desktop entry"
+
+# 11. Started through a link named craft-anything-cli ($ARGV0), every argument goes to the CLI.
+out="$(ARGV0="/home/u/.local/bin/craft-anything-cli" "$APPDIR/AppRun" --version)" || fail "ARGV0 route exited non-zero"
+[ "$out" = "cli: --version" ] || fail "ARGV0 not routed to the CLI: $out"
+[ ! -e "$XDG_DATA_HOME" ] || fail "an ARGV0 CLI run integrated the desktop entry"
+
+# 12. Any other name, or --cli later on the line, still starts the app.
+out="$(ARGV0="craft-anything" "$APPDIR/AppRun" open --cli)" || fail "app launch exited non-zero"
+[ "$out" = "stub: open --cli" ] || fail "app launch routed to the CLI: $out"
+
+echo "AppRun desktop integration and CLI routing ok"

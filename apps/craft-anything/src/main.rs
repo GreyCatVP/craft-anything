@@ -18,6 +18,8 @@ static RETRY_IN_SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 #[cfg(any(target_os = "linux", test))]
 mod linux_gpu;
 
+/// Opens the window on the engine and AI hub (a path on the command line opens as the first
+/// target); if the window can't start, says why and where its log is.
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
@@ -82,23 +84,41 @@ fn main() -> eframe::Result {
         setup.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(eframe::wgpu::Dx12Compiler::from_env());
         setup.native_adapter_selector = Some(Arc::new(pick_adapter));
     }
-    let run = eframe::run_native(
-        "Craft Anything",
-        options,
-        Box::new(move |cc| {
-            log::info!("window open");
-            CraftApp::setup_context(&cc.egui_ctx);
-            let mut app = CraftApp::new(engine, hub);
-            // The window is built hidden and its first frame is drawn afterwards, where a graphics
-            // driver may still crash: the mark stays until frames have been shown (#74).
-            app.after_first_frames(move || start_guard::opened(&config));
-            app.load_prefs(cc.storage);
-            if let Some(p) = open {
-                app.open_path(p);
-            }
-            Ok(Box::new(app))
-        }),
-    );
+    // Set once the first frames have been shown. Before that, eframe 0.36's wgpu panics when it
+    // can't configure the window's surface (no usable GPU, or no desktop: winget-pkgs validation
+    // starts the app that way and rejected the panic, exit 101), instead of returning an error.
+    let shown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shown_by_app = Arc::clone(&shown);
+    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "Craft Anything",
+            options,
+            Box::new(move |cc| {
+                log::info!("window open");
+                CraftApp::setup_context(&cc.egui_ctx);
+                let mut app = CraftApp::new(engine, hub);
+                // The window is built hidden and its first frame is drawn afterwards, where a graphics
+                // driver may still crash: the mark stays until frames have been shown (#74).
+                app.after_first_frames(move || {
+                    start_guard::opened(&config);
+                    shown_by_app.store(true, std::sync::atomic::Ordering::Relaxed);
+                });
+                app.load_prefs(cc.storage);
+                app.install_menu_bar(&cc.egui_ctx);
+                if let Some(p) = open {
+                    app.open_path(p);
+                }
+                Ok(Box::new(app))
+            }),
+        )
+    }));
+    let run = match run {
+        Ok(run) => run,
+        // A window that never showed: report it like any other start failure, below.
+        Err(payload) if !shown.load(std::sync::atomic::Ordering::Relaxed) => Err(eframe::Error::AppCreation(panic_text(payload.as_ref()).into())),
+        // A panic after the window was up is a bug, not a start failure: it ends the app as before.
+        Err(payload) => std::panic::resume_unwind(payload),
+    };
     match &run {
         Ok(()) => log::info!("closed"),
         Err(e) => {
@@ -135,11 +155,25 @@ fn wants_software(setting: Option<&str>) -> bool {
     setting.is_some_and(|s| s.trim().eq_ignore_ascii_case("software"))
 }
 
-/// What to try when the window can't start: a lost graphics device gets the way to the software
-/// renderer, and anything else the usual driver advice.
+/// The message a panic carried (`panic!` with a literal or a formatted string), or a generic one.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    match (payload.downcast_ref::<&str>(), payload.downcast_ref::<String>()) {
+        (Some(text), _) => (*text).to_string(),
+        (None, Some(text)) => text.clone(),
+        (None, None) => "the graphics start failed".to_string(),
+    }
+}
+
+/// What to try when the window can't start. A lost graphics device on Windows gets the way to the
+/// software renderer; on macOS that setting does nothing (only Windows picks its adapter), so it
+/// gets the update advice and the report path. Anything else gets the usual driver advice.
 fn graphics_advice(error: &str) -> &'static str {
     if error.to_lowercase().contains("device is lost") {
-        "The graphics driver stopped while the window opened. Update it, then try again. If it keeps happening, set the environment variable CRAFT_ANYTHING_RENDERER=software to draw without the graphics card (slower), and start the app again."
+        if cfg!(target_os = "macos") {
+            "The Mac's graphics stopped while the window opened. Install the latest macOS update, then try again. If it keeps happening, please report it with the log file (Craft Anything issue #742 covers the Metal shader case)."
+        } else {
+            "The graphics driver stopped while the window opened. Update it, then try again. If it keeps happening, set the environment variable CRAFT_ANYTHING_RENDERER=software to draw without the graphics card (slower), and start the app again."
+        }
     } else {
         "Updating your graphics driver often fixes this."
     }
@@ -200,6 +234,18 @@ fn adapter_rank(backend: eframe::wgpu::Backend, device: eframe::wgpu::DeviceType
 mod tests {
     use super::*;
     use eframe::wgpu::{Backend as B, DeviceType as T};
+
+    /// A panic before the window showed becomes the error the start-failure dialog shows: wgpu's
+    /// own message when there is one (`panic!` with a literal or a formatted string).
+    #[test]
+    fn a_start_panic_keeps_its_message() {
+        let literal: Box<dyn std::any::Any + Send> = Box::new("wgpu error: Validation Error");
+        let formatted: Box<dyn std::any::Any + Send> = Box::new(String::from("In Surface::configure: Invalid surface"));
+        let other: Box<dyn std::any::Any + Send> = Box::new(7_u8);
+        assert_eq!(panic_text(literal.as_ref()), "wgpu error: Validation Error");
+        assert_eq!(panic_text(formatted.as_ref()), "In Surface::configure: Invalid surface");
+        assert_eq!(panic_text(other.as_ref()), "the graphics start failed");
+    }
 
     /// #27: a VMware VM offers its virtual GPU over GL and WARP over DX12; GL drew a black window.
     /// #33: a start that shows nothing is looked at through `desktop.log`; between same-class
@@ -282,10 +328,27 @@ mod graphics_tests {
         assert!(matches!(dx12_compiler(Some(Dx12Compiler::StaticDxc)), Dx12Compiler::StaticDxc));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_lost_device_says_how_to_draw_without_the_graphics_card() {
         assert!(graphics_advice("WGPU error: Parent device is lost").contains("CRAFT_ANYTHING_RENDERER=software"));
         assert!(!graphics_advice("No adapter").contains("software"));
+        assert!(wants_software(Some(" Software ")) && !wants_software(Some("gpu")) && !wants_software(None));
+    }
+
+    /// #742: on macOS `CRAFT_ANYTHING_RENDERER` does nothing, so the advice must not name it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_lost_device_on_a_mac_does_not_point_at_the_windows_only_setting() {
+        let advice = graphics_advice("WGPU error: Parent device is lost");
+        assert!(!advice.contains("CRAFT_ANYTHING_RENDERER"), "{advice}");
+        assert!(advice.contains("#742"));
+        assert!(!graphics_advice("No adapter").contains("CRAFT_ANYTHING_RENDERER"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn wants_software_reads_the_setting() {
         assert!(wants_software(Some(" Software ")) && !wants_software(Some("gpu")) && !wants_software(None));
     }
 }

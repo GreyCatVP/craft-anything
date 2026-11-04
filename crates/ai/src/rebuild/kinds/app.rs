@@ -46,6 +46,9 @@ impl TargetKind for AppKind {
 
     fn brief_sections(&self, cx: &BriefCx) -> Vec<String> {
         let mut s = Vec::new();
+        if cx.ws.manifest.own_project() {
+            return s;
+        }
         if cx.deep && matches!(cx.ws.manifest.target, TargetRef::Local { .. }) {
             s.push(decompile_note(false, cx.ghidra).trim_start().to_string());
             s.push(mechanics::MECHANICS_CONTRACT.to_string());

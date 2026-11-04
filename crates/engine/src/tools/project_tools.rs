@@ -98,6 +98,17 @@ pub fn specs() -> Vec<ToolSpec> {
             run: project_rename,
         },
         ToolSpec {
+            id: "project_plan_fold",
+            title: "Fold a project's plan",
+            summary: "Fold the builder's plan card away (#504). The steps stay in the project's conversation, and a later run's plan shows again. Call it between builds: a build saves its conversation as it goes, so a fold made during one can be overwritten by that build's next save.",
+            beginner: "Hides the builder's checklist until it makes a new one.",
+            toolset: Toolset::Projects,
+            effects: Effects::WRITES_FILESYSTEM,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<FoldPlanParams>,
+            run: project_plan_fold,
+        },
+        ToolSpec {
             id: "project_duplicate",
             title: "Duplicate a project",
             summary: "Copy a project beside it under a new name, to try something else from where it is: what was built, the pictures of the original and the study come along; the conversation, questions and usage don't, and neither do dependencies or compiler output (the next build makes them again). An app edited in place is copied into the copy's app/ folder.",
@@ -180,6 +191,21 @@ fn project_rename(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolE
     let mut ws = open(&p.project)?;
     ws.rename(&p.name)?;
     Ok(ToolOutput::Value(json!({"project": ws.root, "name": ws.manifest.name})))
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FoldPlanParams {
+    /// The project's folder.
+    pub project: PathBuf,
+}
+
+fn project_plan_fold(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: FoldPlanParams = parse_params(params)?;
+    let ws = open(&p.project)?;
+    // `folded` is false when there's no plan to fold, or it's folded already.
+    let folded = crate::feed::dismiss_plan_saved(&ws)?;
+    Ok(ToolOutput::Value(json!({"project": ws.root, "folded": folded})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -622,6 +648,22 @@ mod tests {
         assert_eq!(call(json!({"project": ws.root, "budget_usd": 12.5})).unwrap()["budget_usd"], 12.5);
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.asset_budget_usd, 12.5);
         assert!(call(json!({"project": ws.root, "budget_usd": -1})).is_err());
+    }
+
+    /// #504: the plan card is folded by a tool too (the app's button calls it), and says whether
+    /// it folded anything.
+    #[test]
+    fn a_plan_is_folded_by_its_tool_and_says_whether_it_did() {
+        use crate::feed::{FeedItem, PlanStep, UserItem, save, visible_plan};
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Game", "A game", TargetRef::None).unwrap();
+        let steps = vec![PlanStep { text: "Lay out".into(), doing: "Laying out".into(), status: crate::feed::PlanStatus::Todo }];
+        save(&ws.root, &[FeedItem::User(UserItem::Text("A game".into())), FeedItem::Plan(steps)]).unwrap();
+        let e = Engine::new(crate::testing::session());
+        let fold = || e.call("project_plan_fold", json!({"project": ws.root}), CallOptions::new(Caller::Cli)).map(|o| o.to_json()["result"]["folded"].clone());
+        assert_eq!(fold().unwrap(), true);
+        assert!(visible_plan(&crate::feed::load(&ws)).is_none());
+        assert_eq!(fold().unwrap(), false, "already folded");
     }
 
     #[test]

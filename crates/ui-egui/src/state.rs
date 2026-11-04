@@ -61,6 +61,9 @@ pub struct MakeDraft {
     /// What's already in that folder: the first names and how many.
     #[serde(default)]
     pub folder_files: Option<(Vec<String>, usize)>,
+    /// The stack those files are built with, read when they're chosen as the app.
+    #[serde(default)]
+    pub folder_stack: Option<String>,
     /// What those files are to the project.
     #[serde(default)]
     pub existing: Option<craft_anything_engine::workspace::ExistingFiles>,
@@ -92,6 +95,7 @@ impl Default for MakeDraft {
             mine: false,
             folder: None,
             folder_files: None,
+            folder_stack: None,
             existing: None,
             remember_existing: false,
             ai: None,

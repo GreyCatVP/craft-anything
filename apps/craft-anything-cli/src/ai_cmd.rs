@@ -59,6 +59,10 @@ pub enum AiCommand {
     /// Set the program an agent app runs, when it's installed where it isn't found (leave the
     /// path out to find it by its usual name again).
     Program { name: String, path: Option<String> },
+    /// Set the folder Claude Code keeps its sign-in, settings and sessions in (its
+    /// CLAUDE_CONFIG_DIR), so this AI uses another account: a full path or one under `~/`, on the
+    /// computer it runs on. Leave the path out for its usual folder.
+    Folder { name: String, path: Option<String> },
     /// Set the model an AI uses (Claude Code: the model it's asked for); leave it out to list the
     /// ones it can use.
     Model {
@@ -221,6 +225,10 @@ pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
         }
         AiCommand::Detect => {
             emit(&serde_json::to_value(hub.detect()).unwrap_or(Value::Null), f);
+            // On stderr, so the list on stdout stays what scripts read.
+            for hint in hub.detect_hints() {
+                eprintln!("note: {} {}", hint.message(), hint.remediation());
+            }
             0
         }
         AiCommand::Add { name, kind, model, base_url, ssh_host, key_env, key_stdin } => {
@@ -346,6 +354,13 @@ pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
         AiCommand::Program { name, path } => match hub.set_command(name, path.as_deref()) {
             Ok(found) => {
                 emit(&json!({"name": name, "program": path, "found": found}), f);
+                if found { 0 } else { 1 }
+            }
+            Err(e) => fail(&e, f),
+        },
+        AiCommand::Folder { name, path } => match hub.set_config_dir(name, path.as_deref()) {
+            Ok(found) => {
+                emit(&json!({"name": name, "folder": path, "found": found}), f);
                 if found { 0 } else { 1 }
             }
             Err(e) => fail(&e, f),

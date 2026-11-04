@@ -331,6 +331,9 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
+    let mut save_folder = None;
+    // Taken out while the rows borrow the app, and put back after them.
+    let mut folder_drafts = std::mem::take(&mut app.folder_inputs);
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
     let mut chosen_effort = None;
     let (mut pick_agent_model, mut chosen_agent_model, mut remote_program) = (None, None, None);
@@ -369,6 +372,41 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                 usual_program = Some(b.name.clone());
                             }
                         });
+                    }
+                    // The folder it keeps its sign-in in (Claude Code's CLAUDE_CONFIG_DIR), typed
+                    // so `~/` and hidden folders work, here or over SSH: another folder is another
+                    // account. Saved on Enter or when the field is left; empty is its usual one.
+                    if craft_anything_ai::folder_var(b).is_some() {
+                        let saved = app.backend_options.get(&b.name).and_then(|o| o.config_dir.clone()).unwrap_or_default();
+                        let id = egui::Id::new(("agent-folder", &b.name));
+                        // What was typed stays until it's saved (or refused, so it can be fixed).
+                        if folder_drafts.get(&b.name).is_some_and(|d| d.trim() == saved) && !ui.memory(|m| m.has_focus(id)) {
+                            folder_drafts.remove(&b.name);
+                        }
+                        let mut text = folder_drafts.get(&b.name).cloned().unwrap_or_else(|| saved.clone());
+                        ui.add_space(4.0);
+                        let label = ui.label(RichText::new(tr("Claude Code folder (CLAUDE_CONFIG_DIR)")).size(theme::CAPTION).color(t.text_dim));
+                        ui.label(
+                            RichText::new(tr("Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder."))
+                                .color(t.text_faint)
+                                .size(theme::CAPTION),
+                        );
+                        let r = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut text)
+                                    .id(id)
+                                    .hint_text("~/.claude")
+                                    .desired_width(260.0)
+                                    .frame(widgets::text_field_frame_compact(&t)),
+                            )
+                            .labelled_by(label.id);
+                        if r.changed() {
+                            folder_drafts.insert(b.name.clone(), text.clone());
+                        }
+                        if r.lost_focus() && text.trim() != saved {
+                            save_folder = Some((b.name.clone(), text.trim().to_string()));
+                        }
+                        ui.add_space(4.0);
                     }
                     // How hard it thinks: the Claude API and Claude Code take every Claude level.
                     let effort = craft_anything_ai::effort_in_use(b, app.backend_options.get(&b.name));
@@ -440,6 +478,18 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                             }
                                         }
                                     });
+                                    // A model the list doesn't offer: a newer one, a variant such as
+                                    // `opusplan`, or one another harness serves (#470).
+                                    let id = egui::Id::new(("other-model", &b.name));
+                                    let mut other = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
+                                    let label = ui.label(RichText::new(tr("Another model")).color(t.text_faint).size(theme::CAPTION));
+                                    let r = ui.add(egui::TextEdit::singleline(&mut other).desired_width(140.0)).labelled_by(label.id);
+                                    let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    if (widgets::link(ui, "Use").clicked() || entered) && !other.trim().is_empty() && other.trim() != current {
+                                        chosen_model = Some((b.name.clone(), other.trim().to_string()));
+                                        other.clear();
+                                    }
+                                    ui.data_mut(|d| d.insert_temp(id, other));
                                     if widgets::link(ui, "Cancel").clicked() {
                                         close_picker = true;
                                     }
@@ -567,6 +617,10 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     if let Some(name) = usual_program {
         app.set_agent_program(&name, None);
     }
+    app.folder_inputs = folder_drafts;
+    if let Some((name, folder)) = save_folder {
+        app.set_agent_folder(&name, Some(folder));
+    }
     if let Some(name) = pick_model {
         app.pick_model(&name);
     }
@@ -649,6 +703,15 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if configured {
                         widgets::pill(ui, "Added", t.success, t.raised);
+                        // Claude Code once more, to give it another account's folder.
+                        if craft_anything_ai::folder_var(&d.suggestion).is_some()
+                            && widgets::link(ui, "Add another").on_hover_text(tr("Add it again, to choose another account's folder for it.")).clicked()
+                        {
+                            let taken = |n: &String| app.backends.iter().any(|b| &b.name == n);
+                            if let Some(name) = (2..100).map(|i| format!("{} {i}", d.suggestion.name)).find(|n| !taken(n)) {
+                                app.add_backend(craft_anything_ai::BackendConfig { name, ..d.suggestion.clone() }, None);
+                            }
+                        }
                     } else if !d.needs_key && widgets::primary(ui, "Add").clicked() {
                         app.add_backend(d.suggestion.clone(), None);
                     }
@@ -683,7 +746,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
 
 /// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by
 /// its address (#54, #98). The server is asked for its models before it's added.
-fn server_form(app: &mut CraftApp, ui: &mut Ui) {
+/// The first run's AI step shows it too.
+pub(crate) fn server_form(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(14.0);
     widgets::caption(ui, "Add an AI by its address");
@@ -1055,6 +1119,55 @@ mod tests {
         app.hub.set_enabled("OpenCode", false).unwrap();
         draw(&mut app);
         assert!(app.agent_model_picker.is_none(), "a confirmed settings change still invalidates the picker");
+    }
+
+    /// An AI that finishes connecting is chosen, unless another choice (here "No AI for now") was
+    /// made while it connected.
+    #[test]
+    fn a_late_add_does_not_undo_a_choice_made_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Beginner, false));
+        let added = |choices| Ok(Done::BackendAdded { name: "Home server".into(), result: Ok(()), choices });
+        let started = app.backend_choices;
+        app.choose_backend(None);
+        app.handle_done(Finished { job: 0, result: added(started) });
+        assert_eq!(app.state.backend, None, "the late add must not override No AI for now");
+        app.handle_done(Finished { job: 0, result: added(app.backend_choices) });
+        assert_eq!(app.state.backend.as_deref(), Some("Home server"), "with no choice meanwhile, the added AI is chosen");
+        // Two adds at once: the first one's selection isn't a choice, so the second is selected too.
+        let started = app.backend_choices;
+        let other = |choices| Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices });
+        app.handle_done(Finished { job: 0, result: added(started) });
+        app.handle_done(Finished { job: 0, result: other(started) });
+        assert_eq!(app.state.backend.as_deref(), Some("Laptop"), "the add that finished last is selected");
+    }
+
+    /// A chat started while an AI connects is a choice too: the add doesn't switch AI under it.
+    #[test]
+    fn a_late_add_does_not_stop_a_chat_started_meanwhile() {
+        let mut app = demo::app(demo::engine(craft_anything_engine::Mode::Experienced, true));
+        // A closed local port: the chat starts, and its request fails without leaving this computer.
+        let config = BackendConfig {
+            name: "Box".into(),
+            kind: BackendKind::OpenaiCompatible,
+            model: "m".into(),
+            base_url: Some("http://127.0.0.1:9/v1".into()),
+            ssh_host: None,
+            enabled: true,
+        };
+        app.hub.add_backend(config, None).unwrap();
+        app.state.backend = Some("Box".into());
+        let started = app.backend_choices;
+        app.send("Hi");
+        assert!(app.conversation.is_some(), "the chat started");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "the chat's AI stays chosen");
+        assert!(app.conversation.is_some(), "the chat keeps going");
+        // A follow-up in a chat that started before the add counts the same way.
+        let started = app.backend_choices;
+        app.send("And then?");
+        app.handle_done(Finished { job: 0, result: Ok(Done::BackendAdded { name: "Laptop".into(), result: Ok(()), choices: started }) });
+        assert_eq!(app.state.backend.as_deref(), Some("Box"), "a follow-up keeps its AI");
+        assert!(app.conversation.is_some(), "the follow-up's answer keeps going");
     }
 }
 

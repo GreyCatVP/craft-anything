@@ -44,7 +44,11 @@ pub fn normalize_url(s: &str) -> String {
 }
 
 /// The target the draft will use: the picked one, the typed address, or an address in the request.
+/// "Work on my project" has none: an address in its request is a link to add, not an original.
 pub fn resolve_target(d: &MakeDraft) -> TargetRef {
+    if d.mine {
+        return TargetRef::None;
+    }
     if d.target != TargetRef::None {
         return d.target.clone();
     }
@@ -57,9 +61,19 @@ pub fn resolve_target(d: &MakeDraft) -> TargetRef {
 /// A game is being copied or made, so it's built with a game engine ("Build with").
 pub fn is_game(kinds: &craft_anything_ai::rebuild::KindRegistry, d: &MakeDraft) -> bool {
     use craft_anything_ai::rebuild::GameKind;
+    if let Some(stack) = own_stack(kinds, d) {
+        return craft_anything_engines::game::Builder::from_stack(stack).is_some();
+    }
     d.found.is_some()
         || (d.game && matches!(d.target, TargetRef::Local { .. }))
         || kinds.choose(&d.request, &resolve_target(d), false).is_some_and(|(k, _)| k.id() == GameKind::ID)
+}
+
+/// What the person's own files are built with, when they're the app and the request names no
+/// other stack (the run decides the same way: `project::first_stack`).
+pub fn own_stack<'a>(kinds: &craft_anything_ai::rebuild::KindRegistry, d: &'a MakeDraft) -> Option<&'a str> {
+    let own = d.existing == Some(ExistingFiles::Edit) && kinds.named(&d.request, &resolve_target(d)).is_none();
+    d.folder_stack.as_deref().filter(|_| own)
 }
 
 /// The front door: make your own version of something, work on a project you already have, or
@@ -69,11 +83,16 @@ pub fn hero(app: &mut CraftApp, ui: &mut Ui, w: f32) {
     let d = &mut app.state.make;
     let door = if d.look { 2 } else { usize::from(d.mine) };
     if let Some(i) = widgets::segmented_sized(ui, &["Make my own version", "Work on my project", "Just look inside"], door, 38.0, 12.5) {
+        let left = d.mine && i != 1;
         (d.mine, d.look) = (i == 1, i == 2);
         if d.mine {
             // The person's own project: there's nothing to recreate.
             (d.target, d.editing_url, d.found, d.builder, d.game) = (TargetRef::None, false, None, None, false);
             d.url.clear();
+        }
+        if left && d.existing == Some(ExistingFiles::Edit) {
+            // A version made on Make never edits the project picked here.
+            (d.folder, d.folder_files, d.existing) = (None, None, None);
         }
     }
     ui.add_space(18.0);
@@ -514,6 +533,27 @@ mod tests {
     }
 
     #[test]
+    fn the_persons_own_files_say_whether_it_is_a_game() {
+        use crate::engine_ui::chosen;
+        use craft_anything_engines::game::Builder;
+        let kinds = craft_anything_ai::rebuild::KindRegistry::built_in();
+        let own = |stack: Option<&str>, request: &str| MakeDraft {
+            folder_stack: stack.map(str::to_string),
+            existing: Some(ExistingFiles::Edit),
+            request: request.into(),
+            ..Default::default()
+        };
+        let godot = own(Some("Godot"), "Fix the jump");
+        assert!(is_game(&kinds, &godot), "whatever the request's words say");
+        assert_eq!(chosen(&kinds, &godot), Some(Builder::Godot));
+        assert!(!is_game(&kinds, &own(Some("Python"), "Fix my game")), "no engine to get for a Python game");
+        assert_eq!(chosen(&kinds, &own(Some("Python"), "Fix my game with Godot")), Some(Builder::Godot), "the person's words come first");
+        assert!(is_game(&kinds, &own(None, "Fix my game")), "nothing read from the folder: the words decide");
+        let start_from = MakeDraft { existing: Some(ExistingFiles::StartFrom), ..own(Some("Python"), "Fix my game") };
+        assert!(is_game(&kinds, &start_from), "material to start from doesn't decide");
+    }
+
+    #[test]
     fn targets_from_the_draft() {
         let mut d = MakeDraft { request: "Please recreate https://example.com/pricing.".into(), ..Default::default() };
         assert_eq!(resolve_target(&d), TargetRef::Website { url: "https://example.com/pricing".into() });
@@ -523,5 +563,7 @@ mod tests {
         d.request = "a snake game".into();
         assert_eq!(resolve_target(&d), TargetRef::None);
         assert_eq!(normalize_url("http://x.y"), "http://x.y");
+        let own = MakeDraft { mine: true, request: "Link the footer to https://example.com".into(), ..Default::default() };
+        assert_eq!(resolve_target(&own), TargetRef::None, "an address in the request isn't an original");
     }
 }

@@ -85,6 +85,8 @@ Add a folder…	Добавить папку…
 Add a plugin	Добавить плагин
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Добавьте «мозг» ИИ, и я прочитаю для вас эти доказательства, отвечу на дополнительные вопросы и укажу на доказательства.
 Add an AI by its address	Добавить ИИ по адресу
+Add another	Добавить ещё
+Add it again, to choose another account's folder for it.	Добавить ещё раз, чтобы выбрать для него папку другой учётной записи.
 Add more info. The builder reads it at its next step.	Добавьте больше информации. Конструктор прочитает её на следующем шаге.
 Add pictures	Добавить изображения
 Add pictures of the original	Добавить изображения оригинала
@@ -233,6 +235,7 @@ Choose what the builder's questions get	Выберите, что получаю�
 Choose what to recreate, say what you want, then press Start.	Выберите, что пересоздать, скажите, что хотите, затем нажмите «Старт».
 Choose…	Выбрать…
 Classes	Классы
+Claude Code folder (CLAUDE_CONFIG_DIR)	Папка Claude Code (CLAUDE_CONFIG_DIR)
 Clean room	Чистая комната
 Clean room / Deep	Чистая комната / Глубокий
 Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Режим «Чистая комната» никогда не читает код, файлы или исходник страницы оригинала. Режим «Глубокий» читает их всеми инструментами Craft Anything.
@@ -560,6 +563,7 @@ It's mine, or I'm allowed to look	Это моё, или мне разрешен�
 Its copy is deleted, with anything it saved there. The project itself stays as it is.	Его копия удалена вместе со всем, что там было сохранено. Сам проект остаётся как есть.
 Its folder is deleted with everything in it: what was built, the checks and the conversation.	Его папка удалена со всем содержимым: тем, что было собрано, проверками и перепиской.
 Its own code	Его собственный код
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Свой вход, настройки и разговоры: другая папка — другая учётная запись. Пусто: обычная папка.
 Java archive overview	Обзор архива Java
 Java class	Класс Java
 Java method bytecode and pseudo-Java	Байт-код метода Java и псевдо-Java
@@ -1003,6 +1007,7 @@ Send now	Отправить сейчас
 Server address	Адрес сервера
 Session status	Состояние сессии
 Set a project's asset budget	Установить бюджет ресурсов проекта
+Set an AI's folder	Установить папку ИИ
 Set an AI's program	Установить программу ИИ
 Set model options	Задать параметры модели
 Set one up	Настроить
@@ -1411,3 +1416,29 @@ your files there are the app, edited in place	ваши файлы там — э�
 Providers	Провайдеры
 Harnesses	Агенты
 Nothing of this kind was found.	Ничего такого не найдено.
+Another model	Другая модель
+Fold a project's plan	Свернуть план проекта
+Fold the plan	Свернуть план
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	Приложение Claude для компьютера установлено, но для сборки нужен Claude Code — отдельный инструмент командной строки. Установите Claude Code, один раз войдите в него в терминале и выполните поиск снова.
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal установлен, но встроенная цепочка инструментов Clang C++ не найдена.
+Add Unreal's Linux C++ toolchain	Добавить цепочку инструментов C++ для Linux в Unreal
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Запустите Engine/Build/BatchFiles/Linux/SetupToolchain.sh в папке движка, чтобы установить встроенную цепочку инструментов Clang. При сборке из исходников Setup.sh вместо этого скачивает нативную цепочку инструментов. Системный Clang может не подходить к версии движка.
+Unreal is here, but it also needs Xcode.	Unreal установлен, но также требует Xcode.
+About 60 GB, an Epic Games account, and Xcode.	Около 60 ГБ, аккаунт Epic Games и Xcode.
+File	Файл
+View	Вид
+Window	Окно
+Help	Справка
+Command palette	Палитра команд
+Craft Anything on GitHub	Craft Anything на GitHub
+Report a problem…	Сообщить о проблеме…
+Quit Craft Anything	Завершить Craft Anything
+About Craft Anything	О программе Craft Anything
+Services	Службы
+Hide Craft Anything	Скрыть Craft Anything
+Hide others	Скрыть остальные
+Show all	Показать все
+Close window	Закрыть окно
+Full screen	Полноэкранный режим
+Zoom	Изменить масштаб
+Bring all to front	Все окна — на передний план

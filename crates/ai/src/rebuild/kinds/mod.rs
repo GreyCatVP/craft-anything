@@ -6,6 +6,7 @@
 mod app;
 mod game;
 pub mod mechanics;
+pub mod own;
 pub mod plugin_check;
 pub mod runs;
 pub mod screenshot;
@@ -184,7 +185,8 @@ impl Worker {
             .into_iter()
             .filter(|c| c.kinds.is_empty() || c.kinds.iter().any(|k| k == kind.id()))
             .map(|check| Box::new(plugin_check::PluginJudge { check, kind: kind.id() }) as Box<dyn Check>);
-        for c in kind.checks(ws).into_iter().chain(plugin_checks) {
+        let checks = if ws.manifest.own_project() { own::checks() } else { kind.checks(ws) };
+        for c in checks.into_iter().chain(plugin_checks) {
             if !c.applies(&cx) {
                 continue;
             }
@@ -235,6 +237,8 @@ impl Check for BuildCheck {
     }
     fn run(&self, cx: &mut CheckCx) -> Result<CheckResult, ToolError> {
         let (passed, note) = build_check(&cx.ws.app_dir(), cx.ws.app_place(), &cx.ws.manifest.stack, cx.editor(), cx.stop());
+        // #736: a failed build of an empty app/ says first that nothing was written.
+        let note = if !passed && app_is_empty(cx.ws) { format!("{} {note}", no_files_yet(cx.ws)) } else { note };
         Ok(CheckResult::new(self.id(), cx.round, passed, note))
     }
 }

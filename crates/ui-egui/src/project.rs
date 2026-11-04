@@ -35,6 +35,18 @@ impl CraftApp {
         self.workspace.as_ref().and_then(|ws| self.runs.get(&ws.root))
     }
 
+    /// Fold the open project's plan card (#504). Only between runs: the saved conversation keeps
+    /// the steps, and a later run's checklist shows again.
+    fn fold_plan(&mut self) {
+        let Some(ws) = &self.workspace else { return };
+        match craft_anything_engine::feed::dismiss_plan_saved(ws) {
+            Ok(_) => {
+                craft_anything_engine::feed::dismiss_plan(&mut self.state.feed);
+            }
+            Err(e) => self.toast(e.message, true),
+        }
+    }
+
     /// The open project's place in the queue (1 starts next).
     pub fn queue_position(&self) -> Option<usize> {
         self.workspace.as_ref().and_then(|ws| self.runs.position(&ws.root))
@@ -52,6 +64,13 @@ impl CraftApp {
             return;
         }
         let Some(backend) = self.builder_backend(draft.ai.as_deref()) else { return self.need_builder(true) };
+        // Make's pictures are still being checked: start once they are in.
+        if self.pending_make_checks > 0 {
+            // Retain this draft. Editing Make while the checks run cancels the deferred Start (the
+            // draft no longer matches); navigating away does not.
+            self.start_after_pictures = Some(draft);
+            return;
+        }
         // Games are built with an engine, unless the request names another way to build; one that
         // isn't here yet is got first, then this starts.
         let game = make::is_game(&self.kinds, &draft);
@@ -164,6 +183,7 @@ impl CraftApp {
     /// Show a project: a building one's conversation comes from its run, any other's from what
     /// was saved. Other projects keep building meanwhile.
     pub fn open_workspace(&mut self, ws: Workspace) {
+        let root = ws.root.clone();
         let same = self.workspace.as_ref().is_some_and(|w| w.root == ws.root);
         if !same {
             // What was typed here stays with this project; the next one's comes back.
@@ -186,6 +206,10 @@ impl CraftApp {
         self.workspace = Some(ws);
         self.refresh_side_panel();
         self.state.screen = Screen::Project;
+        // A Send pressed before its picture checks finished, on a project they left: send now.
+        if !self.pending_attach_checks.contains_key(&root) && self.send_after_checks.remove(&root) {
+            self.send_message();
+        }
     }
 
     /// Ask for a change (or continue after a pause or error).
@@ -357,6 +381,12 @@ impl CraftApp {
 
     /// Read picture sizes off the UI thread, then apply the result on it.
     fn check_pictures(&mut self, files: Vec<PathBuf>, target: PictureTarget) {
+        match &target {
+            PictureTarget::Attach(Some(root)) => *self.pending_attach_checks.entry(root.clone()).or_default() += 1,
+            PictureTarget::Attach(None) => {}
+            PictureTarget::Make => self.pending_make_checks += 1,
+            PictureTarget::Project(_) => {}
+        }
         self.jobs.spawn(tr("Add pictures"), false, move |_| {
             let refused = oversized_picture_name(&files);
             Ok(Done::PicturesChecked { files, refused, target })
@@ -369,6 +399,17 @@ impl CraftApp {
         for f in files {
             if craft_anything_engine::workspace::is_picture(&f) && !list.contains(&f) {
                 list.push(f);
+            }
+        }
+    }
+
+    /// Keep checked pictures with a project the person switched away from, so their saved Send
+    /// can use them when they come back.
+    fn keep_attachments(&mut self, root: &Path, files: Vec<PathBuf>) {
+        let saved = self.state.unsent.entry(root.to_path_buf()).or_default();
+        for f in files {
+            if !saved.1.contains(&f) {
+                saved.1.push(f);
             }
         }
     }
@@ -393,24 +434,74 @@ impl CraftApp {
     pub(crate) fn pictures_checked(&mut self, files: Vec<PathBuf>, refused: Option<String>, target: PictureTarget) {
         if let Some(name) = refused {
             self.show_picture_refused(&name);
+            self.picture_check_finished(&target, true);
             return;
         }
-        match target {
+        match &target {
             PictureTarget::Attach(root) => {
                 let showing = root.as_ref().is_none_or(|r| self.workspace.as_ref().is_some_and(|w| &w.root == r));
                 if showing {
                     self.attach_checked(files);
+                } else if let Some(root) = root {
+                    self.keep_attachments(root, files);
                 }
             }
-            PictureTarget::Make => self.add_pictures_checked(files),
+            PictureTarget::Make => {
+                if let Some(draft) = self.start_after_pictures.as_mut() {
+                    for f in &files {
+                        if craft_anything_engine::workspace::is_picture(f) && !draft.pictures.contains(f) {
+                            draft.pictures.push(f.clone());
+                        }
+                    }
+                }
+                self.add_pictures_checked(files);
+            }
             PictureTarget::Project(root) => {
                 let showing = self.state.screen == Screen::Project;
-                let ws = self.workspace.clone().filter(|w| w.root == root);
-                let Some(ws) = ws.filter(|_| showing) else {
-                    return self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true);
-                };
-                self.jobs.spawn(tr("Add pictures"), false, move |_| Ok(Done::PicturesAdded(ws.add_references(&files).map_err(|e| e.message))));
+                let ws = self.workspace.clone().filter(|w| &w.root == root);
+                if let Some(ws) = ws.filter(|_| showing) {
+                    self.jobs.spawn(tr("Add pictures"), false, move |_| Ok(Done::PicturesAdded(ws.add_references(&files).map_err(|e| e.message))));
+                } else {
+                    self.toast(tr("The pasted picture wasn't attached: another screen was opened meanwhile."), true);
+                }
             }
+        }
+        self.picture_check_finished(&target, false);
+    }
+
+    /// One worker check finished: clear its wait, then send or start if that was the last check for
+    /// the destination the person is waiting on.
+    fn picture_check_finished(&mut self, target: &PictureTarget, refused: bool) {
+        if let PictureTarget::Attach(Some(root)) = target {
+            if let Some(left) = self.pending_attach_checks.get_mut(root) {
+                *left = left.saturating_sub(1);
+                if *left == 0 {
+                    self.pending_attach_checks.remove(root);
+                }
+            }
+            if refused {
+                self.send_after_checks.remove(root);
+            } else if !self.pending_attach_checks.contains_key(root)
+                && self.send_after_checks.contains(root)
+                && self.workspace.as_ref().is_some_and(|w| &w.root == root)
+            {
+                self.send_after_checks.remove(root);
+                self.send_message();
+            }
+        }
+        if !matches!(target, PictureTarget::Make) {
+            return;
+        }
+        self.pending_make_checks = self.pending_make_checks.saturating_sub(1);
+        if refused {
+            self.start_after_pictures = None;
+            return;
+        }
+        if self.pending_make_checks == 0
+            && let Some(draft) = self.start_after_pictures.take()
+            && draft == self.state.make
+        {
+            self.start_draft(draft);
         }
     }
 
@@ -522,21 +613,26 @@ pub enum Thumb {
     Missing,
 }
 
-/// The open project's checklist, if the builder made one.
+/// The open project's checklist, if the builder made one and the person hasn't folded it (#504).
 fn plan(feed: &[FeedItem]) -> Option<&[PlanStep]> {
-    feed.iter().find_map(|i| if let FeedItem::Plan(p) = i { Some(p.as_slice()) } else { None })
+    craft_anything_engine::feed::visible_plan(feed)
 }
 
 /// The builder's checklist, pinned above the prompt box: what's done, what it's on now, what's
 /// next, and while it works how long it has been at it. Shown while it works, and afterwards only
-/// if something was left undone.
-fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>) {
+/// if something was left undone. `fold` offers a control to fold it away (between runs); the
+/// returned flag says the person pressed it.
+fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>, fold: bool) -> bool {
     let done = steps.iter().filter(|s| s.status == PlanStatus::Done).count();
+    let mut folded = false;
     widgets::card(t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             widgets::caption(ui, "Plan");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if fold && icons::button(ui, "x", 18.0, false, &tr("Fold the plan")).clicked() {
+                    folded = true;
+                }
                 if let Some(b) = began {
                     ui.label(RichText::new(crate::usage::duration_words(b.elapsed())).font(theme::mono(12.0)).color(t.text_faint));
                     ui.add(crate::widgets::Spinner::new().size(12.0).color(t.accent));
@@ -576,6 +672,7 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
             });
         }
     });
+    folded
 }
 
 /// What the Project screen shows from the project's files, read on a worker when the project
@@ -1236,7 +1333,7 @@ fn draw_items(
             FeedItem::Work { tools, notes } if advanced => work(ui, tools, notes, advanced, &t),
             FeedItem::Work { .. } => {}
             // Pinned above the prompt box instead (see `checklist`).
-            FeedItem::Plan(_) => {}
+            FeedItem::Plan(_) | FeedItem::PlanDismissed => {}
             FeedItem::Ask { request, answer } => {
                 if let Some(a) = ask_card(app, ui, request, answer.as_deref()) {
                     answers.push(a);
@@ -1292,11 +1389,14 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
     let running = tools.iter().any(|(_, d)| d.is_none());
     let failed = tools.iter().filter(|(_, d)| *d == Some(false)).count();
     let title = if tools.is_empty() {
-        notes.last().cloned().unwrap_or_default()
+        one_line(notes.last().map(String::as_str).unwrap_or_default())
     } else {
         let n = tools.len().to_string();
         if running { trf("Working… ({n} steps so far)", &[("n", &n)]) } else { trf("Worked through {n} steps", &[("n", &n)]) }
     };
+    // The notes in the body wrap inside the window (#666). A collapsing header's title never wraps
+    // (egui lays it out on one line), so with no tool the title is the note's first line only.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     egui::CollapsingHeader::new(RichText::new(title).color(t.text_dim).size(theme::CAPTION)).default_open(advanced).icon(widgets::disclosure_icon).show(
         ui,
         |ui| {
@@ -1323,6 +1423,18 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
             }
         },
     );
+}
+
+/// A note's first line, cut to a length a header title can show on one line (#666).
+fn one_line(text: &str) -> String {
+    const MAX: usize = 90;
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    if first.chars().count() <= MAX {
+        first.to_string()
+    } else {
+        let cut: String = first.chars().take(MAX).collect();
+        format!("{}…", cut.trim_end())
+    }
 }
 
 /// A question or approval card. Returns the person's answer when they give one.
@@ -1571,7 +1683,11 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
     let running = app.running();
     if let Some(steps) = plan(&app.state.feed).filter(|p| running || p.iter().any(|s| s.status != PlanStatus::Done)) {
         let began = app.open_run().filter(|_| running).map(RebuildRun::started);
-        ui.allocate_ui(Vec2::new(width, 0.0), |ui| checklist(ui, steps, t, began));
+        let mut fold = false;
+        ui.allocate_ui(Vec2::new(width, 0.0), |ui| fold = checklist(ui, steps, t, began, !running));
+        if fold {
+            app.fold_plan();
+        }
         ui.add_space(8.0);
     }
     if let Some(n) = app.queue_position() {
@@ -1882,6 +1998,11 @@ impl CraftApp {
         if self.queue_position().is_some() {
             return self.toast(tr("This project is waiting its turn. Send your message once it starts."), true);
         }
+        // Attached pictures are still being checked: send this project's text once they finish.
+        if self.pending_attach_checks.get(&ws.root).is_some_and(|left| *left > 0) {
+            self.send_after_checks.insert(ws.root.clone());
+            return;
+        }
         // A picture still being pasted goes with the message: it's sent once the picture is in.
         if self.pasting().is_some_and(|p| p.root == ws.root) {
             if let Some(p) = self.pending_paste.as_mut() {
@@ -2035,6 +2156,169 @@ mod tests {
         assert_eq!(app.state.project_attachments, vec![big]);
     }
 
+    /// Send waits for the picture-size checks for the prompt box; once they pass, the message
+    /// goes with the picture instead of leaving it for the next message.
+    #[test]
+    fn sending_while_pictures_are_checked_waits_for_them() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        app.state.screen = Screen::Project;
+        let shot = d.path().join("shot.png");
+        std::fs::write(&shot, b"\x89PNG\r\n\x1a\n").unwrap();
+        app.attach(vec![shot]);
+        app.state.project_input = "Like this".into();
+        app.send_message();
+        assert_eq!(app.state.project_input, "Like this", "it waits for the picture check");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text().contains("Like this") && t.text().contains("1 picture attached")))
+            && std::time::Instant::now() < deadline
+        {
+            app.take_finished_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            app.state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text().contains("Like this") && t.text().contains("1 picture attached"))),
+            "{:?}",
+            app.state.feed
+        );
+    }
+
+    /// A Send waiting on one project's checks is not sent in another project, and is not lost when
+    /// that project is opened again.
+    #[test]
+    fn a_waiting_send_stays_with_its_project_when_another_opens() {
+        let d = tempfile::tempdir().unwrap();
+        let a = Workspace::create(&d.path().join("a"), "Alpha", "A notes app", TargetRef::None).unwrap();
+        let b = Workspace::create(&d.path().join("b"), "Beta", "A notes app", TargetRef::None).unwrap();
+        let ra = a.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(a.clone());
+        app.state.screen = Screen::Project;
+        app.pending_attach_checks.insert(ra.clone(), 1);
+        app.state.project_input = "For A".into();
+        app.send_message();
+        assert!(app.send_after_checks.contains(&ra));
+
+        app.open_workspace(b.clone());
+        app.state.project_input = "For B".into();
+        app.send_message();
+        assert_eq!(app.state.project_input, "", "B sends without waiting for A's check");
+        let pic = d.path().join("shot.png");
+        std::fs::write(&pic, b"\x89PNG\r\n\x1a\n").unwrap();
+        app.pictures_checked(vec![pic], None, PictureTarget::Attach(Some(ra.clone())));
+        assert!(app.send_after_checks.contains(&ra), "A's Send is kept");
+        assert!(app.state.project_attachments.is_empty(), "B's box is untouched");
+
+        app.open_workspace(a);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text().contains("For A") && t.text().contains("1 picture attached")))
+            && std::time::Instant::now() < deadline
+        {
+            app.take_finished_jobs();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            app.state.feed.iter().any(|f| matches!(f, FeedItem::User(t) if t.text().contains("For A") && t.text().contains("1 picture attached"))),
+            "{:?}",
+            app.state.feed
+        );
+    }
+
+    /// A refused picture clears Send's wait and leaves the message in the box.
+    #[test]
+    fn a_refused_picture_clears_the_waiting_send() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let root = ws.root.clone();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.open_workspace(ws);
+        app.state.screen = Screen::Project;
+        app.pending_attach_checks.insert(root.clone(), 1);
+        app.state.project_input = "Like this".into();
+        app.send_message();
+        assert!(app.send_after_checks.contains(&root));
+        app.pictures_checked(Vec::new(), Some("big.png".into()), PictureTarget::Attach(Some(root.clone())));
+        assert!(!app.send_after_checks.contains(&root));
+        assert_eq!(app.state.project_input, "Like this");
+        assert!(app.state.project_attachments.is_empty());
+    }
+
+    /// Make Start waits for the Make size checks instead of starting without the pictures.
+    #[test]
+    fn make_start_waits_for_picture_checks() {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.backends.push(craft_anything_ai::BackendConfig {
+            name: "Claude Code".into(),
+            kind: craft_anything_ai::BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        });
+        app.builder = Some("Claude Code".into());
+        app.state.make.request = "A notes app".into();
+        app.pending_make_checks = 1;
+        app.start_make();
+        assert!(app.start_after_pictures.is_some());
+        assert!(app.creating.is_none(), "it doesn't create the project yet");
+        app.pending_make_checks = 0;
+        app.start_after_pictures = None;
+    }
+
+    /// The check finishing starts the draft Start was pressed for, not whatever is in Make now.
+    #[test]
+    fn make_start_fires_the_draft_it_deferred() {
+        let d = tempfile::tempdir().unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.settings.projects_dir = Some(d.path().join("projects"));
+        app.backends.push(craft_anything_ai::BackendConfig {
+            name: "Claude Code".into(),
+            kind: craft_anything_ai::BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        });
+        app.builder = Some("Claude Code".into());
+        app.state.make.request = "A notes app".into();
+        app.pending_make_checks = 1;
+        app.start_make();
+        assert!(app.start_after_pictures.is_some());
+        let pic = d.path().join("shot.png");
+        std::fs::write(&pic, b"\x89PNG\r\n\x1a\n").unwrap();
+        app.pictures_checked(vec![pic], None, PictureTarget::Make);
+        assert!(app.start_after_pictures.is_none());
+        assert!(app.creating.is_some(), "it starts the retained draft");
+    }
+
+    /// Editing Make while Start waits cancels that Start; the new draft is not started.
+    #[test]
+    fn changing_the_make_draft_cancels_the_deferred_start() {
+        let d = tempfile::tempdir().unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        app.settings.projects_dir = Some(d.path().join("projects"));
+        app.backends.push(craft_anything_ai::BackendConfig {
+            name: "Claude Code".into(),
+            kind: craft_anything_ai::BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        });
+        app.builder = Some("Claude Code".into());
+        app.state.make.request = "A notes app".into();
+        app.pending_make_checks = 1;
+        app.start_make();
+        app.state.make.request = "Something else".into();
+        let pic = d.path().join("shot.png");
+        std::fs::write(&pic, b"\x89PNG\r\n\x1a\n").unwrap();
+        app.pictures_checked(vec![pic], None, PictureTarget::Make);
+        assert!(app.start_after_pictures.is_none());
+        assert!(app.creating.is_none(), "the changed draft isn't started");
+    }
+
     /// A refused paste (over 20 MB) must not send the message waiting for it.
     #[test]
     fn a_refused_paste_does_not_send_the_waiting_message() {
@@ -2127,5 +2411,24 @@ mod tests {
         apply(&mut feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
         assert!(matches!(feed.last(), Some(FeedItem::Paused)));
         assert_eq!(feed.iter().filter(|f| matches!(f, FeedItem::Error { .. })).count(), 1, "a pause adds no error");
+    }
+}
+
+#[cfg(test)]
+mod one_line_tests {
+    use super::one_line;
+
+    /// #666: a header title is one short line; the first line of a note, cut at 90 characters.
+    #[test]
+    fn a_header_title_is_the_first_line_cut_short() {
+        assert_eq!(one_line("  Reading the code  \nmore"), "Reading the code");
+        assert_eq!(one_line("\n\nSecond\n"), "Second");
+        assert_eq!(one_line(""), "");
+        let long = "x".repeat(200);
+        let cut = one_line(&long);
+        assert_eq!(cut.chars().count(), 91, "90 characters and an ellipsis");
+        assert!(cut.ends_with('…'));
+        let spaced = format!("{} tail", "a".repeat(89));
+        assert_eq!(one_line(&spaced), format!("{}…", "a".repeat(89)), "a cut never leaves a space before the ellipsis");
     }
 }

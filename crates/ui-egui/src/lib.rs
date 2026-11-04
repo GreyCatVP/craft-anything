@@ -25,6 +25,8 @@ pub mod jobs;
 pub mod just_ask;
 pub mod make;
 pub mod manage;
+#[cfg(target_os = "macos")]
+pub mod menu;
 pub mod palette;
 pub mod paste;
 pub mod pins;
@@ -152,7 +154,8 @@ pub enum Done {
         path: PathBuf,
         result: Result<Value, ToolError>,
     },
-    Detected(Vec<Detected>),
+    /// What a scan found, and why an expected coding agent may be missing.
+    Detected(Vec<Detected>, Vec<craft_anything_ai::detect::DetectHint>),
     /// The configured backends, the ones chosen to build with and to extract with, and each one's
     /// options.
     Backends(Vec<BackendConfig>, Option<String>, Option<String>, std::collections::BTreeMap<String, craft_anything_ai::BackendOptions>),
@@ -229,6 +232,8 @@ pub enum Done {
     BackendAdded {
         name: String,
         result: Result<(), ToolError>,
+        /// `CraftApp::backend_choices` when the add started: a choice made since then stands.
+        choices: u64,
     },
     /// The projects folder was listed.
     Projects(Vec<craft_anything_engine::workspace::Workspace>),
@@ -420,6 +425,9 @@ pub struct CraftApp {
     pub persist: bool,
     /// Never open native dialogs (tests and snapshots).
     pub headless: bool,
+    /// The macOS menu bar, once the window is open ([`CraftApp::install_menu_bar`]).
+    #[cfg(target_os = "macos")]
+    pub menu_bar: Option<menu::MenuBar>,
     pub view: SessionView,
     pub jobs: jobs::Jobs<Done>,
     pub conversation: Option<Box<dyn Conversation>>,
@@ -434,12 +442,18 @@ pub struct CraftApp {
     pub model_tuning: std::collections::BTreeMap<String, ModelTuningDraft>,
     /// The agent app whose program the file dialog is choosing.
     pub picking_program_for: Option<String>,
+    /// Claude Code folders being typed in Settings → AI, by AI, until they're saved.
+    pub folder_inputs: std::collections::BTreeMap<String, String>,
     /// The backend the person chose to build with (Settings → AI), if any.
     pub builder: Option<String>,
     /// The backend chosen to take a game's files out in Deep mode, if any.
     pub extractor: Option<String>,
     pub detected: Option<Vec<Detected>>,
+    /// Why an expected coding agent may be missing, from the last scan.
+    pub detect_hints: Vec<craft_anything_ai::detect::DetectHint>,
     pub detecting: bool,
+    /// Counts AI choices, so an add that finishes later doesn't undo one made meanwhile.
+    pub backend_choices: u64,
     pub log: Vec<LogLine>,
     pub key_inputs: std::collections::BTreeMap<String, String>,
     /// Settings → AI's "Add an AI by its address" form. Not kept with the UI state: its key goes
@@ -452,6 +466,14 @@ pub struct CraftApp {
     pub drafts: std::collections::HashMap<u64, project::Draft>,
     /// A picture still being pasted into the open project's prompt box (`paste_pictures`).
     pub pending_paste: Option<project::PendingPaste>,
+    /// Picture-size checks still running for each project's prompt box, and for Make. Send and
+    /// Make Start wait only for their own destination.
+    pending_attach_checks: std::collections::BTreeMap<PathBuf, usize>,
+    pending_make_checks: usize,
+    /// Projects whose Send is waiting for their own picture checks to finish.
+    send_after_checks: std::collections::BTreeSet<PathBuf>,
+    /// The Make draft Start was pressed for, while its picture checks finish.
+    start_after_pictures: Option<state::MakeDraft>,
     /// Each project's building time and AI use, every build together (read from its usage.json).
     pub usage: std::collections::HashMap<PathBuf, usage::ProjectClock>,
     /// All AI use since the app opened: builds and chat.
@@ -531,6 +553,8 @@ impl CraftApp {
             first_frames: None,
             persist: true,
             headless: false,
+            #[cfg(target_os = "macos")]
+            menu_bar: None,
             view: SessionView::default(),
             jobs: jobs::Jobs::default(),
             conversation: None,
@@ -541,16 +565,23 @@ impl CraftApp {
             model_request: 0,
             model_tuning: Default::default(),
             picking_program_for: None,
+            folder_inputs: Default::default(),
             builder: None,
             extractor: None,
             detected: None,
+            detect_hints: Vec::new(),
             detecting: false,
+            backend_choices: 0,
             log: Vec::new(),
             key_inputs: Default::default(),
             server_form: ServerForm::default(),
             runs: craft_anything_ai::rebuild::RunSet::new(craft_anything_engine::settings::BuildSettings::default().parallel),
             drafts: Default::default(),
             pending_paste: None,
+            pending_attach_checks: Default::default(),
+            pending_make_checks: 0,
+            send_after_checks: Default::default(),
+            start_after_pictures: None,
             usage: Default::default(),
             session_usage: Default::default(),
             workspace: None,
@@ -591,6 +622,16 @@ impl CraftApp {
     pub fn setup_context(ctx: &egui::Context) {
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
+    }
+
+    /// Gives the macOS app its menu bar (nothing elsewhere). Call once the window is open.
+    pub fn install_menu_bar(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "macos")]
+        {
+            self.menu_bar = menu::MenuBar::install(ctx);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = ctx;
     }
 
     /// Call `done` once [`FIRST_FRAMES`] frames have been drawn and shown: the window is really up by
@@ -1162,19 +1203,26 @@ impl CraftApp {
         }
         self.detecting = true;
         let hub = self.hub.clone();
-        self.jobs.spawn("Look for AI on this computer", true, move |_| Ok(Done::Detected(hub.detect())));
+        self.jobs.spawn("Look for AI on this computer", true, move |_| Ok(Done::Detected(hub.detect(), hub.detect_hints())));
     }
 
     pub fn add_backend(&mut self, config: BackendConfig, key: Option<String>) {
         let hub = self.hub.clone();
         let name = config.name.clone();
+        let choices = self.backend_choices;
         self.jobs.spawn(i18n::trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_backend(config, key);
-            Ok(Done::BackendAdded { name, result })
+            Ok(Done::BackendAdded { name, result, choices })
         });
     }
 
     pub fn choose_backend(&mut self, name: Option<String>) {
+        self.backend_choices = self.backend_choices.wrapping_add(1);
+        self.select_backend(name);
+    }
+
+    /// Select a backend without counting it as the person's choice (an add that finished).
+    fn select_backend(&mut self, name: Option<String>) {
         if self.state.backend != name {
             self.state.backend = name;
             if let Some(mut c) = self.conversation.take() {
@@ -1190,6 +1238,11 @@ impl CraftApp {
             return;
         }
         self.state.chat.push(ChatItem::User(text.clone()));
+        if self.state.backend.is_some() {
+            // Each message to this AI is a choice too: an AI that finishes connecting meanwhile
+            // doesn't take over (and stop) the answer.
+            self.backend_choices = self.backend_choices.wrapping_add(1);
+        }
         if self.state.backend.is_some() && self.conversation.is_none() {
             match self.hub.start(self.state.backend.as_deref(), self.beginner()) {
                 Ok(c) => self.conversation = Some(c),
@@ -1401,7 +1454,8 @@ impl CraftApp {
                     self.toast(e.for_people(), true);
                 }
             },
-            Done::Detected(d) => {
+            Done::Detected(d, hints) => {
+                self.detect_hints = hints;
                 self.detecting = false;
                 self.log(false, format!("Found {} AI option(s) on this computer", d.len()));
                 self.detected = Some(d);
@@ -1494,13 +1548,16 @@ impl CraftApp {
                     self.toast(error.for_people(), true);
                 }
             }
-            Done::BackendAdded { name, result } => match result {
+            Done::BackendAdded { name, result, choices } => match result {
                 Ok(()) => {
                     if self.server_form.name.trim() == name {
                         self.server_form = ServerForm::default();
                     }
                     self.toast(i18n::trf("{name} is ready", &[("name", &name)]), false);
-                    self.choose_backend(Some(name));
+                    // Picking another AI (or none) while this one connected wins.
+                    if choices == self.backend_choices {
+                        self.select_backend(Some(name));
+                    }
                     self.refresh_backends();
                 }
                 Err(e) => self.toast(e.for_people(), true),
@@ -1534,8 +1591,7 @@ impl CraftApp {
                             if let Some(name) = self.picking_program_for.take() {
                                 self.set_agent_program(&name, Some(path.display().to_string()));
                             }
-                        }
-                        // Several files: these come back as Done::Pictures / Done::ToAttach.
+                        } // Several files: these come back as Done::Pictures / Done::ToAttach.
                         Pick::Pictures | Pick::Attach => {}
                     }
                 }
@@ -1697,6 +1753,8 @@ impl CraftApp {
         let ctx = ui.ctx().clone();
         self.tick(&ctx);
         self.shortcuts(&ctx);
+        #[cfg(target_os = "macos")]
+        menu::update(self, &ctx);
         let t = theme::Tokens::get(&ctx);
         // The title bar is on every screen: it is how the window moves, resizes and closes.
         egui::Panel::top("titlebar").exact_size(titlebar::HEIGHT).frame(egui::Frame::new().fill(t.chrome)).show(ui, |ui| {
@@ -1705,6 +1763,8 @@ impl CraftApp {
         self.stuck_banner(ui, &ctx);
         if !self.settings.first_run_done {
             egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas)).show(ui, |ui| guard_ui(ui, "first run", |ui| first_run::show(self, ui)));
+            // An AI added from the first run reports a failure here (a wrong address or key).
+            self.toasts(&ctx);
             titlebar::window_edge(&ctx);
             titlebar::resize_edges(&ctx);
             return;
@@ -1811,13 +1871,12 @@ impl CraftApp {
         painter.galley(inner.center() - g.size() / 2.0, g, t.text);
     }
 
+    /// Keys that work on every screen: Ctrl/⌘ K for the palette, and Esc to close what's on top
+    /// (the palette, a dialog, Settings) or go back home.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let (palette, esc) = ctx.input_mut(|i| (i.consume_key(egui::Modifiers::COMMAND, egui::Key::K), i.key_pressed(egui::Key::Escape)));
-        if palette && self.settings.first_run_done {
-            self.state.palette.open = !self.state.palette.open;
-            self.state.palette.query.clear();
-            self.state.palette.selected = 0;
-            self.state.palette.form_tool = None;
+        if palette {
+            palette::toggle(self);
         }
         if esc {
             if self.state.palette.open {

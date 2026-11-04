@@ -40,14 +40,26 @@ impl Drop for KeepAwake {
 // shortcut: Windows (a PowerShell helper, since this workspace forbids unsafe FFI) and macOS
 // (caffeinate) only; add `systemd-inhibit` for Linux when it's needed.
 pub fn keep_awake() -> Option<KeepAwake> {
+    keep_awake_while(std::process::id(), std::time::Duration::from_secs(30))
+}
+
+/// The helper for [`keep_awake`], which also ends by itself once process `owner` is gone (checked
+/// every `every` on Windows), so a process that exits without dropping the guard (the window
+/// closed during a build, a crash, a kill) never leaves the computer held awake.
+fn keep_awake_while(owner: u32, every: std::time::Duration) -> Option<KeepAwake> {
     // ES_CONTINUOUS | ES_SYSTEM_REQUIRED (0x80000001, in decimal: Windows PowerShell reads the hex
     // literal as a negative Int32), held by the helper's thread until it's stopped. Any failure
-    // ends the helper, so it never runs without doing its job.
-    const WINDOWS: &str = "$ErrorActionPreference = 'Stop'; $k = Add-Type -Name P -Namespace CraftAnything -PassThru -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f);'; while ($true) { if ($k::SetThreadExecutionState(2147483649) -eq 0) { exit 1 }; Start-Sleep -Seconds 30 }";
+    // ends the helper, so it never runs without doing its job. The owner is opened once and its
+    // handle kept, so Windows can't give its id to another process the helper would then serve.
+    let windows = format!(
+        "$ErrorActionPreference = 'Stop'; $k = Add-Type -Name P -Namespace CraftAnything -PassThru -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f);'; $o = Get-Process -Id {owner}; $null = $o.Handle; while (-not $o.HasExited) {{ if ($k::SetThreadExecutionState(2147483649) -eq 0) {{ exit 1 }}; Start-Sleep -Seconds {} }}",
+        every.as_secs().max(1)
+    );
     let p = if cfg!(windows) {
-        Process::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", WINDOWS])
+        Process::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", windows.as_str()])
     } else if cfg!(target_os = "macos") {
-        Process::new("caffeinate").arg("-i")
+        // caffeinate's own -w ends it when that process exits.
+        Process::new("caffeinate").args(["-i".to_string(), "-w".into(), owner.to_string()])
     } else {
         return None;
     };
@@ -75,6 +87,23 @@ mod tests {
             .run()
             .map(|o| o.success && !o.stdout_text().contains(&pid.to_string()));
         assert_eq!(absent.ok(), Some(true), "dropping the guard stops the helper");
+    }
+
+    /// The window closed during a build: the app ends without dropping the guard, and its helper
+    /// must not keep the computer awake for a week.
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn the_helper_ends_when_its_owner_is_gone() {
+        let owner = if cfg!(windows) {
+            Process::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 60"])
+        } else {
+            Process::new("sleep").arg("60")
+        };
+        let mut owner = owner.timeout(Duration::from_secs(90)).spawn().expect("the stand-in owner starts");
+        let mut guard = keep_awake_while(owner.pid(), Duration::from_secs(1)).expect("the helper starts");
+        assert!(guard.0.wait_timeout(Duration::from_secs(3)).is_none(), "holding while its owner runs");
+        assert!(owner.kill_and_wait(Duration::from_secs(5)), "the stand-in owner stops");
+        assert!(guard.0.wait_timeout(Duration::from_secs(15)).is_some(), "the helper ends by itself once its owner is gone");
     }
 
     fn stand_in(name: &str) -> Process {

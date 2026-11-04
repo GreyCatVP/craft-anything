@@ -239,6 +239,7 @@ fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: S
             builder: None,
             questions: None,
             awaiting_check: false,
+            not_working_checks: 0,
         },
     }
 }

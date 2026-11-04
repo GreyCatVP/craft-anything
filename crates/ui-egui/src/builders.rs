@@ -113,7 +113,7 @@ impl CraftApp {
             .flatten()
             .filter(|d| d.suggestion.kind == BackendKind::AgentCli && !d.needs_key)
             .map(|d| &d.suggestion)
-            .filter(|s| !self.backends.iter().any(|b| b.name == s.name))
+            .filter(|s| !craft_anything_ai::is_on(&self.backends, &s.name))
     }
 
     /// Every AI that can build: the ones set up and on, then agent apps found here.
@@ -140,9 +140,16 @@ impl CraftApp {
         let choices = self.builder_choices();
         let name = wanted.filter(|w| choices.iter().any(|c| c.name == *w)).map(str::to_string).or_else(|| self.default_builder())?;
         let Some(found) = self.found_agents().find(|b| b.name == name).cloned() else { return Some(name) };
-        match self.hub.add_backend(found.clone(), None) {
+        // Saved but switched off (#423): turn it on, keeping its program and folder, rather than
+        // saving a second copy over it.
+        let saved = self.backends.iter().any(|b| b.name == found.name);
+        let done = if saved { self.hub.set_enabled(&found.name, true).map(|_| ()) } else { self.hub.add_backend(found.clone(), None) };
+        match done {
             Ok(()) => {
-                self.backends.push(found);
+                match self.backends.iter_mut().find(|b| b.name == found.name) {
+                    Some(b) => b.enabled = true,
+                    None => self.backends.push(found),
+                }
                 Some(name)
             }
             Err(e) => {
@@ -283,9 +290,10 @@ impl CraftApp {
         let hub = self.hub.clone();
         let f = &self.server_form;
         let (name, address, model, key) = (f.name.trim().to_string(), f.address.clone(), f.model.trim().to_string(), Some(f.key.clone()));
+        let choices = self.backend_choices;
         self.jobs.spawn(trf("Connect {name}", &[("name", &name)]), true, move |_| {
             let result = hub.add_server(&name, &address, Some(model.as_str()).filter(|m| !m.is_empty()), key).map(|_| ());
-            Ok(crate::Done::BackendAdded { name, result })
+            Ok(crate::Done::BackendAdded { name, result, choices })
         });
     }
 
@@ -295,6 +303,16 @@ impl CraftApp {
         let (hub, name) = (self.hub.clone(), name.to_string());
         self.jobs.spawn(tr("Set an AI's program"), false, move |_| {
             hub.set_command(&name, program.as_deref()).map_err(|e| e.message)?;
+            Ok(crate::backends(&hub))
+        });
+    }
+
+    /// Keep an agent app's sign-in, settings and sessions in this folder, so the AI is another
+    /// account (`None`: its usual folder again).
+    pub fn set_agent_folder(&mut self, name: &str, folder: Option<String>) {
+        let (hub, name) = (self.hub.clone(), name.to_string());
+        self.jobs.spawn(tr("Set an AI's folder"), false, move |_| {
+            hub.set_config_dir(&name, folder.as_deref()).map_err(|e| e.message)?;
             Ok(crate::backends(&hub))
         });
     }
@@ -386,6 +404,16 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
         });
     } else if found.is_empty() {
         ui.label(RichText::new(tr("No coding agent was found on this computer yet.")).color(t.text_dim));
+        for hint in &app.detect_hints {
+            match hint {
+                craft_anything_ai::detect::DetectHint::ClaudeDesktopWithoutCli { .. } => ui.add(
+                    egui::Label::new(
+                        RichText::new(tr("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.")).color(t.text_dim),
+                    )
+                    .wrap(),
+                ),
+            };
+        }
     }
     for b in found {
         widgets::panel(&t).show(ui, |ui| {
