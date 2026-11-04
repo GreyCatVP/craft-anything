@@ -591,7 +591,8 @@ Owner: open · Status: in progress
       — claimed: xerenon, branch feature/r2.7-own-project-checks; PR #760
 - [ ] Run the Go, .NET, Maven and Gradle rows of `[[toolchain]]` on real projects, and every row
       on Windows (`windows_program`): Rust, Node.js, Python and Make were run for real, on a Mac
-      only
+      only. Also a person's own Unity project: it's opened in batch mode, which should exit with
+      an error when its scripts don't compile (not run: no Unity on that machine)
 - [ ] A person's own tests that already failed before their request fail the check too, so the
       builder is sent to fix them. If that proves a nuisance, run them once before the first turn
       and hold it only to what it broke

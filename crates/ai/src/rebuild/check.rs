@@ -23,19 +23,42 @@ fn run_in(app: &Path, prog: &Path, args: &[String], minutes: u64, stop: &CancelT
 /// Run one of a toolchain's commands in `app`.
 fn run_tool(app: &Path, tool: &stacks::Toolchain, command: &[String], minutes: u64, stop: &CancelToken) -> Result<(bool, String), String> {
     let Some((program, args)) = command.split_first() else { return Err(format!("{} has no such command.", tool.name)) };
-    let local = tool.local_programs.iter().map(|p| app.join(p)).find(|p| p.is_file());
+    let here = |p: &&String| cfg!(windows) == [".bat", ".cmd", ".exe"].iter().any(|e| p.ends_with(e));
+    let local = tool.local_programs.iter().filter(here).map(|p| app.join(p)).find(|p| p.is_file());
     let system = tool.windows_program.as_ref().filter(|_| cfg!(windows)).unwrap_or(program);
     run_in(app, local.as_deref().unwrap_or(Path::new(system)), args, minutes, stop)
 }
 
+/// What a Unity without a licence prints, and what to tell the person.
+const UNITY_NO_LICENCE: &str = "No valid Unity Editor license";
+const UNITY_LICENCE_FIX: &str = "Unity needs its free licence first: open Unity Hub, sign in and accept the Personal licence, then try again.";
+
 /// A person's own project: its engine's build, else its toolchain's, else a static site. One we
 /// know no way to build isn't a failure, and the note says nothing ran.
 pub(super) fn own_build_check(app: &Path, place: &str, stack: &str, editor: Option<&Path>, stop: &CancelToken) -> (bool, String) {
-    let engine = engine_for(stack, app).is_some();
-    match stacks::toolchain_in(app).filter(|_| !engine) {
+    let engine = engine_for(stack, app);
+    if let (Some(game::Builder::Unity), Some(ed)) = (engine, editor) {
+        return own_unity_check(app, ed, stop);
+    }
+    match stacks::toolchain_in(app).filter(|_| engine.is_none()) {
         Some(tool) => own_build(app, tool, stop),
-        None if engine || static_site(app) => build_check(app, place, stack, editor, stop),
+        None if engine.is_some() || static_site(app) => build_check(app, place, stack, editor, stop),
         None => (true, "Nothing was built: Craft Anything doesn't know how to build this kind of project.".into()),
+    }
+}
+
+/// How a Unity project we didn't make is opened: in batch mode, which compiles its scripts. There's
+/// no `CraftBuild.Build` to call, as there is in one we made ([`build_check`]).
+fn own_unity_args(app: &Path) -> Vec<String> {
+    ["-batchmode", "-quit", "-nographics", "-projectPath", &app.display().to_string(), "-logFile", "-"].map(String::from).to_vec()
+}
+
+fn own_unity_check(app: &Path, editor: &Path, stop: &CancelToken) -> (bool, String) {
+    match run_in(app, editor, &own_unity_args(app), 4 * 60, stop) {
+        Ok((_, out)) if out.contains(UNITY_NO_LICENCE) => (false, UNITY_LICENCE_FIX.into()),
+        Ok((true, _)) => (true, "The Unity project opened and its scripts compiled.".into()),
+        Ok((false, out)) => (false, format!("Build failed: {}", error_lines(&out))),
+        Err(e) => (false, format!("Couldn't run the build: {e}")),
     }
 }
 
@@ -81,13 +104,7 @@ pub(super) fn build_check(app: &Path, place: &str, stack: &str, editor: Option<&
                 return (false, missing(app, place, format!("No Unity project found in {place} yet.")));
             }
             let args = ["-batchmode", "-quit", "-nographics", "-projectPath", &app_s, "-executeMethod", "CraftBuild.Build", "-logFile", "-"].map(String::from);
-            run(ed, &args, 4 * 60).map(|(ok, out)| {
-                if out.contains("No valid Unity Editor license") {
-                    (false, "Unity needs its free licence first: open Unity Hub, sign in and accept the Personal licence, then try again.".into())
-                } else {
-                    (ok && built(), out)
-                }
-            })
+            run(ed, &args, 4 * 60).map(|(ok, out)| if out.contains(UNITY_NO_LICENCE) { (false, UNITY_LICENCE_FIX.into()) } else { (ok && built(), out) })
         }
         (Some(game::Builder::Unreal), Some(ed)) => {
             let Some(uproject) = uproject(app) else {
@@ -245,10 +262,35 @@ mod tests {
     fn a_projects_own_copy_of_the_program_comes_first() {
         let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
         std::os::unix::fs::symlink("/bin/sh", d.path().join("own-sh")).unwrap();
+        std::fs::write(d.path().join("own-sh.bat"), "not for this system").unwrap();
         let test = ["no-such-program-here", "-c", "echo 'error: from its own copy'; exit 1"].map(String::from).to_vec();
-        let tool = stacks::Toolchain { test, local_programs: vec!["not-here".into(), "own-sh".into()], ..Default::default() };
+        let tool = stacks::Toolchain { test, local_programs: vec!["not-here".into(), "own-sh.bat".into(), "own-sh".into()], ..Default::default() };
         let (passed, note) = own_tests_check(d.path(), Some(&tool), &stop);
         assert!(!passed && note.contains("from its own copy"), "{note}");
+    }
+
+    /// The table's own words for Make, on what the real make prints (3.81 here; 4.x quotes alike).
+    #[cfg(unix)]
+    #[test]
+    fn only_a_missing_test_target_means_no_tests() {
+        let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
+        std::fs::write(d.path().join("Makefile"), "").unwrap();
+        let make = stacks::toolchain_in(d.path()).expect("the table has Make");
+        let printing = |line: &str| {
+            let test = ["sh", "-c", "printf '%s\\n' \"$1\"; exit 2", "sh", line].map(String::from).to_vec();
+            own_tests_check(d.path(), Some(&stacks::Toolchain { test, ..make.clone() }), &stop)
+        };
+        assert!(printing("make: *** No rule to make target `test'.  Stop.").0);
+        assert!(printing("make: *** No rule to make target 'test'.  Stop.").0);
+        assert!(!printing("make: *** No rule to make target `fixture.txt', needed by `test'.  Stop.").0, "a prerequisite is a failure");
+        assert!(!printing("make: *** No rule to make target 'fixture.txt', needed by 'test'.  Stop.").0);
+    }
+
+    #[test]
+    fn a_persons_own_unity_project_is_opened_not_built_with_our_script() {
+        let args = own_unity_args(Path::new("/x/game"));
+        assert!(args.iter().any(|a| a == "-batchmode") && args.iter().any(|a| a == "/x/game"), "{args:?}");
+        assert!(!args.iter().any(|a| a == "-executeMethod" || a.contains("CraftBuild")), "{args:?}");
     }
 
     #[cfg(unix)]

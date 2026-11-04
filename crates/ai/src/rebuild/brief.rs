@@ -40,10 +40,16 @@ pub(super) fn stack_steps(stack: &str, editor: Option<&Path>) -> String {
 }
 
 /// The stack's steps, then those of each library the request asks for that works with it
-/// ("use nextjs and shadcn" adds shadcn/ui's).
-fn stack_and_library_steps(request: &str, stack: &str, editor: Option<&Path>) -> String {
-    let mut s = stack_steps(stack, editor);
-    for l in stacks::libraries_for(request, stack) {
+/// ("use nextjs and shadcn" adds shadcn/ui's). A stack's steps make a new project (Unity's say to
+/// write a build script into it), so a person's own project keeps to what it has.
+fn stack_and_library_steps(m: &craft_anything_engine::workspace::Manifest, editor: Option<&Path>) -> String {
+    let mut s = if m.own_project() {
+        let editor = editor.map(|e| format!(" The editor is {}.", e.display())).unwrap_or_default();
+        format!("keep to what the project already uses.{editor}")
+    } else {
+        stack_steps(&m.stack, editor)
+    };
+    for l in stacks::libraries_for(&m.request, &m.stack) {
         s.push(' ');
         s.push_str(&l.steps);
     }
@@ -89,7 +95,7 @@ pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) ->
         m.request,
         ws.root.display(),
         goal,
-        stack_and_library_steps(&m.request, &m.stack, cx.editor),
+        stack_and_library_steps(m, cx.editor),
         steps(cx.deep),
     );
     for section in kind.brief_sections(cx) {

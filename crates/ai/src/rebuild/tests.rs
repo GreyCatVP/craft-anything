@@ -2617,9 +2617,12 @@ fn a_persons_own_project_is_asked_for_nothing_it_would_add_for_our_sake() {
         assert!(!b.contains("--screenshot") && !b.contains("--self-test") && !b.contains("MECHANICS.md"), "{k}: {b}");
         assert!(b.contains("its own build and tests") && !b.contains(kind(k).goal()), "{k}: {b}");
     }
+    own.manifest.stack = "Unity".into();
+    let b = brief(&own, "game", false, false, Some(Path::new("/x/Unity")), false, None);
+    assert!(!b.contains("CraftBuild") && b.contains("keep to what the project already uses") && b.contains("/x/Unity"), "{b}");
     own.manifest.generate_assets = true;
     let b = brief(&own, "game", false, false, None, true, None);
-    assert!(b.contains("assets/generated/") && !b.contains("--screenshot"), "what the person turned on still reaches it: {b}");
+    assert!(b.contains("Assets/Generated/") && !b.contains("--screenshot"), "what the person turned on still reaches it: {b}");
     let (_d, beside) = own_folder("main.py", StartFrom);
     let b = brief(&beside, "app", false, false, None, false, None);
     assert!(b.contains("--screenshot") && !b.contains("its own build and tests"), "a new app beside the files proves itself: {b}");
