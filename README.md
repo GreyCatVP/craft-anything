@@ -137,6 +137,12 @@ Both modes drive the same engine.
   built-in engines (and Ghidra when it's installed), a website's JavaScript is read and its start
   page watched, and the builder may use all of them.
 
+Clean room is a rule about what Craft Anything offers and refuses. It is not an operating-system
+sandbox: it doesn't isolate your computer. A coding agent you run still acts as you, and what it can
+read, write or run depends on its own permissions. Which of an agent's own tools Craft Anything can
+refuse differs by agent; for Claude Code's tools in chats and questions, see
+[`docs/claude-code.md`](docs/claude-code.md).
+
 Switch in the title bar or Settings, with `settings_set deep_mode true`, or for one CLI run with
 `--deep` (or `--clean-room`).
 
@@ -248,6 +254,14 @@ bypasses DRM, logins or anti-cheat. Rebuilds recreate layout, style and behaviou
 the agent is told not to copy logos, photos or text unless you confirm you own them or have
 permission.
 
+**Installing dependencies runs code.** When a builder installs a project's dependencies, the commands
+run on your computer, and the packages can run code while they install. npm runs each package's
+install scripts by default, and Rust build scripts and Python source packages run their own setup
+code. Craft Anything asks before a command of a kind it hasn't seen in this project (`npm`, `cargo`…).
+Choosing "always allow" for `npm` lets every later npm command run without asking, so only do that
+for a project whose dependencies you trust. To install npm packages without their install scripts,
+run `npm install --ignore-scripts`.
+
 ## Downloads
 
 On GitHub, the [latest release](https://github.com/storytold/craft-anything/releases/latest) has every build listed below, and [all releases](https://github.com/storytold/craft-anything/releases) has earlier versions and their notes. `<ver>` in the file names is the version number, and `SHA256SUMS.txt` lists a checksum for every file.
@@ -290,6 +304,29 @@ To run it as just `craft-anything-cli`, add `~/.local/bin` to your `PATH`.
 If you already have the blocked copy, press Done (not Move to Bin), then run
 `xattr -d com.apple.quarantine <path to craft-anything-cli>`, or allow it in System Settings →
 Privacy & Security → Open Anyway.
+
+#### Checking that a Mac download is signed and notarized
+
+Each Mac release is signed with a Developer ID certificate and notarized by Apple. To check a download
+yourself, run these in Terminal (replace `<ver>` with the version and the paths with yours):
+
+```sh
+# The disk image: "accepted" and "source=Notarized Developer ID" mean it passed
+spctl --assess --type open --context context:primary-signature -v "craft-anything-<ver>-macos-universal.dmg"
+# The notarization ticket is attached: prints "The validate action worked!"
+xcrun stapler validate "craft-anything-<ver>-macos-universal.dmg"
+
+# The app, after you open the disk image: the signature must verify
+codesign --verify --deep --strict --verbose=2 "/Volumes/<disk image name>/Craft Anything.app"
+spctl --assess --type execute --verbose "/Volumes/<disk image name>/Craft Anything.app"
+
+# The command-line tool: a bare program can't carry a ticket, so macOS checks it online
+codesign --verify --strict --verbose=2 ~/.local/bin/craft-anything-cli
+codesign -dv --verbose=4 ~/.local/bin/craft-anything-cli 2>&1 | grep Authority
+```
+
+The `Authority` lines should name a "Developer ID Application" certificate. If a check fails, don't
+run the file; report it with the output and the release tag.
 
 ### Linux
 
