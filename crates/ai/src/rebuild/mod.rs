@@ -776,7 +776,8 @@ impl Worker {
                 }
             }
             round += 1;
-            self.step(ws, Step::Check, Status::Checking, "Checking the build against the original…")?;
+            let checking = if ws.manifest.target == TargetRef::None { "Checking the build…" } else { "Checking the build against the original…" };
+            self.step(ws, Step::Check, Status::Checking, checking)?;
             let checks = self.checks_with_a_retry(ws, kind, round)?;
             ws.manifest.checks.extend(checks.iter().cloned());
             ws.manifest.awaiting_check = false;

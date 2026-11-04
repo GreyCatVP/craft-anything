@@ -81,13 +81,14 @@ pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) ->
         }
         TargetRef::None => "There is no target to study.",
     };
+    let goal = if m.own_project() { "what their request asks of the project in this folder" } else { kind.goal() };
     let mut s = format!(
         "You are the builder inside Craft Anything, rebuilding software for a person who doesn't code.\n\n\
          Their request: \"{}\"\nTarget: {target}\nYour working folder is the project workspace ({}).\n\n{capture}\n\n\
          What to build: {}.\n\nHow to build it, unless their request says otherwise: {}\n\n{}\n\n{RULES}",
         m.request,
         ws.root.display(),
-        kind.goal(),
+        goal,
         stack_and_library_steps(&m.request, &m.stack, cx.editor),
         steps(cx.deep),
     );

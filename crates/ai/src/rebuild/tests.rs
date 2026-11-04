@@ -2612,10 +2612,10 @@ fn a_persons_own_project_is_judged_by_its_own_build_and_tests_whatever_its_kind(
 fn a_persons_own_project_is_asked_for_nothing_it_would_add_for_our_sake() {
     use craft_anything_engine::workspace::ExistingFiles::{Edit, StartFrom};
     let (_d, mut own) = own_folder("main.py", Edit);
-    for kind in ["app", "game"] {
-        let b = brief(&own, kind, false, false, None, false, None);
-        assert!(!b.contains("--screenshot") && !b.contains("--self-test") && !b.contains("MECHANICS.md"), "{kind}: {b}");
-        assert!(b.contains("its own build and tests"), "{kind}: {b}");
+    for k in ["app", "game"] {
+        let b = brief(&own, k, false, false, None, false, None);
+        assert!(!b.contains("--screenshot") && !b.contains("--self-test") && !b.contains("MECHANICS.md"), "{k}: {b}");
+        assert!(b.contains("its own build and tests") && !b.contains(kind(k).goal()), "{k}: {b}");
     }
     own.manifest.generate_assets = true;
     let b = brief(&own, "game", false, false, None, true, None);
