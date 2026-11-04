@@ -684,12 +684,15 @@ impl CliConversation {
     }
 }
 
-/// The environment an agent program runs with: Claude Code's limits raised for a long build, and
-/// the effort it thinks with. Other agents ignore these names.
+/// The environment an agent program runs with: Claude Code's limits raised for a long build, the
+/// effort it thinks with, and the mark that it is an AI. The shell commands it runs inherit that
+/// mark, so `craft-anything-cli` called from them is the agent and not the person (see
+/// [`craft_anything_engine::AGENT_ENV`]). Other agents ignore the names they don't know.
 fn agent_env(builder: bool, effort: Option<crate::model::Effort>) -> Vec<(&'static str, String)> {
     let (tool, shell) = if builder { (24 * 3600, 8 * 3600) } else { (40 * 60, 10 * 60) };
     let ms = |secs: u64| (secs * 1000).to_string();
     vec![
+        (craft_anything_engine::AGENT_ENV, "1".into()),
         ("MCP_TOOL_TIMEOUT", ms(tool)),
         // Progress updates keep a long tool call alive; this also covers one that sends none.
         ("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT", "0".into()),
@@ -1219,6 +1222,45 @@ mod tests {
         assert!(line.starts_with("env ") && line.contains(" CLAUDE_CODE_EFFORT_LEVEL=max ") && line.ends_with(" claude -p 'it'\\''s'"), "{line}");
         assert_eq!(crate::ssh::ssh_line_args("box", line.clone()).pop(), Some(line));
         assert!(agent_env(false, None).contains(&("CLAUDE_CODE_EFFORT_LEVEL", "high".to_string())), "high unless chosen");
+    }
+
+    /// An agent's shell commands inherit its environment, so the mark that it is an AI is in it for
+    /// a build and for any other turn, and reaches the other computer over SSH too.
+    #[test]
+    fn every_agent_run_carries_the_mark_that_it_is_an_ai() {
+        let mark = (craft_anything_engine::AGENT_ENV, "1".to_string());
+        assert_eq!(mark.0, "CRAFT_ANYTHING_AGENT");
+        for builder in [true, false] {
+            assert!(agent_env(builder, None).contains(&mark), "builder: {builder}");
+        }
+        let cmd = remote_command("claude", vec!["-p".into()], &agent_env(true, None));
+        assert!(cmd.contains(&"CRAFT_ANYTHING_AGENT=1".to_string()), "{cmd:?}");
+    }
+
+    /// The same, end to end: the program an agent run starts has the mark in its own environment.
+    #[cfg(unix)]
+    #[test]
+    fn the_program_an_agent_run_starts_has_the_mark_in_its_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("claude");
+        let reply = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"s1"}"#;
+        let script = format!("#!/bin/sh\ncat >/dev/null\nprintf '%s' \"$CRAFT_ANYTHING_AGENT\" > \"$(dirname \"$0\")/mark\"\necho '{reply}'\n");
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config =
+            BackendConfig { name: "Claude".into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+        let mut c = CliConversation::new(CliSpec::new(config, options, false, None));
+        c.send("go");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut events = Vec::new();
+        while !events.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+            assert!(std::time::Instant::now() < deadline, "no TurnDone: {events:?}");
+            events.extend(c.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(std::fs::read_to_string(dir.path().join("mark")).unwrap_or_default(), "1", "{events:?}");
     }
 
     /// A folder under `~/` is in the other computer's home: its shell expands it, which it won't

@@ -2,7 +2,11 @@
 //! refinements.
 
 use super::*;
-use craft_anything_engines::assets::{Catalogue, Shape, about_usd};
+use craft_anything_engine::settings::AssetSettings;
+use craft_anything_engine::tools::asset_tools::{limit_applies, type_words};
+use craft_anything_engine::workspace::{TypeAssets, TypeUsage, type_usage};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{Unit, amount};
 
 pub(super) const RULES: &str = "\
 Rules:
@@ -65,6 +69,7 @@ const WEBSITE_FROM_OUTSIDE: &str = "capture/ holds what a visitor of the live si
 /// Clean room: what the builder has of an app or a game. Nothing inside it was read.
 const PROGRAM_FROM_OUTSIDE: &str = "capture/README.md says what we could see from outside. Clean room: nothing inside the program, its files or its folder was read, and you must not open, list, read, run or decompile anything there either (the tools that look inside are off, and reading its files is refused). Build from the person's request and description, the pictures in reference/ and, when capture/ has one, the picture of it running; ask the person with core_person_ask about anything you can't see.";
 
+/// Assemble the first builder prompt from the target evidence, project policy and kind-specific guidance.
 pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) -> String {
     let ws = cx.ws;
     let m = &ws.manifest;
@@ -98,6 +103,7 @@ pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) ->
         stack_and_library_steps(m, cx.editor),
         steps(cx.deep),
     );
+    s.push_str(&format!("\n\n{}", project_assets_note(cx)));
     for section in kind.brief_sections(cx) {
         s.push_str(&format!("\n\n{section}"));
     }
@@ -133,28 +139,145 @@ pub(super) fn start_files_note(m: &craft_anything_engine::workspace::Manifest) -
     })
 }
 
-/// Realistic assets with fal.ai: what each tool makes and costs (prices from the asset table,
-/// for the picture model `image_model` names), the budget, where the engine loads them from, and
-/// that every design is original.
-pub(super) fn assets_note(ws: &Workspace, image_model: Option<&str>) -> String {
+/// Said when generated assets are off for the project, or no type has a provider chosen.
+const ASSETS_NOW_OFF: &str = "Generated assets are now off for this project. Do not generate new assets. Keep the ones already in app/.";
+
+/// Said after the types, when at least one can be made: whose choices they are, and what is left to the builder.
+const ASSET_CHOICES_ARE_THEIRS: &str = " These are the person's choices and limits: don't change them or work around them; if another model or a higher limit would help, say so in your summary for the person. Generate only the types above that name a model, each with its own tool; a tool makes the asset with the provider and model chosen here and needs that provider's key. When a limit is reached the person is asked first; if they say no, use the assets already made, or simple shapes and colours.";
+
+/// Said after the types, when none of them can be made by this builder for want of a key.
+const ASSET_KEYS_MISSING: &str = " None of these can be made by this builder: use existing assets or simple shapes and colours.";
+
+/// Fail closed when either the manifest or checked spending cannot establish current permission.
+pub(super) const ASSET_POLICY_UNAVAILABLE: &str = "The project's current asset choices or spending could not be read safely. Do not generate assets or authorize new spending. Keep existing assets until the settings can be read.";
+
+/// What each asset type of `ws` has used, from one read of its ledger. `None` when the ledger cannot
+/// be read safely (damaged, newer, too large): spending is then never assumed to be none.
+pub(super) fn asset_usage(ws: &Workspace, settings: &AssetSettings) -> Option<BTreeMap<AssetKind, TypeUsage>> {
+    let records = ws.try_assets().ok()?;
+    Some(AssetKind::ALL.into_iter().map(|kind| (kind, type_usage(&records, kind, &ws.manifest.assets.effective(kind, settings)))).collect())
+}
+
+/// Whether a usable key for `provider` is set up in this snapshot.
+fn provider_usable(cx: &BriefCx<'_>, provider: &str) -> bool {
+    cx.asset_providers.iter().any(|p| p.has_key && p.id == provider)
+}
+
+/// Whether `kind` can be made now in this checked snapshot: generated assets are on, a provider is
+/// chosen for it, and that provider has a key. Which provider a type uses is the project's choice
+/// for it, so one provider's key never unlocks another type's.
+pub(super) fn asset_kind_allowed(cx: &BriefCx<'_>, kind: AssetKind) -> bool {
+    cx.asset_usage.is_some()
+        && cx.ws.manifest.asset_type_on(kind, cx.asset_settings).and_then(|t| t.choice.provider).is_some_and(|provider| provider_usable(cx, &provider))
+}
+
+/// A name as it is said in the brief: one line, and not longer than a name should be.
+fn shown(name: &str) -> String {
+    name.chars().filter(|c| !c.is_control()).take(80).collect::<String>().trim().to_owned()
+}
+
+/// A number of credits, without the cents of a dollar: "500", "12.5".
+fn number(x: f64) -> String {
+    format!("{x:.2}").trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// What a type has used, and the limit that applies to it, in the words of its provider's unit. The
+/// limit is the one generation enforces ([`limit_applies`]); a price that is not known is not counted.
+fn usage_words(ws: &Workspace, t: &TypeAssets, usage: TypeUsage) -> String {
+    let unit = t.choice.unit;
+    if !t.choice.pricing.tracked() {
+        return "price unknown, usage not tracked".into();
+    }
+    if !limit_applies(ws, t) {
+        return format!("{} used, no limit", amount(unit, usage.amount));
+    }
+    let used = match unit {
+        Unit::Usd => format!("{} of {} used", amount(unit, usage.amount), amount(unit, t.limit)),
+        Unit::Credits => format!("{} of {} {} used", number(usage.amount), number(t.limit), if t.limit == 1.0 { "credit" } else { "credits" }),
+    };
+    if usage.cost_missing { format!("{used} (an earlier cost could not be read, so the person is asked before the next one)") } else { used }
+}
+
+/// One sentence for an asset type: what the project makes it with and what it has used.
+fn type_sentence(cx: &BriefCx<'_>, kind: AssetKind, usage: TypeUsage) -> String {
+    let mut label = type_words(kind).0.to_owned();
+    if let Some(first) = label.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    let Some(t) = cx.ws.manifest.asset_type_on(kind, cx.asset_settings) else { return format!("{label}: off.") };
+    let id = t.choice.provider.as_deref().unwrap_or_default();
+    let provider = shown(cx.asset_providers.iter().find(|p| p.id == id).map_or(id, |p| p.name));
+    let model = shown(if t.choice.model_name.trim().is_empty() { &t.choice.model } else { &t.choice.model_name });
+    if !provider_usable(cx, id) {
+        return format!("{label}: {provider} \u{b7} {model}, but this builder has no {provider} key, so none can be made.");
+    }
+    format!("{label}: {provider} \u{b7} {model}, {}.", usage_words(cx.ws, &t, usage))
+}
+
+/// The project's choice for each asset type and what it has used of its limit, for every first brief
+/// and follow-up: one sentence per type, then what is left to the builder. The builder is told these
+/// are the person's to change, never its own.
+pub(super) fn project_assets_note(cx: &BriefCx<'_>) -> String {
+    let Some(usage) = cx.asset_usage else { return ASSET_POLICY_UNAVAILABLE.into() };
+    if !AssetKind::ALL.into_iter().any(|kind| cx.ws.manifest.asset_type_on(kind, cx.asset_settings).is_some()) {
+        return ASSETS_NOW_OFF.into();
+    }
+    let sentences: Vec<String> = AssetKind::ALL.into_iter().map(|kind| type_sentence(cx, kind, usage.get(&kind).copied().unwrap_or_default())).collect();
+    let mut note = format!("Generated assets in this project: {}", sentences.join(" "));
+    if cx.ws.manifest.assets.ignore_budget {
+        note.push_str(" No limits apply in this project (the person chose to ignore the budget).");
+    }
+    note.push_str(if AssetKind::ALL.into_iter().any(|kind| asset_kind_allowed(cx, kind)) { ASSET_CHOICES_ARE_THEIRS } else { ASSET_KEYS_MISSING });
+    note
+}
+
+/// Game asset guidance includes only the types that can be made now, using the same checked snapshot.
+pub(super) fn assets_note(cx: &BriefCx<'_>) -> String {
+    if cx.asset_usage.is_none() {
+        return ASSET_POLICY_UNAVAILABLE.into();
+    }
+    let images = asset_kind_allowed(cx, AssetKind::Image);
+    let models = asset_kind_allowed(cx, AssetKind::Model3d);
+    let audio = [
+        (AssetKind::Speech, "assets_speech_generate makes dialogue from text and a voice_id."),
+        (AssetKind::SoundEffect, "assets_sound_generate makes sound effects."),
+        (AssetKind::Music, "assets_music_generate makes original music."),
+    ];
+    let audio_notes: Vec<_> = audio.iter().filter(|(kind, _)| asset_kind_allowed(cx, *kind)).map(|(_, note)| *note).collect();
+    if !images && !models && audio_notes.is_empty() {
+        return String::new();
+    }
+    let ws = cx.ws;
     let folder = match game::Builder::from_stack(&ws.manifest.stack) {
         Some(game::Builder::Unity) => "Unity loads them from Assets/, e.g. Assets/Generated/",
         Some(game::Builder::Godot) => "Godot loads them from the project, e.g. assets/generated/",
         Some(game::Builder::Unreal) => "save them under Content/Generated/ and import them with an editor Python script run through UnrealEditor-Cmd",
         _ => "e.g. assets/generated/",
     };
-    let budget = ws.manifest.asset_budget_usd;
-    let spent = ws.assets_spent();
-    let table = Catalogue::built_in();
-    // An unknown picture model is reported by the tool itself; the note quotes the default's price.
-    let picture = table.image_model(image_model).or_else(|_| table.image_model(None)).map(|m| m.cost(Shape::Square));
-    let (model_cost, picture_cost) = match (table.model_3d(None).map(|m| m.cost(true)), picture) {
-        (Ok(model), Ok(picture)) => (format!(" ({} each)", about_usd(model + picture)), format!(" ({})", about_usd(picture))),
-        _ => (String::new(), String::new()),
-    };
-    format!(
-        "Realistic assets: you can make them with fal.ai. assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from a description{model_cost}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast; assets_image_generate makes a picture{picture_cost} for textures, skies, backgrounds and menu art. This project's asset budget is ${budget:.2} (${spent:.2} used), so spend it on what the player sees most (the main characters, weapons, vehicles and the level's key props) and use simple shapes for the rest. Save each one inside app/ where the engine loads it ({folder}). Every asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork. List each generated file in app/CREDITS.md as made with fal.ai."
-    )
+    let mut note = if images || models { "Realistic assets:" } else { "Generated audio:" }.to_string();
+    note.push_str(" Each tool below makes its type with the provider and model the person chose for it, and needs that provider's key; a key for one provider does not unlock the others.");
+    if images {
+        note.push_str(" assets_image_generate makes a picture for textures, skies, backgrounds and menu art.");
+    }
+    if models {
+        // The tool's own rule: with pictures Off no picture is made first, so a description works
+        // only for a 3D model that takes words; the tool says so when this one doesn't.
+        let source = if images {
+            "a description or an existing picture"
+        } else {
+            "an existing picture (pass it as image), or from a description only if the project's 3D model takes one (pictures are off, so none is made first; the tool says when the model needs a picture)"
+        };
+        note.push_str(&format!(" assets_model_generate makes a textured, game-ready low-poly 3D model (GLB) of one object from {source}; set faces to the fewest that still look right (about 500-1500 for small props, 2000-5000 for weapons and vehicles, 6000-15000 for main characters) so the game stays fast."));
+    }
+    if images || models {
+        note.push_str(" Every visual asset is an original design in the original's style: describe what it is, its shape, materials and colours, never a recognisable character, logo or brand artwork.");
+    }
+    for audio_note in audio_notes {
+        note.push(' ');
+        note.push_str(audio_note);
+    }
+    note.push_str(&format!(" Prioritize assets essential to play and use existing assets for the rest. Save each one inside app/ where the engine loads it ({folder}). List each generated file in app/CREDITS.md with the provider actually used."));
+    note
 }
 
 /// Sent once when a Deep-mode build turn ended without decompiling anything.

@@ -41,9 +41,13 @@ pub const TOOLS: &[&str] = &[
     // Generated pictures and models, and the keys that pay for them.
     "assets_image_generate",
     "assets_model_generate",
+    "assets_speech_generate",
+    "assets_sound_generate",
+    "assets_music_generate",
     "assets_key_set",
     "assets_key_remove",
     "assets_key_status",
+    "assets_models_list",
     "ai_model_options_show",
     "ai_model_options_set",
     // Projects and the rebuild run.
@@ -53,8 +57,9 @@ pub const TOOLS: &[&str] = &[
     "project_play",
     "project_preview",
     "project_open_folder",
-    "project_assets_budget",
     "project_assets_allow",
+    "project_assets_choose",
+    "project_assets_limit",
     "project_rename",
     "project_duplicate",
     "project_delete",
@@ -166,7 +171,7 @@ mod tests {
     #[test]
     fn every_engine_tool_in_the_table_exists_and_none_is_listed_twice() {
         let r = crate::Registry::with_all_tools();
-        let higher_layers = ["rebuild_", "assets_key_", "ai_", "setup_"];
+        let higher_layers = ["rebuild_", "assets_key_", "assets_models_", "ai_", "setup_"];
         for id in TOOLS {
             assert!(r.get(id).is_some() || higher_layers.iter().any(|p| id.starts_with(p)), "{id} isn't a tool");
             assert_eq!(TOOLS.iter().filter(|t| *t == id).count(), 1, "{id} is listed twice");

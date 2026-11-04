@@ -5,8 +5,16 @@ use craft_anything_platform::process::{Output, Process};
 use serde_json::Value;
 use std::time::Duration;
 
+/// The person's own command (refreshing needs their `--allow-run`), even when the tests run in a
+/// shell an AI started (it carries the mark).
 fn cli(args: &[&str], config: &std::path::Path) -> Output {
-    Process::new(env!("CARGO_BIN_EXE_craft-anything-cli")).args(args).env("CRAFT_ANYTHING_CONFIG_DIR", config).timeout(Duration::from_secs(120)).run().unwrap()
+    Process::new(env!("CARGO_BIN_EXE_craft-anything-cli"))
+        .args(args)
+        .env("CRAFT_ANYTHING_CONFIG_DIR", config)
+        .env_remove("CRAFT_ANYTHING_AGENT")
+        .timeout(Duration::from_secs(120))
+        .run()
+        .unwrap()
 }
 
 #[test]
@@ -29,6 +37,17 @@ fn an_mcp_server_becomes_a_toolset_of_proxied_tools() {
 
     // Refreshing starts the server (it's a program, so it needs --allow-run) and caches its tools.
     assert!(!cli(&["plugins-refresh", "--format", "json"], cfg.path()).success, "refused without consent");
+    // A command an AI started (the process is marked) can't give itself the person's --allow-run.
+    let marked = Process::new(exe)
+        .args(["plugins-refresh", "--allow-run", "--format", "json"])
+        .env("CRAFT_ANYTHING_CONFIG_DIR", cfg.path())
+        .env("CRAFT_ANYTHING_AGENT", "1")
+        .timeout(Duration::from_secs(120))
+        .run()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&marked.stdout).unwrap();
+    assert!(!marked.success && v["error"]["code"] == "consent_required", "{v}");
+    assert!(String::from_utf8_lossy(&marked.stderr).contains("--allow-run is ignored"), "{}", String::from_utf8_lossy(&marked.stderr));
     let r = cli(&["plugins-refresh", "--allow-run", "--format", "json"], cfg.path());
     assert!(r.success, "{}", r.stdout_text());
     let v: Value = serde_json::from_slice(&r.stdout).unwrap();

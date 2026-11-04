@@ -146,7 +146,8 @@ pub struct StartParams {
     pub build_with: Option<String>,
     /// For a new game: the builder may generate pictures and 3D models (paid from the person's
     /// asset provider key, within the project's budget). Default false; change it later with
-    /// project_assets_allow.
+    /// project_assets_allow. Only the person turns it on: asked for by an AI client, the project
+    /// starts with it off and the result says so.
     #[serde(default)]
     pub generate_assets: bool,
     /// The coding agent to use (a backend name), kept with a new project for its later changes;
@@ -301,6 +302,7 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
     })?;
     let runs = runs(ctx);
     let settings: &Settings = &ctx.session.settings;
+    let generate_assets = project::generates_assets(p.generate_assets, ctx.caller);
     let (ws, message) = match &p.project {
         Some(dir) => {
             if p.build_with.is_some() {
@@ -320,7 +322,7 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
                 (None, Some(d)) => project::Place::In(d),
                 (None, None) => project::Place::Projects,
             };
-            let ws = project::new_project(settings, target, &p.request, place, p.build_with.as_deref(), p.generate_assets, p.backend.as_deref())?;
+            let ws = project::new_project(settings, target, &p.request, place, p.build_with.as_deref(), generate_assets, p.backend.as_deref())?;
             if p.project_folder.is_some() {
                 ctx.session.remember_project(&ws.root)?;
             }
@@ -347,7 +349,7 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
         ..RunOptions::default()
     };
     let hub = AiHub::new(engine);
-    let out = match set.start(&hub, ws, opts)? {
+    let mut out = match set.start(&hub, ws, opts)? {
         Started::Running => json!({"project": root.display().to_string(), "started": true}),
         Started::Queued { position } => {
             // It starts when a place comes free, whether or not another tool is called.
@@ -356,6 +358,13 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
             json!({"project": root.display().to_string(), "started": false, "queued": position})
         }
     };
+    if p.generate_assets
+        && !generate_assets
+        && let Some(o) = out.as_object_mut()
+    {
+        o.insert("generate_assets".into(), json!(false));
+        o.insert("generate_assets_note".into(), json!(project::ASSETS_LEFT_OFF));
+    }
     Ok(ToolOutput::Value(out))
 }
 
@@ -516,6 +525,41 @@ mod tests {
         assert!(e.call("rebuild_note", json!({"project": ws.root, "text": "blue"}), ok()).is_err());
         assert!(e.call("rebuild_note_withdraw", json!({"project": ws.root, "id": 1}), ok()).is_err());
         assert!(e.call("rebuild_stop", json!({"project": ws.root}), ok()).is_err());
+    }
+
+    /// Generated assets spend the person's money, and there is no inbox to ask them in before the
+    /// project exists: a new project an AI asks for them on starts with them off, and the result
+    /// says so. The person's own callers (the CLI, the app) get them as asked.
+    #[test]
+    fn a_project_an_ai_starts_has_generated_assets_off_and_its_result_says_so() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = craft_anything_engine::testing::session();
+        s.settings.build.parallel = 8;
+        let e = Engine::shared(s, specs());
+        // Stand-in runs: the build "starts" without a coding agent.
+        let stand_ins = StandIns::new();
+        e.session().ext.insert(Arc::new(Runs(Arc::new(Mutex::new(RunSet::new(8).with_starter(stand_ins.starter()))))));
+        for (caller, on) in [(Caller::Agent, false), (Caller::Mcp, false), (Caller::Cli, true), (Caller::Ui, true)] {
+            for asked in [true, false] {
+                let dir = d.path().join(format!("{caller:?}-{asked}"));
+                std::fs::create_dir(&dir).unwrap();
+                let p = json!({"request": "A snake game", "target": "-", "projects_dir": dir, "generate_assets": asked});
+                let r = e.call("rebuild_start", p, CallOptions::new(caller).with_consent(Consent::Granted)).unwrap().to_json();
+                let r = &r["result"];
+                assert_eq!(r["started"], true, "{caller:?}: {r}");
+                let root = PathBuf::from(r["project"].as_str().unwrap());
+                let saved = Workspace::open(&root).unwrap().manifest.generate_assets;
+                assert_eq!(saved, asked && on, "{caller:?} asked {asked}");
+                if asked && !on {
+                    assert_eq!(r["generate_assets"], false, "{caller:?}: {r}");
+                    let note = r["generate_assets_note"].as_str().unwrap_or_default();
+                    assert!(note.contains("off") && note.contains("only the person") && note.contains("Generated assets panel"), "{note}");
+                } else {
+                    assert!(r.get("generate_assets").is_none() && r.get("generate_assets_note").is_none(), "{caller:?} asked {asked}: {r}");
+                }
+            }
+        }
+        assert_eq!(stand_ins.started().len(), 8, "every build started");
     }
 
     #[test]

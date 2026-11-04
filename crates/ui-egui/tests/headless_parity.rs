@@ -75,8 +75,8 @@ const ACTIONS: &[Action] = &[
     a("add_pictures",        "pictures of the original for the builder",       Tool(&["rebuild_start"])),
     a("attach",              "attach pictures to the next message",            Pending { tool: None, why: "rebuild_note and rebuild_start take text; attachments with a message come next" }),
     a("paste_pictures",      "attach pictures from the clipboard (Ctrl+V)",    UiOnly("the clipboard belongs to the app; headless callers name picture files")),
-    a("raise_asset_budget",  "give a project another default budget for generated assets", Tool(&["project_assets_budget"])),
     a("set_generate_assets", "let a game's builder generate pictures and 3D models, or not", Tool(&["project_assets_allow"])),
+    a("Project › Generated assets", "a project's provider and model, limit and limit switch for each asset type, and Ignore budget", Tool(&["project_assets_choose", "project_assets_limit", "project_assets_allow"])),
     a("Project › Open folder", "show the project folder in the file manager",  Tool(&["project_open_folder"])),
     a("Project › Details",   "switch to the Experienced workbench",            UiOnly("a view switch")),
 
@@ -89,6 +89,7 @@ const ACTIONS: &[Action] = &[
     a("check_asset_keys",    "which asset providers have a key set up",        Tool(&["assets_key_status"])),
     a("save_asset_key",      "save an asset provider's key in the keychain",   Tool(&["assets_key_set"])),
     a("remove_asset_key",    "forget an asset provider's key",                 Tool(&["assets_key_remove"])),
+    a("refresh_asset_models","list the models a provider offers for an asset type, with prices", Tool(&["assets_models_list"])),
     a("Engine › Open",       "open Unity Hub or the Epic Games Launcher",      Tool(&["engines_app_open"])),
     a("Download pages",      "open an engine's or fal.ai's download page",     UiOnly("a link; engines_install returns the page for vendor installs")),
 
@@ -101,7 +102,7 @@ const ACTIONS: &[Action] = &[
     a("Settings › Engine paths", "where external engines are",                 Tool(&["settings_set"])),
     a("Settings › Ask before running", "consent before running programs",     Tool(&["settings_set"])),
     a("Settings › Auto mode", "decide routine questions automatically",        Tool(&["settings_set"])),
-    a("Settings › Asset budget", "budget for generated assets",                Tool(&["settings_set"])),
+    a("Settings › Asset defaults", "provider, model and limits new projects start with for each asset type", Tool(&["settings_set"])),
     a("Settings (all)",      "see every setting",                              Tool(&["settings_show"])),
     a("Theme",               "light or dark",                                  UiOnly("a look, not a product action (it is stored in settings, so settings_set theme also works)")),
 
@@ -155,6 +156,9 @@ const PLUMBING: &[(&str, &str)] = &[
     ("attach_checked", "part of pictures_checked"), ("add_pictures_checked", "part of pictures_checked"),
     ("show_picture_refused", "a job's refusal"), ("restore_attachments", "part of unsend"),
     ("settings_changed", "marks settings dirty; each setting has its row"), ("flush_settings", "saves settings"),
+    ("refresh_stale_asset_models", "part of refresh_asset_models: asks again for the lists that are old, when Builds opens"),
+    ("refresh_asset_models_if_stale", "part of refresh_asset_models: asks again for one type's lists when they are old, as its picker opens"),
+    ("keep_asset_defaults", "part of open_workspace: stores what an old project takes from Settings, as the project asset tools do"),
     ("refresh_view", "redraw data"), ("resolve_chat_evidence", "redraw data"), ("mark_dirty", "redraw data"),
     ("poll_conversation", "polling"), ("allow_for_project", "part of answer_consent"),
     ("handle_done", "a job's result"), ("tool_done", "a job's result"),

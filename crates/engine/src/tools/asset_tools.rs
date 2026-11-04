@@ -1,22 +1,28 @@
-//! Game assets the builder generates with fal.ai: `assets_image_generate` (a picture: a texture, a sky,
-//! concept art) and `assets_model_generate` (a low-poly GLB model, from a description or a picture). Each one
-//! is paid for, so a project has a budget: the builder spends freely under it, and the person is
-//! asked before it goes over. Nothing is generated unless the person turned it on for the project
-//! (`project_assets_allow`). Every asset and its cost is listed in the project (assets.json).
-//! The provider comes from the `AssetProviders` registry and the models and prices from the
-//! asset table, so the cost is known before anything is spent.
+//! Project assets the builder generates through registered providers: pictures
+//! (`assets_image_generate`: a texture, a sky, concept art), low-poly GLB models
+//! (`assets_model_generate`), speech, sound effects and music. Each asset type is made with the
+//! provider and model the project chose for it, and has its own limit in that provider's unit
+//! (dollars or credits): the builder generates freely under it, and the person is asked before it
+//! goes over, unless they switched the type's limit off or the project ignores the budget. Nothing
+//! is generated unless the person turned generated assets on for the project and chose a provider
+//! for the type. Every generation and what it cost is listed in the project (assets.json).
 
 use crate::inbox::Inbox;
+use crate::settings::AssetSettings;
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
-use crate::tools::interaction_tools::{Verdict, ask_approval, inbox, inside, resolve, workspace_of};
-use crate::workspace::{AssetRecord, Workspace};
-use craft_anything_engines::assets::{AssetProvider, AssetProviders, AssetRequest, Catalogue, Generated, Shape, about_usd, fal, usd};
+use crate::tools::interaction_tools::{Approval, ask_approval_or_always, inbox, inside, resolve, workspace_of};
+use crate::workspace::{AssetRecord, OWN_NAMES, SpendLock, TypeAssets, TypeUsage, Workspace};
+use craft_anything_engines::assets::inputs::map_request;
+use craft_anything_engines::assets::model::{ModelDetail, Unit, amount};
+use craft_anything_engines::assets::tables::{InputRoles, KnownModels};
+use craft_anything_engines::assets::{AssetKind, AssetProvider, AssetProviders, AssetRequest, Generated, Shape, charged_amount, fal, formats, was_charged};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// The person's key for each asset provider (by provider id), put in the session by the tool
 /// server (read from the keychain; a key never travels on a command line or into a log).
@@ -30,16 +36,26 @@ impl AssetKeys {
     }
 }
 
-/// Remembered when the person says "always" to going over the budget.
-const OVER_BUDGET: &str = "assets:over-budget";
+/// The action an over-limit card for `kind` names. Its "Always" is not remembered as an allowed
+/// action: it switches the type's limit off, where the person sees it.
+fn over_limit_card(kind: AssetKind) -> String {
+    format!("assets:limit:{}", kind.id())
+}
 
+/// How long a generation waits for another process's generation in the same project to finish.
+const SPEND_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Amounts this close are equal: sums of decimal amounts are not exact.
+const EPSILON: f64 = 1e-9;
+
+/// Expose image, model and audio generation tools with network and filesystem effects declared.
 pub fn specs() -> Vec<ToolSpec> {
     let effects = Effects::ACCESSES_NETWORK.union(Effects::WRITES_FILESYSTEM);
     vec![
         ToolSpec {
             id: "assets_image_generate",
             title: "Generate a picture",
-            summary: &summaries().0,
+            summary: "Make a picture with the provider and model the project chose for pictures, and save it inside app/ under save_as (a .png name): a texture, a sky or background, an icon, a title screen or concept art. A model with a choice of format is asked for PNG; one that sends another format (JPEG, WebP) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. shape: square (1024x1024, default), wide (1024x576) or tall (576x1024); a model that can't make the shape says so in the result's ignored list. Counts against the project's limit for pictures, in its provider's unit (dollars or credits). Describe original designs in the original's style; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, what it cost and what is left of the limit.",
             beginner: "Makes a picture for your game, like a texture or a sky.",
             toolset: Toolset::Core,
             effects,
@@ -50,7 +66,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "assets_model_generate",
             title: "Generate a 3D model",
-            summary: &summaries().1,
+            summary: "Make a game-ready, low-poly 3D model (GLB) with the provider and model the project chose for 3D models, and save it inside app/. Give a prompt or an image (a web address, or a picture inside the project such as reference/picture-1.png). From a prompt, a picture is made first with the project's picture model (counted against the limit for pictures) when the 3D model starts from pictures and pictures are on; otherwise the prompt goes to a 3D model that takes words, and one that needs a picture refuses. faces requests the face count (default 3000): about 500-1500 for small props and pickups, 2000-5000 for weapons, furniture and vehicles, 6000-15000 for main characters; fewer faces run faster, so use the fewest that still look right (the model keeps it within its own range). textured (default true) gives colours and surfaces. Counts against the project's limit for 3D models; it takes a minute or two. Describe one original object per model; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, what it cost and what is left of the limit.",
             beginner: "Makes a 3D object for your game, like a crate, a tree or a car.",
             toolset: Toolset::Core,
             effects,
@@ -58,29 +74,40 @@ pub fn specs() -> Vec<ToolSpec> {
             input_schema: schema_of::<ModelParams>,
             run: assets_model_generate,
         },
+        ToolSpec {
+            id: "assets_speech_generate",
+            title: "Generate speech",
+            summary: "Generate speech from text with the provider and model the project chose for speech, and save it inside app/ under save_as (a .mp3 name). A model with a choice of format is asked for MP3; one that sends another format (WAV, Ogg, FLAC) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. Choose a voice_id you are entitled to use. Requires the project's generated-assets opt-in and counts against its limit for speech. Returns the saved path and what it cost.",
+            beginner: "Makes spoken dialogue or narration for your project.",
+            toolset: Toolset::Core,
+            effects,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<SpeechParams>,
+            run: assets_speech_generate,
+        },
+        ToolSpec {
+            id: "assets_sound_generate",
+            title: "Generate a sound effect",
+            summary: "Generate an original sound effect from a prompt and duration_seconds (0.5 to 30) with the provider and model the project chose for sound effects, saving it inside app/ under save_as (a .mp3 name). A model with a choice of format is asked for MP3; one that sends another format (WAV, Ogg, FLAC) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. Requires the project's generated-assets opt-in and counts against its limit for sound effects.",
+            beginner: "Makes a sound effect for your project.",
+            toolset: Toolset::Core,
+            effects,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<SoundParams>,
+            run: assets_sound_generate,
+        },
+        ToolSpec {
+            id: "assets_music_generate",
+            title: "Generate music",
+            summary: "Generate original music from a prompt and duration_seconds (3 to 600) with the provider and model the project chose for music, saving it inside app/ under save_as (a .mp3 name). A model with a choice of format is asked for MP3; one that sends another format (WAV, Ogg, FLAC) has it saved under the same name with that format's extension, and the result's saved, asked and note say so, so use the saved path. instrumental defaults to true. Requires the project's generated-assets opt-in and counts against its limit for music.",
+            beginner: "Makes original background music for your project.",
+            toolset: Toolset::Core,
+            effects,
+            requires: Requires::Nothing,
+            input_schema: schema_of::<MusicParams>,
+            run: assets_music_generate,
+        },
     ]
-}
-
-/// The two tools' summaries, with the prices and face limits of the asset table's default models.
-fn summaries() -> &'static (String, String) {
-    static TEXT: OnceLock<(String, String)> = OnceLock::new();
-    TEXT.get_or_init(|| {
-        let c = Catalogue::built_in();
-        let (picture, picture_model) = c.image_model(None).map(|m| (m.cost(Shape::Square), m.name.as_str())).unwrap_or((0.0, "the default model"));
-        let (textured, faces) = c.model_3d(None).map(|m| (m.cost(true), m.faces())).unwrap_or((0.0, 48..=20_000));
-        let image = format!(
-            "Make a picture with fal.ai ({picture_model}) and save it as a PNG inside app/: a texture, a sky or background, an icon, a title screen or concept art. shape: square (1024x1024, default), wide (1024x576) or tall (576x1024). Costs {}, counted against the project's asset budget. Describe original designs in the original's style; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, the cost and the budget left.",
-            about_usd(picture)
-        );
-        let model = format!(
-            "Make a game-ready, low-poly 3D model (GLB) with fal.ai (Tripo P1) and save it inside app/. Give a prompt (a picture is made first, then turned into the model) or an image (a web address, or a picture inside the project such as reference/picture-1.png). faces caps the face count ({} to {}, default {DEFAULT_FACES}): about 500-1500 for small props and pickups, 2000-5000 for weapons, furniture and vehicles, 6000-15000 for main characters; fewer faces run faster, so use the fewest that still look right. textured (default true) gives colours and surfaces. A textured model costs {} plus {} for the picture, counted against the project's asset budget; it takes a minute or two. Describe one original object per model; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, the cost and the budget left.",
-            faces.start(),
-            faces.end(),
-            usd(textured),
-            usd(picture)
-        );
-        (image, model)
-    })
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -88,7 +115,8 @@ fn summaries() -> &'static (String, String) {
 pub struct ImageParams {
     /// What to draw, in detail (subject, style, colours, lighting).
     pub prompt: String,
-    /// Where to save it, relative to app/, ending in .png (e.g. Assets/Textures/crate.png).
+    /// Where to save it, relative to app/, ending in .png (e.g. Assets/Textures/crate.png). A picture
+    /// that comes back in another format is saved under the same name with its own extension.
     pub save_as: String,
     /// square (default), wide or tall.
     #[serde(default)]
@@ -106,130 +134,705 @@ pub struct ModelParams {
     /// A picture to turn into the model: a web address, or a picture inside the project.
     #[serde(default)]
     pub image: String,
-    /// Colours and surfaces (default true); false makes a plain grey model for $0.40 instead of $0.50.
+    /// Colours and surfaces (default true).
     #[serde(default)]
     pub textured: Option<bool>,
-    /// Most faces the model may have, 48 to 20000 (default 3000). Fewer faces run faster.
+    /// Requested face count (default 3000); the model keeps it within its own range.
     #[serde(default)]
     pub faces: Option<u32>,
 }
 
 /// A mid-sized game prop: detailed enough up close, cheap to draw many of.
 const DEFAULT_FACES: u32 = 3000;
+/// The most faces asked of any model; each model holds the count to its own range as well.
+const MAX_FACES: u32 = 500_000;
 
-/// What a generation needs: the keys, the providers, the inbox (for the over-budget question) and
-/// the project.
-struct Job {
-    keys: std::sync::Arc<AssetKeys>,
-    providers: AssetProviders,
-    inbox: Inbox,
-    ws: Workspace,
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SpeechParams {
+    /// The words to speak (1 to 5000 characters).
+    pub text: String,
+    /// A voice id of the chosen speech model that you are entitled to use.
+    pub voice_id: String,
+    /// Destination relative to app/, ending in .mp3 (audio in another format keeps the name with its
+    /// own extension).
+    pub save_as: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SoundParams {
+    pub prompt: String,
+    /// Sound length, 0.5 to 30 seconds.
+    pub duration_seconds: f64,
+    /// Destination relative to app/, ending in .mp3 (audio in another format keeps the name with its
+    /// own extension).
+    pub save_as: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MusicParams {
+    pub prompt: String,
+    /// Track length, 3 to 600 seconds.
+    pub duration_seconds: f64,
+    /// Defaults to true (no vocals).
+    #[serde(default)]
+    pub instrumental: Option<bool>,
+    /// Destination relative to app/, ending in .mp3 (audio in another format keeps the name with its
+    /// own extension).
+    pub save_as: String,
+}
+
+/// What generations of `kind` are called, many of them and one.
+pub fn type_words(kind: AssetKind) -> (&'static str, &'static str) {
+    match kind {
+        AssetKind::Image => ("pictures", "picture"),
+        AssetKind::Model3d => ("3D models", "3D model"),
+        AssetKind::Speech => ("speech", "clip of speech"),
+        AssetKind::SoundEffect => ("sound effects", "sound effect"),
+        AssetKind::Music => ("music", "music track"),
+        // A type a later build of the engines adds.
+        _ => ("assets", "asset"),
+    }
+}
+
+/// Reject negative or nonfinite amounts before they enter limit or spending calculations.
+fn valid_cost(cost: f64) -> Result<(), ToolError> {
+    if cost.is_finite() && cost >= 0.0 { Ok(()) } else { Err(ToolError::invalid("asset costs and limits must be finite and nonnegative")) }
+}
+
+/// An amount as a receipt or a warning states it, to the fraction of a cent or credit.
+fn exact(unit: Unit, x: f64) -> String {
+    match unit {
+        Unit::Usd => format!("${x:.6}"),
+        Unit::Credits => format!("{x:.4} credits"),
+    }
+}
+
+/// Resolve existing ancestors, including symlinks, without creating an output directory.
+fn canonical_future(path: &Path) -> Result<PathBuf, ToolError> {
+    let mut ancestor = path;
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => {
+                let mut resolved = std::fs::canonicalize(ancestor).map_err(|e| ToolError::io(ancestor.display(), e))?;
+                for part in missing.iter().rev() {
+                    resolved.push(part);
+                }
+                return Ok(resolved);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(ancestor.file_name().ok_or_else(|| ToolError::invalid("asset path has no existing root"))?);
+                ancestor = ancestor.parent().ok_or_else(|| ToolError::invalid("asset path has no existing root"))?;
+            }
+            Err(e) => return Err(ToolError::io(ancestor.display(), e)),
+        }
+    }
+}
+
+/// Whether two names may be one entry on a case-insensitive file system (macOS, Windows): equal
+/// by lower- or upper-case mapping, so "Reference" and "attachmentſ" meet their records too.
+fn same_name_ignoring_case(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase() || a.to_uppercase() == b.to_uppercase()
+}
+
+/// Refuse a destination that is one of Craft Anything's records (in a project whose app is the
+/// project folder, they sit beside the person's files), named directly, in another case, or
+/// through a link.
+fn not_a_record(ws: &Workspace, path: &Path) -> Result<(), ToolError> {
+    let refused = || ToolError::invalid("save_as must not be one of Craft Anything's own records");
+    if ws.is_own_record(path) {
+        return Err(refused());
+    }
+    let root = canonical_future(&ws.root)?;
+    let resolved = canonical_future(path)?;
+    // A folder that doesn't exist yet keeps the case it was given, so compare the first part under
+    // the project ignoring case: on macOS "Reference/x.png" is written into reference/.
+    let first = |p: &Path, base: &Path| p.strip_prefix(base).ok()?.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    for top in [first(path, &ws.root), first(&resolved, &root)].into_iter().flatten() {
+        if OWN_NAMES.iter().filter(|n| **n != "checks").any(|n| same_name_ignoring_case(n, &top)) {
+            return Err(refused());
+        }
+    }
+    for name in OWN_NAMES.iter().filter(|n| **n != "checks") {
+        if inside(&canonical_future(&root.join(name))?, &resolved) {
+            return Err(refused());
+        }
+    }
+    Ok(())
+}
+
+/// Reject paths whose resolved ancestors escape the root, including through symbolic links.
+fn confined(root: &Path, path: &Path) -> Result<(), ToolError> {
+    let root = canonical_future(root)?;
+    let path = canonical_future(path)?;
+    if inside(&root, &path) { Ok(()) } else { Err(ToolError::invalid("asset paths must stay inside the project, including through symbolic links")) }
+}
+
+/// Read a nonempty regular asset file with a 20 MiB cap, rechecking size after opening and reading.
+fn read_asset(path: &Path) -> Result<Vec<u8>, ToolError> {
+    const MAX: u64 = 20 << 20;
+    let before = std::fs::metadata(path).map_err(|e| ToolError::io(path.display(), e))?;
+    if !before.is_file() || before.len() == 0 || before.len() > MAX {
+        return Err(ToolError::invalid("asset input must be a nonempty regular file of at most 20 MiB"));
+    }
+    let file = std::fs::File::open(path).map_err(|e| ToolError::io(path.display(), e))?;
+    let meta = file.metadata().map_err(|e| ToolError::io(path.display(), e))?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > MAX {
+        return Err(ToolError::invalid("asset input must be a nonempty regular file of at most 20 MiB"));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX + 1).read_to_end(&mut bytes).map_err(|e| ToolError::io(path.display(), e))?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX {
+        return Err(ToolError::invalid("asset input must contain 1 byte to 20 MiB"));
+    }
+    Ok(bytes)
+}
+
+/// Require a finite duration within the selected audio generator's inclusive bounds.
+fn duration_ok(seconds: f64, minimum: f64, maximum: f64) -> Result<(), ToolError> {
+    if seconds.is_finite() && (minimum..=maximum).contains(&seconds) {
+        Ok(())
+    } else {
+        Err(ToolError::invalid(format!("duration_seconds must be {minimum} to {maximum}")))
+    }
+}
+
+/// Validate speech text and the voice id before generating it with the project's speech model.
+fn assets_speech_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: SpeechParams = parse_params(params)?;
+    let text = p.text.trim();
+    if text.is_empty() || text.chars().count() > 5000 {
+        return Err(ToolError::invalid("text must contain 1 to 5000 characters"));
+    }
+    let voice = p.voice_id.trim();
+    if voice.is_empty() || voice.len() > 128 || !voice.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') {
+        return Err(ToolError::invalid("voice_id must contain 1 to 128 letters, digits, underscores or hyphens"));
+    }
+    generate_one(ctx, &p.save_as, "mp3", text, AssetRequest::Speech { text, voice_id: voice }, "Generating speech…")
+}
+
+/// Validate the prompt and sound duration before generating it with the project's sound model.
+fn assets_sound_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: SoundParams = parse_params(params)?;
+    let prompt = prompt_ok(&p.prompt)?;
+    duration_ok(p.duration_seconds, 0.5, 30.0)?;
+    generate_one(ctx, &p.save_as, "mp3", prompt, AssetRequest::SoundEffect { prompt, duration_seconds: p.duration_seconds }, "Generating a sound effect…")
+}
+
+/// Validate music length and prompt, defaulting to instrumental audio, before generating it.
+fn assets_music_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: MusicParams = parse_params(params)?;
+    let prompt = prompt_ok(&p.prompt)?;
+    duration_ok(p.duration_seconds, 3.0, 600.0)?;
+    let req = AssetRequest::Music { prompt, duration_seconds: p.duration_seconds, instrumental: p.instrumental.unwrap_or(true) };
+    generate_one(ctx, &p.save_as, "mp3", prompt, req, "Generating music…")
+}
+
+/// Make one asset of the request's type with the project's choice for it: the destination, the
+/// type's provider, key and model are checked, then its limit, before anything is spent.
+fn generate_one(ctx: &mut Ctx<'_>, save_as: &str, ext: &str, from: &str, req: AssetRequest<'_>, progress: &str) -> Result<ToolOutput, ToolError> {
+    let mut j = job(ctx)?;
+    let (path, rel) = save_path(&j.ws, save_as, ext)?;
+    let ready = j.ready(req.kind())?;
+    let estimate = ready.estimate(&req)?;
+    within_limit(ctx, &j.inbox, &mut j.ws, ready.kind, &ready.limited(), estimate)?;
+    ctx.report(None, progress);
+    let made = make(&j.ws, &ready, &req, &path, &rel, from, estimate)?;
+    summary(&j.ws, &ready, &made, json!({}))
+}
+
+/// What a generation needs: the keys, the providers, the starting choices from Settings (for a
+/// project that has not chosen a type yet), the inbox (for the over-limit question) and the
+/// project, with its spending lock held until the generation's receipts are written.
+struct Job {
+    keys: Arc<AssetKeys>,
+    providers: AssetProviders,
+    settings: AssetSettings,
+    inbox: Inbox,
+    ws: Workspace,
+    _spending: SpendLock,
+}
+
+/// Load generation context only for an opted-in project whose manifest this build can safely update.
 fn job(ctx: &Ctx<'_>) -> Result<Job, ToolError> {
     let keys = ctx.session.ext.get::<AssetKeys>().unwrap_or_default();
     // A session can bring its own providers (a fork, a test); otherwise the built-in ones.
     let providers = ctx.session.ext.get::<AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default();
-    if !providers.ids().iter().any(|id| keys.get(id).is_some()) {
-        return Err(no_key("fal.ai"));
-    }
+    let settings = ctx.session.settings.assets.clone();
     let not_project = || ToolError::new(ErrorCode::FeatureMissing, "Assets can only be generated inside a Craft Anything project.");
     let inbox = inbox(ctx).ok_or_else(not_project)?;
-    let ws = workspace_of(&inbox).ok_or_else(not_project)?;
+    let mut ws = workspace_of(&inbox).ok_or_else(not_project)?;
+    generation_permitted(&ws)?;
+    // Held through the limit check, the paid calls and their receipts: another process sharing
+    // this project then sees every earlier receipt and never writes the ledger at the same time.
+    let spending = ws.lock_spending(SPEND_LOCK_WAIT)?;
+    // The person may have changed their choices (generation, providers, limits) while this waited.
+    ws.reload()?;
+    generation_permitted(&ws)?;
+    // A project from before each type had its own choice keeps what it took from Settings from now
+    // on. If that can't be saved it still takes Settings' defaults, which are what this run uses.
+    if let Err(e) = ws.keep_asset_defaults(&settings) {
+        log::warn!("couldn't store the asset defaults in {}: {}", ws.root.display(), e.message);
+    }
+    Ok(Job { keys, providers, settings, inbox, ws, _spending: spending })
+}
+
+/// Generation needs a manifest this build can update and the person's opt-in for the project.
+fn generation_permitted(ws: &Workspace) -> Result<(), ToolError> {
+    if ws.is_read_only() {
+        return Err(ToolError::new(ErrorCode::NoPermission, "This project's settings were written by a newer Craft Anything; asset generation is disabled.")
+            .with_remediation("Update Craft Anything before generating assets for this project."));
+    }
     if !ws.manifest.generate_assets {
         return Err(ToolError::new(ErrorCode::NoPermission, "The person hasn't turned on generated assets for this project.").with_remediation(
             "Make these assets with simple shapes and colours instead, and tell the person they can turn on generated assets for this game in the app.",
         ));
     }
-    Ok(Job { keys, providers, inbox, ws })
+    Ok(())
 }
 
+/// Explain which provider lacks credentials and offer a fallback that requires no paid assets.
 fn no_key(provider: &str) -> ToolError {
-    ToolError::new(ErrorCode::BadSettings, format!("No {provider} key is set up, so pictures and 3D models can't be generated.")).with_remediation(format!(
-        "Make these assets with simple shapes and colours instead, and tell the person they can add a {provider} key in Settings → AI for realistic ones."
+    ToolError::new(ErrorCode::BadSettings, format!("No {provider} key is set up for this asset operation.")).with_remediation(format!(
+        "Make these assets with simple shapes and colours instead, and tell the person they can add a {provider} key in Settings → Builds → Asset provider keys for realistic ones."
+    ))
+}
+
+/// Where the person chooses what each asset type is made with.
+const CHOOSE_AGAIN: &str = "in the project's Generated Assets settings";
+
+/// The type is Off for this project.
+fn type_off(kind: AssetKind) -> ToolError {
+    let (many, _) = type_words(kind);
+    ToolError::new(ErrorCode::NoPermission, format!("Generated {many} are off for this project.")).with_remediation(format!(
+        "Make these with simple shapes, colours or the assets already made instead, and tell the person they can choose a provider and model for {many} {CHOOSE_AGAIN}."
     ))
 }
 
 impl Job {
-    /// The key for `provider`, checked before anything is asked or spent.
-    fn key(&self, provider: &dyn AssetProvider) -> Result<String, ToolError> {
-        self.keys.get(provider.id()).map(str::to_string).ok_or_else(|| no_key(provider.name()))
+    /// Everything one asset type needs before its limit is checked: the project's choice (Off is
+    /// refused), a registered provider billing in the unit the type is counted in, its key, and the
+    /// chosen model as the provider describes it now. The ledger is read (checked) before the
+    /// provider is asked anything, so a damaged ledger stops the generation first; a model the
+    /// provider no longer serves stops it before anything is spent.
+    fn ready(&self, kind: AssetKind) -> Result<Ready, ToolError> {
+        let (many, _) = type_words(kind);
+        let t = self.ws.manifest.asset_type_on(kind, &self.settings).ok_or_else(|| type_off(kind))?;
+        let Some(id) = t.choice.provider.clone() else { return Err(type_off(kind)) };
+        let provider = self.providers.get(&id).ok_or_else(|| {
+            ToolError::new(ErrorCode::FeatureMissing, format!("No asset provider called \"{id}\" is available."))
+                .with_remediation(format!("Ask the person to choose another provider for {many} {CHOOSE_AGAIN}."))
+        })?;
+        if provider.unit() != t.choice.unit {
+            return Err(ToolError::new(
+                ErrorCode::BadSettings,
+                format!("The project counts {many} in {}, but {} bills in {}.", unit_words(t.choice.unit), provider.name(), unit_words(provider.unit())),
+            )
+            .with_remediation(format!("Ask the person to choose the provider and model for {many} again {CHOOSE_AGAIN}.")));
+        }
+        let key = self.keys.get(provider.id()).ok_or_else(|| no_key(provider.name()))?.to_string();
+        provider.validate_key(&key)?;
+        self.ws.try_type_usage(kind, &t)?;
+        let model = provider.describe(&key, &t.choice.model)?;
+        // A model the provider files under this type but that makes something else (fal's Hunyuan
+        // Motion, animations under text-to-3d) is refused as well.
+        let not_made = KnownModels::built_in().not_kinds(provider.id(), &t.choice.model).contains(&kind);
+        if not_made || (!model.kinds.is_empty() && !model.kinds.contains(&kind)) {
+            return Err(ToolError::new(ErrorCode::BadSettings, format!("The model \"{}\" at {} doesn't make {many}.", model.name, provider.name()))
+                .with_remediation(format!("Ask the person to choose another model for {many} {CHOOSE_AGAIN}.")));
+        }
+        Ok(Ready { kind, t, provider, key, model })
     }
 }
 
-/// Where to save inside app/: (full path, path relative to app/). `ext` is the required extension.
-fn save_path(ws: &Workspace, save_as: &str, ext: &str) -> Result<(PathBuf, String), ToolError> {
-    let app = ws.app_dir();
-    // Paths given from the workspace ("app/Assets/x.glb") mean the same place.
-    let rel = save_as.trim().trim_start_matches("./").trim_start_matches("app/").trim_start_matches("app\\");
-    let path = resolve(&app, rel).filter(|p| inside(&app, p) && *p != app).ok_or_else(|| ToolError::invalid("save_as must be a file path inside app/"))?;
-    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
-        return Err(ToolError::invalid(format!("save_as must end in .{ext}")));
+pub(crate) fn unit_words(unit: Unit) -> &'static str {
+    match unit {
+        Unit::Usd => "dollars",
+        Unit::Credits => "credits",
     }
-    let shown = path.strip_prefix(&app).unwrap_or(&path).display().to_string().replace('\\', "/");
-    Ok((path, shown))
 }
 
-/// Go ahead if this stays within the budget, else ask the person (unless they said "always").
-fn within_budget(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, cost: f64) -> Result<(), ToolError> {
-    let spent = ws.assets_spent();
-    let budget = ws.manifest.asset_budget_usd;
-    if spent + cost <= budget + 1e-9 || ws.manifest.allowed_actions.iter().any(|k| k == OVER_BUDGET) {
+/// One asset type, ready to run: the project's choice for it, its provider and key, and the model
+/// as the provider describes it now.
+struct Ready {
+    kind: AssetKind,
+    t: TypeAssets,
+    provider: Arc<dyn AssetProvider>,
+    key: String,
+    model: ModelDetail,
+}
+
+impl Ready {
+    /// The type as its limit is checked. It is tracked when the price the person was shown, or the
+    /// price the provider gives now, is one to count with: a model whose price became known is
+    /// limited, and one whose price can no longer be read is not quietly let off its limit.
+    fn limited(&self) -> TypeAssets {
+        let mut t = self.t.clone();
+        if !t.choice.pricing.tracked() {
+            t.choice.pricing = self.model.pricing.clone();
+        }
+        t
+    }
+
+    /// What `req` will cost before it runs, in the type's unit; `None` when only the run can say.
+    fn estimate(&self, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
+        let estimate = self.provider.estimate(&self.key, &self.model, req)?;
+        if let Some(e) = estimate {
+            valid_cost(e)?;
+        }
+        Ok(estimate)
+    }
+
+    /// What this type's receipts say besides where each went and what it cost.
+    fn receipt<'a>(&'a self, from: &'a str) -> Receipt<'a> {
+        let tracked = self.limited().choice.pricing.tracked();
+        Receipt {
+            kind: self.kind,
+            from,
+            provider: self.provider.id(),
+            model: &self.t.choice.model,
+            unit: self.t.choice.unit,
+            tracked,
+            since_ms: self.t.since_ms,
+        }
+    }
+}
+
+/// What the ledger says of one generation besides where it went and what it cost: the project's
+/// choice for the type, so it names the model the project chose and counts in the type's unit.
+struct Receipt<'a> {
+    kind: AssetKind,
+    /// What it was made from: the description, or the picture it was made from.
+    from: &'a str,
+    provider: &'a str,
+    model: &'a str,
+    unit: Unit,
+    /// The type's price was one to count with when it ran, so a cost was expected.
+    tracked: bool,
+    /// When the type's provider was chosen: its usage counts from then, so no receipt is dated
+    /// before it, even when this computer's clock is behind the one that made the choice.
+    since_ms: u64,
+}
+
+/// Whether a reported amount is one to count with: a number, not below nothing.
+fn believable(amount: f64) -> bool {
+    amount.is_finite() && amount >= 0.0
+}
+
+impl Receipt<'_> {
+    /// The ledger row for `rel`, with the amount the provider reported when it can be believed. No
+    /// amount is a missing cost when one was expected (the type was tracked); a reported amount
+    /// that can't be believed (not a number, below nothing) is kept as a missing cost, never as
+    /// no row: the next generation of the type then asks.
+    fn record(&self, rel: &str, amount: Option<f64>) -> AssetRecord {
+        let counted = amount.filter(|&a| believable(a));
+        AssetRecord {
+            file: rel.to_string(),
+            kind: self.kind.ledger_name().into(),
+            prompt: self.from.chars().take(1000).collect(),
+            provider: self.provider.into(),
+            model: self.model.into(),
+            amount: counted,
+            unit: Some(self.unit),
+            cost_missing: if amount.is_some() { counted.is_none() } else { self.tracked },
+            at_ms: crate::inbox::now_ms().max(self.since_ms),
+        }
+    }
+
+    /// What the provider may have charged, in words.
+    fn charge(&self, amount: Option<f64>) -> String {
+        match amount {
+            Some(a) if believable(a) => exact(self.unit, a),
+            Some(_) => "an amount that can't be read".into(),
+            None => "an amount it did not say".into(),
+        }
+    }
+}
+
+/// Whether `t`'s limit is enforced in this project: it is switched on, the project doesn't ignore
+/// the budget, and the type's price is one to count with.
+pub fn limit_applies(ws: &Workspace, t: &TypeAssets) -> bool {
+    t.limit_on && !ws.manifest.assets.ignore_budget && t.choice.pricing.tracked()
+}
+
+/// Go ahead if the type's limit allows this generation, else ask the person. Usage is the type's
+/// own, under its provider and in its unit, from a checked ledger read. A limit applies when
+/// [`limit_applies`]. With an estimate, usage plus the estimate must stay within the limit; without
+/// one (a cost known only after the run) a generation may start while usage is under the limit, and
+/// so may pass it once. A generation whose cost could not be read leaves usage unknown, so every
+/// later one asks until the person allows it. "Always" switches the type's limit off, through the
+/// person's own settings, where they see it and can switch it back on.
+fn within_limit(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: &mut Workspace, kind: AssetKind, t: &TypeAssets, estimate: Option<f64>) -> Result<(), ToolError> {
+    let usage = ws.try_type_usage(kind, t)?;
+    valid_cost(usage.amount)?;
+    if let Some(e) = estimate {
+        valid_cost(e)?;
+        valid_cost(usage.amount + e)?;
+    }
+    if !limit_applies(ws, t) {
         return Ok(());
     }
-    // Auto mode doesn't stop to ask, and doesn't spend the person's money past the budget unasked.
-    if ctx.session.settings.auto_mode {
-        return Err(ToolError::new(ErrorCode::OverLimit, format!("This project's ${budget:.2} asset budget is used up (${spent:.2} so far)."))
-            .with_remediation("Use simple shapes, colours and the assets already made for the rest. The person can raise the budget in the app."));
+    valid_cost(t.limit)?;
+    let within = match estimate {
+        Some(e) => usage.amount + e <= t.limit + EPSILON,
+        None => usage.amount + EPSILON < t.limit,
+    };
+    if within && !usage.cost_missing {
+        return Ok(());
     }
-    let title = format!("Spend about ${cost:.2} more on game pictures and 3D models?");
-    let detail = format!(
-        "This project's ${budget:.2} budget for generated assets is used up (${spent:.2} so far). Allow once for this asset, or always to let the builder keep generating for this project."
-    );
-    match ask_approval(ctx, inbox, Some(ws), &title, &detail, OVER_BUDGET)? {
-        Verdict::Yes => Ok(()),
-        Verdict::No(_) | Verdict::NoAnswer => Err(ToolError::new(ErrorCode::OverLimit, "The asset budget is used up and the person didn't raise it.")
-            .with_remediation("Use simple shapes, colours and the assets already made for the rest.")),
+    let (many, one) = type_words(kind);
+    let unit = t.choice.unit;
+    let (limit, used) = (amount(unit, t.limit), amount(unit, usage.amount));
+    let stop = |message: String| {
+        ToolError::new(ErrorCode::OverLimit, message).with_remediation(format!(
+            "Use simple shapes, colours and the assets already made for the rest. The person can raise or switch off the limit for {many}, or ignore the budget, {CHOOSE_AGAIN}."
+        ))
+    };
+    // Auto mode doesn't stop to ask, and doesn't spend the person's money past a limit unasked.
+    if ctx.session.settings.auto_mode {
+        return Err(stop(if usage.cost_missing {
+            format!("The cost of an earlier {one} could not be read, so this project's {limit} limit for {many} can't be checked ({used} counted so far).")
+        } else {
+            format!("This project's {limit} limit for {many} doesn't cover another {one} ({used} used so far).")
+        }));
+    }
+    let title = match estimate {
+        Some(e) => format!("Spend about {} more on {many}?", amount(unit, e)),
+        None => format!("Make another {one} past this project's limit for {many}?"),
+    };
+    let mut detail = if usage.cost_missing {
+        format!(
+            "The cost of an earlier {one} could not be read, so how much of this project's {limit} limit for {many} is used is not known ({used} counted so far)."
+        )
+    } else {
+        format!("This project's {limit} limit for {many} is reached ({used} used so far).")
+    };
+    if estimate.is_none() {
+        detail.push_str(" This model's cost is known only after it runs.");
+    }
+    detail
+        .push_str(&format!(" Allow once for this {one}, or always to switch this project's limit for {many} off (it can be switched back on {CHOOSE_AGAIN})."));
+    match ask_approval_or_always(ctx, inbox, &title, &detail, &over_limit_card(kind))? {
+        Approval::Once => Ok(()),
+        Approval::Always => {
+            let settings = ctx.session.settings.assets.clone();
+            let mut switched = Ok(());
+            let saved = ws.set_person(|m| switched = m.assets.set_limit(kind, None, Some(false), &settings));
+            // The person allowed this one either way; a switch that couldn't be saved asks next time.
+            if let Err(e) = saved.and(switched) {
+                ctx.report(None, format!("The limit for {many} could not be switched off: {}", e.message));
+            }
+            Ok(())
+        }
+        Approval::Refused => Err(stop(format!("The limit for {many} is reached and the person didn't allow more."))),
     }
 }
 
-/// Save a generated file and list it with its cost.
-fn keep(ws: &Workspace, path: &Path, rel: &str, kind: &str, made_from: &str, g: &Generated) -> Result<(), ToolError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| ToolError::io(parent.display(), e))?;
+/// A generation run and kept: what the provider gave, and where it was saved.
+struct Made {
+    g: Generated,
+    place: Place,
+}
+
+/// Where a generation is saved: the file asked for, or, when its bytes are another format than the
+/// name says, the same name with that format's extension, never mismatched bytes under the name
+/// asked for. `note` says why, for the result.
+struct Place {
+    path: PathBuf,
+    rel: String,
+    /// The file asked for, when it was saved elsewhere.
+    asked: Option<String>,
+    note: Option<String>,
+}
+
+/// Where `bytes`, asked to be saved at `path` (`rel` inside app/), go: there when they are the
+/// format its extension names, else under the same name with the extension of the format they are.
+/// Bytes of no format this app can tell are saved where asked, and the note says it couldn't check.
+fn real_place(path: &Path, rel: &str, bytes: &[u8]) -> Place {
+    let asked = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    match formats::sniff(bytes) {
+        Some(real) if !formats::same_extension(real.ext, asked) => {
+            let moved = Path::new(rel).with_extension(real.ext).display().to_string().replace('\\', "/");
+            let note =
+                format!("The model sent {} rather than {}, so it was saved as {moved} instead of {rel}; use that file.", real.name, formats::name_of(asked));
+            Place { path: path.with_extension(real.ext), rel: moved, asked: Some(rel.to_string()), note: Some(note) }
+        }
+        Some(_) => Place { path: path.to_path_buf(), rel: rel.to_string(), asked: None, note: None },
+        None => Place {
+            path: path.to_path_buf(),
+            rel: rel.to_string(),
+            asked: None,
+            note: Some(format!("The file's format couldn't be recognised, so it was saved as {rel}, as asked; check that it opens.")),
+        },
     }
-    crate::project::write_atomic(path, &g.bytes)?;
-    ws.record_asset(AssetRecord {
-        file: rel.to_string(),
-        kind: kind.into(),
-        prompt: made_from.chars().take(1000).collect(),
-        cost_usd: g.cost_usd,
-        at_ms: crate::inbox::now_ms(),
+}
+
+/// Run one paid stage, record it and save its output, under the extension of the format it really
+/// is ([`real_place`]). When the provider fails after it accepted the work and reports a charge,
+/// that charge is recorded first, so a retry is checked against the limit it already used. An
+/// overrun of the estimate is reported only after the receipt and the output are kept.
+fn make(ws: &Workspace, ready: &Ready, req: &AssetRequest<'_>, path: &Path, rel: &str, from: &str, estimate: Option<f64>) -> Result<Made, ToolError> {
+    let receipt = ready.receipt(from);
+    // The run may not start at a price above the one its limit was checked against.
+    let g = ready.provider.generate_within(&ready.key, &ready.model, req, estimate).map_err(|e| record_charge(ws, &receipt, ready.kind, rel, e))?;
+    let place = real_place(path, rel, &g.bytes);
+    // The receipt names the file as it is saved, and is written before it.
+    keep(ws, &place.path, &place.rel, &receipt, &g)?;
+    within_estimate(&place.rel, g.cost, estimate, ready.t.choice.unit)?;
+    Ok(Made { g, place })
+}
+
+/// Record the charge a failed generation reported, and say so in its error. A charge of unknown
+/// cost, or one that can't be read, is recorded as a generation without an amount; a charge the
+/// ledger can't take is reported, never dropped.
+fn record_charge(ws: &Workspace, receipt: &Receipt<'_>, kind: AssetKind, rel: &str, error: ToolError) -> ToolError {
+    if !was_charged(&error) {
+        return error;
+    }
+    let amount = charged_amount(&error);
+    let (many, _) = type_words(kind);
+    let row = receipt.record(rel, amount);
+    let counted = row.amount;
+    match ws.record_asset(row) {
+        Ok(()) => {
+            let note = format!(
+                "The charge already counts against the project's limit for {many}. Do not blindly regenerate or retry: check the provider's job and account first."
+            );
+            let remediation = Some(error.remediation.as_deref().map_or_else(|| note.clone(), |r| format!("{r} {note}")));
+            let said = match counted {
+                Some(_) => format!("this was recorded as spending for {rel}, which was not saved."),
+                None => format!("this was recorded as spending of unknown amount for {rel}, which was not saved."),
+            };
+            ToolError { message: format!("{} The provider may have charged {}; {said}", error.message, receipt.charge(amount)), remediation, ..error }
+        }
+        Err(e) => {
+            let mut failed = ToolError::new(
+                e.code,
+                format!("{} The provider may have charged {}, but the charge could not be recorded: {}", error.message, receipt.charge(amount), e.message),
+            )
+            .with_remediation("Do not blindly regenerate or retry: check the provider charge and repair the asset ledger first.");
+            failed.details = error.details;
+            failed
+        }
+    }
+}
+
+/// Record a paid generation before preparing or saving its output. A failed save keeps the receipt;
+/// a failed receipt leaves the destination untouched. These two files are not a crash-atomic transaction.
+///
+/// A cost the provider reported that can't be believed is recorded as a missing one, and the output
+/// is not published: something about the run is wrong.
+fn keep(ws: &Workspace, path: &Path, rel: &str, receipt: &Receipt<'_>, g: &Generated) -> Result<(), ToolError> {
+    let charged = receipt.charge(g.cost);
+    ws.record_asset(receipt.record(rel, g.cost)).map_err(|e| {
+        ToolError::new(e.code, format!("Asset spending could not be recorded; the provider may have charged {charged}. Output was not saved: {}", e.message))
+            .with_remediation("Do not blindly regenerate or retry: check the provider charge and repair the asset ledger first.")
+    })?;
+    if g.cost.is_some_and(|c| !believable(c)) {
+        let (many, one) = type_words(receipt.kind);
+        return Err(ToolError::new(
+            ErrorCode::GarbledOutput,
+            format!("The provider reported a cost for {rel} that is not an amount; it was recorded as a {one} of unknown cost, and {rel} was not saved."),
+        )
+        .with_remediation(format!(
+            "Do not blindly regenerate or retry: check the provider charge first. The next generation of {many} asks before it spends."
+        )));
+    }
+    let save = || {
+        confined(&ws.root, &ws.app_dir())?;
+        confined(&ws.app_dir(), path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ToolError::io(parent.display(), e))?;
+        }
+        confined(&ws.app_dir(), path)?;
+        not_a_record(ws, path)?;
+        crate::project::write_atomic(path, &g.bytes)
+    };
+    save().map_err(|e| {
+        ToolError::new(e.code, format!("Asset spending of {charged} was recorded, but saving {rel} failed: {}", e.message)).with_remediation(
+            "Do not blindly regenerate or retry: the generation is already recorded as spending. Check the destination and provider output first.",
+        )
     })
 }
 
-fn summary(ws: &Workspace, saved: &str, cost: f64, extra: Value) -> ToolOutput {
-    let spent = ws.assets_spent();
-    let mut v =
-        json!({"saved": saved, "cost_usd": round(cost), "spent_usd": round(spent), "budget_left_usd": round((ws.manifest.asset_budget_usd - spent).max(0.0))});
+/// Report an overrun only after preserving both the charge and the generated output.
+fn within_estimate(saved: &str, actual: Option<f64>, estimate: Option<f64>, unit: Unit) -> Result<(), ToolError> {
+    if let (Some(actual), Some(estimate)) = (actual, estimate)
+        && actual > estimate + EPSILON
+    {
+        return Err(ToolError::new(
+            ErrorCode::OverLimit,
+            format!("Saved {saved} and recorded {}, more than the {} estimated before it ran.", exact(unit, actual), exact(unit, estimate)),
+        )
+        .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and review the recorded spending before continuing."));
+    }
+    Ok(())
+}
+
+/// The result of a saved generation: where it was saved (and, when that isn't the file asked for,
+/// which was and why), what it cost and what the type has used of its limit, from a checked ledger
+/// read (an unreadable ledger is never shown as an empty one), and the options of the request the
+/// model ignored.
+fn summary(ws: &Workspace, ready: &Ready, made: &Made, extra: Value) -> Result<ToolOutput, ToolError> {
+    let saved = made.place.rel.as_str();
+    let generated = &made.g;
+    let unit = ready.t.choice.unit;
+    let usage: TypeUsage = ws.try_type_usage(ready.kind, &ready.t).map_err(|e| {
+        let (many, _) = type_words(ready.kind);
+        ToolError::new(
+            e.code,
+            format!("Saved {saved} and recorded {}, but the usage of {many} could not be read: {}", ready.receipt("").charge(generated.cost), e.message),
+        )
+        .with_remediation("Do not blindly regenerate or retry: reuse the saved asset and check the asset ledger before continuing.")
+    })?;
+    let t = ready.limited();
+    let limited = limit_applies(ws, &t);
+    let mut v = json!({
+        "saved": saved,
+        "kind": ready.kind.id(),
+        "provider": ready.provider.id(),
+        "model": t.choice.model,
+        "cost": generated.cost.map(round),
+        "unit": unit,
+        "used": round(usage.amount),
+        "generations": usage.generations,
+        "cost_missing": usage.cost_missing,
+        "limit": limited.then(|| round(t.limit)),
+        "left": limited.then(|| round((t.limit - usage.amount).max(0.0))),
+        "ignored": generated.ignored,
+    });
+    if let Some(o) = v.as_object_mut() {
+        if let Some(asked) = &made.place.asked {
+            o.insert("asked".into(), json!(asked));
+        }
+        if let Some(note) = &made.place.note {
+            o.insert("note".into(), json!(note));
+        }
+    }
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
         o.extend(e.clone());
     }
-    ToolOutput::Value(v)
+    Ok(ToolOutput::Value(v))
 }
 
-fn round(x: f64) -> f64 {
-    (x * 100.0).round() / 100.0
+/// An amount as a result reports it: to a hundredth of a cent or credit.
+pub(crate) fn round(x: f64) -> f64 {
+    (x * 10_000.0).round() / 10_000.0
 }
 
 fn prompt_ok(p: &str) -> Result<&str, ToolError> {
     let p = p.trim();
-    if p.is_empty() || p.len() > 2000 {
+    if p.is_empty() || p.chars().count() > 2000 {
         return Err(ToolError::invalid("prompt must be 1..=2000 characters"));
     }
     Ok(p)
 }
 
+/// Validate the destination, the project's picture choice and its limit before saving the picture
+/// (a PNG where the model gives one).
 fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ImageParams = parse_params(params)?;
     let prompt = prompt_ok(&p.prompt)?;
@@ -237,75 +840,143 @@ fn assets_image_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         None => Shape::Square,
         Some(s) => Shape::parse(s).ok_or_else(|| ToolError::invalid("shape must be square, wide or tall"))?,
     };
-    let mut j = job(ctx)?;
-    let (path, rel) = save_path(&j.ws, &p.save_as, "png")?;
-    let model = Catalogue::built_in().image_model(ctx.session.settings.assets.image_model.as_deref())?;
-    let req = AssetRequest::Image { model, prompt, shape };
-    let provider = j.providers.for_request(&req)?;
-    let key = j.key(provider.as_ref())?;
-    within_budget(ctx, &j.inbox, &mut j.ws, provider.estimate(&req)?)?;
-    ctx.report(None, "Making a picture…");
-    let g = provider.generate(&key, &req)?;
-    keep(&j.ws, &path, &rel, "image", prompt, &g)?;
-    Ok(summary(&j.ws, &rel, g.cost_usd, json!({})))
+    generate_one(ctx, &p.save_as, "png", prompt, AssetRequest::Image { prompt, shape }, "Making a picture…")
 }
 
+/// A stand-in for the picture a 3D model will be made from, which doesn't exist yet when the
+/// model's cost is asked for: a plain light-grey PNG of the size a picture is made at (1024×1024),
+/// sent inline, so a provider that quotes the very request has a real picture of the real size.
+fn preflight_picture() -> &'static str {
+    static PICTURE: OnceLock<String> = OnceLock::new();
+    PICTURE.get_or_init(|| fal::data_uri(include_bytes!("preflight-picture.png"), "image/png"))
+}
+
+/// What a 3D model is made from.
+enum Start {
+    /// A picture given: a web address, or a picture of the project sent inline.
+    Given(String),
+    /// A picture made first from the description, with the project's choice for pictures.
+    Made(Box<Ready>),
+    /// The description itself, for a model that takes words.
+    Words,
+}
+
+/// Generate a GLB from a picture, from a picture made first, or from the description. Every
+/// participating type's choice, key and limit is checked before the first paid call.
 fn assets_model_generate(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ModelParams = parse_params(params)?;
     let textured = p.textured.unwrap_or(true);
     let faces = p.faces.unwrap_or(DEFAULT_FACES);
-    let catalogue = Catalogue::built_in();
-    let model = catalogue.model_3d(None)?;
-    let range = model.faces();
-    if !range.contains(&faces) {
-        return Err(ToolError::invalid(format!("faces must be {} to {}", range.start(), range.end())));
+    if faces == 0 || faces > MAX_FACES {
+        return Err(ToolError::invalid(format!("faces must be 1 to {MAX_FACES}")));
     }
     let mut j = job(ctx)?;
     let (path, rel) = save_path(&j.ws, &p.save_as, "glb")?;
     let image = p.image.trim();
-    let from_prompt = image.is_empty();
-    // The picture's address isn't known yet; the estimate doesn't depend on it.
-    let model_req = AssetRequest::Model3d { model, image_url: "", textured, faces };
-    let provider = j.providers.for_request(&model_req)?;
-    let key = j.key(provider.as_ref())?;
-    let mut estimate = provider.estimate(&model_req)?;
-    // From a prompt, a picture is made first: with the picture model chosen in Settings.
-    let mut picture_maker = None;
-    if from_prompt {
-        let image_model = catalogue.image_model(ctx.session.settings.assets.image_model.as_deref())?;
-        let picture_req = AssetRequest::Image { model: image_model, prompt: &p.prompt, shape: Shape::Square };
-        let picture_provider = j.providers.for_request(&picture_req)?;
-        let picture_key = j.key(picture_provider.as_ref())?;
-        estimate += picture_provider.estimate(&picture_req)?;
-        picture_maker = Some((image_model, picture_provider, picture_key));
-    }
-    let source = if from_prompt { None } else { Some(image_source(&j.ws, image)?) };
-    within_budget(ctx, &j.inbox, &mut j.ws, estimate)?;
-    let mut cost = 0.0;
-    let mut picture = Value::Null;
-    let (url, made_from) = match source {
-        Some(src) => (src, format!("from {image}")),
-        None => {
-            let prompt = prompt_ok(&p.prompt).map_err(|_| ToolError::invalid("give a prompt (what to make) or an image to make it from"))?;
-            let (image_model, picture_provider, picture_key) = picture_maker.ok_or_else(|| ToolError::internal("no picture model was chosen"))?;
-            ctx.report(None, "Making a picture of it first…");
-            // Image-to-3D works best from one whole object on a plain background.
-            let described = format!(
-                "{prompt}. One whole object, centred and fully in view, on a plain light-grey background, soft even lighting, three-quarter view, no text."
-            );
-            let g = picture_provider.generate(&picture_key, &AssetRequest::Image { model: image_model, prompt: &described, shape: Shape::Square })?;
-            let (pic_path, pic_rel) = save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?;
-            keep(&j.ws, &pic_path, &pic_rel, "image", prompt, &g)?;
-            cost += g.cost_usd;
-            picture = Value::String(pic_rel);
-            (g.url, prompt.to_string())
+    let prompt = if image.is_empty() { Some(prompt_ok(&p.prompt)?) } else { None };
+    // A picture given is checked (and read, when it is the project's) before the provider is asked anything.
+    let given = if image.is_empty() { None } else { Some(image_source(&j.ws, image)?) };
+    let solid = j.ready(AssetKind::Model3d)?;
+    let request = |image_url: Option<&'static str>, words: Option<&'static str>| AssetRequest::Model3d { image_url, prompt: words, textured, faces };
+    let start = match (given, prompt) {
+        (Some(url), _) => Start::Given(url),
+        (None, None) => return Err(ToolError::invalid("give a prompt or an image")),
+        (None, Some(prompt)) => {
+            let roles = InputRoles::built_in();
+            let takes_picture = map_request(&solid.model.fields, &request(Some(preflight_picture()), None), roles).is_ok();
+            let words = AssetRequest::Model3d { image_url: None, prompt: Some(prompt), textured, faces };
+            let takes_words = map_request(&solid.model.fields, &words, roles);
+            let pictures_on = j.ws.manifest.asset_type_on(AssetKind::Image, &j.settings).is_some();
+            match (takes_picture, pictures_on, takes_words) {
+                (true, true, _) => Start::Made(Box::new(j.ready(AssetKind::Image)?)),
+                (_, _, Ok(_)) => Start::Words,
+                (true, false, Err(_)) => {
+                    return Err(ToolError::new(
+                        ErrorCode::NoPermission,
+                        "The project's 3D model starts from a picture, and generated pictures are off for this project.",
+                    )
+                    .with_remediation(format!(
+                        "Pass a picture as image (a web address, or a picture inside the project), or ask the person to choose a provider and model for pictures {CHOOSE_AGAIN}."
+                    )));
+                }
+                (false, _, Err(e)) => return Err(e),
+            }
         }
     };
+    let words = prompt.unwrap_or_default();
+    // The picture made first is saved beside the model; its place is checked before anything is spent.
+    let picture_place = match &start {
+        Start::Made(_) => Some(save_path(&j.ws, &format!("{}.png", rel.trim_end_matches(".glb").trim_end_matches(".GLB")), "png")?),
+        _ => None,
+    };
+    // The same expanded description is quoted and sent: a provider may price its length.
+    let described =
+        format!("{words}. One whole object, centred and fully in view, on a plain light-grey background, soft even lighting, three-quarter view, no text.");
+    let picture_req = AssetRequest::Image { prompt: &described, shape: Shape::Square };
+    let model_estimate = match &start {
+        Start::Given(url) => solid.estimate(&AssetRequest::Model3d { image_url: Some(url), prompt: None, textured, faces })?,
+        // The picture isn't made yet; what a model costs doesn't depend on it.
+        Start::Made(_) => solid.estimate(&request(Some(preflight_picture()), None))?,
+        Start::Words => solid.estimate(&AssetRequest::Model3d { image_url: None, prompt: Some(words), textured, faces })?,
+    };
+    let picture_estimate = match &start {
+        Start::Made(pictures) => pictures.estimate(&picture_req)?,
+        _ => None,
+    };
+    // Both limits are checked before the first paid call.
+    if let Start::Made(pictures) = &start {
+        within_limit(ctx, &j.inbox, &mut j.ws, AssetKind::Image, &pictures.limited(), picture_estimate)?;
+    }
+    within_limit(ctx, &j.inbox, &mut j.ws, AssetKind::Model3d, &solid.limited(), model_estimate)?;
+    let mut picture = Value::Null;
+    let (url, made_from): (Option<String>, String) = match (start, picture_place) {
+        (Start::Given(url), _) => (Some(url), format!("from {image}")),
+        (Start::Made(pictures), Some((pic_path, pic_rel))) => {
+            ctx.report(None, "Making a picture of it first…");
+            let Made { g, place } = make(&j.ws, &pictures, &picture_req, &pic_path, &pic_rel, words, picture_estimate)?;
+            picture = json!({"saved": place.rel, "provider": pictures.provider.id(), "model": pictures.t.choice.model, "cost": g.cost.map(round), "unit": pictures.t.choice.unit});
+            if let (Some(o), Some(note)) = (picture.as_object_mut(), place.note) {
+                o.insert("note".into(), json!(note));
+            }
+            // A provider that sends the picture back without an address: it goes inline, as the
+            // format it is.
+            let url = if g.url.is_empty() { fal::data_uri(&g.bytes, formats::sniff(&g.bytes).map_or("image/png", |f| f.media)) } else { g.url };
+            (Some(url), words.to_string())
+        }
+        (Start::Made(_), None) => return Err(ToolError::internal("the picture made first has no place to be saved")),
+        (Start::Words, _) => (None, words.to_string()),
+    };
+    // From a picture, the picture alone, as before; from words, the words.
+    let model_req = AssetRequest::Model3d { image_url: url.as_deref(), prompt: url.is_none().then_some(words), textured, faces };
     ctx.report(None, "Turning it into a 3D model (a minute or two)…");
-    let g = provider.generate(&key, &AssetRequest::Model3d { model, image_url: &url, textured, faces })?;
-    keep(&j.ws, &path, &rel, "model", &made_from, &g)?;
-    cost += g.cost_usd;
-    Ok(summary(&j.ws, &rel, cost, json!({"picture": picture, "textured": textured, "faces": faces})))
+    let made = make(&j.ws, &solid, &model_req, &path, &rel, &made_from, model_estimate)?;
+    summary(&j.ws, &solid, &made, json!({"picture": picture, "textured": textured, "faces": faces}))
+}
+
+/// Where to save inside app/: (full path, path relative to app/). `ext` is the required extension.
+fn save_path(ws: &Workspace, save_as: &str, ext: &str) -> Result<(PathBuf, String), ToolError> {
+    let app = ws.app_dir();
+    // Paths given from the workspace ("app/Assets/x.glb") mean the same place.
+    let rel = save_as.trim().trim_start_matches("./").trim_start_matches("app/").trim_start_matches("app\\");
+    // Windows drops trailing dots and spaces, reads ':' as a data stream and "NAME~1" as a short
+    // name, so "reference./x.png" or "REFERE~1/x.png" could reach a record by another spelling.
+    // Refuse those spellings everywhere.
+    let short_name = |part: &str| part.split('~').skip(1).any(|after| after.starts_with(|c: char| c.is_ascii_digit()));
+    if rel.split(['/', '\\']).filter(|part| !part.is_empty() && *part != ".").any(|part| part.ends_with(['.', ' ']) || part.contains(':') || short_name(part)) {
+        return Err(ToolError::invalid("save_as parts must not end in a dot or space, or contain ':' or a short-name '~1'"));
+    }
+    let path = resolve(&app, rel).filter(|p| inside(&app, p) && *p != app).ok_or_else(|| ToolError::invalid("save_as must be a file path inside app/"))?;
+    confined(&ws.root, &app)?;
+    confined(&app, &path)?;
+    not_a_record(ws, &path)?;
+    if path.is_dir() {
+        return Err(ToolError::invalid("save_as must name a file, not a directory"));
+    }
+    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
+        return Err(ToolError::invalid(format!("save_as must end in .{ext}")));
+    }
+    let shown = path.strip_prefix(&app).unwrap_or(&path).display().to_string().replace('\\', "/");
+    Ok((path, shown))
 }
 
 /// The picture a model is made from: a web address as it is, or a picture in the project sent
@@ -317,33 +988,357 @@ fn image_source(ws: &Workspace, image: &str) -> Result<String, ToolError> {
     let path = resolve(&ws.root, image)
         .filter(|p| inside(&ws.root, p))
         .ok_or_else(|| ToolError::invalid("image must be a web address or a picture inside the project"))?;
+    confined(&ws.root, &path)?;
     let media = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("webp") => "image/webp",
         _ => return Err(ToolError::invalid("image must be a PNG, JPEG or WebP picture")),
     };
-    let meta = std::fs::metadata(&path).map_err(|e| ToolError::io(path.display(), e))?;
-    if meta.len() > 20 << 20 {
-        return Err(ToolError::invalid("that picture is over 20 MB"));
-    }
-    let bytes = std::fs::read(&path).map_err(|e| ToolError::io(path.display(), e))?;
+    let bytes = read_asset(&path)?;
     Ok(fal::data_uri(&bytes, media))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asset_choice::AssetChoice;
     use crate::inbox::{Answer, InboxDir};
     use crate::workspace::TargetRef;
+    use craft_anything_engines::assets::inputs::{FieldKind, InputField};
+    use craft_anything_engines::assets::model::{AssetOption, ModelList, Pricing, Rate};
+    use craft_anything_engines::assets::{charged_or_unknown, estimate_from};
+    use craft_anything_platform::sync::Mutex;
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
-    /// A game whose person allows generated assets.
+    /// A game whose person allows generated assets. Every type is Off until a test chooses it.
     fn ws() -> (tempfile::TempDir, Workspace) {
         let dir = tempfile::tempdir().unwrap();
         let mut w = Workspace::create(dir.path(), "game", "A snake game", TargetRef::None).unwrap();
         w.set_person(|m| m.generate_assets = true).unwrap();
         (dir, w)
+    }
+
+    /// The bytes of a version 1 `assets.json` holding `records`.
+    fn ledger_of(records: &[AssetRecord]) -> Vec<u8> {
+        serde_json::to_vec(&json!({"version": 1, "records": records})).unwrap()
+    }
+
+    /// A spoken line made at ElevenLabs, as a receipt records it.
+    fn speech() -> Receipt<'static> {
+        Receipt { kind: AssetKind::Speech, from: "hi", provider: "elevenlabs", model: "eleven_v3", unit: Unit::Credits, tracked: true, since_ms: 0 }
+    }
+
+    /// A dollar receipt written by hand, to stand for spending already in the ledger.
+    fn receipt(file: &str, kind: &str, cost: f64) -> AssetRecord {
+        AssetRecord {
+            file: file.into(),
+            kind: kind.into(),
+            prompt: "x".into(),
+            provider: "fal".into(),
+            model: "flux-dev".into(),
+            amount: Some(cost),
+            unit: Some(Unit::Usd),
+            cost_missing: false,
+            at_ms: 0,
+        }
+    }
+
+    fn price(unit: Unit, x: f64) -> Pricing {
+        Pricing::Before { unit, rate: Rate::PerRequest(x) }
+    }
+
+    fn input(name: &str, kind: FieldKind, required: bool) -> InputField {
+        InputField { name: name.into(), kind, required, has_default: false }
+    }
+
+    fn detail(id: &str, kind: AssetKind, fields: Vec<InputField>, pricing: Pricing) -> ModelDetail {
+        ModelDetail { id: id.into(), name: id.into(), kinds: vec![kind], fields, pricing, unit_price: None }
+    }
+
+    /// A picture model that makes every shape.
+    fn picture_model(id: &str, pricing: Pricing) -> ModelDetail {
+        let sizes = FieldKind::Choice(vec!["square_hd".into(), "landscape_16_9".into(), "portrait_16_9".into()]);
+        detail(id, AssetKind::Image, vec![input("prompt", FieldKind::Text, true), input("image_size", sizes, false)], pricing)
+    }
+
+    /// A 3D model that starts from a picture, from words, or either.
+    fn solid_model(id: &str, picture: bool, words: bool, pricing: Pricing) -> ModelDetail {
+        let mut fields = vec![input("face_limit", FieldKind::Integer { min: Some(48), max: Some(20_000) }, false), input("texture", FieldKind::Bool, false)];
+        if picture {
+            fields.push(input("image_url", FieldKind::Text, !words));
+        }
+        if words {
+            fields.push(input("prompt", FieldKind::Text, !picture));
+        }
+        detail(id, AssetKind::Model3d, fields, pricing)
+    }
+
+    fn audio_model(id: &str, kind: AssetKind, pricing: Pricing) -> ModelDetail {
+        let fields = match kind {
+            AssetKind::Speech => vec![input("text", FieldKind::Text, true), input("voice_id", FieldKind::Text, false)],
+            AssetKind::SoundEffect => vec![input("text", FieldKind::Text, true), input("duration_seconds", FieldKind::Number { min: None, max: None }, false)],
+            _ => vec![
+                input("prompt", FieldKind::Text, true),
+                input("music_length_ms", FieldKind::Integer { min: None, max: None }, false),
+                input("force_instrumental", FieldKind::Bool, false),
+            ],
+        };
+        detail(id, kind, fields, pricing)
+    }
+
+    /// One request a stand-in was asked to run or to price.
+    #[derive(Debug, Clone, PartialEq)]
+    struct Call {
+        kind: AssetKind,
+        model: String,
+        picture: Option<String>,
+        words: Option<String>,
+    }
+
+    impl Call {
+        fn of(model: &ModelDetail, req: &AssetRequest) -> Call {
+            let (picture, words) = match *req {
+                AssetRequest::Model3d { image_url, prompt, .. } => (image_url.map(str::to_string), prompt.map(str::to_string)),
+                AssetRequest::Image { prompt, .. } => (None, Some(prompt.to_string())),
+                _ => (None, None),
+            };
+            Call { kind: req.kind(), model: model.id.clone(), picture, words }
+        }
+    }
+
+    /// Stands in for a provider: describes the models it holds, records each estimate and run,
+    /// and answers with a few bytes. What it estimates, what a run costs and whether a run fails
+    /// after it was accepted can be set; otherwise they follow the model's price.
+    struct Recording {
+        id: &'static str,
+        unit: Unit,
+        models: BTreeMap<String, ModelDetail>,
+        /// What every estimate says, instead of the model's price.
+        estimate: Option<Option<f64>>,
+        /// What every run costs, instead of the model's price.
+        cost: Option<Option<f64>>,
+        /// Every run fails after it was accepted, with this charge.
+        fails_charging: Option<Option<f64>>,
+        /// What every run sends back, instead of bytes of no known format.
+        bytes: Option<Vec<u8>>,
+        /// A project whose spending lock is looked at during each run: whether it was held.
+        probe: Option<(PathBuf, Mutex<Option<bool>>)>,
+        calls: Mutex<Vec<Call>>,
+        estimates: Mutex<Vec<Call>>,
+        /// The estimate each run was approved within, as the generation passed it on.
+        approved: Mutex<Vec<Option<f64>>>,
+        described: Mutex<Vec<String>>,
+    }
+
+    impl Recording {
+        /// The provider `id`, billing in `unit`, with one model of each type (`pic`, `solid`
+        /// (from a picture), `words-3d`, `both-3d`, `speech`, `sound`, `music`) at `per_run` each.
+        fn new(id: &'static str, unit: Unit, per_run: f64) -> Recording {
+            let p = price(unit, per_run);
+            let models = [
+                picture_model("pic", p.clone()),
+                solid_model("solid", true, false, p.clone()),
+                solid_model("words-3d", false, true, p.clone()),
+                solid_model("both-3d", true, true, p.clone()),
+                audio_model("speech", AssetKind::Speech, p.clone()),
+                audio_model("sound", AssetKind::SoundEffect, p.clone()),
+                audio_model("music", AssetKind::Music, p),
+            ];
+            Recording {
+                id,
+                unit,
+                models: models.into_iter().map(|m| (m.id.clone(), m)).collect(),
+                estimate: None,
+                cost: None,
+                fails_charging: None,
+                bytes: None,
+                probe: None,
+                calls: Mutex::default(),
+                estimates: Mutex::default(),
+                approved: Mutex::default(),
+                described: Mutex::default(),
+            }
+        }
+
+        /// Hold `model` as well (or instead of the one of its id).
+        fn with(mut self, model: ModelDetail) -> Recording {
+            self.models.insert(model.id.clone(), model);
+            self
+        }
+
+        fn calls(&self) -> Vec<Call> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn kinds_run(&self) -> Vec<AssetKind> {
+            self.calls().into_iter().map(|c| c.kind).collect()
+        }
+
+        fn nothing_asked(&self) -> bool {
+            self.calls.lock().unwrap().is_empty() && self.estimates.lock().unwrap().is_empty()
+        }
+    }
+
+    impl AssetProvider for Recording {
+        /// Use the configured registry id so tests can replace any built-in provider.
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        /// Use the registry id as the stand-in provider's display name in errors.
+        fn name(&self) -> &'static str {
+            self.id
+        }
+        fn unit(&self) -> Unit {
+            self.unit
+        }
+        fn list_models(&self, _key: Option<&str>, _kind: AssetKind) -> Result<ModelList, ToolError> {
+            Ok(ModelList { models: Vec::new(), error: None })
+        }
+        /// The model it holds of that id, else the error a provider gives for a model it no longer serves.
+        fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
+            assert_eq!(key, "sk-test");
+            self.described.lock().unwrap().push(model.to_string());
+            self.models.get(model).cloned().ok_or_else(|| {
+                ToolError::new(ErrorCode::BadSettings, format!("The model \"{model}\" is no longer available at {}.", self.id))
+                    .with_remediation("Choose another model for this type of asset in the project's Generated Assets settings.")
+            })
+        }
+        /// Record quote requests, refuse a request the model can't take, and return the injected amount or the model's price.
+        fn estimate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
+            assert_eq!(key, "sk-test");
+            self.estimates.lock().unwrap().push(Call::of(model, req));
+            map_request(&model.fields, req, InputRoles::built_in())?;
+            Ok(self.estimate.unwrap_or_else(|| estimate_from(&model.pricing, req)))
+        }
+        /// Require the test key, record the request and return fixed bytes without network access.
+        fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
+            assert_eq!(key, "sk-test");
+            let mapped = map_request(&model.fields, req, InputRoles::built_in())?;
+            self.calls.lock().unwrap().push(Call::of(model, req));
+            if let Some((root, held)) = &self.probe {
+                // A second handle stands for another process sharing the project.
+                *held.lock().unwrap() = Some(Workspace::open(root).unwrap().lock_spending(Duration::ZERO).is_err());
+            }
+            let cost = self.cost.unwrap_or_else(|| estimate_from(&model.pricing, req));
+            if let Some(charge) = self.fails_charging {
+                let failed = ToolError::new(ErrorCode::ProgramFailed, "The job failed.").with_remediation("Check the job.");
+                return Err(charged_or_unknown(failed, charge));
+            }
+            let bytes = self.bytes.clone().unwrap_or_else(|| b"generated".to_vec());
+            Ok(Generated { url: "https://stand-in/picture.png".into(), bytes, cost, ignored: mapped.ignored })
+        }
+        /// Record the estimate the run was approved within, then run it.
+        fn generate_within(&self, key: &str, model: &ModelDetail, req: &AssetRequest, approved: Option<f64>) -> Result<Generated, ToolError> {
+            self.approved.lock().unwrap().push(approved);
+            self.generate(key, model, req)
+        }
+    }
+
+    /// Choose `model` at `provider` for `kind` in the project, with its limit on.
+    fn choose(w: &mut Workspace, kind: AssetKind, provider: &str, model: &str, unit: Unit, pricing: Pricing, limit: f64) {
+        let choice = AssetChoice { provider: Some(provider.into()), model: model.into(), model_name: model.into(), unit, pricing };
+        w.set_person(|m| {
+            m.assets.types.insert(kind, TypeAssets { choice, limit, limit_on: true, since_ms: 0 });
+        })
+        .unwrap();
+    }
+
+    /// The model of each type that `Recording::new` holds.
+    fn model_for(kind: AssetKind) -> &'static str {
+        match kind {
+            AssetKind::Image => "pic",
+            AssetKind::Model3d => "solid",
+            AssetKind::Speech => "speech",
+            AssetKind::SoundEffect => "sound",
+            AssetKind::Music => "music",
+            other => panic!("no stand-in model for {other:?}"),
+        }
+    }
+
+    /// Choose `stub`'s model of every type in the project, priced as `stub` prices it, with the
+    /// unit's default limit.
+    fn choose_all(w: &mut Workspace, stub: &Recording) {
+        let limit = AssetSettings::default().default_limit(stub.unit);
+        for kind in AssetKind::ALL {
+            let pricing = stub.models[model_for(kind)].pricing.clone();
+            choose(w, kind, stub.id, model_for(kind), stub.unit, pricing, limit);
+        }
+    }
+
+    /// An auto-mode engine whose keyed providers are the given stand-ins.
+    fn engine_with(w: &Workspace, stand_ins: Vec<Arc<dyn AssetProvider>>) -> crate::Engine {
+        let mut providers = AssetProviders::built_in();
+        let mut keys = BTreeMap::new();
+        for p in stand_ins {
+            keys.insert(p.id().to_string(), "sk-test".to_string());
+            providers.register(p);
+        }
+        let mut session = crate::testing::session();
+        session.settings.auto_mode = true;
+        session.ext.insert(Arc::new(InboxDir(w.inbox_dir())));
+        session.ext.insert(Arc::new(AssetKeys(keys)));
+        session.ext.insert(Arc::new(providers));
+        crate::Engine::new(session)
+    }
+
+    /// An auto-mode engine with one keyed recording provider, chosen for every type in the project.
+    fn recording_engine(w: &mut Workspace, stub: Recording) -> (crate::Engine, Arc<Recording>) {
+        choose_all(w, &stub);
+        let stub = Arc::new(stub);
+        (engine_with(w, vec![stub.clone()]), stub)
+    }
+
+    fn call(engine: &crate::Engine, tool: &str, params: Value) -> Result<Value, ToolError> {
+        match engine.call(tool, params, crate::CallOptions::new(crate::Caller::Mcp))? {
+            ToolOutput::Value(v) => Ok(v),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Provide valid speech, sound and music requests with distinct destinations and expected request kinds.
+    fn audio_calls() -> Vec<(&'static str, Value, AssetKind)> {
+        vec![
+            ("assets_speech_generate", json!({"text":"A new adventure", "voice_id":"voice-test", "save_as":"audio/speech.mp3"}), AssetKind::Speech),
+            ("assets_sound_generate", json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"}), AssetKind::SoundEffect),
+            ("assets_music_generate", json!({"prompt":"A calm piano theme", "duration_seconds":3.0, "save_as":"audio/theme.mp3"}), AssetKind::Music),
+        ]
+    }
+
+    /// Every tool, one call each, with what it makes.
+    fn every_call() -> Vec<(&'static str, Value, AssetKind)> {
+        let mut calls = audio_calls();
+        calls.push(("assets_image_generate", json!({"prompt":"a crate", "save_as":"crate.png"}), AssetKind::Image));
+        calls.push(("assets_model_generate", json!({"image":"https://example.invalid/source.png", "save_as":"crate.glb"}), AssetKind::Model3d));
+        calls
+    }
+
+    /// An over-limit question answered on another thread, once it is asked.
+    fn answer_when_asked(w: &Workspace, allow: bool, always: bool, title_has: &'static str) -> std::thread::JoinHandle<()> {
+        let inbox = Inbox::new(w.inbox_dir());
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                if let Some(r) = inbox.pending().first() {
+                    assert!(r.title.contains(title_has), "{}", r.title);
+                    inbox.answer(&r.id, &Answer { allow: Some(allow), always, ..Default::default() }).unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            panic!("no question came");
+        })
+    }
+
+    /// A session outside Auto mode, which asks the person.
+    fn asking() -> crate::Session {
+        let mut session = crate::testing::session();
+        session.settings.auto_mode = false;
+        session
+    }
+
+    fn ctx(session: &mut crate::Session) -> Ctx<'_> {
+        Ctx { tool: "test", session, cancel: crate::CancelToken::default(), progress: &|_| {}, caller: crate::Caller::Mcp }
     }
 
     #[test]
@@ -359,176 +1354,1156 @@ mod tests {
         assert_eq!(image_source(&w, "https://v3.fal.media/x.png").unwrap(), "https://v3.fal.media/x.png");
     }
 
+    /// The builder no longer chooses models: the tools take none, and their words name no model and no price.
     #[test]
-    fn the_summaries_read_the_asset_table() {
-        // The default picture model's name and price, and the default 3D model's.
-        assert_eq!(
-            summaries().0,
-            "Make a picture with fal.ai (Nano Banana Pro) and save it as a PNG inside app/: a texture, a sky or background, an icon, a title screen or concept art. shape: square (1024x1024, default), wide (1024x576) or tall (576x1024). Costs about $0.15, counted against the project's asset budget. Describe original designs in the original's style; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, the cost and the budget left."
-        );
-        assert_eq!(
-            summaries().1,
-            "Make a game-ready, low-poly 3D model (GLB) with fal.ai (Tripo P1) and save it inside app/. Give a prompt (a picture is made first, then turned into the model) or an image (a web address, or a picture inside the project such as reference/picture-1.png). faces caps the face count (48 to 20000, default 3000): about 500-1500 for small props and pickups, 2000-5000 for weapons, furniture and vehicles, 6000-15000 for main characters; fewer faces run faster, so use the fewest that still look right. textured (default true) gives colours and surfaces. A textured model costs $0.50 plus $0.15 for the picture, counted against the project's asset budget; it takes a minute or two. Describe one original object per model; never ask for recognisable characters, logos or brand artwork. Returns where it was saved, the cost and the budget left."
-        );
-    }
-
-    /// Stands in for fal.ai: records each request's endpoint and answers with a few bytes.
-    #[derive(Default)]
-    struct StandIn(craft_anything_platform::sync::Mutex<Vec<String>>);
-
-    impl craft_anything_engines::assets::AssetProvider for StandIn {
-        fn id(&self) -> &'static str {
-            "fal"
-        }
-        fn name(&self) -> &'static str {
-            "stand-in"
-        }
-        fn generate(&self, key: &str, req: &AssetRequest) -> Result<Generated, ToolError> {
-            assert_eq!(key, "k-1");
-            let (endpoint, bytes) = match req {
-                AssetRequest::Image { model, .. } => (model.endpoint.clone(), b"png".to_vec()),
-                AssetRequest::Model3d { model, image_url, .. } => {
-                    assert_eq!(*image_url, "https://stand-in/picture.png", "the model is made from the picture");
-                    (model.endpoint.clone(), b"glb".to_vec())
-                }
-                _ => return Err(ToolError::invalid("the stand-in makes pictures and 3D models only")),
-            };
-            self.0.lock().unwrap().push(endpoint);
-            Ok(Generated { url: "https://stand-in/picture.png".into(), bytes, cost_usd: req.listed_cost() })
+    fn the_tools_take_no_model_and_name_the_projects_choice() {
+        for spec in specs() {
+            let schema = serde_json::to_string(&(spec.input_schema)()).unwrap();
+            assert!(!schema.contains("\"model\"") && !schema.contains("image_model"), "{}: {schema}", spec.id);
+            assert!(spec.summary.contains("the project chose") && spec.summary.contains("limit"), "{}: {}", spec.id, spec.summary);
+            assert!(!spec.summary.contains('$') && !spec.summary.contains("override"), "{}: {}", spec.id, spec.summary);
         }
     }
 
+    /// Each type is made with the model the project chose for it, recorded with that model and the
+    /// type's unit; a `model` parameter is refused as unknown.
     #[test]
-    fn a_model_from_a_prompt_through_the_provider_registry() {
-        let (_d, w) = ws();
-        let stand_in = std::sync::Arc::new(StandIn::default());
-        let mut providers = AssetProviders::built_in();
-        providers.register(stand_in.clone());
+    fn each_type_uses_the_projects_choice() {
+        let (_d, mut w) = ws();
+        let stub = Recording::new("scenario", Unit::Credits, 20.0).with(picture_model("other-pic", price(Unit::Credits, 20.0)));
+        let (engine, stub) = recording_engine(&mut w, stub);
+        choose(&mut w, AssetKind::Image, "scenario", "other-pic", Unit::Credits, price(Unit::Credits, 20.0), 500.0);
+        let v = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap();
+        assert_eq!(stub.calls(), [Call { kind: AssetKind::Image, model: "other-pic".into(), picture: None, words: Some("a crate".into()) }]);
+        assert_eq!(
+            (v["kind"].as_str(), v["provider"].as_str(), v["model"].as_str(), v["unit"].as_str()),
+            (Some("image"), Some("scenario"), Some("other-pic"), Some("credits"))
+        );
+        assert_eq!((v["cost"].as_f64(), v["used"].as_f64(), v["limit"].as_f64(), v["left"].as_f64()), (Some(20.0), Some(20.0), Some(500.0), Some(480.0)));
+        let records = w.try_assets().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!((records[0].kind.as_str(), records[0].provider.as_str(), records[0].model.as_str()), ("image", "scenario", "other-pic"));
+        assert_eq!((records[0].amount, records[0].unit, records[0].cost_missing), (Some(20.0), Some(Unit::Credits), false));
+        // The builder can't choose another model.
+        for (tool, params) in [
+            ("assets_image_generate", json!({"prompt": "a crate", "save_as": "b.png", "model": "pic"})),
+            ("assets_model_generate", json!({"prompt": "a crate", "save_as": "b.glb", "image_model": "pic"})),
+            ("assets_sound_generate", json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": "b.mp3", "model": "sound"})),
+        ] {
+            assert_eq!(call(&engine, tool, params).unwrap_err().code, ErrorCode::BadInput, "{tool}");
+        }
+        assert_eq!(stub.calls().len(), 1);
+    }
+
+    /// A type that is Off is refused before anything is asked, saying how to turn it on.
+    #[test]
+    fn an_off_type_is_refused_with_how_to_turn_it_on() {
+        for (tool, params, kind) in every_call() {
+            let (_d, mut w) = ws();
+            let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+            w.set_person(|m| {
+                m.assets.types.insert(kind, TypeAssets { choice: AssetChoice::off(), ..TypeAssets::default() });
+            })
+            .unwrap();
+            let error = call(&engine, tool, params).unwrap_err();
+            assert_eq!(error.code, ErrorCode::NoPermission, "{tool}");
+            assert!(error.message.contains("off for this project"), "{}", error.message);
+            assert!(error.remediation.as_deref().is_some_and(|r| r.contains("simple shapes") && r.contains("Generated Assets settings")), "{error:?}");
+            assert!(stub.nothing_asked(), "{tool}");
+            assert!(w.assets().is_empty() && Inbox::new(w.inbox_dir()).pending().is_empty());
+        }
+    }
+
+    /// Each type has its own limit, in its provider's unit: a type near its limit asks, while another
+    /// type of the same project with nothing used runs.
+    #[test]
+    fn limits_are_per_type_and_in_the_types_unit() {
+        let (_d, mut w) = ws();
+        let pictures = Recording::new("scenario", Unit::Credits, 2.0);
+        let sounds = Recording::new("elevenlabs", Unit::Usd, 0.5).with(audio_model("sound", AssetKind::SoundEffect, price(Unit::Usd, 0.5)));
+        choose(&mut w, AssetKind::Image, "scenario", "pic", Unit::Credits, price(Unit::Credits, 2.0), 500.0);
+        choose(&mut w, AssetKind::SoundEffect, "elevenlabs", "sound", Unit::Usd, price(Unit::Usd, 0.5), 5.0);
+        let earlier = AssetRecord { provider: "scenario".into(), unit: Some(Unit::Credits), ..receipt("old.png", "image", 499.0) };
+        w.record_asset(earlier).unwrap();
+        let (pictures, sounds) = (Arc::new(pictures), Arc::new(sounds));
+        let engine = engine_with(&w, vec![pictures.clone(), sounds.clone()]);
+        // 499 of 500 credits used, and a picture costs 2: Auto mode stops instead of asking.
+        let error = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OverLimit);
+        assert!(error.message.contains("500 credits") && error.message.contains("pictures") && error.message.contains("499 credits"), "{}", error.message);
+        assert!(pictures.calls().is_empty());
+        // Sound effects have used nothing of their own five dollars: they run.
+        let v = call(&engine, "assets_sound_generate", json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": "wind.mp3"})).unwrap();
+        assert_eq!((v["cost"].as_f64(), v["unit"].as_str(), v["left"].as_f64()), (Some(0.5), Some("usd"), Some(4.5)));
+        assert_eq!(sounds.kinds_run(), [AssetKind::SoundEffect]);
+        // Outside Auto mode, the person is asked in credits, and a "no" spends nothing.
+        let mut session = asking();
+        let inbox = Inbox::new(w.inbox_dir());
+        let t = w.manifest.assets.types[&AssetKind::Image].clone();
+        let asked = answer_when_asked(&w, false, false, "2 credits");
+        assert_eq!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(2.0)).unwrap_err().code, ErrorCode::OverLimit);
+        asked.join().unwrap();
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(1.0)).unwrap();
+        assert!(inbox.pending().is_empty(), "exactly the limit is within it");
+    }
+
+    #[test]
+    fn a_limit_asks_before_going_over_and_always_switches_it_off() {
+        let (_d, mut w) = ws();
+        choose(&mut w, AssetKind::Model3d, "fal", "solid", Unit::Usd, price(Unit::Usd, 0.48), 5.0);
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, price(Unit::Usd, 0.48), 5.0);
+        w.record_asset(receipt("a.glb", "model", 4.80)).unwrap();
+        w.record_asset(receipt("a.png", "image", 4.80)).unwrap();
+        let inbox = Inbox::new(w.inbox_dir());
+        let models = w.manifest.assets.types[&AssetKind::Model3d].clone();
+        let pictures = w.manifest.assets.types[&AssetKind::Image].clone();
         let mut session = crate::testing::session();
-        session.settings.assets.image_model = Some("flux-schnell".into());
-        let e = crate::Engine::new(session);
-        e.session().ext.insert(std::sync::Arc::new(InboxDir(w.inbox_dir())));
-        e.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".to_string(), "k-1".to_string())].into())));
-        e.session().ext.insert(std::sync::Arc::new(providers));
-        let out =
-            e.call("assets_model_generate", json!({"prompt": "a crate", "save_as": "Assets/crate.glb"}), crate::CallOptions::new(crate::Caller::Mcp)).unwrap();
-        let ToolOutput::Value(v) = out else { panic!("{out:?}") };
-        assert_eq!(v["saved"], "Assets/crate.glb");
-        assert_eq!(v["picture"], "Assets/crate.png");
-        assert_eq!(*stand_in.0.lock().unwrap(), vec!["fal-ai/flux/schnell".to_string(), "tripo3d/p1/image-to-3d".to_string()], "the configured picture model");
-        assert_eq!(std::fs::read(w.app_dir().join("Assets/crate.glb")).unwrap(), b"glb");
-        let spent = w.assets_spent();
-        assert!((spent - (0.50 + 0.003 * 1.048576)).abs() < 1e-9, "{spent}");
-        assert_eq!(w.assets().len(), 2);
+        // Auto mode stops at the limit without asking.
+        session.settings.auto_mode = true;
+        assert_eq!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap_err().code, ErrorCode::OverLimit);
+        assert!(inbox.pending().is_empty(), "no question in Auto mode");
+        // Asking is what Auto mode switches off.
+        session.settings.auto_mode = false;
+        // Under the limit: no question.
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.03)).unwrap();
+        assert!(inbox.pending().is_empty());
+        // Over it: asked; "no" stops, "once" lets this one through and asks next time.
+        let t = answer_when_asked(&w, false, false, "$0.48");
+        assert_eq!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap_err().code, ErrorCode::OverLimit);
+        t.join().unwrap();
+        let t = answer_when_asked(&w, true, false, "3D models");
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap();
+        t.join().unwrap();
+        assert!(Workspace::open(&w.root).unwrap().manifest.assets.types[&AssetKind::Model3d].limit_on, "once leaves the limit on");
+        // "Always" switches this type's limit off, in the person's own settings, where the panel shows it.
+        let t = answer_when_asked(&w, true, true, "3D models");
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(0.48)).unwrap();
+        t.join().unwrap();
+        let saved = Workspace::open(&w.root).unwrap().manifest;
+        assert!(!saved.assets.types[&AssetKind::Model3d].limit_on, "the 3D limit is off");
+        assert!(saved.assets.types[&AssetKind::Image].limit_on, "the pictures limit is not");
+        assert!(!saved.allowed_actions.iter().any(|k| k.starts_with("assets:")), "no hidden permission: {:?}", saved.allowed_actions);
+        assert_eq!(w.manifest.assets.types[&AssetKind::Model3d].limit, 5.0, "the limit itself is kept for when it is switched back on");
+        let models = w.manifest.assets.types[&AssetKind::Model3d].clone();
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Model3d, &models, Some(10.0)).unwrap();
+        assert!(inbox.pending().is_empty(), "with the limit off it doesn't ask again for 3D models");
+        // An answer of "always" from before limits were per type lifts nothing.
+        w.set_person(|m| m.allowed_actions.push("assets:over-budget".into())).unwrap();
+        // Pictures have a limit of their own, which "always" for 3D models doesn't lift.
+        let t = answer_when_asked(&w, false, false, "pictures");
+        assert_eq!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &pictures, Some(0.48)).unwrap_err().code, ErrorCode::OverLimit);
+        t.join().unwrap();
+        assert_eq!(w.try_assets().unwrap().len(), 2, "asking spends nothing");
+    }
+
+    /// "Ignore budget", and a type's limit switched off, never ask; what was used is still recorded.
+    #[test]
+    fn ignore_budget_and_a_limit_switched_off_never_ask() {
+        for how in ["ignore budget", "limit off"] {
+            let (_d, mut w) = ws();
+            let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 2.0));
+            w.set_person(|m| match how {
+                "ignore budget" => m.assets.ignore_budget = true,
+                _ => {
+                    if let Some(t) = m.assets.types.get_mut(&AssetKind::Image) {
+                        t.limit_on = false;
+                    }
+                }
+            })
+            .unwrap();
+            for i in 0..4 {
+                let v = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": format!("crate-{i}.png")})).unwrap();
+                assert_eq!((v["limit"].clone(), v["left"].clone()), (Value::Null, Value::Null), "{how}: no limit applies");
+            }
+            assert_eq!(stub.calls().len(), 4, "{how}: eight dollars against a five-dollar limit, unasked");
+            assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+            let t = w.manifest.assets.types[&AssetKind::Image].clone();
+            assert_eq!(w.try_type_usage(AssetKind::Image, &t).unwrap(), TypeUsage { amount: 8.0, generations: 4, cost_missing: false }, "{how}");
+        }
+    }
+
+    /// A model whose cost is known only after it runs may start while its type is under the limit,
+    /// and so may pass it once; the next one is then over and asks.
+    #[test]
+    fn a_cost_known_after_the_run_may_pass_the_limit_once() {
+        let (_d, mut w) = ws();
+        let after = Pricing::After { unit: Unit::Usd };
+        let stub =
+            Recording { cost: Some(Some(0.4)), ..Recording::new("fal", Unit::Usd, 0.0).with(audio_model("sound", AssetKind::SoundEffect, after.clone())) };
+        let (engine, stub) = recording_engine(&mut w, stub);
+        choose(&mut w, AssetKind::SoundEffect, "fal", "sound", Unit::Usd, after, 5.0);
+        w.record_asset(receipt("old.mp3", "sound", 4.9)).unwrap();
+        let params = |i: u32| json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": format!("wind-{i}.mp3")});
+        let v = call(&engine, "assets_sound_generate", params(1)).unwrap();
+        assert_eq!((v["cost"].as_f64(), v["used"].as_f64(), v["left"].as_f64()), (Some(0.4), Some(5.3), Some(0.0)));
+        assert_eq!(w.try_assets().unwrap().last().and_then(|r| r.amount), Some(0.4));
+        // Now over: Auto mode stops.
+        assert_eq!(call(&engine, "assets_sound_generate", params(2)).unwrap_err().code, ErrorCode::OverLimit);
+        assert_eq!(stub.calls().len(), 1);
+        // Outside Auto mode, the person is asked, saying the cost is known only after the run.
+        let mut session = asking();
+        let inbox = Inbox::new(w.inbox_dir());
+        let t = w.manifest.assets.types[&AssetKind::SoundEffect].clone();
+        let asked = answer_when_asked(&w, false, false, "sound effect");
+        assert!(within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::SoundEffect, &t, None).is_err());
+        asked.join().unwrap();
+    }
+
+    /// Review focus: a generation of a tracked type whose cost can't be read is recorded without an
+    /// amount, and every later one of that type asks (Auto mode stops) until the person allows it.
+    #[test]
+    fn an_unreadable_cost_stops_the_type_until_the_person_allows() {
+        let (_d, mut w) = ws();
+        let stub = Recording { cost: Some(None), ..Recording::new("fal", Unit::Usd, 0.1) };
+        let (engine, stub) = recording_engine(&mut w, stub);
+        let params = |i: u32| json!({"prompt": "a crate", "save_as": format!("crate-{i}.png")});
+        let v = call(&engine, "assets_image_generate", params(1)).unwrap();
+        assert_eq!((v["cost"].clone(), v["cost_missing"].as_bool()), (Value::Null, Some(true)));
+        let record = w.try_assets().unwrap().pop().unwrap();
+        assert_eq!((record.amount, record.unit, record.cost_missing), (None, Some(Unit::Usd), true));
+        // Usage is now unknown: Auto mode stops instead of spending unchecked.
+        let error = call(&engine, "assets_image_generate", params(2)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OverLimit);
+        assert!(error.message.contains("could not be read"), "{}", error.message);
+        assert_eq!(stub.calls().len(), 1);
+        // Another type is not stopped by it.
+        call(&engine, "assets_sound_generate", json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": "wind.mp3"})).unwrap();
+        // Outside Auto mode the person is asked; allowing once lets this one through, and the next asks again.
+        let mut session = asking();
+        let inbox = Inbox::new(w.inbox_dir());
+        let t = w.manifest.assets.types[&AssetKind::Image].clone();
+        for allow in [true, true] {
+            let asked = answer_when_asked(&w, allow, false, "pictures");
+            within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(0.1)).unwrap();
+            asked.join().unwrap();
+        }
+        // Always: the limit for pictures is switched off, so it stops asking.
+        let asked = answer_when_asked(&w, true, true, "pictures");
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(0.1)).unwrap();
+        asked.join().unwrap();
+        let t = w.manifest.assets.types[&AssetKind::Image].clone();
+        assert!(!t.limit_on);
+        within_limit(&mut ctx(&mut session), &inbox, &mut w, AssetKind::Image, &t, Some(0.1)).unwrap();
+        assert!(inbox.pending().is_empty());
+    }
+
+    /// A model the provider has no price for runs without a limit, and each generation is counted
+    /// without an amount, and without a missing cost: none was expected.
+    #[test]
+    fn an_untracked_model_runs_and_is_counted_without_an_amount() {
+        let (_d, mut w) = ws();
+        let stub = Recording { cost: Some(Some(1.0)), ..Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown)) };
+        let (engine, stub) = recording_engine(&mut w, stub);
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, Pricing::Unknown, 0.5);
+        for i in 0..3 {
+            let v = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": format!("crate-{i}.png")})).unwrap();
+            assert_eq!((v["limit"].clone(), v["left"].clone(), v["generations"].as_u64()), (Value::Null, Value::Null, Some(i + 1)));
+        }
+        assert_eq!(stub.calls().len(), 3, "three dollar runs against a fifty-cent limit: the limit doesn't apply to a type whose price is unknown");
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+        // Without a cost from the provider: counted, no amount, and nothing missing.
+        let unpriced = Recording { cost: Some(None), ..Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown)) };
+        let v = call(&engine_with(&w, vec![Arc::new(unpriced)]), "assets_image_generate", json!({"prompt": "a crate", "save_as": "plain.png"})).unwrap();
+        assert_eq!((v["cost"].clone(), v["cost_missing"].as_bool(), v["generations"].as_u64()), (Value::Null, Some(false), Some(4)));
+        let last = w.try_assets().unwrap().pop().unwrap();
+        assert_eq!((last.amount, last.cost_missing, last.model.as_str()), (None, false, "pic"));
+    }
+
+    /// Generations made while a type's price was unknown never block it once the model has a price:
+    /// the priced model runs under its limit without asking, and its limit then holds.
+    #[test]
+    fn generations_without_a_price_never_block_a_price_that_becomes_known() {
+        let (_d, mut w) = ws();
+        let unpriced = Recording { cost: Some(None), ..Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", Pricing::Unknown)) };
+        let (engine, _) = recording_engine(&mut w, unpriced);
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, Pricing::Unknown, 0.15);
+        for i in 0..3 {
+            call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": format!("crate-{i}.png")})).unwrap();
+        }
+        assert!(w.try_assets().unwrap().iter().all(|r| r.amount.is_none() && !r.cost_missing));
+        // The same provider now prices the model (or the person picks a priced one there): the count
+        // goes on, and the earlier generations are not an unknown cost.
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, price(Unit::Usd, 0.1), 0.15);
+        let priced = Recording::new("fal", Unit::Usd, 0.0).with(picture_model("pic", price(Unit::Usd, 0.1)));
+        let engine = engine_with(&w, vec![Arc::new(priced)]);
+        let v = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "priced.png"})).unwrap();
+        assert_eq!(
+            (v["used"].as_f64(), v["generations"].as_u64(), v["cost_missing"].as_bool(), v["left"].as_f64()),
+            (Some(0.1), Some(4), Some(false), Some(0.05))
+        );
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty(), "under its limit: not asked (Auto mode would have stopped)");
+        // And its limit holds: another ten cents would pass fifteen.
+        assert_eq!(call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "over.png"})).unwrap_err().code, ErrorCode::OverLimit);
+    }
+
+    /// The picture a 3D model's price is asked with, before its picture is made, is a real picture
+    /// of the size pictures are made at.
+    #[test]
+    fn the_stand_in_picture_is_a_full_size_picture() {
+        let uri = preflight_picture();
+        let b64 = uri.strip_prefix("data:image/png;base64,").unwrap();
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().unwrap();
+        assert_eq!((reader.info().width, reader.info().height), (1024, 1024));
+    }
+
+    /// Each run is started within the estimate its limit was checked against, so a provider that
+    /// prices it again just before starting can refuse a higher price.
+    #[test]
+    fn a_run_starts_within_the_estimate_its_limit_approved() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("scenario", Unit::Credits, 20.0));
+        call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap();
+        call(&engine, "assets_model_generate", json!({"prompt": "a crate", "save_as": "crate.glb"})).unwrap();
+        assert_eq!(*stub.approved.lock().unwrap(), [Some(20.0), Some(20.0), Some(20.0)], "a picture, then a picture and the model made from it");
+        // The model made from a picture still to be made was priced with the full-size stand-in picture.
+        let priced: Vec<Call> = stub.estimates.lock().unwrap().iter().filter(|c| c.kind == AssetKind::Model3d).cloned().collect();
+        assert_eq!(priced.len(), 1);
+        assert_eq!(priced[0].picture.as_deref(), Some(preflight_picture()));
+    }
+
+    /// A 3D model's limit that refuses the run stops it before the picture made first is paid for.
+    #[test]
+    fn a_3d_limit_refusal_stops_before_the_picture_is_paid_for() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+        w.set_person(|m| {
+            if let Some(t) = m.assets.types.get_mut(&AssetKind::Model3d) {
+                t.limit = 0.05;
+            }
+        })
+        .unwrap();
+        let error = call(&engine, "assets_model_generate", json!({"prompt": "a crate", "save_as": "crate.glb"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OverLimit);
+        assert!(error.message.contains("3D models"), "{}", error.message);
+        assert!(stub.calls().is_empty(), "no picture was made");
+        assert!(w.try_assets().unwrap().is_empty() && !w.app_dir().join("crate.png").exists());
+    }
+
+    /// From a description: the pictures choice makes a picture first, counted as a picture, when the
+    /// 3D model starts from pictures; with pictures Off, a model that takes words gets the words,
+    /// and one that takes only pictures is refused, naming both ways out.
+    #[test]
+    fn a_3d_model_from_text_uses_the_pictures_choice_or_refuses() {
+        let from_text = || json!({"prompt": "a barrel", "save_as": "barrel.glb"});
+        // Pictures on: a picture with the pictures choice, then the model from it.
+        let (_d, mut w) = ws();
+        let pictures = Recording::new("fal", Unit::Usd, 0.15);
+        let solids = Recording::new("scenario", Unit::Credits, 30.0);
+        choose_all(&mut w, &pictures);
+        choose(&mut w, AssetKind::Model3d, "scenario", "solid", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        let (pictures, solids) = (Arc::new(pictures), Arc::new(solids));
+        let engine = engine_with(&w, vec![pictures.clone(), solids.clone()]);
+        let v = call(&engine, "assets_model_generate", from_text()).unwrap();
+        assert_eq!(pictures.kinds_run(), [AssetKind::Image]);
+        assert!(pictures.calls()[0].words.as_deref().is_some_and(|w| w.starts_with("a barrel. One whole object")));
+        assert_eq!(
+            solids.calls(),
+            [Call { kind: AssetKind::Model3d, model: "solid".into(), picture: Some("https://stand-in/picture.png".into()), words: None }]
+        );
+        assert_eq!(v["picture"]["saved"], "barrel.png");
+        assert_eq!((v["picture"]["cost"].as_f64(), v["picture"]["unit"].as_str()), (Some(0.15), Some("usd")));
+        assert_eq!((v["cost"].as_f64(), v["unit"].as_str(), v["used"].as_f64()), (Some(30.0), Some("credits"), Some(30.0)));
+        let records: Vec<_> = w.try_assets().unwrap().into_iter().map(|r| (r.file, r.kind, r.provider, r.amount, r.unit)).collect();
+        assert_eq!(
+            records,
+            [
+                ("barrel.png".to_string(), "image".to_string(), "fal".to_string(), Some(0.15), Some(Unit::Usd)),
+                ("barrel.glb".to_string(), "model".to_string(), "scenario".to_string(), Some(30.0), Some(Unit::Credits)),
+            ],
+            "the picture against pictures, the model against 3D models, each in its unit"
+        );
+        // Pictures Off, and a 3D model that takes words: the words go to it directly.
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("scenario", Unit::Credits, 30.0));
+        w.set_person(|m| {
+            m.assets.types.insert(AssetKind::Image, TypeAssets { choice: AssetChoice::off(), ..TypeAssets::default() });
+        })
+        .unwrap();
+        for model in ["words-3d", "both-3d"] {
+            choose(&mut w, AssetKind::Model3d, "scenario", model, Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+            let v = call(&engine, "assets_model_generate", json!({"prompt": "a barrel", "save_as": format!("{model}.glb")})).unwrap();
+            assert_eq!(v["picture"], Value::Null);
+            assert_eq!(stub.calls().last(), Some(&Call { kind: AssetKind::Model3d, model: model.into(), picture: None, words: Some("a barrel".into()) }));
+        }
+        assert!(!stub.kinds_run().contains(&AssetKind::Image));
+        // A 3D model that takes words only is given the words even with pictures on.
+        choose(&mut w, AssetKind::Image, "scenario", "pic", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        choose(&mut w, AssetKind::Model3d, "scenario", "words-3d", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        call(&engine, "assets_model_generate", json!({"prompt": "a barrel", "save_as": "direct.glb"})).unwrap();
+        assert!(!stub.kinds_run().contains(&AssetKind::Image), "no picture a model can't use");
+        // Pictures Off, and a 3D model that takes only pictures: refused, naming both ways out.
+        w.set_person(|m| {
+            m.assets.types.insert(AssetKind::Image, TypeAssets { choice: AssetChoice::off(), ..TypeAssets::default() });
+        })
+        .unwrap();
+        choose(&mut w, AssetKind::Model3d, "scenario", "solid", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        let before = (stub.calls().len(), w.try_assets().unwrap().len());
+        let error = call(&engine, "assets_model_generate", from_text()).unwrap_err();
+        assert_eq!(error.code, ErrorCode::NoPermission);
+        let remedy = error.remediation.unwrap_or_default();
+        assert!(remedy.contains("image") && remedy.contains("provider and model for pictures"), "{remedy}");
+        assert_eq!((stub.calls().len(), w.try_assets().unwrap().len()), before);
+        // A picture given works for that model all the same.
+        call(&engine, "assets_model_generate", json!({"image": "https://example.invalid/a.png", "save_as": "given.glb"})).unwrap();
+    }
+
+    /// The result names the options of the request the model has no input for.
+    #[test]
+    fn the_result_names_ignored_options() {
+        let (_d, mut w) = ws();
+        let shapeless = detail("pic", AssetKind::Image, vec![input("prompt", FieldKind::Text, true)], price(Unit::Usd, 0.1));
+        let (engine, _) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1).with(shapeless));
+        let v = call(&engine, "assets_image_generate", json!({"prompt": "a sky", "shape": "wide", "save_as": "sky.png"})).unwrap();
+        assert_eq!(v["ignored"], json!(["shape"]));
+        let v = call(&engine, "assets_sound_generate", json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": "wind.mp3"})).unwrap();
+        assert_eq!(v["ignored"], json!([]));
+        assert_eq!(serde_json::to_value(AssetOption::Shape).unwrap(), "shape");
+    }
+
+    /// A chosen model the provider no longer serves is refused when it is described: nothing is
+    /// estimated, generated or recorded.
+    #[test]
+    fn a_model_the_provider_no_longer_serves_is_refused_before_anything_is_spent() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+        choose(&mut w, AssetKind::Image, "fal", "gone-model", Unit::Usd, price(Unit::Usd, 0.1), 5.0);
+        let error = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::BadSettings);
+        assert!(error.message.contains("gone-model") && error.remediation.unwrap_or_default().contains("Choose another model"));
+        assert_eq!(*stub.described.lock().unwrap(), ["gone-model"]);
+        assert!(stub.nothing_asked() && w.assets().is_empty());
+        // A model that doesn't make the type is refused too.
+        choose(&mut w, AssetKind::Image, "fal", "sound", Unit::Usd, price(Unit::Usd, 0.1), 5.0);
+        let error = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
+        assert!(error.message.contains("doesn't make pictures"), "{}", error.message);
+        assert!(stub.nothing_asked());
+    }
+
+    /// A project choice whose unit isn't the provider's, or a provider that isn't registered, is refused.
+    #[test]
+    fn a_choice_the_registry_cannot_honour_is_refused() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+        choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Credits, price(Unit::Credits, 0.1), 500.0);
+        let error = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::BadSettings);
+        assert!(error.message.contains("credits") && error.message.contains("dollars"), "{}", error.message);
+        choose(&mut w, AssetKind::Image, "acme", "pic", Unit::Usd, price(Unit::Usd, 0.1), 5.0);
+        assert_eq!(call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err().code, ErrorCode::FeatureMissing);
+        assert!(stub.nothing_asked() && stub.described.lock().unwrap().is_empty());
     }
 
     #[test]
     fn a_key_for_another_provider_doesnt_pay_this_one() {
-        let (_d, w) = ws();
+        let (_d, mut w) = ws();
+        choose(&mut w, AssetKind::Image, "fal", "fal-ai/flux/dev", Unit::Usd, price(Unit::Usd, 0.05), 5.0);
         let e = crate::Engine::new(crate::testing::session());
-        e.session().ext.insert(std::sync::Arc::new(InboxDir(w.inbox_dir())));
-        e.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".to_string(), " ".to_string())].into())));
-        let err =
-            e.call("assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"}), crate::CallOptions::new(crate::Caller::Mcp)).err().unwrap();
+        e.session().ext.insert(Arc::new(InboxDir(w.inbox_dir())));
+        e.session().ext.insert(Arc::new(AssetKeys([("fal".to_string(), " ".to_string())].into())));
+        let err = call(&e, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
         assert!(err.code == ErrorCode::BadSettings, "a blank key is no key");
         let mut providers = AssetProviders::built_in();
-        providers.register(std::sync::Arc::new(Named("other")));
-        e.session().ext.insert(std::sync::Arc::new(providers));
-        e.session().ext.insert(std::sync::Arc::new(AssetKeys([("other".to_string(), "o-1".to_string())].into())));
-        let err =
-            e.call("assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"}), crate::CallOptions::new(crate::Caller::Mcp)).err().unwrap();
+        providers.register(Arc::new(Recording::new("other", Unit::Usd, 0.1)));
+        e.session().ext.insert(Arc::new(providers));
+        e.session().ext.insert(Arc::new(AssetKeys([("other".to_string(), "sk-test".to_string())].into())));
+        let err = call(&e, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
         assert_eq!(err.code, ErrorCode::BadSettings);
         assert!(err.message.contains("No fal.ai key"), "{}", err.message);
         assert!(w.assets().is_empty() && Inbox::new(w.inbox_dir()).pending().is_empty(), "nothing asked or spent");
     }
 
-    /// A provider that serves nothing in the catalogue.
-    struct Named(&'static str);
-
-    impl craft_anything_engines::assets::AssetProvider for Named {
-        fn id(&self) -> &'static str {
-            self.0
-        }
-        fn name(&self) -> &'static str {
-            self.0
-        }
-        fn generate(&self, _key: &str, _req: &AssetRequest) -> Result<Generated, ToolError> {
-            Err(ToolError::invalid("not here"))
-        }
-    }
-
     #[test]
     fn without_a_key_it_says_to_use_simple_shapes() {
-        let (_d, w) = ws();
+        let (_d, mut w) = ws();
+        choose(&mut w, AssetKind::Image, "fal", "fal-ai/flux/dev", Unit::Usd, price(Unit::Usd, 0.05), 5.0);
         let e = crate::Engine::new(crate::testing::session());
-        e.session().ext.insert(std::sync::Arc::new(InboxDir(w.inbox_dir())));
-        let err =
-            e.call("assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"}), crate::CallOptions::new(crate::Caller::Mcp)).err().unwrap();
+        e.session().ext.insert(Arc::new(InboxDir(w.inbox_dir())));
+        let err = call(&e, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
         assert_eq!(err.code, ErrorCode::BadSettings);
         assert!(err.remediation.unwrap_or_default().contains("simple shapes"));
-        let err =
-            e.call("assets_model_generate", json!({"prompt": "a crate", "save_as": "crate.glb", "faces": 40_000}), crate::CallOptions::new(crate::Caller::Mcp));
-        assert!(err.err().unwrap().message.contains("faces must be 48 to 20000"), "Tripo P1's face limit");
+        for faces in [0, MAX_FACES + 1] {
+            let err = call(&e, "assets_model_generate", json!({"prompt": "a crate", "save_as": "crate.glb", "faces": faces})).unwrap_err();
+            assert!(err.message.contains("faces must be 1 to 500000"), "{}", err.message);
+        }
     }
 
     #[test]
     fn nothing_is_generated_unless_the_project_allows_it() {
         let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
         w.set_person(|m| m.generate_assets = false).unwrap();
-        let e = crate::Engine::new(crate::testing::session());
-        e.session().ext.insert(std::sync::Arc::new(InboxDir(w.inbox_dir())));
-        e.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".to_string(), "k-1".to_string())].into())));
-        let err =
-            e.call("assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"}), crate::CallOptions::new(crate::Caller::Mcp)).err().unwrap();
+        let err = call(&engine, "assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"})).unwrap_err();
         assert_eq!(err.code, ErrorCode::NoPermission, "a key alone isn't the person's choice");
         assert!(err.remediation.unwrap_or_default().contains("simple shapes"));
-        assert!(w.assets().is_empty() && Inbox::new(w.inbox_dir()).pending().is_empty(), "nothing asked or spent");
+        assert!(stub.nothing_asked() && w.assets().is_empty() && Inbox::new(w.inbox_dir()).pending().is_empty(), "nothing asked or spent");
     }
 
+    /// A failure after the provider accepted the work reaches the ledger, and later attempts are
+    /// checked against it; a charge that can't be recorded is reported, never dropped.
     #[test]
-    fn the_budget_asks_before_going_over_and_remembers_always() {
+    fn a_charged_failure_is_recorded_and_counts_against_the_limit() {
         let (_d, mut w) = ws();
-        w.record_asset(AssetRecord { file: "a.glb".into(), kind: "model".into(), prompt: "x".into(), cost_usd: 4.80, at_ms: 0 }).unwrap();
-        let inbox = Inbox::new(w.inbox_dir());
-        let mut session = crate::testing::session();
-        // Auto mode stops at the budget without asking.
-        session.settings.auto_mode = true;
-        {
-            let mut ctx = Ctx { tool: "test", session: &mut session, cancel: crate::CancelToken::default(), progress: &|_| {}, caller: crate::Caller::Mcp };
-            assert_eq!(within_budget(&mut ctx, &inbox, &mut w, 0.48).unwrap_err().code, ErrorCode::OverLimit);
-            assert!(inbox.pending().is_empty(), "no question in Auto mode");
-        }
-        // Asking is what Auto mode switches off.
-        session.settings.auto_mode = false;
-        let mut ctx = Ctx { tool: "test", session: &mut session, cancel: crate::CancelToken::default(), progress: &|_| {}, caller: crate::Caller::Mcp };
-        // Under the budget: no question.
-        within_budget(&mut ctx, &inbox, &mut w, 0.03).unwrap();
-        assert!(inbox.pending().is_empty());
-        // Over it: asked; "no" stops, "always" lifts the cap for the project.
-        let dir = w.inbox_dir();
-        let answer = |allow: bool, always: bool| {
-            let inbox = Inbox::new(dir.clone());
-            std::thread::spawn(move || {
-                for _ in 0..200 {
-                    if let Some(r) = inbox.pending().first() {
-                        assert!(r.title.contains("$0.48"), "{}", r.title);
-                        inbox.answer(&r.id, &Answer { allow: Some(allow), always, ..Default::default() }).unwrap();
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
-                panic!("no question came");
-            })
+        let (engine, _) = recording_engine(&mut w, Recording { fails_charging: Some(Some(30.0)), ..Recording::new("elevenlabs", Unit::Credits, 10.0) });
+        let sound = |e: &crate::Engine| {
+            call(e, "assets_sound_generate", json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"})).unwrap_err()
         };
-        let t = answer(false, false);
-        assert_eq!(within_budget(&mut ctx, &inbox, &mut w, 0.48).unwrap_err().code, ErrorCode::OverLimit);
-        t.join().unwrap();
-        let t = answer(true, true);
-        within_budget(&mut ctx, &inbox, &mut w, 0.48).unwrap();
-        t.join().unwrap();
-        assert!(Workspace::open(&w.root).unwrap().manifest.allowed_actions.iter().any(|k| k == OVER_BUDGET));
-        within_budget(&mut ctx, &inbox, &mut w, 10.0).unwrap();
-        assert!(inbox.pending().is_empty(), "after \"always\" it doesn't ask again");
-        assert!((w.assets_spent() - 4.80).abs() < 1e-9);
+        let error = sound(&engine);
+        assert_eq!(error.code, ErrorCode::ProgramFailed);
+        assert!(error.message.contains("30.0000 credits") && error.message.contains("recorded as spending"), "{}", error.message);
+        assert!(error.remediation.as_deref().is_some_and(|r| r.starts_with("Check the job.") && r.contains("limit for sound effects")));
+        let records = w.try_assets().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            (records[0].file.as_str(), records[0].kind.as_str(), records[0].amount, records[0].unit),
+            ("audio/chime.mp3", "sound", Some(30.0), Some(Unit::Credits))
+        );
+        assert!(!w.app_dir().join("audio/chime.mp3").exists(), "no output was saved");
+        // With the limit at what was already charged, the next attempt is refused before spending.
+        w.set_person(|m| {
+            if let Some(t) = m.assets.types.get_mut(&AssetKind::SoundEffect) {
+                t.limit = 30.0;
+            }
+        })
+        .unwrap();
+        assert_eq!(sound(&engine).code, ErrorCode::OverLimit);
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+        // A charge of unknown cost is recorded without an amount.
+        w.set_person(|m| m.assets.ignore_budget = true).unwrap();
+        let unknown = engine_with(&w, vec![Arc::new(Recording { fails_charging: Some(None), ..Recording::new("elevenlabs", Unit::Credits, 10.0) })]);
+        assert!(sound(&unknown).message.contains("spending of unknown amount"));
+        assert_eq!(w.try_assets().unwrap().last().map(|r| (r.amount, r.cost_missing)), Some((None, true)));
+        // A charge that is no amount is still a charge: recorded as one of unknown cost, never dropped.
+        let invalid = engine_with(&w, vec![Arc::new(Recording { fails_charging: Some(Some(-1.0)), ..Recording::new("elevenlabs", Unit::Credits, 10.0) })]);
+        let error = sound(&invalid);
+        assert!(error.message.contains("can't be read") && error.message.contains("spending of unknown amount"), "{}", error.message);
+        assert_eq!(w.try_assets().unwrap().last().map(|r| (r.amount, r.cost_missing)), Some((None, true)));
+        assert_eq!(w.try_assets().unwrap().len(), 3);
+        // A charge the ledger can't take is reported, never dropped silently.
+        std::fs::write(w.root.join("assets.json"), "broken").unwrap();
+        let failed = ToolError::new(ErrorCode::ProgramFailed, "The job failed.");
+        let reported = record_charge(&w, &speech(), AssetKind::Speech, "audio/x.mp3", craft_anything_engines::assets::charged(failed, 3.0));
+        assert!(reported.message.contains("3.0000 credits") && reported.message.contains("could not be recorded"), "{}", reported.message);
+        assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
+    }
+
+    /// A model stage that fails after its picture was made records both charges.
+    #[test]
+    fn a_charged_model_failure_after_its_picture_records_both() {
+        let (_d, mut w) = ws();
+        let pictures = Arc::new(Recording::new("fal", Unit::Usd, 0.1));
+        choose_all(&mut w, &pictures);
+        choose(&mut w, AssetKind::Model3d, "scenario", "solid", Unit::Credits, price(Unit::Credits, 40.0), 500.0);
+        let failing = Recording { fails_charging: Some(Some(40.0)), ..Recording::new("scenario", Unit::Credits, 40.0) };
+        let engine = engine_with(&w, vec![pictures.clone(), Arc::new(failing)]);
+        let error = call(&engine, "assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})).unwrap_err();
+        assert!(error.message.contains("recorded as spending for crate.glb"), "{}", error.message);
+        let records = w.try_assets().unwrap();
+        assert_eq!(records.iter().map(|r| (r.file.as_str(), r.kind.as_str())).collect::<Vec<_>>(), [("crate.png", "image"), ("crate.glb", "model")]);
+        assert_eq!((records[1].amount, records[1].unit), (Some(40.0), Some(Unit::Credits)));
+        assert!(w.app_dir().join("crate.png").exists() && !w.app_dir().join("crate.glb").exists());
+        assert_eq!(pictures.kinds_run(), [AssetKind::Image]);
+    }
+
+    /// A generation holds the project's spending lock through its paid call and releases it after
+    /// its receipt; another process's generation then waits instead of using a stale total.
+    #[test]
+    fn a_generation_holds_the_spending_lock_until_its_receipt_is_written() {
+        let (_d, mut w) = ws();
+        let probe = Recording { probe: Some((w.root.clone(), Mutex::default())), ..Recording::new("elevenlabs", Unit::Credits, 10.0) };
+        let (engine, probe) = recording_engine(&mut w, probe);
+        call(&engine, "assets_sound_generate", json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"})).unwrap();
+        assert_eq!(probe.probe.as_ref().and_then(|(_, held)| *held.lock().unwrap()), Some(true), "held during the paid call");
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+        w.lock_spending(Duration::ZERO).expect("released once the receipt is written");
+    }
+
+    /// A generation that waited for the spending lock re-reads the person's choices first: turned
+    /// off while it waited, it stops before any estimate, paid call or receipt.
+    #[test]
+    fn a_generation_that_waited_for_the_lock_rereads_the_projects_choices() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+        let held = w.lock_spending(Duration::ZERO).unwrap();
+        let waiting = std::thread::spawn(move || {
+            let params = json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"audio/chime.mp3"});
+            call(&engine, "assets_sound_generate", params).map(|_| ()).unwrap_err().code
+        });
+        // Long enough for the call to pass its first checks and wait on the lock.
+        std::thread::sleep(Duration::from_millis(500));
+        Workspace::open(&w.root).unwrap().set_person(|m| m.generate_assets = false).unwrap();
+        drop(held);
+        assert_eq!(waiting.join().unwrap(), ErrorCode::NoPermission);
+        assert!(stub.nothing_asked() && stub.described.lock().unwrap().is_empty());
+        assert!(w.try_assets().unwrap().is_empty());
+    }
+
+    /// Where the app is the project folder, an asset never lands on Craft Anything's records, named
+    /// directly or through a link that resolves into one, and nothing is spent trying.
+    #[test]
+    fn assets_never_overwrite_the_projects_own_records() {
+        let (_d, mut w) = ws();
+        w.manifest.app_in_root = true;
+        w.save().unwrap();
+        std::fs::create_dir_all(w.root.join("reference")).unwrap();
+        // Other cases too: a case-insensitive file system writes them into the record folders.
+        for record in ["reference/picture-1.png", "pinned/old.png", "inbox/x.png", "./capture/shot.png", "Reference/x.png", "PINNED/x.png", "attachmentſ/x.png"]
+        {
+            assert_eq!(save_path(&w, record, "png").unwrap_err().code, ErrorCode::BadInput, "{record}");
+        }
+        // Spellings Windows maps onto a record: trailing dots or spaces, data streams, short names.
+        for spelling in ["reference./x.png", "reference /x.png", "inbox:hidden/x.png", "ATTACH~1/x.png", "Assets/x.png.", "Assets\\pinned. \\x.png"] {
+            assert_eq!(save_path(&w, spelling, "png").unwrap_err().code, ErrorCode::BadInput, "{spelling}");
+        }
+        assert_eq!(save_path(&w, "Assets/crate.png", "png").unwrap().1, "Assets/crate.png");
+        assert_eq!(save_path(&w, "Assets/sky~night.png", "png").unwrap().1, "Assets/sky~night.png", "a tilde alone is fine");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(w.root.join("reference"), w.root.join("art")).unwrap();
+            assert_eq!(save_path(&w, "art/sky.png", "png").unwrap_err().code, ErrorCode::BadInput, "a link into a record");
+        }
+        let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+        let params = json!({"prompt":"A gentle chime", "duration_seconds":2.0, "save_as":"reference/chime.mp3"});
+        assert_eq!(call(&engine, "assets_sound_generate", params).unwrap_err().code, ErrorCode::BadInput);
+        assert!(stub.nothing_asked());
+        assert!(w.try_assets().unwrap().is_empty());
+    }
+
+    /// A newer manifest version must block every generation tool without altering the manifest or asset ledger.
+    #[test]
+    fn future_project_settings_refuse_all_paid_generation() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+        let mut future = w.manifest.clone();
+        future.version = crate::workspace::MANIFEST_VERSION + 1;
+        std::fs::write(w.root.join("craft.json"), serde_json::to_vec(&future).unwrap()).unwrap();
+        let original = std::fs::read(w.root.join("craft.json")).unwrap();
+        for (tool, params, _) in every_call() {
+            assert_eq!(call(&engine, tool, params).unwrap_err().code, ErrorCode::NoPermission);
+        }
+        assert!(stub.nothing_asked());
+        assert!(w.assets().is_empty());
+        assert_eq!(std::fs::read(w.root.join("craft.json")).unwrap(), original);
+    }
+
+    /// Each audio tool must select its request kind, save the returned bytes and record exactly one paid asset.
+    #[test]
+    fn audio_tools_route_with_only_an_elevenlabs_key_and_record_each_asset_once() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+        for (tool, params, kind) in audio_calls() {
+            let v = call(&engine, tool, params).unwrap();
+            assert_eq!(v["provider"], "elevenlabs");
+            let saved = v["saved"].as_str().unwrap();
+            assert_eq!(std::fs::read(w.app_dir().join(saved)).unwrap(), b"generated");
+            assert_eq!(stub.calls().last().map(|c| (c.kind, c.model.clone())), Some((kind, model_for(kind).to_string())));
+        }
+        let records = w.assets();
+        assert_eq!(records.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>(), ["speech", "sound", "music"]);
+        assert!(records.iter().all(|r| r.amount == Some(10.0) && r.unit == Some(Unit::Credits)));
+        assert_eq!(stub.calls().len(), 3);
+    }
+
+    /// Auto-mode audio calls must stop before generation when opt-in is missing or the type's limit is used up.
+    #[test]
+    fn every_audio_tool_requires_opt_in_and_stops_before_spending_over_its_limit() {
+        for (tool, params, kind) in audio_calls() {
+            let (_d, mut w) = ws();
+            let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+            w.set_person(|m| m.generate_assets = false).unwrap();
+            assert_eq!(call(&engine, tool, params.clone()).unwrap_err().code, ErrorCode::NoPermission);
+            w.set_person(|m| {
+                m.generate_assets = true;
+                if let Some(t) = m.assets.types.get_mut(&kind) {
+                    t.limit = 0.0;
+                }
+            })
+            .unwrap();
+            assert_eq!(call(&engine, tool, params).unwrap_err().code, ErrorCode::OverLimit);
+            assert!(stub.calls().is_empty());
+            assert!(w.assets().is_empty());
+            assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+        }
+    }
+
+    /// Invalid audio parameters, escaping paths and missing provider credentials must leave generation untouched.
+    #[test]
+    fn audio_validation_and_provider_keys_are_checked_before_paid_calls() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+        for (tool, params) in [
+            ("assets_speech_generate", json!({"text":" ","voice_id":"voice-test","save_as":"a.mp3"})),
+            ("assets_speech_generate", json!({"text":"Hi","voice_id":"../voice","save_as":"a.mp3"})),
+            ("assets_sound_generate", json!({"prompt":"chime","duration_seconds":0.0,"save_as":"a.mp3"})),
+            ("assets_music_generate", json!({"prompt":"piano","duration_seconds":601.0,"save_as":"a.mp3"})),
+            ("assets_music_generate", json!({"prompt":"piano","duration_seconds":3.0,"save_as":"../a.mp3"})),
+            ("assets_sound_generate", json!({"prompt":"chime","duration_seconds":2.0,"save_as":"a.mp3","model":"music"})),
+        ] {
+            assert!(call(&engine, tool, params).is_err());
+        }
+        engine.session().ext.insert(Arc::new(AssetKeys([("fal".into(), "sk-test".into())].into())));
+        let (tool, params, _) = audio_calls().remove(0);
+        assert_eq!(call(&engine, tool, params).unwrap_err().code, ErrorCode::BadSettings);
+        assert!(stub.nothing_asked());
+        assert!(w.assets().is_empty());
+    }
+
+    /// Invalid provider estimates must fail before generation or any asset ledger entry.
+    #[test]
+    fn nonfinite_or_negative_provider_estimates_never_authorize_spending() {
+        for estimate in [f64::NAN, f64::INFINITY, -0.1] {
+            let (_d, mut w) = ws();
+            let (engine, stub) = recording_engine(&mut w, Recording { estimate: Some(Some(estimate)), ..Recording::new("elevenlabs", Unit::Credits, 10.0) });
+            let (tool, params, _) = audio_calls().remove(0);
+            assert!(call(&engine, tool, params).is_err());
+            assert!(stub.calls().is_empty());
+            assert!(w.assets().is_empty());
+        }
+    }
+
+    /// Invalid actual costs must prevent both writing generated bytes and adding a spending record.
+    #[test]
+    fn an_invalid_returned_cost_is_recorded_as_missing_and_the_output_is_not_saved() {
+        let (_d, w) = ws();
+        let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
+        for (i, cost) in [f64::NAN, f64::INFINITY, -1.0].into_iter().enumerate() {
+            let made = Generated { url: String::new(), bytes: vec![1], cost: Some(cost), ignored: Vec::new() };
+            let error = keep(&w, &path, &rel, &speech(), &made).unwrap_err();
+            assert_eq!(error.code, ErrorCode::GarbledOutput, "{cost}");
+            assert!(error.message.contains("not an amount") && error.message.contains("not saved"), "{}", error.message);
+            assert!(!path.exists(), "nothing published");
+            let records = w.try_assets().unwrap();
+            assert_eq!(records.len(), i + 1, "the receipt is never dropped");
+            assert_eq!((records[i].amount, records[i].cost_missing), (None, true), "{cost}");
+        }
+        // The type's usage is then unknown: its next generation asks first.
+        let t = TypeAssets {
+            choice: AssetChoice {
+                provider: Some("elevenlabs".into()),
+                model: "eleven_v3".into(),
+                model_name: "v3".into(),
+                unit: Unit::Credits,
+                pricing: price(Unit::Credits, 1.0),
+            },
+            ..TypeAssets::default()
+        };
+        assert!(w.try_type_usage(AssetKind::Speech, &t).unwrap().cost_missing);
+    }
+
+    /// Unreadable ledgers stop every paid tool before quotes, approval questions or provider calls.
+    #[test]
+    fn invalid_ledgers_block_all_generations_before_provider_calls() {
+        for invalid in ["json", "directory", "negative", "overflow"] {
+            let (_d, mut w) = ws();
+            let (engine, stub) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+            let ledger = w.root.join("assets.json");
+            let receipt = |cost| receipt("old.png", "image", cost);
+            match invalid {
+                "directory" => std::fs::create_dir(&ledger).unwrap(),
+                "negative" => std::fs::write(&ledger, ledger_of(&[receipt(-1.0)])).unwrap(),
+                "overflow" => std::fs::write(&ledger, ledger_of(&[receipt(f64::MAX), receipt(f64::MAX)])).unwrap(),
+                _ => std::fs::write(&ledger, "not JSON").unwrap(),
+            }
+            let original = std::fs::read(&ledger).ok();
+            let mut calls = every_call();
+            calls.push(("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"}), AssetKind::Model3d));
+            for (tool, params, _) in calls {
+                assert!(call(&engine, tool, params).is_err(), "{invalid}: {tool}");
+            }
+            assert!(stub.nothing_asked() && stub.described.lock().unwrap().is_empty(), "{invalid}");
+            assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+            assert_eq!(std::fs::read(&ledger).ok(), original);
+        }
+    }
+
+    /// A dangling ledger link cannot authorize a quote or generation and must remain untouched.
+    #[cfg(unix)]
+    #[test]
+    fn dangling_asset_ledger_blocks_provider_calls() {
+        let (_d, mut w) = ws();
+        let (engine, provider) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+        let ledger = w.root.join("assets.json");
+        let target = w.root.join("missing-ledger.json");
+        std::os::unix::fs::symlink(&target, &ledger).unwrap();
+        for (tool, params) in [
+            ("assets_image_generate", json!({"prompt":"a crate", "save_as":"crate.png"})),
+            ("assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})),
+        ] {
+            assert!(call(&engine, tool, params).is_err());
+        }
+        assert!(provider.nothing_asked());
+        assert!(Inbox::new(w.inbox_dir()).pending().is_empty());
+        assert_eq!(std::fs::read_link(ledger).unwrap(), target);
+        assert!(!target.exists());
+    }
+
+    /// Once a provider has charged, a ledger failure must leave new and existing output destinations untouched.
+    #[test]
+    fn receipt_failure_preserves_the_destination_and_warns_of_possible_charges() {
+        for existing in [false, true] {
+            let (_d, w) = ws();
+            let (path, rel) = save_path(&w, "audio/a.mp3", "mp3").unwrap();
+            if existing {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, b"original").unwrap();
+            }
+            std::fs::write(w.root.join("assets.json"), "broken").unwrap();
+            let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost: Some(20.0), ignored: Vec::new() };
+            let err = keep(&w, &path, &rel, &speech(), &made).unwrap_err();
+            assert!(err.message.contains("may have charged 20.0000 credits"), "{}", err.message);
+            assert!(err.remediation.unwrap().contains("Do not blindly"));
+            if existing {
+                assert_eq!(std::fs::read(&path).unwrap(), b"original");
+            } else {
+                assert!(!path.parent().unwrap().exists(), "no destination preparation before a receipt");
+            }
+            assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
+        }
+    }
+
+    /// A receipt is never dated before its type's provider was chosen: a clock that is behind the
+    /// time of the choice (another computer's, or one set back) still counts the generation.
+    #[test]
+    fn a_receipt_counts_even_when_the_clock_is_behind_the_choice() {
+        let (_d, mut w) = ws();
+        let stub = Recording::new("elevenlabs", Unit::Credits, 10.0);
+        choose_all(&mut w, &stub);
+        let ahead = crate::inbox::now_ms() + 86_400_000;
+        w.set_person(|m| m.assets.types.get_mut(&AssetKind::Speech).unwrap().since_ms = ahead).unwrap();
+        let t = w.manifest.assets.types[&AssetKind::Speech].clone();
+        assert_eq!(t.since_ms, ahead);
+        let ready = Ready { kind: AssetKind::Speech, model: stub.models["speech"].clone(), t: t.clone(), provider: Arc::new(stub), key: "sk-test".into() };
+        let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
+        let made = Generated { url: String::new(), bytes: b"ID3 generated".to_vec(), cost: Some(3.0), ignored: Vec::new() };
+        keep(&w, &path, &rel, &ready.receipt("hi"), &made).unwrap();
+        let rows = w.try_assets().unwrap();
+        assert_eq!(rows.last().map(|r| r.at_ms), Some(ahead), "dated when the type was chosen, not before it");
+        let usage = w.try_type_usage(AssetKind::Speech, &t).unwrap();
+        assert_eq!((usage.generations, usage.amount), (1, 3.0), "counted against the type's limit");
+        // A charge recorded from a failed run is dated the same way.
+        let error = craft_anything_engines::assets::charged(ToolError::new(ErrorCode::EngineMissing, "timed out"), 2.0);
+        let _ = record_charge(&w, &ready.receipt("hi"), AssetKind::Speech, &rel, error);
+        assert_eq!(w.try_type_usage(AssetKind::Speech, &t).unwrap().amount, 5.0);
+    }
+
+    /// A generation is saved under the extension of the format it really is: a picture asked as a PNG
+    /// that comes back as a JPEG is saved as a .jpg, with the receipt and the result naming that file
+    /// and the result saying why; nothing is saved under the name asked for. Bytes that match keep
+    /// the name, and bytes of no format this app can tell keep it with a note.
+    #[test]
+    fn a_generation_is_saved_under_the_extension_of_what_came_back() {
+        let jpeg = b"\xff\xd8\xff\xe0 a picture".to_vec();
+        let wav = b"RIFF\x24\x00\x00\x00WAVEfmt a sound".to_vec();
+        for (tool, params, bytes, saved, asked, said) in [
+            (
+                "assets_image_generate",
+                json!({"prompt": "a crate", "save_as": "Assets/crate.png"}),
+                jpeg.clone(),
+                "Assets/crate.jpg",
+                Some("Assets/crate.png"),
+                Some("JPEG rather than PNG"),
+            ),
+            (
+                "assets_image_generate",
+                json!({"prompt": "a crate", "save_as": "Assets/crate.png"}),
+                b"\x89PNG\r\n\x1a\nok".to_vec(),
+                "Assets/crate.png",
+                None,
+                None,
+            ),
+            (
+                "assets_sound_generate",
+                json!({"prompt": "wind", "duration_seconds": 2.0, "save_as": "audio/wind.mp3"}),
+                wav.clone(),
+                "audio/wind.wav",
+                Some("audio/wind.mp3"),
+                Some("WAV rather than MP3"),
+            ),
+            (
+                "assets_music_generate",
+                json!({"prompt": "calm", "duration_seconds": 3.0, "save_as": "audio/calm.mp3"}),
+                b"ID3\x04 music".to_vec(),
+                "audio/calm.mp3",
+                None,
+                None,
+            ),
+            (
+                "assets_speech_generate",
+                json!({"text": "hi", "voice_id": "v1", "save_as": "audio/hi.mp3"}),
+                b"<html>?".to_vec(),
+                "audio/hi.mp3",
+                None,
+                Some("couldn't be recognised"),
+            ),
+        ] {
+            let (_d, mut w) = ws();
+            let stub = Recording { bytes: Some(bytes.clone()), ..Recording::new("fal", Unit::Usd, 0.1) };
+            let (engine, _stub) = recording_engine(&mut w, stub);
+            let v = call(&engine, tool, params).unwrap();
+            assert_eq!(v["saved"], saved, "{tool}: {v}");
+            assert_eq!(v.get("asked").and_then(Value::as_str), asked, "{tool}: {v}");
+            match said {
+                Some(words) => assert!(v["note"].as_str().is_some_and(|n| n.contains(words)), "{tool}: {v}"),
+                None => assert!(v.get("note").is_none(), "{tool}: {v}"),
+            }
+            assert_eq!(std::fs::read(w.app_dir().join(saved)).unwrap(), bytes, "{tool}: the bytes, unchanged");
+            if let Some(asked) = asked {
+                assert!(!w.app_dir().join(asked).exists(), "{tool}: nothing under the name asked for");
+            }
+            let receipts: Vec<String> = w.try_assets().unwrap().into_iter().map(|r| r.file).collect();
+            assert_eq!(receipts, [saved], "{tool}: the receipt names the file as saved");
+        }
+        // The picture a 3D model is made from is saved as what it is too; the model, a GLB, as asked.
+        let (_d, mut w) = ws();
+        let pictures = Recording { bytes: Some(jpeg), ..Recording::new("fal", Unit::Usd, 0.15) };
+        let solids = Recording { bytes: Some(b"glTF\x02\x00\x00\x00 a barrel".to_vec()), ..Recording::new("scenario", Unit::Credits, 30.0) };
+        choose_all(&mut w, &pictures);
+        choose(&mut w, AssetKind::Model3d, "scenario", "solid", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        let engine = engine_with(&w, vec![Arc::new(pictures), Arc::new(solids)]);
+        let v = call(&engine, "assets_model_generate", json!({"prompt": "a barrel", "save_as": "barrel.glb"})).unwrap();
+        assert_eq!(v["picture"]["saved"], "barrel.jpg", "{v}");
+        assert!(v["picture"]["note"].as_str().is_some_and(|n| n.contains("JPEG")), "{v}");
+        assert_eq!((&v["saved"], v.get("note")), (&json!("barrel.glb"), None), "{v}");
+        assert!(w.app_dir().join("barrel.jpg").is_file() && !w.app_dir().join("barrel.png").exists());
+    }
+
+    /// A model chosen for 3D models that makes animations, though fal files it as a 3D model, is
+    /// refused before anything is spent.
+    #[test]
+    fn a_model_that_makes_no_3d_models_is_refused_for_them() {
+        let (_d, mut w) = ws();
+        let stub = Recording::new("fal", Unit::Usd, 0.4).with(solid_model("fal-ai/hunyuan-motion", false, true, price(Unit::Usd, 0.4)));
+        let (engine, stub) = recording_engine(&mut w, stub);
+        choose(&mut w, AssetKind::Model3d, "fal", "fal-ai/hunyuan-motion", Unit::Usd, price(Unit::Usd, 0.4), 5.0);
+        let error = call(&engine, "assets_model_generate", json!({"prompt": "a dancer", "save_as": "dancer.glb"})).unwrap_err();
+        assert_eq!(error.code, ErrorCode::BadSettings, "{error:?}");
+        assert!(error.message.contains("doesn't make 3D models"), "{}", error.message);
+        assert!(stub.calls().is_empty(), "nothing was run");
+        assert!(w.try_assets().unwrap().is_empty(), "nothing was spent");
+    }
+
+    /// The place a generation goes, from its bytes alone.
+    #[test]
+    fn the_real_place_keeps_the_name_and_changes_only_the_extension() {
+        let path = Path::new("/p/app/Assets/Sky.PNG");
+        let same = real_place(path, "Assets/Sky.PNG", b"\x89PNG\r\n\x1a\n");
+        assert_eq!((same.rel.as_str(), same.asked.is_none(), same.note.is_none()), ("Assets/Sky.PNG", true, true), "the extension's case doesn't matter");
+        let webp = real_place(path, "Assets/Sky.PNG", b"RIFF\x10\x00\x00\x00WEBPVP8 ");
+        assert_eq!((webp.path.as_path(), webp.rel.as_str()), (Path::new("/p/app/Assets/Sky.webp"), "Assets/Sky.webp"));
+        assert_eq!(webp.asked.as_deref(), Some("Assets/Sky.PNG"));
+        let gltf = real_place(Path::new("/p/app/m.glb"), "m.glb", b"glTF\x02\x00\x00\x00");
+        assert!(gltf.note.is_none() && gltf.rel == "m.glb");
+    }
+
+    /// A final ledger read failure cannot be reported as successful generation with zero historical spending.
+    #[test]
+    fn saved_asset_summary_reports_ledger_failure_without_erasing_output() {
+        let (_d, mut w) = ws();
+        let stub = Recording::new("elevenlabs", Unit::Credits, 10.0);
+        choose_all(&mut w, &stub);
+        let t = w.manifest.assets.types[&AssetKind::Speech].clone();
+        let ready = Ready { kind: AssetKind::Speech, model: stub.models["speech"].clone(), t, provider: Arc::new(stub), key: "sk-test".into() };
+        let (path, rel) = save_path(&w, "a.mp3", "mp3").unwrap();
+        let made = Generated { url: String::new(), bytes: b"generated".to_vec(), cost: Some(0.2), ignored: Vec::new() };
+        keep(&w, &path, &rel, &ready.receipt("hi"), &made).unwrap();
+        std::fs::write(w.root.join("assets.json"), "broken").unwrap();
+        let made = Made { g: made, place: real_place(&path, &rel, b"ID3") };
+        let err = summary(&w, &ready, &made, json!({})).unwrap_err();
+        assert!(err.message.contains("Saved a.mp3 and recorded") && err.message.contains("could not be read"), "{}", err.message);
+        assert!(err.remediation.unwrap().contains("Do not blindly"));
+        assert_eq!(std::fs::read(path).unwrap(), b"generated");
+        assert_eq!(std::fs::read(w.root.join("assets.json")).unwrap(), b"broken");
+    }
+
+    /// Filesystem preparation and atomic-save failures happen after accounting and never erase a charge.
+    #[test]
+    fn saving_failure_keeps_the_receipt_and_existing_files() {
+        for blocked_parent in [false, true] {
+            let (_d, w) = ws();
+            let (path, rel) = save_path(&w, "audio/a.mp3", "mp3").unwrap();
+            std::fs::create_dir_all(w.app_dir()).unwrap();
+            let preserved = if blocked_parent {
+                path.parent().unwrap().to_path_buf()
+            } else {
+                std::fs::create_dir_all(&path).unwrap();
+                path.join("original")
+            };
+            std::fs::write(&preserved, b"original").unwrap();
+            let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost: Some(0.2), ignored: Vec::new() };
+            let err = keep(&w, &path, &rel, &speech(), &made).unwrap_err();
+            assert!(err.message.contains("was recorded, but saving"));
+            assert!(err.remediation.unwrap().contains("Do not blindly"));
+            assert_eq!(w.try_assets().unwrap()[0].amount, Some(0.2));
+            assert_eq!(w.try_assets().unwrap()[0].file, rel);
+            assert_eq!(std::fs::read(preserved).unwrap(), b"original");
+        }
+    }
+
+    /// A confinement check that fails after generation still retains the paid receipt and the old target bytes.
+    #[cfg(unix)]
+    #[test]
+    fn post_generation_confinement_failure_keeps_charge_and_existing_output() {
+        let (_d, w) = ws();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("original.mp3");
+        std::fs::write(&target, b"original").unwrap();
+        let (path, rel) = save_path(&w, "audio/a.mp3", "mp3").unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let made = Generated { url: String::new(), bytes: b"replacement".to_vec(), cost: Some(0.2), ignored: Vec::new() };
+        assert!(keep(&w, &path, &rel, &speech(), &made).unwrap_err().message.contains("was recorded, but saving"));
+        assert_eq!(w.try_assets().unwrap()[0].amount, Some(0.2));
+        assert_eq!(std::fs::read(target).unwrap(), b"original");
+    }
+
+    /// Overruns for every asset kind preserve output and charge, and return a non-retryable explanation.
+    #[test]
+    fn stage_overruns_are_reported_only_after_recording_and_saving() {
+        for (tool, params, _) in every_call() {
+            let (_d, mut w) = ws();
+            let (engine, stub) = recording_engine(&mut w, Recording { estimate: Some(Some(0.0)), ..Recording::new("fal", Unit::Usd, 0.1) });
+            let rel = params["save_as"].as_str().unwrap().to_string();
+            let err = call(&engine, tool, params).unwrap_err();
+            assert_eq!(err.code, ErrorCode::OverLimit);
+            assert!(err.message.contains(&rel) && err.message.contains("recorded"), "{}", err.message);
+            assert!(err.remediation.unwrap().contains("Do not blindly"));
+            assert_eq!(std::fs::read(w.app_dir().join(rel)).unwrap(), b"generated");
+            assert_eq!(w.try_assets().unwrap().len(), 1);
+            assert_eq!(w.try_assets().unwrap()[0].amount, Some(0.1));
+            assert_eq!(stub.calls().len(), 1);
+        }
+    }
+
+    /// An over-estimate precursor is kept and recorded, but cannot authorize the subsequent model generation.
+    #[test]
+    fn precursor_overrun_stops_before_model_generation() {
+        let (_d, mut w) = ws();
+        let (engine, stub) = recording_engine(&mut w, Recording { estimate: Some(Some(0.0)), ..Recording::new("fal", Unit::Usd, 0.1) });
+        let err = call(&engine, "assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"})).unwrap_err();
+        assert_eq!(err.code, ErrorCode::OverLimit);
+        assert!(err.message.contains("crate.png"));
+        assert_eq!(stub.kinds_run(), [AssetKind::Image]);
+        assert_eq!(std::fs::read(w.app_dir().join("crate.png")).unwrap(), b"generated");
+        assert!(!w.app_dir().join("crate.glb").exists());
+        assert_eq!(w.try_assets().unwrap().len(), 1);
+    }
+
+    /// A custom provider whose price depends on the exact prompt, exposing quote/generation mismatches.
+    struct PromptPriced {
+        stand_in: Recording,
+        quoted: Mutex<Vec<String>>,
+        generated: Mutex<Vec<String>>,
+        model_calls: Mutex<usize>,
+    }
+
+    impl PromptPriced {
+        /// Price every picture character; charge a fixed amount for the downstream model.
+        fn price(req: &AssetRequest) -> f64 {
+            match req {
+                AssetRequest::Image { prompt, .. } => prompt.chars().count() as f64 / 1000.0,
+                _ => 0.5,
+            }
+        }
+    }
+
+    impl AssetProvider for PromptPriced {
+        /// Replace fal without real credentials or network calls.
+        fn id(&self) -> &'static str {
+            "fal"
+        }
+        /// Name the local stand-in in any error.
+        fn name(&self) -> &'static str {
+            "prompt-priced stand-in"
+        }
+        fn unit(&self) -> Unit {
+            Unit::Usd
+        }
+        fn list_models(&self, key: Option<&str>, kind: AssetKind) -> Result<ModelList, ToolError> {
+            self.stand_in.list_models(key, kind)
+        }
+        fn describe(&self, key: &str, model: &str) -> Result<ModelDetail, ToolError> {
+            self.stand_in.describe(key, model)
+        }
+        /// Capture exactly what was quoted.
+        fn estimate(&self, _key: &str, _model: &ModelDetail, req: &AssetRequest) -> Result<Option<f64>, ToolError> {
+            if let AssetRequest::Image { prompt, .. } = req {
+                self.quoted.lock().unwrap().push(prompt.to_string());
+            }
+            Ok(Some(Self::price(req)))
+        }
+        /// Capture exactly what was generated and return the matching charge.
+        fn generate(&self, _key: &str, _model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
+            match req {
+                AssetRequest::Image { prompt, .. } => self.generated.lock().unwrap().push(prompt.to_string()),
+                _ => *self.model_calls.lock().unwrap() += 1,
+            }
+            Ok(Generated { url: "https://example.invalid/source.png".into(), bytes: b"generated".to_vec(), cost: Some(Self::price(req)), ignored: Vec::new() })
+        }
+    }
+
+    /// Precursor quotes use the expanded trimmed prompt, while ledger provenance retains the person's description.
+    #[test]
+    fn precursor_quotes_and_generation_use_identical_expanded_prompts() {
+        for picture_limit in [0.05, 5.0] {
+            let (_d, mut w) = ws();
+            let stub = Arc::new(PromptPriced {
+                stand_in: Recording::new("fal", Unit::Usd, 0.1),
+                quoted: Mutex::default(),
+                generated: Mutex::default(),
+                model_calls: Mutex::default(),
+            });
+            choose_all(&mut w, &stub.stand_in);
+            choose(&mut w, AssetKind::Image, "fal", "pic", Unit::Usd, price(Unit::Usd, 0.1), picture_limit);
+            let engine = engine_with(&w, vec![stub.clone()]);
+            let result = call(&engine, "assets_model_generate", json!({"prompt":"  a crate  ", "save_as":"crate.glb"}));
+            let quoted = stub.quoted.lock().unwrap().clone();
+            assert_eq!(quoted.len(), 1);
+            assert!(quoted[0].starts_with("a crate. One whole object"));
+            if picture_limit < 1.0 {
+                assert_eq!(result.unwrap_err().code, ErrorCode::OverLimit);
+                assert!(stub.generated.lock().unwrap().is_empty());
+                assert_eq!(*stub.model_calls.lock().unwrap(), 0);
+                assert!(w.try_assets().unwrap().is_empty());
+            } else {
+                result.unwrap();
+                assert_eq!(*stub.generated.lock().unwrap(), quoted);
+                assert_eq!(*stub.model_calls.lock().unwrap(), 1);
+                assert!(w.try_assets().unwrap().iter().all(|record| record.prompt == "a crate"));
+            }
+        }
+    }
+
+    /// A malformed downstream model key must be rejected before paying for its precursor picture.
+    #[test]
+    fn malformed_model_credentials_stop_before_spending_on_the_source_picture() {
+        let (_d, mut w) = ws();
+        let (engine, pictures) = recording_engine(&mut w, Recording::new("fal", Unit::Usd, 0.1));
+        choose(&mut w, AssetKind::Model3d, "scenario", "model_meshy-7-1-img23d", Unit::Credits, price(Unit::Credits, 30.0), 500.0);
+        // Scenario's key needs a secret; this one has none.
+        engine.session().ext.insert(Arc::new(AssetKeys([("fal".into(), "sk-test".into()), ("scenario".into(), "sk-test".into())].into())));
+        let result = call(&engine, "assets_model_generate", json!({"prompt":"a crate", "save_as":"crate.glb"}));
+        assert_eq!(result.unwrap_err().code, ErrorCode::BadSettings);
+        assert!(pictures.nothing_asked(), "reject a malformed downstream key before the first paid call");
+        assert!(w.assets().is_empty());
+    }
+
+    /// Symlink escapes in inputs or outputs, including dangling links, must fail before paid generation.
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_outputs_and_inputs_cannot_escape_the_project() {
+        let (_d, mut w) = ws();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(w.app_dir()).unwrap();
+        std::os::unix::fs::symlink(outside.path(), w.app_dir().join("escape")).unwrap();
+        std::fs::write(outside.path().join("picture.png"), b"png").unwrap();
+        assert!(save_path(&w, "escape/new.mp3", "mp3").is_err());
+        assert!(image_source(&w, "app/escape/picture.png").is_err());
+        std::os::unix::fs::symlink(outside.path().join("new.mp3"), w.app_dir().join("broken.mp3")).unwrap();
+        assert!(save_path(&w, "broken.mp3", "mp3").is_err());
+        let (engine, stub) = recording_engine(&mut w, Recording::new("elevenlabs", Unit::Credits, 10.0));
+        assert!(call(&engine, "assets_sound_generate", json!({"prompt":"chime","duration_seconds":2.0,"save_as":"escape/new.mp3"})).is_err());
+        assert!(stub.calls().is_empty());
+        assert!(!outside.path().join("new.mp3").exists());
     }
 }

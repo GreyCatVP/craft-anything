@@ -273,15 +273,16 @@ pub struct LoopConfig {
 /// target (evidence, unknowns, hypotheses, reports…) that make a building model explore instead
 /// of writing; their descriptions alone take about 5,000 tokens, more than Ollama's default
 /// context holds (#417). Kept are the Build tools, every other enabled toolset, and the Core tools
-/// the builder's brief names: asking the person, the check, the generated assets and the unknowns.
+/// the builder's brief names: asking the person, the check, the generated assets (pictures, 3D
+/// models, speech, sound effects and music) and the unknowns. A test checks each id is a tool.
 const LOCAL_BUILDER_CORE: &[&str] = &[
     "core_person_ask",
     "rebuild_check",
-    "rebuild_words",
     "assets_image_generate",
     "assets_model_generate",
-    "assets_spent",
-    "assets_note",
+    "assets_speech_generate",
+    "assets_sound_generate",
+    "assets_music_generate",
     "core_unknowns_show",
     "core_unknown_add",
     "core_unknown_edit",
@@ -1003,6 +1004,20 @@ pub(crate) mod tests {
         }
         assert!(!names.contains(&"core_journal_read") && !names.contains(&"core_session_show"), "{names:?}");
         assert!(lean.len() <= 20 && size(&lean) * 2 < size(&all), "{} tools, {} of {} characters", lean.len(), size(&lean), size(&all));
+    }
+
+    /// Every tool a local builder keeps is one the registry has: a name that matches no tool keeps
+    /// nothing, and nothing would say so (`assets_spent`, `assets_note` and `rebuild_words` were
+    /// listed for a while). The audio tools the brief offers are among them.
+    #[test]
+    fn every_tool_a_local_builder_keeps_exists() {
+        let engine = craft_anything_engine::Engine::shared(craft_anything_engine::testing::session(), crate::tools());
+        for id in LOCAL_BUILDER_CORE {
+            assert!(engine.registry().get(id).is_some(), "{id} is not a tool");
+        }
+        for audio in ["assets_speech_generate", "assets_sound_generate", "assets_music_generate"] {
+            assert!(LOCAL_BUILDER_CORE.contains(&audio), "{audio}");
+        }
     }
 
     /// A scripted model: returns canned turns and records requests.

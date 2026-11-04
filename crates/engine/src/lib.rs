@@ -5,6 +5,7 @@
 //! records the evidence it returns, and turns any escaped panic into an error.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod asset_choice;
 pub mod clean_room;
 
 /// Tools an agent app may be told to approve on its own side (Codex's `approval_mode`): each one
@@ -40,7 +41,7 @@ pub use registry::Registry;
 pub use session::Session;
 pub use settings::{Mode, Settings};
 pub use target::{Target, TargetKind};
-pub use tool::{Caller, CancelToken, Ctx, Effects, Progress, Requires, ToolOutput, ToolSpec, Toolset};
+pub use tool::{AGENT_ENV, Caller, CancelToken, Ctx, Effects, Progress, Requires, ToolOutput, ToolSpec, Toolset};
 
 use craft_anything_evidence::{ErrorCode, ToolError};
 use craft_anything_platform::sync::{Mutex, MutexGuard};

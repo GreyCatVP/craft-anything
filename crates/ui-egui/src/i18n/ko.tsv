@@ -94,7 +94,6 @@ About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	약 60 GB, Ep
 Add	추가
 Add Visual Studio's C++ tools	Visual Studio C++ 도구 추가
 Add a brain	AI 추가
-Add a fal.ai key	fal.ai 키 추가
 Add a folder…	폴더 추가…
 Add a plugin	플러그인 추가
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	AI를 추가하면 이 근거를 대신 읽고, 이어지는 질문에 답하고, 증거가 있는 곳을 짚어 줍니다.
@@ -187,7 +186,6 @@ Best guess: a reasonable reading, but not proven.	추정: 그럴듯한 해석이
 Binary layout	바이너리 구조
 Blocked	차단됨
 Bookmark	책갈피
-Budget for a new project	새 프로젝트 예산
 Bug report	버그 보고
 Build	만들기
 Build a rebuild ledger	재구성 기록부 만들기
@@ -459,16 +457,12 @@ Function references	함수 참조
 Functions	함수
 GDB command	GDB 명령
 GDB session status	GDB 세션 상태
-Game assets	게임 에셋
 Game engines	게임 엔진
 Game files	게임 파일
 General	일반
 Generate a 3D model	3D 모델 생성
 Generate a picture	그림 생성
-Generate custom pictures and models	맞춤 그림과 모델 생성
-Generated art (games)	생성한 그림 (게임)
 Generated assets	생성한 에셋
-Generated pictures and 3D models are made with fal.ai.	생성하는 그림과 3D 모델은 fal.ai로 만듭니다.
 Get Ghidra	Ghidra 받기
 Get Ghidra for Deep mode	심층 모드용 Ghidra 받기
 Get Unity Hub	Unity Hub 받기
@@ -614,7 +608,6 @@ Leave a path empty to use the managed install. We never need environment variabl
 Leave empty to use the one Craft Anything sets up.	비워 두면 Craft Anything이 설치한 것을 씁니다.
 Let a project generate assets	프로젝트가 에셋을 생성하도록 허용
 Let's go	시작하기
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	빌더가 게임용 사실적인 3D 모델과 텍스처를 만들 수 있습니다. 모델 하나에 {model}, 프로젝트마다 예산 {budget}입니다.
 Library resolution	라이브러리 해석
 Light copy: shares big files with the project	가벼운 사본: 큰 파일을 프로젝트와 공유
 Likeness	닮은 정도
@@ -671,7 +664,6 @@ Looking on this computer…	이 컴퓨터에서 찾는 중…
 Low	낮음
 Mach-O structure	Mach-O 구조
 Made a copy: {name}	사본을 만들었습니다: {name}
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	fal.ai로 만들고 내 계정에서 비용이 나갑니다: 3D 모델 하나에 {model}, 그림 하나에 {picture}. 끄면 게임을 이것 없이 만듭니다.
 Made with {engine}	{engine} 기반
 Made without looking inside the original.	원본 안을 보지 않고 만들었습니다.
 Make a game that plays like this	이렇게 플레이되는 게임 만들기
@@ -708,7 +700,6 @@ Name an address	주소에 이름 붙이기
 Name at address	주소의 이름
 Name many addresses	여러 주소에 이름 붙이기
 Names the program's author gave to functions or variables that survived in the file.	프로그램 작성자가 함수나 변수에 붙인 이름 중 파일에 남아 있는 것입니다.
-Needs a fal.ai key. Until then the game is built without them.	fal.ai 키가 필요합니다. 그전까지는 게임을 이것 없이 만듭니다.
 Needs you	확인 필요
 Network	네트워크
 New	신규
@@ -841,7 +832,6 @@ Pick the app, game or file to rebuild	다시 만들 앱, 게임, 파일 고르�
 Pick the folder for this project	이 프로젝트의 폴더 고르기
 Pick the game's folder	게임 폴더 고르기
 Picture a program's window	프로그램 창 캡처
-Picture model	그림 모델
 Pictures	그림
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	IoStore 컨테이너에서는 아직 그림을 저장할 수 없습니다. 안에 든 것은 볼 수 있습니다.
 Pictures of the original	원본 그림
@@ -885,8 +875,6 @@ Projects and builds	프로젝트와 빌드
 Property list	속성 목록
 Pseudo-C	의사 C
 Purpose	용도
-Raise the asset budget	에셋 예산 늘리기
-Raise the budget by {amount}	예산 {amount} 늘리기
 Raw machine code	기계어 원본
 Read AI settings	AI 설정 읽기
 Read a Unity game's IL2CPP metadata	Unity 게임의 IL2CPP 메타데이터 읽기
@@ -1009,7 +997,6 @@ Send (Enter)	보내기 (Enter)
 Send now	지금 보내기
 Server address	서버 주소
 Session status	세션 상태
-Set a project's asset budget	프로젝트 에셋 예산 정하기
 Set an AI's folder	AI 폴더 정하기
 Set an AI's program	AI 프로그램 정하기
 Set model options	모델 옵션 설정
@@ -1097,7 +1084,6 @@ That folder already has {names}, where Craft Anything keeps its own files. Pick 
 That folder is already a project, so it's open now.	그 폴더는 이미 프로젝트라서 바로 열었습니다.
 The Rust toolchain (rustup.rs).	Rust 툴체인 (rustup.rs).
 The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	빌더가 스스로 질문에 답하고 무엇을 골랐는지 알려 주므로("결정함: …") 나중에 바꿀 수 있습니다.
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	빌더가 새로 고안한 디자인 설명을 바탕으로 게임의 3D 모델과 텍스처를 만들며, 비용은 fal.ai 계정에서 나갑니다. 게임이 빠르게 돌도록 모델은 로우폴리로 만듭니다. 텍스처를 입힌 모델은 {model}, 그림은 {picture}입니다. 프로젝트마다 예산은 {budget}이며, 넘기 전에 먼저 묻습니다. 키는 시스템 키체인에 보관합니다.
 The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	빌더가 이 파일(코드, 메모, 그림)을 읽고 그 옆의 새 앱 폴더에 앱을 만듭니다. 원래 파일은 그대로 둡니다.
 The builder will decide its questions and tell you what it chose.	빌더가 질문을 스스로 정하고 무엇을 골랐는지 알려 줍니다.
 The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	빌더가 이 파일을 직접 고치고 잘 되는 것을 남깁니다. Craft Anything은 그 옆에 자체 기록 몇 개를 더합니다.
@@ -1208,7 +1194,6 @@ Website address	웹사이트 주소
 Website pages	웹사이트 페이지
 Websites	웹사이트
 Welcome	환영합니다
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	새 게임이 묻지 않고 그림과 3D 모델 생성에 쓸 수 있는 금액입니다. 프로젝트마다 따로 둡니다.
 What a program exports	프로그램이 내보내는 것
 What a program imports	프로그램이 가져오는 것
 What are its main parts?	주요 부분은 무엇인가요?
@@ -1232,7 +1217,6 @@ What is this?	이것은 무엇인가요?
 What it calls	호출하는 것
 What kind of file is this?	어떤 종류의 파일인가요?
 What permissions does it ask for?	어떤 권한을 요청하나요?
-What pictures and textures are made with.	그림과 텍스처를 만드는 데 씁니다.
 What settings are in here?	여기에 어떤 설정이 있나요?
 What tables are in here?	여기에 어떤 테이블이 있나요?
 What we couldn't check	확인하지 못한 것
@@ -1294,7 +1278,6 @@ You chose:	고른 항목:
 You're all set	준비를 마쳤습니다
 Your app is ready	앱이 완성되었습니다
 Your brains	내 AI
-Your fal.ai key	내 fal.ai 키
 Your game is ready	게임이 완성되었습니다
 Your message wasn't sent: another project was opened while its pictures were copied.	메시지를 보내지 못했습니다. 그림을 복사하는 동안 다른 프로젝트가 열렸습니다.
 Your own tool installs (optional)	직접 설치한 도구 (선택)
@@ -1302,7 +1285,7 @@ Your project starts as soon as it's done.	끝나는 대로 프로젝트가 시�
 Your version	내 버전
 Your website is ready	웹사이트가 완성되었습니다
 a new folder in {dir}	{dir} 안의 새 폴더
-a picture	(그림 1장)
+a picture	그림당
 about ${n}	약 ${n}
 address, e.g. http://192.168.1.20:11434/v1	주소, 예: http://192.168.1.20:11434/v1
 and {n} more	외 {n}개
@@ -1379,8 +1362,6 @@ your files there are the app, edited in place	그 파일이 곧 앱이며 그 �
 {n} picture(s) to match.	맞출 그림 {n}장.
 {n} step(s) didn't work and were retried or skipped.	{n}단계가 실패해 다시 시도하거나 건너뛰었습니다.
 {n} tokens	토큰 {n}개
-{n} · ${spent:.2} of ${budget:.2}	{n} · ${budget:.2} 중 ${spent:.2}
-{n} · ${spent} of ${budget}	{n} · ${budget} 중 ${spent}
 {scenes} {}	{scenes} {}
 {text}, {}	{text}, {}
 {title} hit a bug and stopped safely. ({what})	{title}에서 버그가 나서 안전하게 멈췄습니다. ({what})
@@ -1413,6 +1394,116 @@ your files there are the app, edited in place	그 파일이 곧 앱이며 그 �
 … {} older	… 이전 항목 {}개
 ← Back	← 뒤로
 ↑↓ to move · Enter to run · Esc to close	↑↓ 이동 · Enter 실행 · Esc 닫기
+Generate speech	음성 생성
+Generate a sound effect	효과음 생성
+Generate music	음악 생성
+Generate pictures, models and audio	그림, 모델, 오디오 생성
+Needs an asset provider key. Until then the game is built without generated assets.	에셋 제공자 키가 필요합니다. 그전까지는 생성한 에셋 없이 게임을 빌드합니다.
+Add a provider key	제공자 키 추가
+Your asset provider keys	에셋 제공자 키
+Use fal.ai, Scenario or ElevenLabs for generated assets.	생성 에셋에 fal.ai, Scenario 또는 ElevenLabs를 사용합니다.
+API secret	API 시크릿
+{name} API secret	{name} API 시크릿
+Paste your {name} API secret	{name} API 시크릿 붙여넣기
+Save asset settings	에셋 설정 저장
+Key needed	키 필요
+Manage provider keys	제공자 키 관리
+Saving asset settings…	에셋 설정 저장 중…
+Asset spending is unavailable. Repair assets.json before generating.	에셋 지출 기록을 읽을 수 없습니다. 생성하기 전에 assets.json을 고치세요.
+1 hour ago	1시간 전
+1 minute ago	1분 전
+{n} hours ago	{n}시간 전
+{n} minutes ago	{n}분 전
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	새 프로젝트는 이 행을 복사하며 자체적으로 바꿀 수 있습니다. 기본 한도는 단위마다 하나뿐이므로, 바꾸면 그 단위로 청구되는 모든 유형에 적용됩니다.
+Add a key	키 추가
+Add a key for {name}	{name} 키 추가
+Ask the providers for their models	제공자에게 모델 목록 요청
+Asking the providers for their models…	제공자에게 모델 목록을 요청하는 중…
+Asset provider keys	에셋 제공자 키
+At least this much: the cost of an earlier one could not be read.	적어도 이만큼입니다. 이전에 생성한 것 하나의 비용을 읽지 못했습니다.
+Checking for a saved key…	저장된 키가 있는지 확인하는 중…
+Choose how a project makes one kind of asset	프로젝트가 에셋 한 유형을 만드는 방식 선택
+Couldn't ask {name}: {error}	{name}에 요청하지 못했습니다: {error}
+Enter an amount from 0 to {max} {unit}.	0에서 {max} {unit} 사이의 금액을 입력하세요.
+Every limit in this project is off while this is on. What is used is still counted and shown.	이 항목을 켜 두면 이 프로젝트의 모든 한도가 꺼집니다. 사용량은 계속 집계되어 표시됩니다.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	내 제공자 계정으로 오리지널 그림과 모델, 음성, 효과음, 음악을 생성합니다. 가격은 제공자가 정하며, 에셋 유형마다 한도가 따로 있습니다. 키는 가능하면 시스템 키체인에, 아니면 비공개 로컬 키 파일에 보관합니다. 제공자와 모델은 설정 → 빌드에서 고르세요.
+Generated assets for new projects	새 프로젝트의 생성 에셋
+Ignore budget	예산 무시
+Ignore budget (no limits)	예산 무시 (한도 없음)
+Ignore budget is on, so no limit applies. What is used is still counted.	예산 무시가 켜져 있어 한도가 적용되지 않습니다. 사용량은 계속 집계됩니다.
+Ignored	무시됨
+Model lists fetched from {names} {ago}	{names}에서 모델 목록을 가져옴: {ago}
+New projects ignore the budget, so this limit starts off.	새 프로젝트는 예산을 무시하므로 이 한도는 꺼진 상태로 시작합니다.
+New projects start with this limit on.	새 프로젝트는 이 한도를 켠 상태로 시작합니다.
+No model lists yet. Save a provider key above to list its models.	아직 모델 목록이 없습니다. 위에서 제공자 키를 저장하면 그 모델이 표시됩니다.
+No model matches that.	일치하는 모델이 없습니다.
+No provider with a saved key makes this.	저장된 키가 있는 제공자 중에는 이 유형을 만드는 곳이 없습니다.
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	저장된 키가 있는 제공자 중에는 '{type}' 유형을 만드는 곳이 없습니다. 설정 → 빌드에서 키를 저장하세요.
+No {name} key	{name} 키 없음
+Off. Turning this on uses the choices below.	꺼짐. 켜면 아래에서 고른 항목을 사용합니다.
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	제공자 계정에서 결제되며, 고른 모델에 대해 각 제공자가 제시하는 가격이 적용됩니다. 끄면 생성한 에셋 없이 게임을 빌드합니다.
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	그림, 3D 모델, 음성, 효과음, 음악은 키를 저장한 제공자가 만듭니다. 키는 가능하면 시스템 키체인에, 아니면 비공개 로컬 키 파일에 보관합니다.
+Reading what this has used…	사용량을 읽는 중…
+Refresh	새로 고침
+Remove the {name} key	{name} 키 삭제
+Search models	모델 검색
+Set a project's limit for one kind of asset	프로젝트의 에셋 한 유형에 대한 한도 설정
+Showing the first {n} rows. Type to narrow the list.	처음 {n}개 행만 표시합니다. 입력하면 목록이 좁혀집니다.
+The limit is off: nothing stops this, and what is used is still counted.	한도가 꺼져 있어 아무것도 막지 않으며, 사용량은 계속 집계됩니다.
+The limit is on: you are asked before this goes past it.	한도가 켜져 있어 이를 넘기 전에 확인을 요청합니다.
+The model lists couldn't be read. Try Refresh in Settings → Builds.	모델 목록을 읽지 못했습니다. 설정 → 빌드에서 새로 고침을 눌러 보세요.
+The model lists haven't been read yet.	아직 모델 목록을 읽지 않았습니다.
+This model's price is unknown, so what these cost is not counted.	이 모델의 가격을 알 수 없어 이 비용은 집계하지 않습니다.
+credits	크레딧
+credit	크레딧
+dollars	달러
+ignores: {options}	무시함: {options}
+price unknown	가격 알 수 없음
+cost known after each run	비용은 매번 생성 후에 알 수 있음
+quoted before each run	매번 생성 전에 가격 안내
+under 0.01	0.01 미만
+under 0.01 credits	0.01 크레딧 미만
+unreadable	읽을 수 없음
+usage not tracked	사용량 집계 안 함
+{n} made	{n}개 생성
+{n} made so far	지금까지 {n}개 생성
+{type} default limit	{type} 기본 한도
+{type} limit	{type} 한도
+{type} limit switch	{type} 한도 스위치
+{type} model	{type} 모델
+{type}: may pass the limit by one generation	{type}: 한도를 한 번의 생성만큼 넘을 수 있음
+{type}: no {name} key	{type}: {name} 키 없음
+{type}: price unknown, usage not tracked	{type}: 가격을 알 수 없어 사용량을 집계하지 않음
+3D models	3D 모델
+Speech	음성
+Sound effects	효과음
+Music	음악
+Assets	에셋
+pictures	그림
+speech	음성
+sound effects	효과음
+music	음악
+assets	에셋
+shape	모양
+faces	면 수
+textures	텍스처
+length	길이
+instrumental	연주곡
+voice	목소리
+New projects ignore the budget	새 프로젝트는 예산 무시
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	새 프로젝트는 모든 한도를 끈 채 시작하므로 지출을 막는 것이 없습니다. 사용량은 계속 집계되어 표시됩니다.
+Type	유형
+Provider · model	제공자 · 모델
+Default limit	기본 한도
+Limit	한도
+and	및
+a 3D model	3D 모델당
+a clip	클립당
+a sound	효과음당
+a track	트랙당
+a megapixel	메가픽셀당
+a second	초당
+a character	글자당
 Providers	제공자
 Harnesses	에이전트
 Nothing of this kind was found.	이런 종류는 찾지 못했습니다.

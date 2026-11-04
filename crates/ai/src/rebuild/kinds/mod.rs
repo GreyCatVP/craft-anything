@@ -59,11 +59,26 @@ pub struct BriefCx<'a> {
     pub ghidra: bool,
     /// The game engine's editor for engine stacks.
     pub editor: Option<&'a Path>,
-    /// An asset provider's key is set up; assets are offered only if the project also allows them
-    /// (`Manifest::generate_assets`).
-    pub assets: bool,
-    /// The picture model chosen in Settings (an asset-table id); `None` = the table's default.
-    pub image_model: Option<&'a str>,
+    /// The registered asset providers in this prompt snapshot (from the engine session's registry),
+    /// each with whether a usable key is set up. A type is offered only through the provider the
+    /// project chose for it, and only if that provider has a key: one provider's key never unlocks
+    /// another's models.
+    pub asset_providers: &'a [ProviderKey<'a>],
+    /// Settings' asset defaults, which a project from before it chose each type follows.
+    pub asset_settings: &'a AssetSettings,
+    /// What each asset type has used, read from one checked ledger snapshot for this prompt; `None`
+    /// denies generation because the ledger or the project's choices are unreadable.
+    pub asset_usage: Option<&'a BTreeMap<AssetKind, TypeUsage>>,
+}
+
+/// An asset provider as a prompt snapshot sees it.
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderKey<'a> {
+    pub id: &'a str,
+    /// Shown to the person and the builder ("fal.ai").
+    pub name: &'a str,
+    /// A usable key is set up for it.
+    pub has_key: bool,
 }
 
 /// The words the app uses for a kind's result.

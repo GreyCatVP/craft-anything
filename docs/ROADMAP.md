@@ -371,9 +371,11 @@ yet, and the quick start is how every new person begins.
 **An API key or a bill:**
 - [ ] Run Nano Banana Pro once with a real key (a picture, then a 3D model from it) and check the
       picture's size and the invoice ($0.15)
-- [ ] fal bills pictures "by rounding up to the nearest megapixel"; estimates use the exact size.
-      Confirm on a real invoice whether a 1024×1024 picture bills as 1 or 2 megapixels, then round
-      in the table (needs a key)
+- [ ] fal bills pictures "by rounding up to the nearest megapixel"; FLUX estimates now round up to
+      whole decimal megapixels (the larger bound). Confirm on a real invoice whether a 1024×1024
+      picture bills as 1 or 2 megapixels, then settle the table (needs a key) — in PR #503
+- [ ] Exercise Scenario image → 3D and ElevenLabs speech, sound effects and music with real
+      credentials; compare the spending estimates against the invoices (needs keys) — in PR #503
 - [ ] A live extraction run with Kimi K3.1 Pro (needs the person's OpenRouter key)
 
 **A second computer or another system:**

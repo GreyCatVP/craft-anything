@@ -12,7 +12,7 @@ mod tool_args;
 
 use clap::{Parser, Subcommand};
 use craft_anything_engine::project::{Project, Purpose};
-use craft_anything_engine::{CallOptions, Caller, CancelToken, Consent, Engine, Requires, Session, Settings, ToolOutput};
+use craft_anything_engine::{AGENT_ENV, CallOptions, Caller, CancelToken, Consent, Engine, Requires, Session, Settings, ToolOutput};
 use craft_anything_evidence::ToolError;
 use output::Format;
 use serde_json::{Value, json};
@@ -218,8 +218,39 @@ fn open_or_create_project(dir: &Path) -> Result<Project, ToolError> {
 }
 
 pub fn call_options(cli: &Cli, cancel: &CancelToken) -> CallOptions<'static> {
-    let consent = if cli.allow_run { Consent::Granted } else { Consent::NotAsked };
-    CallOptions::new(Caller::Cli).with_consent(consent).with_cancel(cancel.clone())
+    call_options_for(cli, cancel, std::env::var_os(AGENT_ENV).as_deref())
+}
+
+/// [`call_options`] with the process's AI mark given (see [`caller_for`]).
+fn call_options_for(cli: &Cli, cancel: &CancelToken, agent_mark: Option<&std::ffi::OsStr>) -> CallOptions<'static> {
+    let caller = caller_for(agent_mark);
+    let consent = if allows_running(cli.allow_run, caller) { Consent::Granted } else { Consent::NotAsked };
+    CallOptions::new(caller).with_consent(consent).with_cancel(cancel.clone())
+}
+
+/// Who is at the command line: the person, unless the app marked this process as an AI's (the
+/// agent it starts has [`AGENT_ENV`] set, and the shell commands it runs inherit it). The AI is
+/// asked before it loosens a project's spending and cannot answer an approval. The mark being set at
+/// all counts, whatever its value, so setting it empty or to 0 is not a way out.
+pub fn caller_for(agent_mark: Option<&std::ffi::OsStr>) -> Caller {
+    if agent_mark.is_some() { Caller::Agent } else { Caller::Cli }
+}
+
+/// Whether `--allow-run` counts for `caller`. The flag is the person's OK for tools that run code or
+/// change a device; an AI that started this command must not give it to itself, so for
+/// [`Caller::Agent`] it is ignored (said once on stderr) and those tools still need the person's OK.
+pub fn allows_running(allow_run: bool, caller: Caller) -> bool {
+    if !allow_run {
+        return false;
+    }
+    if caller == Caller::Agent {
+        static SAID: std::sync::Once = std::sync::Once::new();
+        SAID.call_once(|| {
+            eprintln!("--allow-run is ignored: an AI started this command ({AGENT_ENV} is set), and only the person can allow tools that run code.")
+        });
+        return false;
+    }
+    true
 }
 
 /// A cancel token that trips on Ctrl-C.
@@ -274,7 +305,7 @@ fn run(cli: Cli) -> u8 {
                 return 1;
             }
             opts.all_tools |= *all_tools;
-            opts.allow_run = cli.allow_run;
+            opts.allow_run = allows_running(cli.allow_run, caller_for(std::env::var_os(AGENT_ENV).as_deref()));
             match craft_anything_mcp::serve_stdio(engine, opts) {
                 Ok(()) => 0,
                 Err(e) => {
@@ -535,5 +566,41 @@ fn tool(cli: &Cli, args: &[String], f: Format) -> u8 {
             0
         }
         Err(e) => fail(&e, f),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn the_command_line_is_the_person_unless_an_ai_marked_the_process() {
+        assert_eq!(caller_for(None), Caller::Cli);
+        for mark in ["1", "", "0", "false"] {
+            assert_eq!(caller_for(Some(OsStr::new(mark))), Caller::Agent, "a mark of {mark:?} still says an AI started it");
+        }
+        assert_eq!(AGENT_ENV, "CRAFT_ANYTHING_AGENT");
+    }
+
+    /// `--allow-run` is the person's OK for tools that run code: a command an AI started (the process
+    /// is marked) can't give it to itself, so its calls go out not asked, and those tools wait for
+    /// the person. The person's own `--allow-run` still grants it.
+    #[test]
+    fn a_command_an_ai_started_ignores_allow_run() {
+        assert!(allows_running(true, Caller::Cli));
+        assert!(!allows_running(false, Caller::Cli));
+        assert!(!allows_running(true, Caller::Agent), "an AI's --allow-run");
+        assert!(!allows_running(false, Caller::Agent));
+        let cli = |allow_run| Cli { format: Format::Json, json: false, project: None, allow_run, deep: false, clean_room: false, command: Command::Commands };
+        let cancel = CancelToken::default();
+        let consent = |allow_run, mark: Option<&str>| {
+            let o = call_options_for(&cli(allow_run), &cancel, mark.map(OsStr::new));
+            (o.caller, o.consent)
+        };
+        assert_eq!(consent(true, None), (Caller::Cli, Consent::Granted), "the person's --allow-run");
+        assert_eq!(consent(false, None), (Caller::Cli, Consent::NotAsked));
+        assert_eq!(consent(true, Some("1")), (Caller::Agent, Consent::NotAsked), "an AI's --allow-run is ignored");
+        assert_eq!(consent(true, Some("")), (Caller::Agent, Consent::NotAsked), "an empty mark is still a mark");
     }
 }

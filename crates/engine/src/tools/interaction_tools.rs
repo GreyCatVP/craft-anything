@@ -650,12 +650,6 @@ pub(crate) enum Verdict {
 
 /// Show an approval card and wait for the answer. "Always for this project" is remembered in the
 /// workspace as `kind`, so the same kind of action isn't asked about again.
-pub(crate) fn ask_approval(ctx: &mut Ctx<'_>, inbox: &Inbox, ws: Option<&mut Workspace>, title: &str, detail: &str, kind: &str) -> Result<Verdict, ToolError> {
-    ctx.report(None, "Waiting for your OK…");
-    let cancel = ctx.cancel.clone();
-    wait_for_approval(inbox, ws, title, detail, kind, &|| cancel.is_cancelled())
-}
-
 fn wait_for_approval(
     inbox: &Inbox,
     ws: Option<&mut Workspace>,
@@ -664,22 +658,46 @@ fn wait_for_approval(
     kind: &str,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Verdict, ToolError> {
+    let (verdict, always) = answer_of(inbox, title, detail, kind, cancelled)?;
+    if always && let Some(w) = ws {
+        let _ = w.set_person(|m| {
+            if !m.allowed_actions.iter().any(|k| k == kind) {
+                m.allowed_actions.push(kind.to_string());
+            }
+        });
+    }
+    Ok(verdict)
+}
+
+/// Show an approval card and wait for the answer: the verdict, and whether a yes was "Always for
+/// this project".
+fn answer_of(inbox: &Inbox, title: &str, detail: &str, kind: &str, cancelled: &dyn Fn() -> bool) -> Result<(Verdict, bool), ToolError> {
     let id = inbox.post(RequestKind::Approval, title, detail, Vec::new(), false, Some(kind.to_string()))?;
     Ok(match inbox.wait(&id, WAIT, cancelled) {
-        Some(a) if a.allow == Some(true) => {
-            if a.always
-                && let Some(w) = ws
-            {
-                let _ = w.set_person(|m| {
-                    if !m.allowed_actions.iter().any(|k| k == kind) {
-                        m.allowed_actions.push(kind.to_string());
-                    }
-                });
-            }
-            Verdict::Yes
-        }
-        Some(a) => Verdict::No(a.text),
-        None => Verdict::NoAnswer,
+        Some(a) if a.allow == Some(true) => (Verdict::Yes, a.always),
+        Some(a) => (Verdict::No(a.text), false),
+        None => (Verdict::NoAnswer, false),
+    })
+}
+
+/// What the person said to an approval card whose "Always for this project" the caller acts on
+/// itself, rather than by remembering the action.
+pub(crate) enum Approval {
+    Once,
+    Always,
+    /// No, or no answer.
+    Refused,
+}
+
+/// Show an approval card and wait for the answer, remembering nothing: the caller decides what
+/// "Always for this project" changes (an asset type's limit switch, which the person sees).
+pub(crate) fn ask_approval_or_always(ctx: &mut Ctx<'_>, inbox: &Inbox, title: &str, detail: &str, kind: &str) -> Result<Approval, ToolError> {
+    ctx.report(None, "Waiting for your OK…");
+    let cancel = ctx.cancel.clone();
+    Ok(match answer_of(inbox, title, detail, kind, &|| cancel.is_cancelled())? {
+        (Verdict::Yes, true) => Approval::Always,
+        (Verdict::Yes, false) => Approval::Once,
+        (Verdict::No(_) | Verdict::NoAnswer, _) => Approval::Refused,
     })
 }
 

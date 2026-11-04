@@ -1,9 +1,9 @@
 //! Starting a project from a request: the target, the folder, the stack the person asked for, the
-//! asset budget from settings and whether assets may be generated. Shared by the CLI's `rebuild` and the `rebuild_start` tool.
+//! asset choices and limits from settings and whether assets may be generated. Shared by the CLI's `rebuild` and the `rebuild_start` tool.
 
 use super::*;
 use craft_anything_engine::Settings;
-use craft_anything_engine::workspace::{ExistingFiles, suggest_name};
+use craft_anything_engine::workspace::{ExistingFiles, ProjectAssets, suggest_name};
 
 /// Where a new project goes.
 #[derive(Debug, Clone, Copy, Default)]
@@ -36,7 +36,7 @@ pub(super) fn first_stack(kinds: &KindRegistry, ws: &Workspace, deep: bool) -> O
 
 /// A new project for `request` about `target` (a web address, an absolute path, or `-` for none),
 /// at `place`, with the stack the person
-/// picked (`build_with`), the asset budget from settings, and `generate_assets`: the person lets the
+/// picked (`build_with`), the asset choices and limits from settings, and `generate_assets`: the person lets the
 /// builder generate pictures and 3D models.
 pub fn new_project(
     settings: &Settings,
@@ -62,11 +62,24 @@ pub fn new_project(
     if let Some(s) = stack {
         ws.manifest.stack = s.name.clone();
     }
-    let budget = settings.assets.budget();
+    let now = craft_anything_engine::inbox::now_ms();
     ws.set_person(|m| {
-        m.asset_budget_usd = budget;
+        m.assets = ProjectAssets::from_defaults(&settings.assets, now);
         m.generate_assets = generate_assets;
         m.builder = builder.map(str::to_string);
     })?;
     Ok(ws)
 }
+
+/// Whether a new project starts with generated assets on when `caller` asked for them (`asked`).
+/// They spend the person's money, so only the person turns them on: when an AI asks (an agent or
+/// an MCP client, or a command line an AI started), the project starts with them off and the
+/// result says so in [`ASSETS_LEFT_OFF`]. There is no inbox to ask the person in before the
+/// project exists.
+pub fn generates_assets(asked: bool, caller: Caller) -> bool {
+    asked && matches!(caller, Caller::Ui | Caller::Cli)
+}
+
+/// What an AI is told when it asked for generated assets on a new project and they were left off
+/// (the same words `project_duplicate` gives for a copy).
+pub const ASSETS_LEFT_OFF: &str = craft_anything_engine::tools::project_tools::ASSETS_LEFT_OFF;

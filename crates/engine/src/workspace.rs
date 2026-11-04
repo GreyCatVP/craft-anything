@@ -19,14 +19,21 @@
 
 use crate::inbox::now_ms;
 use crate::project::write_atomic;
+use crate::settings::AssetSettings;
 use crate::versioned::{self, upgrade};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::Unit;
 use craft_anything_evidence::{ErrorCode, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
+pub mod assets;
 pub mod progress;
+
+pub use assets::{ProjectAssets, TypeAssets};
 
 pub const MANIFEST: &str = "craft.json";
 
@@ -78,10 +85,10 @@ fn copy_tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool, depth: usize)
 }
 
 /// The current `craft.json` format version. Bumping it means appending a step to [`MANIFEST_STEPS`].
-pub const MANIFEST_VERSION: u32 = 2;
+pub const MANIFEST_VERSION: u32 = 4;
 
 /// The steps that bring an older `craft.json` forward; step `i` goes from version `i` to `i + 1`.
-const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2];
+const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2, manifest_v2_to_v3, manifest_v3_to_v4];
 const _: () = assert!(MANIFEST_STEPS.len() == MANIFEST_VERSION as usize, "one step per craft.json version");
 
 /// Version 0 (no `version` field) has the same shape as version 1; only the number is new.
@@ -94,6 +101,31 @@ fn manifest_v0_to_v1(doc: &mut Value) -> Result<(), String> {
 /// look for the app in app/, opens such a project read-only instead of saving over it.
 fn manifest_v1_to_v2(doc: &mut Value) -> Result<(), String> {
     if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
+}
+
+/// Version 3 adds provider choices. Missing means the legacy master switch controls all providers.
+/// Older builds open this version read-only so they cannot overwrite those choices.
+fn manifest_v2_to_v3(doc: &mut Value) -> Result<(), String> {
+    if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
+}
+
+/// Version 4 keeps the asset choices of each asset type in `assets`. The single dollar budget and
+/// the provider list of version 3 move there as `legacy_budget_usd` and `legacy_providers`, so the
+/// project keeps its budget and its provider choices until the person chooses again. Older builds
+/// open this version read-only so they cannot overwrite the new choices.
+fn manifest_v3_to_v4(doc: &mut Value) -> Result<(), String> {
+    let obj = doc.as_object_mut().ok_or("the manifest isn't a JSON object")?;
+    let moved: Vec<(&str, Value)> = [("asset_budget_usd", "legacy_budget_usd"), ("asset_providers", "legacy_providers")]
+        .into_iter()
+        .filter_map(|(old, new)| obj.remove(old).filter(|v| !v.is_null()).map(|v| (new, v)))
+        .collect();
+    if moved.is_empty() {
+        return Ok(());
+    }
+    let assets = obj.entry("assets").or_insert_with(|| Value::Object(Default::default()));
+    let assets = assets.as_object_mut().ok_or("assets isn't a JSON object")?;
+    assets.extend(moved.into_iter().map(|(new, v)| (new.to_string(), v)));
+    Ok(())
 }
 
 /// Read a `craft.json` document of any version this build understands. A newer manifest is read
@@ -390,13 +422,14 @@ pub struct Manifest {
     /// The agent's last plain-words summary, shown when the project is reopened.
     #[serde(default)]
     pub last_reply: String,
-    /// What generated pictures and 3D models may cost before the person is asked (US dollars).
-    #[serde(default = "default_asset_budget")]
-    pub asset_budget_usd: f64,
     /// The person lets the builder generate pictures and 3D models (paid, so off until they turn
     /// it on; it also needs a key for an asset provider).
     #[serde(default)]
     pub generate_assets: bool,
+    /// The provider and model, limit and usage start for each asset type, and "Ignore budget".
+    /// The person's, like the master switch above.
+    #[serde(default)]
+    pub assets: ProjectAssets,
     /// The app is the project folder itself: the person's own files, which the builder edits in
     /// place, instead of app/.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -434,6 +467,7 @@ impl Manifest {
         self.app_in_root && self.target == TargetRef::None
     }
 
+    /// Create a new manifest with trimmed request text and paid asset generation disabled.
     fn new(name: &str, request: &str, target: TargetRef) -> Manifest {
         let now = now_ms();
         Manifest {
@@ -451,8 +485,8 @@ impl Manifest {
             agent_session_by: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
-            asset_budget_usd: ASSET_BUDGET_USD,
             generate_assets: false,
+            assets: ProjectAssets::default(),
             app_in_root: false,
             start_files: Vec::new(),
             builder: None,
@@ -468,10 +502,20 @@ impl Manifest {
         self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
     }
 
+    /// What the project has for `kind` when generated assets are on and a provider is chosen for
+    /// it; `None` when the master switch is off or the type is Off.
+    pub fn asset_type_on(&self, kind: AssetKind, s: &AssetSettings) -> Option<TypeAssets> {
+        if !self.generate_assets {
+            return None;
+        }
+        let t = self.assets.effective(kind, s);
+        t.choice.provider.is_some().then_some(t)
+    }
+
     /// Take the fields the person owns from `other` (what's on disk).
     fn take_person_fields(&mut self, other: &Manifest) {
-        self.asset_budget_usd = other.asset_budget_usd;
         self.generate_assets = other.generate_assets;
+        self.assets.clone_from(&other.assets);
         self.allowed_actions = other.allowed_actions.clone();
         self.builder.clone_from(&other.builder);
         self.questions = other.questions;
@@ -481,26 +525,168 @@ impl Manifest {
 
 /// The starting budget for generated assets.
 pub const ASSET_BUDGET_USD: f64 = 5.0;
+/// The starting limit for an asset type billed in credits (Scenario, ElevenLabs).
+pub const ASSET_CREDIT_LIMIT: f64 = 500.0;
+/// The largest budget a project or Settings accepts for generated assets. Defined beside the
+/// asset types in the engines crate, which also refuses a fetched price above it.
+pub use craft_anything_engines::assets::model::MAX_ASSET_BUDGET_USD;
 
-fn default_asset_budget() -> f64 {
-    ASSET_BUDGET_USD
-}
-
-/// One generated asset (a picture or a 3D model) and what it cost.
+/// One paid generation and what it cost, including generations whose output could not be saved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssetRecord {
-    /// Where it was saved, relative to app/.
+    /// Intended destination relative to app/; recording a charge does not guarantee this file exists.
     pub file: String,
-    /// "image" or "model".
+    /// Asset category: image, model, speech, sound or music (see [`AssetKind::ledger_name`]).
     pub kind: String,
     /// What it was made from (the description, or the picture it was made from).
     pub prompt: String,
-    pub cost_usd: f64,
+    /// The provider's id (`fal`, `scenario`, `elevenlabs`). Empty: the generation was recorded
+    /// before the ledger kept providers (`assets.json` version 0), in dollars.
+    pub provider: String,
+    /// The model's id at the provider. Empty for a generation recorded before version 1.
+    pub model: String,
+    /// What the provider reported the generation cost, in `unit`, which may differ from the final
+    /// bill. `None`: it reported nothing usable, or the model has no price to count with.
+    pub amount: Option<f64>,
+    /// What `amount` is counted in; `None` when the provider's unit isn't known either.
+    pub unit: Option<Unit>,
+    /// A cost that should have been read was not: the model had a price, or the provider reported
+    /// one that can't be believed, so the totals understate what it took. A generation of a model
+    /// with no price at all has no amount without this: its usage was never counted in amounts.
+    pub cost_missing: bool,
     pub at_ms: u64,
+}
+
+/// What one asset type has used under the provider and unit it has now (see
+/// [`Workspace::try_type_usage`]).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TypeUsage {
+    /// The sum of the amounts reported, in the type's unit.
+    pub amount: f64,
+    /// How many generations were counted, including those without an amount.
+    pub generations: u32,
+    /// At least one counted generation's cost should have been read and was not (see
+    /// [`AssetRecord::cost_missing`]), so `amount` is a lower bound.
+    pub cost_missing: bool,
 }
 
 /// The list of generated assets, in the workspace folder.
 const ASSETS: &str = "assets.json";
+
+/// The current `assets.json` format version: `{"version": 1, "records": [...]}`. A bare list of
+/// records is version 0. Bumping it means appending a step to [`LEDGER_STEPS`].
+const LEDGER_VERSION: u32 = 1;
+
+/// The steps that bring an older ledger forward; step `i` goes from version `i` to `i + 1`.
+const LEDGER_STEPS: &[versioned::Step<Value>] = &[ledger_v0_to_v1];
+const _: () = assert!(LEDGER_STEPS.len() == LEDGER_VERSION as usize, "one step per assets.json version");
+
+/// Version 1 wraps the records in an object with a version, and each one gains its provider, model,
+/// unit and whether its cost was missing. A version 0 record had only a dollar cost, so it becomes
+/// an amount in dollars of an unknown provider and model. A record without a number for its cost is
+/// damage, never a free generation.
+fn ledger_v0_to_v1(doc: &mut Value) -> Result<(), String> {
+    let Value::Array(items) = doc else { return Err("the ledger isn't a list of records".into()) };
+    let mut records = std::mem::take(items);
+    for item in &mut records {
+        let record = item.as_object_mut().ok_or("a record isn't a JSON object")?;
+        let cost = record.remove("cost_usd").filter(Value::is_number).ok_or("a record has no cost_usd number")?;
+        record.insert("provider".into(), Value::from(""));
+        record.insert("model".into(), Value::from(""));
+        record.insert("amount".into(), cost);
+        record.insert("unit".into(), Value::from("usd"));
+        record.insert("cost_missing".into(), Value::from(false));
+    }
+    *doc = serde_json::json!({"version": 1, "records": records});
+    Ok(())
+}
+
+/// The ledger as it is read: the version is checked before this is built.
+#[derive(Deserialize)]
+struct LedgerFile {
+    records: Vec<AssetRecord>,
+}
+
+/// The ledger as it is written. Always the current version.
+#[derive(Serialize)]
+struct LedgerOut<'a> {
+    version: u32,
+    records: &'a [AssetRecord],
+}
+
+/// Read the bytes of an `assets.json` of any version this build understands. A newer ledger is
+/// refused rather than read as far as its fields are known: spending that can't be counted fully
+/// must not be mistaken for less.
+fn read_ledger(bytes: &[u8]) -> Result<Vec<AssetRecord>, ToolError> {
+    let damaged = || ToolError::invalid("The asset ledger is not valid asset-record JSON.");
+    let mut doc: Value = serde_json::from_slice(bytes).map_err(|_| damaged())?;
+    let found = match &doc {
+        Value::Array(_) => 0,
+        Value::Object(o) => match o.get("version").and_then(Value::as_u64) {
+            Some(n) if n >= 1 => u32::try_from(n).unwrap_or(u32::MAX),
+            _ => return Err(damaged()),
+        },
+        _ => return Err(damaged()),
+    };
+    if found > LEDGER_VERSION {
+        return Err(ToolError::unsupported(format!(
+            "The asset ledger was written by a newer Craft Anything (assets.json version {found}; this one reads up to {LEDGER_VERSION})."
+        ))
+        .with_remediation("Update Craft Anything before generating assets for this project."));
+    }
+    upgrade(&mut doc, found, 0, LEDGER_STEPS).map_err(|e| ToolError::invalid(format!("The asset ledger could not be brought up to date: {e}")))?;
+    let records = serde_json::from_value::<LedgerFile>(doc).map_err(|_| damaged())?.records;
+    asset_total(&records)?;
+    Ok(records)
+}
+
+/// What `kind` has used under `t`: the generations of that kind since the provider was chosen,
+/// at that provider and in that unit. A generation recorded before ledger version 1 has no
+/// provider; it counts only for a type billed in dollars and counted from the start of the project.
+pub fn type_usage(records: &[AssetRecord], kind: AssetKind, t: &TypeAssets) -> TypeUsage {
+    let mut usage = TypeUsage::default();
+    let Some(provider) = t.choice.provider.as_deref() else { return usage };
+    for record in records.iter().filter(|r| r.kind == kind.ledger_name() && r.at_ms >= t.since_ms) {
+        let ours = if record.provider.is_empty() { t.choice.unit == Unit::Usd && t.since_ms == 0 } else { record.provider == provider };
+        if !ours || record.unit.is_some_and(|unit| unit != t.choice.unit) {
+            continue;
+        }
+        usage.generations = usage.generations.saturating_add(1);
+        // No amount, unflagged, is a generation of a model with no price: counted, not missing.
+        usage.amount += record.amount.unwrap_or(0.0);
+        usage.cost_missing |= record.cost_missing;
+    }
+    usage
+}
+
+/// Taken while one paid generation is admitted, run and recorded.
+const ASSETS_LOCK: &str = "assets.lock";
+
+/// Held from a paid generation's budget check until its receipt is written, so processes sharing a
+/// project never admit spending against a stale total or overwrite each other's receipts. It is an
+/// operating-system file lock: the system releases it when the holder exits, even after a crash.
+#[derive(Debug)]
+pub struct SpendLock {
+    _file: std::fs::File,
+}
+
+/// Bound untrusted ledger reads, including files that grow after opening.
+const MAX_ASSET_LEDGER_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Validate every recorded charge and reject totals that overflow instead of understating
+/// spending. An amount needs the unit it is counted in. Returns the sum of all amounts whatever
+/// their units, which is meaningful only as an overflow guard: dollars and credits are never added
+/// up for the person (see [`type_usage`], which counts one type in one unit).
+fn asset_total(records: &[AssetRecord]) -> Result<f64, ToolError> {
+    records.iter().try_fold(0.0, |spent, record| {
+        let amount = record.amount.unwrap_or(0.0);
+        let total = spent + amount;
+        if !amount.is_finite() || amount < 0.0 || !total.is_finite() || (record.amount.is_some() && record.unit.is_none()) {
+            return Err(ToolError::invalid("The asset ledger contains an invalid charge or overflowing total."));
+        }
+        Ok(total)
+    })
+}
 
 /// What a project's builds have taken and used, every run together (`usage.json`). The rebuild
 /// run is its only writer; everything else reads it.
@@ -648,6 +834,16 @@ impl Workspace {
     /// questions or usage. An app edited in place is copied into the copy's app/. What a build
     /// makes again (dependencies, compiler output) is left out.
     pub fn duplicate(&self, name: &str) -> Result<Workspace, ToolError> {
+        self.copy_as(name, true)
+    }
+
+    /// The same copy as [`Self::duplicate`] with generated assets off, for a copy an AI asked for:
+    /// they spend the person's money, so only the person turns them on in the copy.
+    pub fn duplicate_assets_off(&self, name: &str) -> Result<Workspace, ToolError> {
+        self.copy_as(name, false)
+    }
+
+    fn copy_as(&self, name: &str, keep_generation: bool) -> Result<Workspace, ToolError> {
         let parent = self.root.parent().ok_or_else(|| ToolError::invalid(format!("{} has no parent folder to copy it into.", self.root.display())))?;
         let m = &self.manifest;
         let mut copy = Workspace::create(parent, name, &m.request, m.target.clone())?;
@@ -668,11 +864,10 @@ impl Workspace {
         // Ready stays ready; anything else can carry on (with a new conversation).
         copy.manifest.status = if m.status == Status::Ready { Status::Ready } else { Status::Stopped };
         copy.save()?;
-        let (budget, generate, builder, allowed, questions) =
-            (m.asset_budget_usd, m.generate_assets, m.builder.clone(), m.allowed_actions.clone(), m.questions);
+        let (generate, builder, allowed, questions) = (m.generate_assets && keep_generation, m.builder.clone(), m.allowed_actions.clone(), m.questions);
         copy.set_person(|c| {
-            c.asset_budget_usd = budget;
             c.generate_assets = generate;
+            c.assets.clone_from(&m.assets);
             c.builder = builder;
             c.allowed_actions = allowed;
             c.questions = questions;
@@ -776,9 +971,9 @@ impl Workspace {
         self.write_manifest(&m)
     }
 
-    /// Change the fields the person owns (the asset budget, whether assets are generated, the
-    /// actions always allowed): start from what's on disk, apply `f` and save. This is the only
-    /// way they change.
+    /// Change the fields the person owns (the asset choices and limits, whether assets are
+    /// generated, the actions always allowed): start from what's on disk, apply `f` and save. This
+    /// is the only way they change.
     pub fn set_person(&mut self, f: impl FnOnce(&mut Manifest)) -> Result<(), ToolError> {
         if let Ok(disk) = Workspace::open(&self.root) {
             self.manifest.take_person_fields(&disk.manifest);
@@ -797,6 +992,20 @@ impl Workspace {
         }
         let bytes = serde_json::to_vec_pretty(m).map_err(|e| ToolError::internal(e.to_string()))?;
         write_atomic(&self.root.join(MANIFEST), &bytes)
+    }
+
+    /// Store what a project from before version 4 still takes from Settings for its asset types
+    /// (see [`ProjectAssets::keep_effective`]), through [`Self::set_person`], so changing Settings'
+    /// defaults later never changes this project. Done the first time this build opens the project
+    /// to work on it; a read-only project (made by a newer build) and one with every type stored
+    /// are left alone. Returns whether it saved.
+    pub fn keep_asset_defaults(&mut self, s: &AssetSettings) -> Result<bool, ToolError> {
+        if self.is_read_only() || !self.manifest.assets.follows_settings() {
+            return Ok(false);
+        }
+        let mut changed = false;
+        self.set_person(|m| changed = m.assets.keep_effective(s))?;
+        Ok(changed)
     }
 
     /// Set the status and note, and save.
@@ -847,9 +1056,34 @@ impl Workspace {
         copy_pictures(&self.reference_dir(), files).map(|v| v.len())
     }
 
-    /// Every generated asset so far, oldest first.
+    /// Best-effort display of generated assets, oldest first; use `try_assets` for accounting.
     pub fn assets(&self) -> Vec<AssetRecord> {
-        std::fs::read(self.root.join(ASSETS)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        self.try_assets().unwrap_or_default()
+    }
+
+    /// Read and validate a regular-file asset ledger without changing it. Only an absent directory entry
+    /// means no spending; links and special files are rejected before opening them. A version 0
+    /// ledger (a bare list) is read as dollars of an unknown provider; a newer one is refused.
+    pub fn try_assets(&self) -> Result<Vec<AssetRecord>, ToolError> {
+        let path = self.root.join(ASSETS);
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(ToolError::io(path.display(), e)),
+        };
+        if !metadata.is_file() {
+            return Err(ToolError::invalid("The asset ledger must be a regular file, not a link, directory or special file."));
+        }
+        let file = std::fs::File::open(&path).map_err(|e| ToolError::io(path.display(), e))?;
+        if !file.metadata().map_err(|e| ToolError::io(path.display(), e))?.is_file() {
+            return Err(ToolError::invalid("The opened asset ledger is not a regular file."));
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_ASSET_LEDGER_BYTES + 1).read_to_end(&mut bytes).map_err(|e| ToolError::io(path.display(), e))?;
+        if bytes.len() as u64 > MAX_ASSET_LEDGER_BYTES {
+            return Err(ToolError::new(ErrorCode::OverLimit, "The asset ledger exceeds the 64 MiB reading limit."));
+        }
+        read_ledger(&bytes)
     }
 
     /// What the builds have taken and used so far.
@@ -857,17 +1091,52 @@ impl Workspace {
         ProjectUsage::load(&self.root)
     }
 
-    /// What generated assets have cost so far.
-    pub fn assets_spent(&self) -> f64 {
-        // A fold from 0.0: an empty `sum()` of floats is -0.0, which prints as "$-0.00".
-        self.assets().iter().fold(0.0, |spent, a| spent + a.cost_usd)
+    /// What `kind` has used under the choice, limit period and unit in `t`: see [`TypeUsage`]. A
+    /// generation counts when it is of that kind, at that provider, in that unit and since
+    /// `t.since_ms`. Unreadable, malformed or newer ledgers fail closed.
+    pub fn try_type_usage(&self, kind: AssetKind, t: &TypeAssets) -> Result<TypeUsage, ToolError> {
+        Ok(type_usage(&self.try_assets()?, kind, t))
     }
 
-    /// Add a generated asset to the list.
+    /// Take the project's spending lock, waiting up to `wait` for another process's generation to
+    /// finish. Every paid generation holds it from its budget check until its receipt is written.
+    pub fn lock_spending(&self, wait: std::time::Duration) -> Result<SpendLock, ToolError> {
+        let path = self.root.join(ASSETS_LOCK);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if !metadata.is_file() => {
+                return Err(ToolError::invalid("The asset spending lock must be a regular file, not a link, directory or special file."));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(ToolError::io(path.display(), e)),
+        }
+        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).map_err(|e| ToolError::io(path.display(), e))?;
+        let start = std::time::Instant::now();
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(SpendLock { _file: file }),
+                Err(std::fs::TryLockError::WouldBlock) if start.elapsed() < wait => {
+                    std::thread::sleep(std::time::Duration::from_millis(100).min(wait));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(ToolError::new(ErrorCode::TimedOut, "Another asset generation for this project is still running.")
+                        .with_remediation("Wait for it to finish, then try again: one project's paid generations run one at a time."));
+                }
+                Err(std::fs::TryLockError::Error(e)) => return Err(ToolError::io(path.display(), e)),
+            }
+        }
+    }
+
+    /// Add a paid generation receipt, preserving an unreadable ledger and rejecting invalid charges.
+    /// Callers hold [`Workspace::lock_spending`] so no other process writes the ledger meanwhile.
     pub fn record_asset(&self, rec: AssetRecord) -> Result<(), ToolError> {
-        let mut all = self.assets();
+        let mut all = self.try_assets()?;
         all.push(rec);
-        let json = serde_json::to_vec_pretty(&all).map_err(|e| ToolError::internal(e.to_string()))?;
+        asset_total(&all)?;
+        let json = serde_json::to_vec_pretty(&LedgerOut { version: LEDGER_VERSION, records: &all }).map_err(|e| ToolError::internal(e.to_string()))?;
+        if json.len() as u64 > MAX_ASSET_LEDGER_BYTES {
+            return Err(ToolError::new(ErrorCode::OverLimit, "The asset ledger would exceed the 64 MiB reading limit."));
+        }
         write_atomic(&self.root.join(ASSETS), &json)
     }
 
@@ -947,6 +1216,7 @@ pub const OWN_NAMES: &[&str] = &[
     ACTIVITY_LOG,
     ACTIVITY_LOG_OLD,
     ASSETS,
+    ASSETS_LOCK,
     "transcript.json",
     "extract-transcript.json",
     AGENT_SESSION_FILE,
@@ -1210,6 +1480,133 @@ pub fn default_projects_dir() -> PathBuf {
 mod tests {
     use super::*;
 
+    /// Construct a receipt independently of provider APIs for ledger validation tests.
+    fn asset_receipt(cost_usd: f64) -> AssetRecord {
+        AssetRecord {
+            file: "picture.png".into(),
+            kind: "image".into(),
+            prompt: "a crate".into(),
+            provider: "fal".into(),
+            model: "fal-ai/flux/dev".into(),
+            amount: Some(cost_usd),
+            unit: Some(Unit::Usd),
+            cost_missing: false,
+            at_ms: 0,
+        }
+    }
+
+    /// The bytes of a version 1 ledger holding `records`.
+    fn ledger_bytes(records: &[AssetRecord]) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({"version": 1, "records": records})).unwrap()
+    }
+
+    /// A missing ledger is empty, but malformed JSON and invalid totals must never be overwritten.
+    #[test]
+    fn checked_asset_ledger_preserves_invalid_bytes_and_accepts_first_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        assert!(ws.try_assets().unwrap().is_empty());
+        ws.record_asset(asset_receipt(0.5)).unwrap();
+        assert_eq!(ws.try_assets().unwrap().len(), 1);
+        let path = ws.root.join(ASSETS);
+        for bytes in [b"broken JSON".to_vec(), ledger_bytes(&[asset_receipt(-1.0)]), ledger_bytes(&[asset_receipt(f64::MAX), asset_receipt(f64::MAX)])] {
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(ws.try_assets().is_err());
+            assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(ws.try_assets().is_err());
+        assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+        assert!(path.is_dir());
+    }
+
+    /// The spending lock is exclusive across handles to the same project, bounded while another
+    /// holder keeps it, released when dropped, and refuses a lock path that isn't a regular file.
+    #[test]
+    fn the_spending_lock_is_exclusive_bounded_and_released() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Game", "A game", TargetRef::None).unwrap();
+        let held = ws.lock_spending(std::time::Duration::ZERO).unwrap();
+        // Another handle stands for another process: separate opens of the same file conflict.
+        let other = Workspace::open(&ws.root).unwrap();
+        let start = std::time::Instant::now();
+        let busy = other.lock_spending(std::time::Duration::from_millis(250)).unwrap_err();
+        assert_eq!(busy.code, ErrorCode::TimedOut);
+        assert!(start.elapsed() >= std::time::Duration::from_millis(250), "it waited for the holder");
+        drop(held);
+        other.lock_spending(std::time::Duration::ZERO).unwrap();
+        assert!(ws.is_own_record(&ws.root.join(ASSETS_LOCK)), "the lock is one of the project's own records");
+        let d2 = tempfile::tempdir().unwrap();
+        let ws2 = Workspace::create(d2.path(), "Game", "A game", TargetRef::None).unwrap();
+        std::fs::create_dir(ws2.root.join(ASSETS_LOCK)).unwrap();
+        assert_eq!(ws2.lock_spending(std::time::Duration::ZERO).unwrap_err().code, ErrorCode::BadInput);
+    }
+
+    /// New invalid charges and an overflowing append cannot damage an existing valid ledger.
+    #[test]
+    fn asset_receipts_reject_invalid_costs_and_overflow_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        ws.record_asset(asset_receipt(f64::MAX)).unwrap();
+        let original = std::fs::read(ws.root.join(ASSETS)).unwrap();
+        for cost in [f64::NAN, f64::INFINITY, -1.0, f64::MAX] {
+            assert!(ws.record_asset(asset_receipt(cost)).is_err());
+            assert_eq!(std::fs::read(ws.root.join(ASSETS)).unwrap(), original);
+        }
+    }
+
+    /// Sparse oversized ledgers are refused and preserved instead of being read without a bound.
+    #[test]
+    fn oversized_asset_ledger_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        let path = ws.root.join(ASSETS);
+        std::fs::File::create(&path).unwrap().set_len(MAX_ASSET_LEDGER_BYTES + 1).unwrap();
+        assert_eq!(ws.try_assets().unwrap_err().code, ErrorCode::OverLimit);
+        assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+        assert_eq!(std::fs::metadata(path).unwrap().len(), MAX_ASSET_LEDGER_BYTES + 1);
+    }
+
+    /// Both dangling and live ledger links are rejected without replacing the link or touching its target.
+    #[cfg(unix)]
+    #[test]
+    fn asset_ledger_links_are_not_empty_or_replaced() {
+        for target_exists in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+            let target = dir.path().join("target.json");
+            if target_exists {
+                std::fs::write(&target, b"[]").unwrap();
+            }
+            let ledger = ws.root.join(ASSETS);
+            std::os::unix::fs::symlink(&target, &ledger).unwrap();
+            assert!(ws.try_assets().is_err());
+            assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+            assert_eq!(std::fs::read_link(&ledger).unwrap(), target);
+            assert_eq!(target.exists(), target_exists);
+            if target_exists {
+                assert_eq!(std::fs::read(target).unwrap(), b"[]");
+            }
+        }
+    }
+
+    /// Special ledger entries are rejected by metadata before opening, and cannot be replaced by a receipt.
+    #[cfg(unix)]
+    #[test]
+    fn nonregular_asset_ledger_is_rejected_before_opening() {
+        use std::os::unix::fs::FileTypeExt;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(dir.path(), "Game", "Build", TargetRef::None).unwrap();
+        let ledger = ws.root.join(ASSETS);
+        let _socket = std::os::unix::net::UnixListener::bind(&ledger).unwrap();
+        let err = ws.try_assets().unwrap_err();
+        assert!(err.message.contains("must be a regular file"));
+        assert!(ws.record_asset(asset_receipt(0.2)).is_err());
+        assert!(std::fs::symlink_metadata(ledger).unwrap().file_type().is_socket());
+    }
+
     #[test]
     fn a_message_takes_picture_files_up_to_20_mb() {
         let dir = tempfile::tempdir().unwrap();
@@ -1322,16 +1719,21 @@ mod tests {
         assert_eq!(ProjectUsage::load(dir.path()).work_ms, 5, "read as far as it's known, never written over");
     }
 
+    /// Saving stale build progress must preserve the latest limits, choices and approvals on disk.
     #[test]
     fn a_run_holding_an_old_copy_keeps_the_persons_changes() {
+        use crate::settings::AssetSettings;
+        let settings = AssetSettings::default();
         let dir = tempfile::tempdir().unwrap();
         let mut run = Workspace::create(dir.path(), "game", "A snake game", TargetRef::None).unwrap();
-        // While the run works, the person raises the budget, turns assets on and always allows npm.
+        // While the run works, the person raises a limit, turns assets on, ignores the budget and
+        // always allows npm.
         let mut person = Workspace::open(&run.root).unwrap();
         person
             .set_person(|m| {
-                m.asset_budget_usd = 20.0;
+                m.assets.set_limit(AssetKind::Image, Some(20.0), Some(false), &settings).unwrap();
                 m.generate_assets = true;
+                m.assets.ignore_budget = true;
                 m.allowed_actions.push("bash:npm".into());
             })
             .unwrap();
@@ -1340,13 +1742,51 @@ mod tests {
         run.manifest.note = "Building".into();
         run.save().unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
-        assert_eq!((disk.asset_budget_usd, disk.generate_assets), (20.0, true));
+        let image = disk.assets.effective(AssetKind::Image, &settings);
+        assert_eq!((image.limit, image.limit_on, disk.generate_assets, disk.assets.ignore_budget), (20.0, false, true, true));
         assert_eq!(disk.allowed_actions, ["bash:npm"]);
         assert_eq!((disk.status, disk.note.as_str()), (Status::Building, "Building"), "the run's own fields are saved");
         // A setter on the old copy starts from what's on disk too.
-        run.set_person(|m| m.asset_budget_usd = 25.0).unwrap();
+        run.set_person(|m| m.assets.set_limit(AssetKind::Image, Some(25.0), None, &settings).unwrap()).unwrap();
         let disk = Workspace::open(&run.root).unwrap().manifest;
-        assert_eq!((disk.asset_budget_usd, disk.generate_assets), (25.0, true));
+        let image = disk.assets.effective(AssetKind::Image, &settings);
+        assert_eq!((image.limit, image.limit_on, disk.generate_assets, disk.assets.ignore_budget), (25.0, false, true, true));
+    }
+
+    /// A project from before each type had its own choice opens at the current version, and a
+    /// project's choices, limits and master switch survive copying it.
+    #[test]
+    fn asset_choices_survive_duplication() {
+        use crate::asset_choice::AssetChoice;
+        use crate::settings::AssetSettings;
+        use craft_anything_engines::assets::model::{Pricing, Unit};
+        let old = br#"{"version":2,"name":"Old","request":"x","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true}"#;
+        let m = read_manifest(old).unwrap();
+        assert_eq!((m.version, m.generate_assets), (MANIFEST_VERSION, true));
+        assert!(m.assets.legacy_providers.is_none() && m.assets.types.is_empty(), "nothing is chosen until the person chooses");
+
+        let settings = AssetSettings::default();
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "Original", "x", TargetRef::None).unwrap();
+        let choice = AssetChoice {
+            provider: Some("scenario".into()),
+            model: "m".into(),
+            model_name: "M".into(),
+            unit: Unit::Credits,
+            pricing: Pricing::After { unit: Unit::Credits },
+        };
+        ws.set_person(|m| {
+            m.generate_assets = true;
+            m.assets.choose(AssetKind::Music, choice.clone(), &settings, 7);
+            m.assets.set_limit(AssetKind::Music, Some(40.0), Some(false), &settings).unwrap();
+        })
+        .unwrap();
+        let copy = ws.duplicate("Copy").unwrap();
+        let saved = Workspace::open(&copy.root).unwrap().manifest;
+        assert!(saved.generate_assets);
+        let music = saved.assets.effective(AssetKind::Music, &settings);
+        assert_eq!((music.choice, music.limit, music.limit_on), (choice, 40.0, false));
+        assert_eq!(saved.assets, ws.manifest.assets);
     }
 
     #[test]
@@ -1463,7 +1903,7 @@ mod tests {
         let ws = Workspace::open(dir.path()).unwrap();
         assert_eq!(ws.manifest.version, MANIFEST_VERSION);
         assert_eq!(ws.manifest.status, Status::Ready);
-        assert_eq!(ws.manifest.asset_budget_usd, ASSET_BUDGET_USD);
+        assert_eq!(ws.manifest.assets, ProjectAssets::default(), "a project that never chose has nothing stored");
         assert!(!ws.manifest.generate_assets, "assets are generated only once the person turns it on");
         assert!(ws.manifest.checks[0].passed && !ws.is_read_only());
         ws.save().unwrap();

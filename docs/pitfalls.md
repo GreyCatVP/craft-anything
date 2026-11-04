@@ -71,6 +71,11 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 
 ## Tests
 
+**An accepted socket inherited nonblocking mode on another platform.** A local test server
+polled a nonblocking listener, then assumed its accepted streams would block while reading.
+Set each accepted stream's mode explicitly before reading and retain its read timeout; Linux
+and BSD-derived systems differ in whether the listener's flags are inherited.
+
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
 created folders in the real config directory (`Session::default()` uses it).
@@ -105,6 +110,11 @@ reached `main`. Run with `--no-fail-fast`, and after a fix rerun the whole crate
 **A test that changes the whole process.** A UI test raised the process-wide stuck-lock banner; in
 CI the banner moved the layout under another test running beside it, and its click missed. It passed
 25 runs on a Mac. Anything a test sets for the whole process goes in a test program of its own.
+
+**A click that closed the window it was meant for.** `egui_kittest`'s `scroll_to_me()` takes three
+frames to scroll a Settings tab, not one; a click after two went to where the widget had been, outside
+the window, and the modal closed with the test still "running". The reported rect lags the scroll too.
+After `scroll_to_me()`, run three steps before the click, and check the widget's rect when a click does nothing.
 
 **Fixtures that leak into each other.** A "nothing here" path sat beside a fake game folder in the
 same temp directory, and game detection walked up and found the game. Give each case its own
@@ -351,6 +361,15 @@ edit, right before committing.
 
 ## Design
 
+**A damaged spending ledger looked like an empty project.** Budget authorization must use a
+checked ledger read; only a missing ledger is empty. Never overwrite an unreadable history with
+a new row. After a provider returns, record its reported cost before publishing its output:
+rejecting a late cost overrun or deleting an output cannot undo an expense already incurred.
+Surface the error, retain known spending and stop any following paid stage instead of hiding it.
+A failure after the provider accepted the work is an expense too: a failed job or download that
+returned only an error left no receipt, so retries passed the budget check. Mark such failures with
+`assets::charged` and record them like a returned cost.
+
 **An early error without a terminal event.** Model validation returned after reporting an error,
 but headless chat waits for `TurnDone`, not just an idle worker. Preflight failures and cancellation
 must finish the event sequence too; regression tests check both the error/status and the terminal event.
@@ -443,6 +462,21 @@ a note, a log line), and test the success path end to end, not just the picking.
 The fix then made the check create `checks/round-N/routes/` first, which made `round-N` exist, and
 `web_site_capture` (which refuses an existing folder) stopped the run. Create a tool's output parent
 right before that tool runs, never a folder that another tool must create itself.
+
+**A popup list that could shrink but not grow.** egui sizes a popup from its last frame, and a
+`ScrollArea` inside it gets only the height that is left. The model picker has a search box above its
+list: a search that matched nothing shrank the popup to one row, and when it matched again the rows were
+laid out below the popup's edge, where they could not be hovered or clicked (no single frame was wrong,
+and the screen looked fine). Give a list in a popup a fixed height (`min_scrolled_height` equal to
+`max_height`, `auto_shrink` off) and test a search that empties the list and then fills it again.
+
+**Esc in a single-line field took the person back to Home.** egui drops the focus of a single-line
+text field when Esc is pressed, before our `shortcuts` runs, and `shortcuts` reads "no field has focus"
+as "go back to Home" (its test for "Esc was meant for a text field" only holds for a field that asked
+egui to keep Esc). The project panel's limit field would have thrown away what was typed and left the
+project; a test that pressed Esc in it found that. A field where Esc means "cancel my edit" sets
+`memory.set_focus_lock_filter(id, EventFilter { escape: true, .. })` after adding the `TextEdit` (which
+sets its own filter each frame, so a call before it is overwritten) and gives up its own focus.
 
 **A size measured after drawing, used a frame late.** The prompt box's height was measured each
 frame and used to size the feed on the next, so every time it grew or shrank one frame showed it
@@ -599,6 +633,13 @@ computer (and under the folder) that started it; a project synced to another com
 three more times. Anything a project keeps must still work where the folder goes: keep what the id
 points to as well (`agent-session.jsonl`), tell "not here" apart from a failure by a typed signal
 (`Conversation::session_lost`), and never retry what can't succeed.
+
+**A price with its number inside the key, and a title lowercased.** The model picker passed
+"$0.15 a picture" whole to `tr`, so no catalog could ever hold it and every price stayed English; the
+list's "no provider makes {type}" note lowercased a translated title, which is wrong for German nouns.
+Neither failed a test or `cargo xtask i18n-coverage`, which sees only literal keys. Translate the
+words around a number and leave the number (`price_words`), give a mid-sentence noun its own catalog
+entry (`type_noun`), and check each language's words through `tr` in `tests/i18n.rs`, not by eye.
 
 **An installer that downloaded what was already there.** Ghidra was found only on PATH and at two
 Linux folders, so an unzipped copy in Downloads, Program Files or a Homebrew cask was missed, and

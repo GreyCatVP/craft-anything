@@ -1,7 +1,9 @@
 //! Keep locale-changing UI checks in one integration-test executable: i18n is process-wide.
 
 use craft_anything_engine::{Mode, Session, Settings};
-use craft_anything_ui_egui::{CraftApp, demo, i18n};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+use craft_anything_ui_egui::{CraftApp, asset_picker, demo, i18n};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use std::path::Path;
@@ -51,7 +53,6 @@ fn chinese_startup_language_menu_and_saved_selection() {
         assert_eq!(i18n::trf("Opened {name}", &[("name", "sample.exe")]), translated_open);
         assert_eq!(i18n::tr("A deliberately uncatalogued message"), "A deliberately uncatalogued message");
         assert_eq!(i18n::trf("Uncatalogued {name}", &[("name", "sample.exe")]), "Uncatalogued sample.exe");
-        assert_eq!(craft_anything_ui_egui::usage::asset_cost_words(0.0031), if initial == "zh-hans" { "低于 $0.01" } else { "低於 $0.01" });
         let kinds = craft_anything_ai::rebuild::KindRegistry::built_in();
         for (suggestion, expected) in [("A website for my bakery", "website"), ("A simple snake game", "game")] {
             let translated = i18n::tr(suggestion);
@@ -129,6 +130,48 @@ fn chinese_startup_language_menu_and_saved_selection() {
         assert_eq!(i18n::language(), code);
         existing.get_by_label(label);
         existing.get_by_value(native);
+    }
+    // What a model costs, how long ago the lists were read and what the asset types are called: the
+    // words around a number follow the language, the number stays.
+    for code in ["zh-hans", "zh-hant", "ru", "ko", "cs", "de", "fr", "ja"] {
+        i18n::set_language(code);
+        let credits = Pricing::Before { unit: Unit::Credits, rate: Rate::PerRequest(20.0) };
+        let said = asset_picker::price_words(&credits, AssetKind::Image);
+        assert!(said.starts_with("20 ") && said != "20 credits a picture", "{code}: {said}");
+        let dollars = Pricing::Before { unit: Unit::Usd, rate: Rate::PerMegapixel(0.003) };
+        let said = asset_picker::price_words(&dollars, AssetKind::Image);
+        assert!(said.starts_with("$0.003 ") && said != "$0.003 a megapixel", "{code}: {said}");
+        for fixed in [Pricing::Unknown, Pricing::After { unit: Unit::Usd }, Pricing::Before { unit: Unit::Usd, rate: Rate::Quoted { typical: None } }] {
+            assert_ne!(asset_picker::price_words(&fixed, AssetKind::Image), fixed.shown(AssetKind::Image), "{code}");
+        }
+        // Every kind with every shape of price, in both units: worded in the language, the number as it is.
+        let rates = [
+            Rate::PerRequest(0.15),
+            Rate::PerRequest(0.001),
+            Rate::PerRequest(1.0),
+            Rate::PerMegapixel(0.003),
+            Rate::PerSecond(2.5),
+            Rate::PerCharacter(0.0001),
+            Rate::Quoted { typical: Some(20.0) },
+            Rate::Quoted { typical: Some(0.001) },
+        ];
+        for kind in AssetKind::ALL {
+            for unit in [Unit::Usd, Unit::Credits] {
+                for rate in &rates {
+                    let pricing = Pricing::Before { unit, rate: rate.clone() };
+                    let english = pricing.shown(kind);
+                    let said = asset_picker::price_words(&pricing, kind);
+                    assert_ne!(said, english, "{code}: {kind:?} {english}");
+                    let number = english.split(' ').find(|word| word.chars().any(|c| c.is_ascii_digit())).unwrap_or_default();
+                    assert!(!number.is_empty() && said.contains(number), "{code}: {kind:?} {english:?} became {said:?}, which lost {number:?}");
+                }
+            }
+        }
+        for kind in AssetKind::ALL {
+            assert_ne!(i18n::tr(asset_picker::type_title(kind)), asset_picker::type_title(kind), "{code}: {kind:?}");
+        }
+        assert_ne!(asset_picker::type_noun(AssetKind::Image), "pictures", "{code}");
+        assert_ne!(asset_picker::ago(150 * 60_000, 0), "2 hours ago", "{code}");
     }
     i18n::set_language("unsupported-locale");
     assert_eq!(i18n::language(), "en");

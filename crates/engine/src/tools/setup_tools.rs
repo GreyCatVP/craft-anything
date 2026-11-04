@@ -38,7 +38,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "settings_show",
             title: "Show settings",
-            summary: "The current settings as JSON (mode, Auto mode, Deep mode/Ghidra, engine paths, projects folder, asset budget and picture model, AI backends). API keys are never in settings.",
+            summary: "The current settings as JSON (mode, Auto mode, Deep mode/Ghidra, engine paths, projects folder, generated-asset defaults and limits per type, AI backends). API keys are never in settings.",
             beginner: "Shows your settings.",
             toolset: Toolset::Setup,
             effects: Effects::READ_ONLY,
@@ -49,7 +49,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "settings_set",
             title: "Change a setting",
-            summary: "Set one setting by its dotted key from settings_show (`auto_mode`, `deep_mode`, `projects_dir`, `assets.budget_usd`…) to a JSON value, then save. Unknown keys and values of the wrong type are refused, and nothing is written.",
+            summary: "Set one setting by its dotted key from settings_show (`auto_mode`, `deep_mode`, `projects_dir`, `build.good_enough`…) to a JSON value, then save. Unknown keys and values of the wrong type are refused, and nothing is written. Keys under `assets.` (generated-asset defaults, limits and Ignore budget) are the person's: an AI client is refused for them.",
             beginner: "Changes one of your settings.",
             toolset: Toolset::Setup,
             effects: Effects::WRITES_FILESYSTEM.union(Effects::MUTATES_SESSION),
@@ -510,8 +510,20 @@ pub fn with_setting(settings: &Settings, key: &str, value: Value) -> Result<Sett
     Ok(next)
 }
 
+/// Whether `key` is in the asset settings (`assets`, `assets.usd_limit`, ...): the limits, defaults
+/// and "Ignore budget" every new or unchosen type starts from.
+fn is_asset_setting(key: &str) -> bool {
+    key.split('.').next().map(str::trim) == Some("assets")
+}
+
 fn settings_set(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: SetParams = parse_params(params)?;
+    // Raising a default limit, or ignoring the budget, loosens spending for every project and type that
+    // hasn't chosen its own, and Settings has no project inbox to ask in: the person does it.
+    if is_asset_setting(&p.key) && matches!(ctx.caller, crate::Caller::Agent | crate::Caller::Mcp) {
+        return Err(ToolError::new(ErrorCode::NoPermission, "Asset limits, defaults and Ignore budget are the person's to change, not an AI's.")
+            .with_remediation("The person changes asset settings in the Craft Anything app (Settings → Builds)."));
+    }
     let next = with_setting(&ctx.session.settings, &p.key, p.value)?;
     let path = ctx.session.config_dir().join("config.toml");
     next.save_to(&path)?;
@@ -536,6 +548,48 @@ mod tests {
         assert!(with_setting(&s, "version", json!(9)).is_err());
         assert!(with_setting(&s, "auto_mode.inner", json!(1)).is_err());
         assert!(with_setting(&s, "", json!(1)).is_err());
+    }
+
+    /// The asset limits, defaults and Ignore budget are the person's: an AI can't raise them for every
+    /// project, since Settings has no project inbox to ask in. Other settings are unchanged.
+    #[test]
+    fn an_ai_cannot_change_the_asset_settings_and_the_person_can() {
+        let s = crate::testing::session();
+        let config = s.config_dir().join("config.toml");
+        let e = Engine::new(s);
+        let set = |caller: Caller, key: &str, value: Value| {
+            e.call("settings_set", json!({"key": key, "value": value}), CallOptions::new(caller)).map(|o| o.to_json()["result"].clone())
+        };
+        for caller in [Caller::Agent, Caller::Mcp] {
+            for (key, value) in [
+                ("assets.credit_limit", json!(9_000_000.0)),
+                ("assets.usd_limit", json!(9_000.0)),
+                ("assets.ignore_budget", json!(true)),
+                (" assets . usd_limit", json!(1.0)),
+                ("assets", json!({"usd_limit": 9_000.0})),
+            ] {
+                let err = set(caller, key, value).expect_err("an AI changing asset settings");
+                assert_eq!(err.code, ErrorCode::NoPermission, "{caller:?} {key}: {err:?}");
+                assert!(err.remediation.as_deref().is_some_and(|r| r.contains("Craft Anything app") && !r.contains("CLI")), "{err:?}");
+            }
+        }
+        assert!(!config.exists(), "nothing was saved");
+        // The person (the CLI, the app) can, and an AI can still change other settings.
+        assert!(set(Caller::Cli, "assets.usd_limit", json!(12.0)).is_ok());
+        assert!(set(Caller::Ui, "assets.ignore_budget", json!(true)).is_ok());
+        assert!(set(Caller::Agent, "build.good_enough", json!(80.0)).is_ok(), "other settings stay open to an AI");
+        let saved = std::fs::read_to_string(&config).unwrap();
+        assert!(saved.contains("usd_limit = 12.0") && saved.contains("ignore_budget = true"), "{saved}");
+        // The tool's summary offers only keys an AI may set, and says the asset ones are refused.
+        let summary = e.registry().get("settings_set").unwrap().summary;
+        let examples: Vec<&str> = summary.split('`').skip(1).step_by(2).filter(|k| !k.ends_with('.')).collect();
+        assert!(examples.len() >= 3, "{summary}");
+        for key in examples {
+            assert!(!is_asset_setting(key), "{key} is offered as an example to an AI: {summary}");
+            let known = with_setting(&Settings::default(), key, json!(null)).map_or_else(|e| !e.message.starts_with("There's no setting"), |_| true);
+            assert!(known, "{key} is a real key");
+        }
+        assert!(summary.contains("`assets.`") && summary.contains("AI client is refused"), "{summary}");
     }
 
     #[test]

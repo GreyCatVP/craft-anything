@@ -60,7 +60,9 @@ fn consumed_notes_wait_for_turn_done_before_accessing_progress() {
             polls: 0,
             sends: 0,
         };
-        let result = worker.turn_with_wait(&mut ws, &mut agent, "Apply the notes", None, |_, _| panic!("a local record cannot retry the builder"));
+        let result = worker.turn_with_wait(&mut ws, &mut agent, kind("app").as_ref(), &BuilderPrompt::Message("Apply the notes".into()), None, |_, _| {
+            panic!("a local record cannot retry the builder")
+        });
         assert_eq!(result.unwrap(), "Finished the edit");
         assert_eq!((agent.sends, agent.polls), (1, 2), "keep polling the existing request until TurnDone");
         assert!(!agent.is_busy());

@@ -4,10 +4,13 @@
 use crate::state::{CenterTab, ChatItem, Fill, RailKind, RightTab, Screen};
 use crate::{CraftApp, TargetInfo};
 use craft_anything_ai::{AiHub, BackendConfig, BackendKind, Detected};
+use craft_anything_engine::asset_choice::AssetChoice;
 use craft_anything_engine::evidence::{Confidence, Coverage, Environment, Evidence, EvidenceBuilder, Limitation, Location, Severity, Unknown};
 use craft_anything_engine::target::Target;
-use craft_anything_engine::workspace::{CheckResult, Claim, Manifest, Status, TargetRef, Workspace};
+use craft_anything_engine::workspace::{CheckResult, Claim, Manifest, ProjectAssets, Status, TargetRef, TypeAssets, TypeUsage, Workspace};
 use craft_anything_engine::{Engine, Mode, Session, Settings};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -213,6 +216,7 @@ pub fn detected() -> Vec<Detected> {
     ]
 }
 
+/// Construct an in-memory demo project with the requested age and generated assets disabled.
 fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: Status, age_min: u64) -> Workspace {
     let at = craft_anything_engine::inbox::now_ms().saturating_sub(age_min * 60_000);
     Workspace {
@@ -232,8 +236,8 @@ fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: S
             agent_session_by: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
-            asset_budget_usd: craft_anything_engine::workspace::ASSET_BUDGET_USD,
             generate_assets: false,
+            assets: Default::default(),
             app_in_root: false,
             start_files: Vec::new(),
             builder: None,
@@ -309,11 +313,58 @@ pub fn fill_project(app: &mut CraftApp) {
             answer: None,
         },
     ];
+    let (assets, asset_usage) = project_assets();
+    ws.manifest.generate_assets = true;
+    ws.manifest.assets = assets;
     app.facts = crate::project::Facts {
         root: ws.root.clone(),
+        asset_usage,
         open_questions: vec!["May the original's logo and text be reused, or must they be placeholders?".into()],
         ..Default::default()
     };
     app.workspace = Some(ws);
     app.state.screen = Screen::Project;
+}
+
+/// A project's generated assets as the panel shows them: pictures and 3D models at Scenario (credits),
+/// speech priced only after each run, sound effects whose price is unknown, and music off; with what
+/// the first three have used.
+fn project_assets() -> (ProjectAssets, std::collections::BTreeMap<AssetKind, crate::project::CountedUsage>) {
+    let choice = |provider: &str, model: &str, name: &str, unit, pricing| AssetChoice {
+        provider: Some(provider.into()),
+        model: model.into(),
+        model_name: name.into(),
+        unit,
+        pricing,
+    };
+    let quoted = |credits| Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(credits) } };
+    let types = [
+        (AssetKind::Image, choice("scenario", "model_gemini-3-1", "Gemini 3.1", Unit::Credits, quoted(20.0)), 500.0),
+        (AssetKind::Model3d, choice("scenario", "model_meshy-7-1-img23d", "Meshy 7.1", Unit::Credits, quoted(100.0)), 1000.0),
+        (AssetKind::Speech, choice("elevenlabs", "eleven_v3", "Eleven v3", Unit::Credits, Pricing::After { unit: Unit::Credits }), 20_000.0),
+        (AssetKind::SoundEffect, choice("fal", "fal-ai/stable-audio", "Stable Audio", Unit::Usd, Pricing::Unknown), 5.0),
+        (AssetKind::Music, AssetChoice::off(), 5.0),
+    ];
+    let used = [(AssetKind::Image, 120.0, 6), (AssetKind::Model3d, 300.0, 3), (AssetKind::Speech, 4000.0, 11), (AssetKind::SoundEffect, 0.0, 2)];
+    let assets = ProjectAssets {
+        types: types
+            .iter()
+            .map(|(kind, c, limit)| (*kind, TypeAssets { choice: c.clone(), limit: *limit, limit_on: *kind != AssetKind::SoundEffect, since_ms: 0 }))
+            .collect(),
+        ..Default::default()
+    };
+    let usage = used
+        .into_iter()
+        .filter_map(|(kind, amount, generations)| {
+            let c = &types.iter().find(|(k, ..)| *k == kind)?.1;
+            let counted = crate::project::CountedUsage {
+                provider: c.provider.clone()?,
+                unit: c.unit,
+                since_ms: 0,
+                usage: TypeUsage { amount, generations, cost_missing: false },
+            };
+            Some((kind, counted))
+        })
+        .collect();
+    (assets, usage)
 }

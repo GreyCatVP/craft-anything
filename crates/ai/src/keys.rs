@@ -203,7 +203,25 @@ mod tests {
         fn name(&self) -> &'static str {
             "Other"
         }
-        fn generate(&self, _key: &str, _req: &craft_anything_engines::assets::AssetRequest) -> Result<craft_anything_engines::assets::Generated, ToolError> {
+        fn unit(&self) -> craft_anything_engines::assets::model::Unit {
+            craft_anything_engines::assets::model::Unit::Usd
+        }
+        fn list_models(
+            &self,
+            _key: Option<&str>,
+            _kind: craft_anything_engines::assets::AssetKind,
+        ) -> Result<craft_anything_engines::assets::model::ModelList, ToolError> {
+            Ok(craft_anything_engines::assets::model::ModelList { models: Vec::new(), error: None })
+        }
+        fn describe(&self, _key: &str, _model: &str) -> Result<craft_anything_engines::assets::model::ModelDetail, ToolError> {
+            Err(ToolError::invalid("not here"))
+        }
+        fn generate(
+            &self,
+            _key: &str,
+            _model: &craft_anything_engines::assets::model::ModelDetail,
+            _req: &craft_anything_engines::assets::AssetRequest,
+        ) -> Result<craft_anything_engines::assets::Generated, ToolError> {
             Err(ToolError::invalid("not here"))
         }
     }

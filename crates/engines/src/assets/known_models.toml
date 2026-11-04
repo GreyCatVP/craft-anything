@@ -1,0 +1,602 @@
+# Which asset types a model makes, for the models whose provider's own list doesn't say.
+#
+# The live model lists tell the type for most models (fal `category`, Scenario `capabilities`).
+# They do not for audio: fal's `text-to-audio` and Scenario's `txt2audio` mix speech, sound effects
+# and music, and ElevenLabs lists speech models only. This table is the fallback for those, and
+# for the models this app has always offered. `id` is the provider's own id for the model (fal and
+# Scenario list models by it; ElevenLabs by its `model_id`), never a name of ours.
+#
+# `not_kinds` lists types a provider's own list files a model under but that it doesn't make: the
+# model is never listed or run for them. fal files Hunyuan Motion, which makes character animation,
+# under `text-to-3d`.
+#
+# `fixed = true` marks a model that is the provider's only endpoint for its type and is not in any
+# live list (ElevenLabs sound effects and music): the picker offers it without asking the provider.
+# `credits_per_second` is the credit rate this app keeps for such a fixed model, because
+# ElevenLabs publishes no per-model rate in its API; it is the one price kept here, and is updated
+# with releases. Prices of every other model come from the provider.
+#
+# The audio entries below were classified on 2026-11-03 from fal's `GET /v1/models` and
+# Scenario's `GET /v1/models/public`. A model is listed only when its name and tags point to one
+# asset type and to no other. Left out: models whose tags disagree (`fal-ai/lyria3`,
+# `fal-ai/lyria3/pro`, `google/lyria-3.5`, `minimax/music-3`); models that say too little
+# (`bytedance/seed-audio-1.0`, `mureka/v8/generate/soundtrack`, `fal-ai/mmaudio-v2/text-to-audio`,
+# `fal-ai/stable-audio-25/text-to-audio`, `fal-ai/ltx-2.3-quality/text-to-audio`); and speech models
+# that aren't plain text to speech (`fal-ai/elevenlabs/text-to-dialogue/eleven-v3`,
+# `mureka/api/generate/podcast`, `fal-ai/zonos`). Models Scenario tags `deprecated` are left out too.
+
+version = 1
+
+[[model]]
+provider = "fal"
+id = "fal-ai/hunyuan-motion"
+name = "Hunyuan Motion"
+kinds = []
+not_kinds = ["model_3d"]
+
+# The models the previous fixed table offered (the old `assets.toml`, now removed), under the provider's own ids. Its
+# Scenario 3D model, `model_meshy-img23d` (Meshy 6), is deprecated at Scenario, so the entry here is
+# the model that replaces it, `model_meshy-7-1-img23d`.
+[[model]]
+provider = "fal"
+id = "fal-ai/nano-banana-pro"
+name = "Nano Banana Pro"
+kinds = ["image"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/flux/dev"
+name = "FLUX.1 [dev]"
+kinds = ["image"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/flux/schnell"
+name = "FLUX.1 [schnell]"
+kinds = ["image"]
+
+[[model]]
+provider = "scenario"
+id = "model_google-gemini-3-1-flash"
+name = "Scenario Gemini 3.1"
+kinds = ["image"]
+
+[[model]]
+provider = "fal"
+id = "tripo3d/p1/image-to-3d"
+name = "Tripo P1"
+kinds = ["model_3d"]
+
+[[model]]
+provider = "scenario"
+id = "model_meshy-7-1-img23d"
+name = "Scenario Meshy 7.1"
+kinds = ["model_3d"]
+
+[[model]]
+provider = "elevenlabs"
+id = "eleven_multilingual_v2"
+name = "ElevenLabs Multilingual v2"
+kinds = ["speech"]
+
+# ElevenLabs' two fixed endpoints. Credit rates are the ones ElevenLabs states, converted to
+# credits per second.
+#
+# Both ids are deprecated by ElevenLabs, which still serves them: `eleven_text_to_sound_v2` is
+# removed on 2027-03-01 (replaced by `eleven_text_to_sound_v3`) and `music_v1` on 2027-01-31
+# (replaced by `music_v2_5`; `music_v2` also exists). The replacements are not listed here because
+# ElevenLabs documents no credit rate for them, and a guessed rate would mislimit spending. Read on
+# 2026-11-03: https://elevenlabs.io/docs/overview/capabilities/sound-effects ("40 credits per
+# second" with no model named, v2 "deprecated and will be removed on March 1, 2027"),
+# https://elevenlabs.io/docs/overview/capabilities/music (no credit cost for any model, `music_v1`
+# "will be removed on January 31, 2027"), https://elevenlabs.io/docs/overview/models, and
+# https://elevenlabs.io/pricing/api (dollars, not credits). When ElevenLabs documents their rates,
+# add them as `fixed` models and remove the old ones before the removal dates.
+#
+# Sound effects: "Cost: 40 credits per second when duration is specified" (the range is 0.1 to
+# 30 seconds), https://elevenlabs.io/docs/overview/capabilities/sound-effects, read on 2026-11-03.
+# The pricing page adds that a sound whose duration the AI picks costs 200 credits per generation
+# (https://elevenlabs.io/pricing); this app always passes a duration, so the per-second rate applies.
+# The same page states the 40 credits per second with a maximum duration of 22 seconds, while the API
+# docs allow 0.1 to 30 seconds. The app keeps its own range of 0.5 to 30 seconds, so the estimate for a
+# sound longer than 22 seconds is unverified.
+[[model]]
+provider = "elevenlabs"
+id = "eleven_text_to_sound_v2"
+name = "ElevenLabs Sound Effects v2"
+kinds = ["sound_effect"]
+credits_per_second = 40.0
+fixed = true
+
+# Music: "Eleven Music 900 credits per minute", listed among "Approximate credit costs" in the
+# FAQ of https://elevenlabs.io/pricing, read on 2026-11-03; 900 credits a minute is 15 credits a
+# second (converted here). The page gives an approximate rate for the product, not one for
+# `music_v1`, and ElevenLabs' API pricing page (https://elevenlabs.io/pricing/api) quotes music in
+# US dollars per generation instead.
+[[model]]
+provider = "elevenlabs"
+id = "music_v1"
+name = "ElevenLabs Music v1"
+kinds = ["music"]
+credits_per_second = 15.0
+fixed = true
+
+# fal.ai text-to-audio models, speech.
+[[model]]
+provider = "fal"
+id = "fal-ai/csm-1b"
+name = "CSM-1B"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/elevenlabs/tts/eleven-v3"
+name = "Elevenlabs Tts Eleven V3"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/elevenlabs/tts/multilingual-v2"
+name = "ElevenLabs TTS Multilingual v2"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/f5-tts"
+name = "F5 TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/gemini-tts"
+name = "Gemini TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/american-english"
+name = "Kokoro TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/brazilian-portuguese"
+name = "Kokoro TTS (Brazilian Portuguese)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/british-english"
+name = "Kokoro TTS (British English)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/french"
+name = "Kokoro TTS (French)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/hindi"
+name = "Kokoro TTS (Hindi)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/italian"
+name = "Kokoro TTS (Italian)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/japanese"
+name = "Kokoro TTS (Japanese)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/mandarin-chinese"
+name = "Kokoro TTS (Mandarin Chinese)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/kokoro/spanish"
+name = "Kokoro TTS (Spanish)"
+kinds = ["speech"]
+
+[[model]]
+provider = "fal"
+id = "mureka/api/generate/speech"
+name = "Mureka Speech Generation"
+kinds = ["speech"]
+
+# fal.ai text-to-audio models, sound effects.
+[[model]]
+provider = "fal"
+id = "cassetteai/sound-effects-generator"
+name = "Sound Effects Generator"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "fal"
+id = "elevenlabs/sound-effects/v3"
+name = "ElevenLabs Sound Effects V3"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/elevenlabs/sound-effects/v2"
+name = "Elevenlabs Sound Effects V2"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio-3/small/sfx/base/text-to-audio"
+name = "Stable Audio 3 Small SFX Base Text to Audio"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio-3/small/sfx/text-to-audio"
+name = "Stable Audio 3 Small SFX Text to Audio"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "fal"
+id = "mirelo-ai/sfx2.0/text-to-audio"
+name = "Mirelo SFX2.0"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "fal"
+id = "sonilo/v1.1/text-to-sound-effects"
+name = "V1.1 Text to Sound Effects"
+kinds = ["sound_effect"]
+
+# fal.ai text-to-audio models, music.
+[[model]]
+provider = "fal"
+id = "cassetteai/music-generator"
+name = "music generator"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "elevenlabs/music/v2.5"
+name = "Elevenlabs Music v2.5"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "elevenlabs/music/v2"
+name = "Elevenlabs Music v2"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/elevenlabs/music"
+name = "Elevenlabs Music"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/ace-step"
+name = "ACE Step"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/ace-step/prompt-to-audio"
+name = "ACE Step Prompt To Audio"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/diffrhythm"
+name = "DiffRhythm: Lyrics to Song"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/lyria2"
+name = "Lyria2"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/minimax-music"
+name = "MiniMax (Hailuo AI) Music"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/minimax-music/v1.5"
+name = "MiniMax (Hailuo AI) Music v1.5"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/minimax-music/v2"
+name = "Minimax Music"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/minimax-music/v2.5"
+name = "Minimax Music 2.5"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/minimax-music/v2.6"
+name = "Minimax Music 2.6"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio"
+name = "Stable Audio Open"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio-3/medium/base/text-to-audio"
+name = "Stable Audio 3 Medium Base Text to Audio"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio-3/medium/text-to-audio"
+name = "Stable Audio 3"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio-3/small/music/base/text-to-audio"
+name = "Stable Audio 3"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "fal-ai/stable-audio-3/small/music/text-to-audio"
+name = "Stable Audio 3 Small Music Text to Audio"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "mureka/v8/generate/instrumental"
+name = "Mureka 8 Instrumental Generation"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "mureka/v8/generate/song"
+name = "Mureka 8 Song Generation"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "mureka/v9/generate/instrumental"
+name = "Mureka 9 Instrumental Generation"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "mureka/v9/generate/song"
+name = "Mureka 9 Song Generation"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "mureka/v9.5/generate/instrumental"
+name = "Mureka 9.5 Instrumental Generation"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "mureka/v9.5/generate/song"
+name = "Mureka 9.5 Song Generation"
+kinds = ["music"]
+
+[[model]]
+provider = "fal"
+id = "sonilo/v1.1/text-to-music"
+name = "Sonilo V1.1 Text to Music"
+kinds = ["music"]
+
+# Scenario txt2audio models, speech. Models tagged deprecated are left out.
+[[model]]
+provider = "scenario"
+id = "model_alibaba-qwen-audio-3-tts"
+name = "Qwen Audio 3.0 TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_byteplus-seed-audio-1-0-multilingual"
+name = "Seed Audio 1.0 Multilingual"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_byteplus-seed-audio-1-0"
+name = "Seed Audio 1.0"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-multilingual-v2"
+name = "ElevenLabs Multilingual 2"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-tts-v3"
+name = "ElevenLabs 3"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-tts-v4"
+name = "ElevenLabs v4"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-tts-v4-turbo"
+name = "ElevenLabs v4 Turbo"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-turbo-v2-5"
+name = "ElevenLabs Turbo 2.5"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_google-gemini-3-8-flash-lite-tts"
+name = "Gemini 3.8 Flash-Lite TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_google-gemini-3-8-flash-tts"
+name = "Gemini 3.8 Flash TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_heygen-voice"
+name = "HeyGen Voice"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_heygen-voice-turbo"
+name = "HeyGen Voice Turbo"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_lux-tts"
+name = "Lux TTS"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_minimax-speech-2-8-hd"
+name = "Minimax Speech 2.8 HD"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_minimax-speech-2-8-turbo"
+name = "Minimax Speech 2.8 Turbo"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_tada-1b-text-to-speech"
+name = "Tada 1B Text to Speech"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_tada-3b-text-to-speech"
+name = "Tada 3B Text to Speech"
+kinds = ["speech"]
+
+[[model]]
+provider = "scenario"
+id = "model_xai-grok-tts"
+name = "xAI Grok TTS"
+kinds = ["speech"]
+
+# Scenario txt2audio models, sound effects. Models tagged deprecated are left out.
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-sound-effects-v2"
+name = "ElevenLabs Sound Effects 2"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-sound-effects-v3"
+name = "ElevenLabs Sound Effects v3"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "scenario"
+id = "model_mirelo-sfx-2-0-text-to-audio"
+name = "Mirelo SFX 2.0 Text to Audio"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "scenario"
+id = "model_mm-audio-2-t2a"
+name = "MM Audio 2 Text-To-Audio (SFX)"
+kinds = ["sound_effect"]
+
+[[model]]
+provider = "scenario"
+id = "model_sonilo-v1-1-text-to-sound-effects"
+name = "Sonilo V1.1 Text to SFX"
+kinds = ["sound_effect"]
+
+# Scenario txt2audio models, music. Models tagged deprecated are left out.
+[[model]]
+provider = "scenario"
+id = "model_ace-step-1-5-quality-text-to-music"
+name = "ACE-Step 1.5 Text to Music - Quality"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-music-advanced-v2-5"
+name = "ElevenLabs Music Advanced v2.5"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_elevenlabs-music-v2-5"
+name = "ElevenLabs Music v2.5"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_lyria-3-5"
+name = "Google Lyria 3.5"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_lyria-3-clip"
+name = "Google Lyria 3 Clip"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_lyria-3-pro"
+name = "Google Lyria 3 Pro"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_meta-musicgen"
+name = "Meta MusicGen"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_minimax-music-3-0"
+name = "Minimax Music 3.0"
+kinds = ["music"]
+
+[[model]]
+provider = "scenario"
+id = "model_sonilo-v1-1-text-to-music"
+name = "Sonilo V1.1 - Text to Music"
+kinds = ["music"]

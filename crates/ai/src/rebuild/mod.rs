@@ -21,16 +21,18 @@ use crate::cli_agents::{Builder, CliSpec};
 use crate::{AgentEvent, AiHub, BackendKind, Conversation, Role};
 use craft_anything_engine::inbox::{Answer, Inbox, InboxDir, Request};
 use craft_anything_engine::project::{Project, Purpose};
+use craft_anything_engine::settings::AssetSettings;
 use craft_anything_engine::workspace::progress::{AppFingerprintCache, BuildProgress};
-use craft_anything_engine::workspace::{CheckResult, ProjectUsage, Status, TargetRef, Workspace};
+use craft_anything_engine::workspace::{CheckResult, ProjectUsage, Status, TargetRef, TypeUsage, Workspace};
 use craft_anything_engine::{CallOptions, Caller, CancelToken, Engine, ToolOutput};
+use craft_anything_engines::assets::AssetKind;
 use craft_anything_engines::game;
 use craft_anything_evidence::{ErrorCode, ToolError};
 pub use craft_anything_platform::serve::StaticServer;
 use craft_anything_platform::serve::serve_dir;
 use craft_anything_platform::sync::Mutex;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -58,7 +60,8 @@ pub mod tools;
 
 use brief::*;
 pub use kinds::{
-    AppKind, BriefCx, BuildCheck, Check, CheckCx, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, TargetKind, WebVisualCheck, WebsiteKind,
+    AppKind, BriefCx, BuildCheck, Check, CheckCx, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, ProviderKey, TargetKind, WebVisualCheck,
+    WebsiteKind,
 };
 pub use locate::game_folder;
 use locate::*;
@@ -246,7 +249,10 @@ impl RebuildRun {
             editor: None,
             notes: notes.clone(),
             feed: feed.clone(),
-            assets: hub.has_asset_keys(),
+            asset_keys_available: {
+                let keys = hub.keys.clone();
+                Box::new(move |provider| crate::keys::asset_key(&keys, provider).is_some())
+            },
             decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
@@ -409,6 +415,16 @@ pub fn preview(ws: &Workspace) -> Result<StaticServer, ToolError> {
     serve_dir(&site).map_err(|e| ToolError::io(site.display(), e))
 }
 
+/// Delay policy-sensitive prompt rendering until immediately before a conversation send.
+enum BuilderPrompt {
+    Initial { extra: Option<String>, api: bool, originals: bool },
+    Message(String),
+    ResumedElsewhere { extra: Option<String>, handoff: Option<String> },
+}
+
+/// Whether a usable key is set up for a provider, looked up on the worker without holding the session lock.
+type KeyAvailable = Box<dyn Fn(&dyn craft_anything_engines::assets::AssetProvider) -> bool + Send + Sync>;
+
 struct Worker {
     /// Told after each event.
     wake: Wake,
@@ -422,9 +438,9 @@ struct Worker {
     editor: Option<PathBuf>,
     notes: Arc<Mutex<Vec<Note>>>,
     feed: Arc<Mutex<feed::FeedLog>>,
-    /// An asset provider's key is set up, so the builder can generate pictures and 3D models if the
-    /// project allows it.
-    assets: bool,
+    /// Resolve current key availability for a provider on the worker, without retaining credentials or holding
+    /// the engine session lock during key-store I/O. Tests supply an isolated availability source.
+    asset_keys_available: KeyAvailable,
     /// The builder has decompiled something this run (Deep mode requires it).
     decompiled: bool,
     /// Where this run adds its working time, tokens and cost (`None` in tests that don't build).
@@ -522,7 +538,7 @@ impl Worker {
         // A cancelled step can't be reported, but the notes go in either way.
         let _ = self.step(ws, Step::Build, Status::Building, "Reading what you added…");
         let texts: Vec<String> = notes.into_iter().map(|n| n.text).collect();
-        Some(added_prompt(&texts) + &pictures_reminder(ws))
+        Some(added_prompt(&texts))
     }
 
     /// Decides an ACP builder's permission requests with the same policy Claude Code's approval
@@ -664,34 +680,18 @@ impl Worker {
             Some(a) => Box::new(a),
             None => crate::cli_agents::builder_conversation(spec, self.approver(ws)),
         };
-        // The builder's tool server is started in this run's mode (`--deep` or `--clean-room`).
-        let s = self.engine.session();
-        let (deep, ghidra) = (!s.clean_room(), s.settings.ghidra_launcher().is_some());
-        let image_model = s.settings.assets.image_model.clone();
-        drop(s);
-        let cx = BriefCx { ws, deep, ghidra, editor: self.editor.as_deref(), assets: self.assets, image_model: image_model.as_deref() };
-        // The project's settings as they are now, for an agent that carries on its session.
-        let now = || kind.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>() + &pictures_reminder(ws);
         let mut prompt = match &opts.message {
-            // An agent with a saved session gets the follow-up; one without (an API loop) starts
-            // from the brief with the request added.
-            Some(m) if !first && has_history => follow_up(m, kind) + &now(),
+            // An agent with its own saved session gets the follow-up; otherwise start from the brief.
+            Some(m) if !first && has_history => BuilderPrompt::Message(follow_up(m, kind)),
             // Carrying on after a stop: the same, told to finish what it was doing.
-            None if carrying_on && !first && has_history => continue_prompt(kind) + &now(),
-            _ => {
-                let b = brief(kind, &cx, opts.message.as_deref());
-                if api_loop { format!("{API_BUILDER}\n\n{b}") } else { b }
-            }
+            None if carrying_on && !first && has_history => BuilderPrompt::Message(continue_prompt(kind)),
+            _ => BuilderPrompt::Initial { extra: opts.message.clone(), api: api_loop, originals: first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() },
         };
-        // The extraction step left the original's files in app/Original/: the builder starts from them.
-        if first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() {
-            prompt.push_str(ORIGINALS_READY);
-        }
         // A saved session may not be on this computer (the project was copied here): then a new
         // one starts from the brief and what the project already has.
         let mut fresh = (!api_loop && ws.manifest.agent_session.is_some()).then(|| {
             let handoff = keeper.as_ref().and_then(|a| a.handoff(&kept_session(ws)?, HANDOFF_CHARS));
-            resumed_elsewhere(&brief(kind, &cx, opts.message.as_deref()), &ws.manifest.last_reply, handoff.as_deref())
+            BuilderPrompt::ResumedElsewhere { extra: opts.message.clone(), handoff }
         });
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
         // A new request starts the count of checks that found no working build again. "Try again" on
@@ -727,7 +727,7 @@ impl Worker {
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
                 ws.manifest.awaiting_check = false;
-                let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take());
+                let reply = self.turn(ws, agent.as_mut(), kind, &prompt, fresh.take());
                 // Kept even when the turn failed: the conversation is still worth carrying.
                 if let Some(a) = &keeper {
                     self.keep_session(ws, a.as_ref());
@@ -777,12 +777,12 @@ impl Worker {
                     progress.reset();
                     progress.save(&ws.root)?;
                     ws.manifest.not_working_checks = 0;
-                    prompt = p;
+                    prompt = BuilderPrompt::Message(p);
                     continue;
                 }
                 if must_decompile && !self.decompiled && !reminded {
                     reminded = true;
-                    prompt = DECOMPILE_FIRST.to_string();
+                    prompt = BuilderPrompt::Message(DECOMPILE_FIRST.to_string());
                     continue;
                 }
             }
@@ -803,7 +803,7 @@ impl Worker {
                 progress.reset();
                 progress.save(&ws.root)?;
                 ws.manifest.not_working_checks = 0;
-                prompt = p;
+                prompt = BuilderPrompt::Message(p);
                 continue;
             }
             let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
@@ -828,11 +828,11 @@ impl Worker {
             refinements += 1;
             // Nothing written yet: a fix for a build that doesn't exist sends the builder looking for one.
             // It is asked to write the project and to show its build output (#736).
-            let refined = if app_is_empty(ws) { NO_PROJECT_PROMPT.to_string() } else { kind.refine(check) };
-            prompt = refined + &pictures_reminder(ws);
+            let mut refinement = if app_is_empty(ws) { NO_PROJECT_PROMPT.to_string() } else { kind.refine(check) };
             if !api_loop {
-                prompt.push_str(CHECK_BEFORE_REPLYING);
+                refinement.push_str(CHECK_BEFORE_REPLYING);
             }
+            prompt = BuilderPrompt::Message(refinement);
         }
         if let Some(url) = self.preview.lock().unwrap_or_else(PoisonError::into_inner).as_ref().map(StaticServer::url) {
             self.emit(RunEvent::Preview(url));
@@ -974,10 +974,88 @@ impl Worker {
         self.emit(RunEvent::Agent(AgentEvent::Status { text }));
     }
 
-    /// `fresh`: what to send instead when the agent's saved session turns out not to be on this
-    /// computer.
-    fn turn(&mut self, ws: &mut Workspace, agent: &mut dyn Conversation, prompt: &str, fresh: Option<String>) -> Result<String, ToolError> {
-        self.turn_with_wait(ws, agent, prompt, fresh, |stop, seconds| {
+    /// Render all policy-sensitive sections from one disk snapshot, overlaying only asset choices
+    /// on a clone so custom kind hooks still see this run's unsaved progress. Failed reads deny spending.
+    fn turn_prompt(&self, ws: &Workspace, kind: &dyn TargetKind, prompt: &BuilderPrompt) -> String {
+        let (deep, ghidra, providers, asset_settings) = {
+            let session = self.engine.session();
+            (
+                !session.clean_room(),
+                session.settings.ghidra_launcher().is_some(),
+                // The session's registry, so providers a fork registers are offered and checked too.
+                session.ext.get::<craft_anything_engines::assets::AssetProviders>().map(|p| p.as_ref().clone()).unwrap_or_default(),
+                session.settings.assets.clone(),
+            )
+        };
+        let mut snapshot = ws.clone();
+        let usage = match Workspace::open(&ws.root) {
+            Ok(mut current) if !current.is_read_only() => {
+                // A project from before each type had its own choice keeps what it takes from
+                // Settings now, so a later change to Settings doesn't change it.
+                if let Err(e) = current.keep_asset_defaults(&asset_settings) {
+                    log::warn!("couldn't store the asset defaults in {}: {}", current.root.display(), e.message);
+                }
+                snapshot.manifest.generate_assets = current.manifest.generate_assets;
+                snapshot.manifest.assets.clone_from(&current.manifest.assets);
+                asset_usage(&current, &asset_settings)
+            }
+            _ => None,
+        };
+        if usage.is_none() {
+            snapshot.manifest.generate_assets = false;
+        }
+        // Key lookups can touch the keychain: they run after the session lock is released.
+        let keyed: Vec<ProviderKey<'_>> = providers
+            .ids()
+            .into_iter()
+            .filter_map(|id| providers.get(id))
+            .map(|p| ProviderKey { id: p.id(), name: p.name(), has_key: (self.asset_keys_available)(p.as_ref()) })
+            .collect();
+        let cx = BriefCx {
+            ws: &snapshot,
+            deep,
+            ghidra,
+            editor: self.editor.as_deref(),
+            asset_providers: &keyed,
+            asset_settings: &asset_settings,
+            asset_usage: usage.as_ref(),
+        };
+        match prompt {
+            BuilderPrompt::Initial { extra, api, originals } => {
+                let mut text = brief(kind, &cx, extra.as_deref());
+                if *api {
+                    text = format!("{API_BUILDER}\n\n{text}");
+                }
+                if *originals {
+                    text.push_str(ORIGINALS_READY);
+                }
+                text
+            }
+            BuilderPrompt::Message(message) => {
+                let mut text = format!("{message}\n\nCurrent asset policy for this turn (replaces earlier asset instructions): {}", project_assets_note(&cx));
+                for section in kind.follow_up_sections(&cx) {
+                    text.push_str(&format!("\n\n{section}"));
+                }
+                text.push_str(&pictures_reminder(&snapshot));
+                text
+            }
+            BuilderPrompt::ResumedElsewhere { extra, handoff } => {
+                resumed_elsewhere(&brief(kind, &cx, extra.as_deref()), &snapshot.manifest.last_reply, handoff.as_deref())
+            }
+        }
+    }
+
+    /// Run a builder turn with fresh asset policy, preserving its session and retrying recoverable interruptions.
+    /// `fresh`: what to send instead when the agent's saved session turns out not to be on this computer.
+    fn turn(
+        &mut self,
+        ws: &mut Workspace,
+        agent: &mut dyn Conversation,
+        kind: &dyn TargetKind,
+        prompt: &BuilderPrompt,
+        fresh: Option<BuilderPrompt>,
+    ) -> Result<String, ToolError> {
+        self.turn_with_wait(ws, agent, kind, prompt, fresh, |stop, seconds| {
             for _ in 0..seconds {
                 stop.check()?;
                 std::thread::sleep(Duration::from_secs(1));
@@ -990,15 +1068,22 @@ impl Worker {
         &mut self,
         ws: &mut Workspace,
         agent: &mut dyn Conversation,
-        prompt: &str,
-        mut fresh: Option<String>,
+        kind: &dyn TargetKind,
+        prompt: &BuilderPrompt,
+        mut fresh: Option<BuilderPrompt>,
         mut wait_for: impl FnMut(&CancelToken, u64) -> Result<(), ToolError>,
     ) -> Result<String, ToolError> {
-        let mut prompt = prompt.to_string();
+        let mut started_fresh = None;
         let mut tries = 0u64;
         let mut retry = false;
         loop {
-            let result = self.converse_turn(ws, agent, &prompt, retry);
+            // Sidebar choices can change during a build. Read only the policy from disk, leaving
+            // this worker's unsaved progress untouched; this also covers notes, fixes, fresh
+            // starts and retries that resend the whole turn. A retry that continues the agent's
+            // own history sends no new prompt (`Conversation::retry`), so it keeps the policy
+            // its turn started with; the asset tools still check the current choices.
+            let text = self.turn_prompt(ws, kind, started_fresh.as_ref().unwrap_or(prompt));
+            let result = self.converse_turn(ws, agent, &text, retry);
             let lost = result.is_err() && agent.session_lost();
             if lost {
                 // The id is for a session this computer doesn't have: never ask for it again.
@@ -1016,7 +1101,7 @@ impl Worker {
                         Status::Building,
                         "The builder's earlier conversation isn't on this computer. Starting a new one from what the project already has…",
                     )?;
-                    prompt = f;
+                    started_fresh = Some(f);
                     retry = false;
                 }
                 // A missing session can only start fresh above, never resume. Only backend

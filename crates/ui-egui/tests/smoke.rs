@@ -151,8 +151,9 @@ fn fal_key(stored: bool) -> std::collections::BTreeMap<String, bool> {
     [(craft_anything_engines::assets::fal::ID.to_string(), stored)].into()
 }
 
+/// Asset opt-in offers every provider, accepts Scenario credentials and keeps key setup reachable in Settings.
 #[test]
-fn turning_on_generated_assets_without_a_fal_key_asks_for_one() {
+fn turning_on_generated_assets_offers_all_providers_and_accepts_a_scenario_key() {
     use craft_anything_engine::workspace::TargetRef;
     use craft_anything_engines::game::{Builder, Installed, Inventory};
     use craft_anything_ui_egui::state::Modal;
@@ -175,12 +176,17 @@ fn turning_on_generated_assets_without_a_fal_key_asks_for_one() {
     });
     h.run_steps(3);
     assert!(!h.state().state.make.generate_assets, "off until the person turns it on");
-    h.get_by_label("Generate custom pictures and models").click();
+    h.get_by_label("Generate pictures, models and audio").click();
     h.run_steps(3);
     assert!(h.state().state.make.generate_assets);
     assert_eq!(h.state().state.modal, Some(Modal::Assets), "no key yet, so it's asked for");
-    h.get_by_label("Your fal.ai key");
+    h.get_by_label("Your asset provider keys");
     h.get_by_label("fal.ai key");
+    h.get_by_label("Scenario key");
+    h.get_by_label("Scenario API secret");
+    assert!(h.query_by_label("fal.ai API secret").is_none());
+    assert!(h.query_by_label("ElevenLabs API secret").is_none());
+    h.get_by_label("ElevenLabs key");
     h.get_by_label("Not now").click();
     h.run_steps(3);
     assert_eq!(h.state().state.modal, None);
@@ -189,14 +195,93 @@ fn turning_on_generated_assets_without_a_fal_key_asks_for_one() {
     for deep in [true, false] {
         h.state_mut().settings.deep_mode = deep;
         h.run_steps(2);
-        h.get_by_label_contains("Off, the game is built without them.");
+        h.get_by_label_contains("Off, the game is built without generated assets.");
         assert!(h.query_by_label_contains("original game").is_none());
     }
     // With a key, turning it on asks nothing.
-    h.state_mut().asset_keys = Some(fal_key(true));
-    h.get_by_label("Generate custom pictures and models").click();
+    h.state_mut().asset_keys = Some([("scenario".to_string(), true)].into());
+    h.get_by_label("Generate pictures, models and audio").click();
     h.run_steps(3);
     assert!(h.state().state.make.generate_assets && h.state().state.modal.is_none());
+    // Provider credentials remain reachable in Settings → Builds, and are not on the AI page.
+    h.state_mut().asset_keys = Some(Default::default());
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(3);
+    assert!(h.query_by_label("Add a key for Scenario").is_none(), "the AI page no longer has the asset provider keys");
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
+    h.run_steps(3);
+    h.get_by_label("Add a key for Scenario").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Add a key for Scenario").click();
+    h.run_steps(3);
+    h.get_by_label("Scenario key");
+    h.get_by_label("Scenario API secret");
+}
+
+/// Scenario requires a nonblank key and secret in password fields and clears both inputs after saving.
+#[test]
+fn scenario_settings_require_both_masked_fields_and_clear_them_after_save() {
+    use egui_kittest::kittest::NodeT;
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.asset_keys = Some(Default::default());
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
+        a
+    });
+    h.run_steps(3);
+    h.get_by_label("Add a key for Scenario").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Add a key for Scenario").click();
+    h.run_steps(3);
+    for label in ["Scenario key", "Scenario API secret"] {
+        assert_eq!(h.get_by_label(label).accesskit_node().role(), egui::accesskit::Role::PasswordInput);
+    }
+    assert!(h.get_by_label("Save").accesskit_node().is_disabled());
+    h.get_by_label("Scenario API secret").scroll_to_me();
+    h.get_by_label("Scenario API secret").focus();
+    h.run_steps(3);
+    h.get_by_label("Scenario API secret").type_text("  ");
+    h.run_steps(2);
+    h.get_by_label("Scenario key").scroll_to_me();
+    h.get_by_label("Scenario key").focus();
+    h.run_steps(3);
+    h.get_by_label("Scenario key").type_text("  sk-test-key  ");
+    h.run_steps(2);
+    assert!(h.get_by_label("Save").accesskit_node().is_disabled(), "whitespace is not a secret");
+    assert_eq!(h.state().key_inputs.get("scenario").unwrap(), "  sk-test-key  ");
+    h.get_by_label("Scenario API secret").focus();
+    h.run_steps(2);
+    h.get_by_label("Scenario API secret").type_text("sk-test-secret  ");
+    h.run_steps(2);
+    assert!(!h.get_by_label("Save").accesskit_node().is_disabled());
+    h.state_mut().key_inputs.insert("scenario".into(), "  ".into());
+    h.run_steps(2);
+    assert!(h.get_by_label("Save").accesskit_node().is_disabled(), "a secret alone is not enough");
+    // A credential generation would refuse (not ASCII) keeps both fields, saves nothing and says why.
+    h.state_mut().key_inputs.insert("scenario".into(), "sk-tëst-key".into());
+    h.run_steps(2);
+    h.get_by_label("Save").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    assert_eq!(h.state().key_inputs.get("scenario").map(String::as_str), Some("sk-tëst-key"));
+    assert!(h.state().key_inputs.contains_key("scenario:secret"));
+    assert!(h.state().asset_keys.as_ref().is_some_and(|keys| keys.get("scenario").is_none()), "nothing saved");
+    assert!(h.state().state.toasts.iter().any(|(text, error)| *error && text.contains("valid asset provider credential")));
+    h.state_mut().key_inputs.insert("scenario".into(), String::new());
+    h.get_by_label("Scenario key").focus();
+    h.run_steps(2);
+    h.get_by_label("Scenario key").type_text("sk-test-key  ");
+    h.run_steps(2);
+    h.get_by_label("Save").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    assert!(wait(&mut h, |a| a.asset_keys.as_ref().and_then(|keys| keys.get("scenario")) == Some(&true)));
+    assert!(!h.state().key_inputs.contains_key("scenario"));
+    assert!(!h.state().key_inputs.contains_key("scenario:secret"));
+    h.get_by_label("Key saved");
 }
 
 #[test]
@@ -278,35 +363,1221 @@ fn a_long_prompt_wraps_inside_the_window_in_the_project_and_the_chat() {
     }
 }
 
+// ---- Settings → Builds: generated-assets defaults -------------------------------------------
+
+/// What the stand-in providers were asked, and the gate that holds their answers back.
+struct Probe {
+    asked: Vec<(&'static str, std::sync::Arc<std::sync::atomic::AtomicUsize>)>,
+    /// While closed, a provider that is asked waits (so a test can look at the page meanwhile).
+    open: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The keys the engine's tools read (a file of their own): a test saves one as the person would.
+    keys: craft_anything_ai::KeyStore,
+}
+
+impl Probe {
+    /// How many times `provider` was asked for a list.
+    fn asked(&self, provider: &str) -> usize {
+        self.asked.iter().filter(|(id, _)| *id == provider).map(|(_, n)| n.load(std::sync::atomic::Ordering::SeqCst)).sum()
+    }
+
+    fn total(&self) -> usize {
+        self.asked.iter().map(|(_, n)| n.load(std::sync::atomic::Ordering::SeqCst)).sum()
+    }
+
+    fn hold(&self, hold: bool) {
+        self.open.store(!hold, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// A stand-in asset provider with canned model lists. Nothing in it reaches the network.
+struct Canned {
+    id: &'static str,
+    name: &'static str,
+    unit: craft_anything_engines::assets::model::Unit,
+    models: Vec<craft_anything_engines::assets::model::ListedModel>,
+    asked: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    open: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl craft_anything_engines::assets::AssetProvider for Canned {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    fn name(&self) -> &'static str {
+        self.name
+    }
+    fn unit(&self) -> craft_anything_engines::assets::model::Unit {
+        self.unit
+    }
+    fn list_models(
+        &self,
+        key: Option<&str>,
+        kind: craft_anything_engines::assets::AssetKind,
+    ) -> Result<craft_anything_engines::assets::model::ModelList, craft_anything_engine::evidence::ToolError> {
+        assert_eq!(key, Some("sk-test"), "a provider is only asked with the key the person saved");
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let start = Instant::now();
+        while !self.open.load(std::sync::atomic::Ordering::SeqCst) && start.elapsed() < Duration::from_secs(8) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let models = self.models.iter().filter(|m| m.kinds.contains(&kind)).cloned().collect();
+        Ok(craft_anything_engines::assets::model::ModelList { models, error: None })
+    }
+    fn describe(&self, _key: &str, _model: &str) -> Result<craft_anything_engines::assets::model::ModelDetail, craft_anything_engine::evidence::ToolError> {
+        Err(craft_anything_engine::evidence::ToolError::invalid("not used in this test"))
+    }
+    fn generate(
+        &self,
+        _key: &str,
+        _model: &craft_anything_engines::assets::model::ModelDetail,
+        _req: &craft_anything_engines::assets::AssetRequest,
+    ) -> Result<craft_anything_engines::assets::Generated, craft_anything_engine::evidence::ToolError> {
+        Err(craft_anything_engine::evidence::ToolError::invalid("not used in this test"))
+    }
+}
+
+fn listed(
+    provider: &str,
+    id: &str,
+    name: &str,
+    kinds: &[craft_anything_engines::assets::AssetKind],
+    pricing: craft_anything_engines::assets::model::Pricing,
+    ignores: &[craft_anything_engines::assets::model::AssetOption],
+) -> craft_anything_engines::assets::model::ListedModel {
+    craft_anything_engines::assets::model::ListedModel {
+        provider: provider.into(),
+        id: id.into(),
+        name: name.into(),
+        kinds: kinds.to_vec(),
+        pricing,
+        ignores: ignores.to_vec(),
+    }
+}
+
+/// An engine whose asset providers are stand-ins with canned lists, whose keys (a saved key for each
+/// of `keyed`) and model cache live in a folder of their own, and which has the AI layer's tools.
+/// Nothing in it reaches the network, the keychain or the person's config.
+fn asset_engine(keyed: &[&str]) -> (std::sync::Arc<craft_anything_engine::Engine>, Probe) {
+    use craft_anything_engines::assets::AssetKind::{Image, Model3d, Music, SoundEffect, Speech};
+    use craft_anything_engines::assets::model::AssetOption::{Faces, Shape};
+    use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+    use craft_anything_engines::assets::{AssetProviders, model::ListedModel};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    let usd = |rate| Pricing::Before { unit: Unit::Usd, rate };
+    let quote = |credits| Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(credits) } };
+    let catalogue: [(&'static str, &'static str, Unit, Vec<ListedModel>); 3] = [
+        (
+            "fal",
+            "fal.ai",
+            Unit::Usd,
+            vec![
+                listed("fal", "fal-ai/nano-banana-pro", "Nano Banana Pro", &[Image], usd(Rate::PerRequest(0.15)), &[]),
+                listed("fal", "fal-ai/flux/dev", "FLUX.1 [dev]", &[Image], usd(Rate::PerMegapixel(0.025)), &[]),
+                listed("fal", "fal-ai/square-only", "Square Only", &[Image], usd(Rate::PerRequest(0.04)), &[Shape]),
+                listed("fal", "fal-ai/some-new-model", "Some new model", &[Image], Pricing::Unknown, &[Shape, Faces]),
+                listed("fal", "tripo3d/p1/image-to-3d", "Tripo P1", &[Model3d], usd(Rate::PerRequest(0.4)), &[]),
+                listed("fal", "fal-ai/stable-audio", "Stable Audio", &[SoundEffect], Pricing::Unknown, &[]),
+                listed("fal", "fal-ai/lyria-3-pro", "Lyria 3 Pro", &[Music], usd(Rate::PerRequest(2.0)), &[]),
+            ],
+        ),
+        (
+            "scenario",
+            "Scenario",
+            Unit::Credits,
+            vec![
+                listed("scenario", "model_gemini-3-1", "Gemini 3.1", &[Image], quote(20.0), &[]),
+                listed("scenario", "model_flux-kontext", "Flux Kontext", &[Image], quote(15.0), &[]),
+                listed("scenario", "model_meshy-7-1-img23d", "Meshy 7.1", &[Model3d], quote(100.0), &[]),
+            ],
+        ),
+        (
+            "elevenlabs",
+            "ElevenLabs",
+            Unit::Credits,
+            vec![listed("elevenlabs", "eleven_v3", "Eleven v3", &[Speech], Pricing::After { unit: Unit::Credits }, &[])],
+        ),
+    ];
+    let open = Arc::new(AtomicBool::new(true));
+    let mut session = craft_anything_engine::testing::session();
+    session.settings.mode = Mode::Beginner;
+    session.settings.first_run_done = true;
+    session.settings.language = "en".into();
+    let keys = craft_anything_ai::KeyStore::file_only(session.config_dir().join("ai-keys.toml"));
+    for id in keyed {
+        keys.set(&craft_anything_ai::keys::asset_key_name(id), "sk-test").unwrap();
+    }
+    let mut providers = AssetProviders::built_in();
+    let mut asked = Vec::new();
+    for (id, name, unit, models) in catalogue {
+        let counter = Arc::new(AtomicUsize::new(0));
+        asked.push((id, counter.clone()));
+        providers.register(Arc::new(Canned { id, name, unit, models, asked: counter, open: open.clone() }));
+    }
+    session.ext.insert(Arc::new(providers));
+    session.ext.insert(Arc::new(keys.clone()));
+    (craft_anything_engine::Engine::shared(session, craft_anything_ai::tools()), Probe { asked, open, keys })
+}
+
+/// The app over `engine`, with Settings open on Builds and `keyed` showing as the providers with a key.
+fn asset_app(engine: std::sync::Arc<craft_anything_engine::Engine>, keyed: &[&str]) -> CraftApp {
+    let mut a = demo::app(engine);
+    a.asset_keys = Some(["fal", "scenario", "elevenlabs"].into_iter().map(|id| (id.to_string(), keyed.contains(&id))).collect());
+    a.state.settings_open = true;
+    a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
+    a
+}
+
+/// A choice of `model` at `provider`, as the picker makes it.
+fn picked(
+    provider: &str,
+    model: &str,
+    name: &str,
+    unit: craft_anything_engines::assets::model::Unit,
+    pricing: craft_anything_engines::assets::model::Pricing,
+) -> craft_anything_engine::asset_choice::AssetChoice {
+    craft_anything_engine::asset_choice::AssetChoice { provider: Some(provider.into()), model: model.into(), model_name: name.into(), unit, pricing }
+}
+
+/// Step until every asset type's lists have been read and no request is running.
+fn lists_read(h: &mut Harness<'static, CraftApp>) -> bool {
+    wait(h, |a| a.asset_models.len() == 5 && a.asset_models.values().all(|v| v.is_read() && !v.loading))
+}
+
+/// The pictures and music defaults that most tests start from: Scenario (credits) and fal.ai (dollars).
+fn with_two_defaults(a: &mut CraftApp) {
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+    let quoted = Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(20.0) } };
+    a.settings.assets.defaults.insert(AssetKind::Image, picked("scenario", "model_gemini-3-1", "Gemini 3.1", Unit::Credits, quoted));
+    let track = Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(2.0) };
+    a.settings.assets.defaults.insert(AssetKind::Music, picked("fal", "fal-ai/lyria-3-pro", "Lyria 3 Pro", Unit::Usd, track));
+}
+
+/// Settings → Builds has the provider keys and a row for each asset type with its provider and model
+/// (Off where none is chosen), its default limit in the provider's unit and whether new projects
+/// enforce it. The AI page no longer has the keys.
 #[test]
-fn a_game_project_shows_its_asset_spending_and_can_raise_the_budget() {
-    use craft_anything_engine::workspace::{AssetRecord, TargetRef, Workspace};
+fn settings_shows_a_default_row_per_asset_type() {
+    use egui_kittest::kittest::NodeT;
+    let (engine, _probe) = asset_engine(&["fal", "scenario"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || {
+        let mut a = asset_app(engine, &["fal", "scenario"]);
+        with_two_defaults(&mut a);
+        a
+    });
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    // The keys: a saved key reads as such, a missing one offers to add it.
+    h.get_by_label("Asset provider keys");
+    assert_eq!(h.query_all_by_label("Key saved").count(), 2);
+    h.get_by_label("Key needed");
+    h.get_by_label("Add a key for ElevenLabs");
+    h.get_by_label("Remove the fal.ai key");
+    // A row for each type, with what a new project uses for it.
+    h.get_by_label("Generated assets for new projects");
+    h.get_by_label("New projects ignore the budget");
+    for title in ["Pictures", "3D models", "Speech", "Sound effects", "Music"] {
+        h.get_by_label(title);
+    }
+    let words = |h: &Harness<'static, CraftApp>, title: &str| h.get_by_label(&format!("{title} model")).value();
+    assert_eq!(words(&h, "Pictures").as_deref(), Some("Scenario · Gemini 3.1"));
+    assert_eq!(words(&h, "Music").as_deref(), Some("fal.ai · Lyria 3 Pro"));
+    for off in ["3D models", "Speech", "Sound effects"] {
+        assert_eq!(words(&h, off).as_deref(), Some("Off"), "{off} has no default");
+    }
+    // Limits are in the provider's unit, and a type that is Off has none.
+    assert_eq!(h.get_by_label("Pictures default limit").accesskit_node().numeric_value(), Some(500.0));
+    assert_eq!(h.get_by_label("Music default limit").accesskit_node().numeric_value(), Some(5.0));
+    assert!(h.query_by_label("Speech default limit").is_none());
+    assert_eq!(h.query_all_by_label("On").count(), 2, "new projects start both with their limit on");
+    h.get_by_label_contains("Model lists fetched from fal.ai and Scenario just now");
+    // The AI page is only about AIs now.
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(3);
+    assert!(h.query_by_label("Asset provider keys").is_none() && h.query_by_label("Key saved").is_none());
+}
+
+/// Saving a provider's key lists its models at once, with Settings still open: the pickers offer
+/// that provider without closing and opening the page again.
+#[test]
+fn saving_a_provider_key_lists_its_models_without_reopening_settings() {
+    use craft_anything_engines::assets::AssetKind;
+    let (engine, probe) = asset_engine(&["fal"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || asset_app(engine, &["fal"]));
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    let providers = |a: &CraftApp| a.asset_models[&AssetKind::Image].providers.iter().map(|p| p.provider.clone()).collect::<Vec<_>>();
+    assert_eq!(providers(h.state()), ["fal"]);
+    assert_eq!(probe.asked("scenario"), 0, "no key, so no one asked");
+    // The person saves a Scenario key; the app is told which providers have one now.
+    probe.keys.set(&craft_anything_ai::keys::asset_key_name("scenario"), "sk-test").unwrap();
+    let keys: std::collections::BTreeMap<String, bool> =
+        [("fal", true), ("scenario", true), ("elevenlabs", false)].map(|(id, saved)| (id.to_string(), saved)).into();
+    h.state_mut().jobs.spawn("Save the key", false, move |_| Ok(craft_anything_ui_egui::Done::AssetKeys(keys)));
+    assert!(wait(&mut h, |a| providers(a) == ["fal", "scenario"] && a.asset_models.values().all(|v| !v.loading)));
+    assert_eq!(probe.asked("scenario"), 5, "once for each type");
+    h.run_steps(3);
+    // The same keys again change nothing and ask no one.
+    let again: std::collections::BTreeMap<String, bool> =
+        [("fal", true), ("scenario", true), ("elevenlabs", false)].map(|(id, saved)| (id.to_string(), saved)).into();
+    h.state_mut().jobs.spawn("Check the asset keys", false, move |_| Ok(craft_anything_ui_egui::Done::AssetKeys(again)));
+    h.run_steps(5);
+    assert_eq!(probe.asked("scenario"), 5);
+}
+
+/// A default whose provider has no key is flagged, a type no saved key can make says so, and a model
+/// whose price is unknown has no limit to set.
+#[test]
+fn settings_flags_a_default_without_a_key_and_a_model_without_a_price() {
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{Pricing, Unit};
+    let (engine, _probe) = asset_engine(&["fal"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || {
+        let mut a = asset_app(engine, &["fal"]);
+        a.settings
+            .assets
+            .defaults
+            .insert(AssetKind::Music, picked("elevenlabs", "music_v1", "Music v1", Unit::Credits, Pricing::After { unit: Unit::Credits }));
+        a.settings.assets.defaults.insert(AssetKind::SoundEffect, picked("fal", "fal-ai/stable-audio", "Stable Audio", Unit::Usd, Pricing::Unknown));
+        a
+    });
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    h.get_by_label("No ElevenLabs key");
+    h.get_by_label("price unknown");
+    h.get_by_label("usage not tracked");
+    assert!(h.query_by_label("Sound effects default limit").is_none(), "nothing to limit when usage can't be counted");
+    // Speech is Off, and no provider with a saved key makes it (fal.ai doesn't).
+    h.get_by_label("No provider with a saved key makes this.");
+}
+
+/// The picker lists only the providers with a saved key, with each model's price, what it ignores and
+/// "Off"; the search field narrows it; a click chooses the model for new projects.
+#[test]
+fn the_picker_offers_only_providers_with_keys_and_filters_by_search() {
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+    let (engine, _probe) = asset_engine(&["fal", "scenario"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || asset_app(engine, &["fal", "scenario"]));
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    h.get_by_label("Pictures model").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    // Grouped by provider, each model with its price as the provider gave it.
+    h.get_by_label_contains("Nano Banana Pro · $0.15 a picture");
+    h.get_by_label_contains("FLUX.1 [dev] · $0.025 a megapixel");
+    h.get_by_label_contains("Gemini 3.1 · ~20 credits a picture");
+    h.get_by_label_contains("Some new model · price unknown");
+    // What a model does nothing with is said beside it.
+    h.get_by_label_contains("Square Only · $0.04 a picture   ignores: shape");
+    h.get_by_label_contains("Some new model · price unknown   ignores: shape, faces");
+    h.get_by_label("Off");
+    // The three providers are offered a key in the keys block; only two have lists in the picker.
+    assert_eq!(h.query_all_by_label("fal.ai").count(), 2, "its key row and its group");
+    assert_eq!(h.query_all_by_label("Scenario").count(), 2, "its key row and its group");
+    assert_eq!(h.query_all_by_label("ElevenLabs").count(), 1, "no key, so no group");
+    assert!(h.query_by_label_contains("Eleven v3").is_none() && h.query_by_label_contains("Tripo P1").is_none(), "models of other types are not offered");
+    // Typing narrows the list.
+    h.get_by_label("Search models").focus();
+    h.run_steps(2);
+    h.get_by_label("Search models").type_text("flux");
+    h.run_steps(3);
+    h.get_by_label_contains("FLUX.1 [dev]");
+    h.get_by_label_contains("Flux Kontext");
+    assert!(h.query_by_label_contains("Nano Banana Pro").is_none() && h.query_by_label_contains("Gemini 3.1").is_none());
+    h.get_by_label("Search models").type_text("zzz");
+    h.run_steps(3);
+    h.get_by_label("No model matches that.");
+    // A click chooses the model: provider, model, its name, the provider's unit and its price.
+    h.get_by_label("Search models").focus();
+    h.run_steps(2);
+    for _ in 0..3 {
+        h.key_press(egui::Key::Backspace);
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    h.get_by_label_contains("FLUX.1 [dev]").click();
+    h.run_steps(3);
+    let chosen = h.state().settings.assets.defaults.get(&AssetKind::Image).cloned();
+    let expected = picked("fal", "fal-ai/flux/dev", "FLUX.1 [dev]", Unit::Usd, Pricing::Before { unit: Unit::Usd, rate: Rate::PerMegapixel(0.025) });
+    assert_eq!(chosen, Some(expected));
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("fal.ai · FLUX.1 [dev]"));
+    assert!(h.query_by_label("Search models").is_none(), "the list closes once a model is picked");
+    // Off is a choice too, and it is saved as one.
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label("Off").click();
+    h.run_steps(3);
+    assert_eq!(h.state().settings.assets.choice(AssetKind::Image), craft_anything_engine::asset_choice::AssetChoice::off());
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Off"));
+}
+
+/// Opening Settings → Builds asks the providers for their lists on a worker: the page keeps drawing and
+/// says so while the request runs; lists read lately aren't asked for again; Refresh asks again.
+#[test]
+fn opening_settings_refreshes_stale_model_lists_in_the_background() {
+    use egui_kittest::kittest::NodeT;
+    let (engine, probe) = asset_engine(&["fal", "scenario"]);
+    probe.hold(true);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || {
+        let mut a = asset_app(engine, &["fal", "scenario"]);
+        a.state.settings_open = false;
+        a
+    });
+    h.run_steps(3);
+    assert_eq!((probe.total(), h.state().asset_models.len()), (0, 0), "nothing is asked until the page opens");
+    h.state_mut().state.settings_open = true;
+    h.run_steps(3);
+    // The providers are held back, yet the window draws and says what it is waiting for.
+    assert_eq!(h.state().asset_models.len(), 5);
+    assert!(h.state().asset_models.values().all(|v| v.loading && !v.is_read()), "a request for each type is running");
+    assert_eq!(h.state().jobs.running().filter(|j| j.title == "Ask the providers for their models").count(), 5);
+    h.get_by_label_contains("Asking");
+    assert!(h.get_by_label("Refresh").accesskit_node().is_disabled(), "a request is already running");
+    h.get_by_label("Pictures model").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label("Asking the providers for their models…");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    // Let the providers answer.
+    probe.hold(false);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    assert_eq!(
+        (probe.asked("fal"), probe.asked("scenario"), probe.asked("elevenlabs")),
+        (5, 5, 0),
+        "each keyed provider once per type; the one without a key never"
+    );
+    // Closing and opening it again soon after asks no one: the lists are young.
+    let jobs_before = h.state().jobs.list.len();
+    h.state_mut().state.settings_open = false;
+    h.run_steps(2);
+    h.state_mut().state.settings_open = true;
+    h.run_steps(3);
+    assert_eq!(h.state().jobs.list.len(), jobs_before, "no request for lists read a moment ago");
+    // Lists read more than ten minutes ago are asked for again. The tool's own copy of each list is
+    // young, so only the four lists a provider said it makes nothing of are asked for again (those
+    // are never kept).
+    let long_ago = craft_anything_engine::inbox::now_ms() - 11 * 60 * 1000;
+    for v in h.state_mut().asset_models.values_mut() {
+        v.fetched_ms = long_ago;
+    }
+    h.state_mut().state.settings_open = false;
+    h.run_steps(2);
+    h.state_mut().state.settings_open = true;
+    h.run_steps(3);
+    assert_eq!(h.state().jobs.list.len(), jobs_before + 5, "a request for each type");
+    assert!(lists_read(&mut h));
+    assert_eq!(probe.total(), 14);
+    // Refresh asks every provider again, whatever it kept.
+    h.get_by_label("Refresh").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Refresh").click();
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    assert_eq!(probe.total(), 24);
+}
+
+/// The default limit is edited in the unit of the provider chosen (dollars or credits), one number for
+/// each unit, and it is kept in the settings.
+#[test]
+fn a_default_limit_is_edited_in_its_unit() {
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{MAX_ASSET_CREDITS, Pricing, Rate, Unit};
+    use egui_kittest::kittest::NodeT;
+    let (engine, _probe) = asset_engine(&["fal", "scenario"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || {
+        let mut a = asset_app(engine, &["fal", "scenario"]);
+        with_two_defaults(&mut a);
+        let meshy = Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(100.0) } };
+        a.settings.assets.defaults.insert(AssetKind::Model3d, picked("scenario", "model_meshy-7-1-img23d", "Meshy 7.1", Unit::Credits, meshy));
+        a
+    });
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    let value = |h: &Harness<'static, CraftApp>, label: &str| h.get_by_label(label).accesskit_node().numeric_value();
+    assert_eq!(
+        (value(&h, "Pictures default limit"), value(&h, "3D models default limit"), value(&h, "Music default limit")),
+        (Some(500.0), Some(500.0), Some(5.0))
+    );
+    // Credits: typed into the pictures row.
+    h.get_by_label("Pictures default limit").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Pictures default limit").click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.event(egui::Event::Text("750".into()));
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let settings = h.state().settings.assets.clone();
+    assert_eq!((settings.credit_limit, settings.usd_limit), (750.0, 5.0), "credits changed, dollars didn't");
+    assert_eq!(value(&h, "3D models default limit"), Some(750.0), "the other type billed in credits has the same default");
+    assert_eq!(value(&h, "Music default limit"), Some(5.0));
+    // Dollars: typed into the music row.
+    h.get_by_label("Music default limit").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Music default limit").click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.event(egui::Event::Text("2.5".into()));
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let settings = h.state().settings.assets.clone();
+    assert_eq!((settings.credit_limit, settings.usd_limit), (750.0, 2.5));
+    // More than a limit can be is cut down to the most.
+    h.get_by_label("Pictures default limit").click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.event(egui::Event::Text("99999999999".into()));
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().settings.assets.credit_limit, MAX_ASSET_CREDITS);
+    // The change reaches the engine's settings, which is what saves them.
+    h.run_steps(3);
+    assert_eq!(h.state().engine.session().settings.assets.usd_limit, 2.5);
+}
+
+/// The "ignore the budget" default for new projects is a switch here; with it on, the limit column
+/// says new projects start with their limits ignored.
+#[test]
+fn new_projects_can_ignore_the_budget_by_default() {
+    let (engine, _probe) = asset_engine(&["fal", "scenario"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || {
+        let mut a = asset_app(engine, &["fal", "scenario"]);
+        with_two_defaults(&mut a);
+        a
+    });
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    assert!(!h.state().settings.assets.ignore_budget, "off unless the person turns it on");
+    h.get_by_label("Ignore budget").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Ignore budget").click();
+    h.run_steps(3);
+    assert!(h.state().settings.assets.ignore_budget);
+    assert_eq!(h.query_all_by_label("Ignored").count(), 2);
+    assert!(h.query_by_label("On").is_none());
+    h.run_steps(3);
+    assert!(h.state().engine.session().settings.assets.ignore_budget, "kept in the settings the engine saves");
+}
+
+// ---- The project panel: generated assets per type --------------------------------------------
+
+/// The app showing `ws` on the Project screen, with `keyed` as the providers that have a key.
+fn project_app(engine: std::sync::Arc<craft_anything_engine::Engine>, keyed: &[&str], ws: craft_anything_engine::workspace::Workspace) -> CraftApp {
+    let mut a = demo::app(engine);
+    a.asset_keys = Some(["fal", "scenario", "elevenlabs"].into_iter().map(|id| (id.to_string(), keyed.contains(&id))).collect());
+    a.open_workspace(ws);
+    a
+}
+
+/// What a project has stored for `kind`, read from its folder.
+fn stored_type(root: &std::path::Path, kind: craft_anything_engines::assets::AssetKind) -> Option<craft_anything_engine::workspace::TypeAssets> {
+    craft_anything_engine::workspace::Workspace::open(root).unwrap().manifest.assets.types.get(&kind).cloned()
+}
+
+/// A project with scenario pictures (500 credits) and fal 3D models ($5), and the other types Off, stored.
+fn project_with_two_types(parent: &std::path::Path) -> craft_anything_engine::workspace::Workspace {
+    use craft_anything_engine::workspace::{TargetRef, TypeAssets, Workspace};
+    use craft_anything_engines::assets::AssetKind;
+    use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+    let mut ws = Workspace::create(parent, "Snake", "A snake game", TargetRef::None).unwrap();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        // A new project stores every type (the others Off, as Settings has no default for them).
+        m.assets = craft_anything_engine::workspace::ProjectAssets::from_defaults(&craft_anything_engine::settings::AssetSettings::default(), 1);
+        let quote = Pricing::Before { unit: Unit::Credits, rate: Rate::Quoted { typical: Some(20.0) } };
+        let tripo = Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.4) };
+        m.assets.types.insert(
+            AssetKind::Image,
+            TypeAssets { choice: picked("scenario", "model_gemini-3-1", "Gemini 3.1", Unit::Credits, quote), limit: 500.0, limit_on: true, since_ms: 1 },
+        );
+        m.assets.types.insert(
+            AssetKind::Model3d,
+            TypeAssets { choice: picked("fal", "tripo3d/p1/image-to-3d", "Tripo P1", Unit::Usd, tripo), limit: 5.0, limit_on: true, since_ms: 1 },
+        );
+    })
+    .unwrap();
+    ws
+}
+
+/// "Ignore budget" in the project's panel is the project_assets_allow tool's `ignore_budget`: it is
+/// saved with the project, and what a project has used is still counted while it is on.
+#[test]
+fn ignore_budget_switch_calls_the_tool() {
+    use craft_anything_engine::workspace::Workspace;
     let d = tempfile::tempdir().unwrap();
-    let mut ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
-    ws.manifest.stack = "Unity".into();
-    ws.save().unwrap();
-    ws.record_asset(AssetRecord { file: "Assets/Generated/crate.glb".into(), kind: "model".into(), prompt: "a crate".into(), cost_usd: 0.51, at_ms: 0 })
-        .unwrap();
+    let ws = project_with_two_types(d.path());
     let root = ws.root.clone();
-    let mut h = harness(move || {
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
         let mut a = demo::app(demo::engine(Mode::Beginner, true));
-        a.asset_keys = Some(fal_key(true));
         a.open_workspace(ws);
         a
     });
-    assert!(wait(&mut h, |a| a.facts.assets.0 == 1));
-    h.get_by_label("1 · $0.51 of $5.00");
-    // Generated assets are the person's choice, saved with the project through project_assets_allow.
-    h.get_by_label("Generate custom pictures and models").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.generate_assets)));
-    assert!(Workspace::open(&root).unwrap().manifest.generate_assets);
-    assert!(h.state().state.modal.is_none(), "a key is set up");
-    // Through the project_assets_budget tool, by the default budget from Settings.
-    h.get_by_label("Raise the budget by $5.00").click();
-    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.asset_budget_usd == 10.0)));
-    assert_eq!(Workspace::open(&root).unwrap().manifest.asset_budget_usd, 10.0);
+    h.run_steps(3);
+    let ignoring = |root: &std::path::Path| Workspace::open(root).unwrap().manifest.assets.ignore_budget;
+    assert!(!ignoring(&root), "off unless the person turns it on");
+    h.get_by_label("Ignore budget (no limits)").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.ignore_budget)));
+    assert!(ignoring(&root), "saved with the project");
+    assert_eq!(stored_type(&root, craft_anything_engines::assets::AssetKind::Image).map(|t| t.limit_on), Some(true), "each type's own switch is left alone");
+    assert!(wait(&mut h, |a| a.facts.asset_usage.len() == 2));
     h.run_steps(2);
-    h.get_by_label("1 · $0.51 of $10.00");
+    h.get_by_label("0 /");
+    h.get_by_label("$0.00 /");
+    // And back to each type's own switch.
+    h.get_by_label("Ignore budget (no limits)").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.ignore_budget)));
+    assert!(!ignoring(&root));
+}
+
+/// A limit is typed in its row, in the provider's unit, and applied when the field is left; an amount
+/// that isn't a limit is refused and the stored one comes back; Esc leaves it as it was; the row's
+/// switch turns the limit on and off.
+#[test]
+fn a_limit_is_edited_in_the_row() {
+    use craft_anything_engines::assets::AssetKind::{Image, Model3d};
+    use egui_kittest::kittest::NodeT;
+    let d = tempfile::tempdir().unwrap();
+    let ws = project_with_two_types(d.path());
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    let type_into = |h: &mut Harness<'static, CraftApp>, label: &str, text: &str| {
+        h.get_by_label(label).click();
+        h.run_steps(2);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run_steps(1);
+        h.get_by_label(label).type_text(text);
+        h.run_steps(2);
+    };
+    let shown = |h: &Harness<'static, CraftApp>, label: &str| h.get_by_label(label).value();
+    assert_eq!((shown(&h, "Pictures limit").as_deref(), shown(&h, "3D models limit").as_deref()), (Some("500"), Some("$5.00")));
+    // Credits: 750, applied with Enter.
+    type_into(&mut h, "Pictures limit", "750");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 750.0)));
+    assert_eq!(stored_type(&root, Image).map(|t| (t.limit, t.limit_on)), Some((750.0, true)));
+    assert_eq!(stored_type(&root, Model3d).map(|t| t.limit), Some(5.0), "the other type's limit is its own");
+    h.run_steps(3);
+    assert_eq!(shown(&h, "Pictures limit").as_deref(), Some("750"));
+    // Dollars: $2.50, applied by leaving the field for another.
+    type_into(&mut h, "3D models limit", "$2.5");
+    h.get_by_label("Pictures limit").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Model3d].limit == 2.5)));
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(750.0));
+    h.run_steps(3);
+    assert_eq!(shown(&h, "3D models limit").as_deref(), Some("$2.50"));
+    // Something that isn't a limit says so while it is typed, and is refused when the field is left.
+    type_into(&mut h, "Pictures limit", "lots");
+    h.get_by_label("Enter an amount from 0 to 10000000 credits.");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(shown(&h, "Pictures limit").as_deref(), Some("750"), "the stored limit comes back");
+    assert!(h.query_by_label("Enter an amount from 0 to 10000000 credits.").is_none());
+    type_into(&mut h, "3D models limit", "10001");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(stored_type(&root, Model3d).map(|t| t.limit), Some(2.5), "more than a limit can be is not applied");
+    // Esc leaves a typed amount unapplied.
+    type_into(&mut h, "Pictures limit", "900");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(4);
+    assert_eq!((shown(&h, "Pictures limit").as_deref(), stored_type(&root, Image).map(|t| t.limit)), (Some("750"), Some(750.0)));
+    assert_eq!(h.state().state.screen, Screen::Project, "Esc was for the field: it doesn't take the person back to Home");
+    // The switch.
+    let on = |h: &Harness<'static, CraftApp>| h.get_by_label("Pictures limit switch").accesskit_node().toggled();
+    assert_eq!(on(&h), Some(egui::accesskit::Toggled::True));
+    h.get_by_label("Pictures limit switch").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.types[&Image].limit_on)));
+    assert_eq!(stored_type(&root, Image).map(|t| (t.limit, t.limit_on)), Some((750.0, false)), "off keeps the number");
+    h.run_steps(3);
+    assert_eq!(on(&h), Some(egui::accesskit::Toggled::False));
+    assert_eq!(stored_type(&root, Model3d).map(|t| t.limit_on), Some(true));
+}
+
+/// Selects what is in a limit field and types `text` over it.
+fn type_into_field(h: &mut Harness<'static, CraftApp>, label: &str, text: &str) {
+    h.get_by_label(label).click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.get_by_label(label).type_text(text);
+    h.run_steps(2);
+}
+
+/// A limit is changed while the project's ledger is damaged: the new limit is saved with the project
+/// and the ledger is left exactly as it was, still reported as unreadable.
+#[test]
+fn a_limit_is_edited_while_the_ledger_is_damaged() {
+    use craft_anything_engines::assets::AssetKind::Image;
+    let d = tempfile::tempdir().unwrap();
+    let ws = project_with_two_types(d.path());
+    let root = ws.root.clone();
+    let ledger = root.join("assets.json");
+    let damaged = b"{not-json";
+    std::fs::write(&ledger, damaged).unwrap();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    assert!(wait(&mut h, |a| a.facts.assets_error.is_some()), "the ledger is read, and found damaged");
+    h.run_steps(2);
+    h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
+    type_into_field(&mut h, "Pictures limit", "750");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 750.0)));
+    assert_eq!(stored_type(&root, Image).map(|t| (t.limit, t.limit_on)), Some((750.0, true)), "craft.json has the new limit");
+    assert_eq!(std::fs::read(&ledger).unwrap(), damaged, "the ledger is as it was");
+    // Switching the limit off is a change of the project too, and also leaves the ledger alone.
+    h.run_steps(3);
+    h.get_by_label("Pictures limit switch").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.types[&Image].limit_on)));
+    assert_eq!(stored_type(&root, Image).map(|t| (t.limit, t.limit_on)), Some((750.0, false)));
+    assert_eq!(std::fs::read(&ledger).unwrap(), damaged);
+    h.run_steps(3);
+    h.get_by_label("Asset spending is unavailable. Repair assets.json before generating.");
+}
+
+/// A limit field shows the limit to the hundredth; going into it and out again changes nothing, so
+/// a limit with more places is not rounded by a visit. A fraction of a credit is shown as a number
+/// that can be typed back, and is not called a wrong amount while the field has the focus.
+#[test]
+fn visiting_a_limit_field_does_not_round_the_limit() {
+    use craft_anything_engines::assets::AssetKind::Image;
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = project_with_two_types(d.path());
+    ws.set_person(|m| {
+        if let Some(t) = m.assets.types.get_mut(&Image) {
+            t.limit = 0.456;
+        }
+    })
+    .unwrap();
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("0.46"));
+    // In and out, to another field: nothing is saved.
+    h.get_by_label("Pictures limit").click();
+    h.run_steps(2);
+    h.get_by_label("3D models limit").click();
+    h.run_steps(8);
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.456), "the limit is as it was");
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("0.46"));
+    // Typing what is shown is no change either.
+    type_into_field(&mut h, "Pictures limit", "0.46");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(8);
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.456));
+    // A different amount is a change.
+    type_into_field(&mut h, "Pictures limit", "0.7");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 0.7)));
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.7));
+    // A fraction of a credit is shown as a number, which is a limit.
+    type_into_field(&mut h, "Pictures limit", "0.004");
+    h.key_press(egui::Key::Enter);
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].limit == 0.004)));
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("0.004"));
+    h.get_by_label("Pictures limit").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Enter an amount from 0 to 10000000 credits.").is_none(), "what the field shows is an amount");
+    h.get_by_label("3D models limit").click();
+    h.run_steps(8);
+    assert_eq!(stored_type(&root, Image).map(|t| t.limit), Some(0.004), "and visiting it leaves it as it is");
+}
+
+/// A type's provider and model are chosen in its row from the lists the providers gave: another
+/// provider starts the count afresh in its own unit, another model of the same provider keeps it, a
+/// model picked again has its stored price refreshed, and Off stops the type.
+#[test]
+fn a_type_is_chosen_in_its_row() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    use craft_anything_engines::assets::AssetKind::Image;
+    use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+    let (engine, _probe) = asset_engine(&["fal", "scenario"]);
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || project_app(engine, &["fal", "scenario"], ws));
+    h.run_steps(3);
+    // A project that never chose a type has what it takes from Settings (Off here) stored as it opens.
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.follows_settings())));
+    assert_eq!(stored_type(&root, Image).map(|t| t.choice), Some(craft_anything_engine::asset_choice::AssetChoice::off()), "Off until the person chooses");
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Off"));
+    assert!(h.query_by_label("Pictures limit").is_none());
+    // The list opens beside the narrow panel and stays on the screen; opening it asks for the lists.
+    h.get_by_label("Pictures model").click();
+    assert!(wait(&mut h, |a| a.asset_models.get(&Image).is_some_and(|v| v.is_read() && !v.loading)));
+    h.run_steps(3);
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1100.0));
+    for words in ["Nano Banana Pro · $0.15 a picture", "Gemini 3.1 · ~20 credits a picture", "Some new model · price unknown"] {
+        let rect = h.get_by_label_contains(words).rect();
+        assert!(screen.contains_rect(rect), "{words} is at {rect:?}, off the screen");
+    }
+    h.get_by_label_contains("Nano Banana Pro").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].choice.provider.is_some())));
+    let t = stored_type(&root, Image).unwrap();
+    let per_picture = Pricing::Before { unit: Unit::Usd, rate: Rate::PerRequest(0.15) };
+    assert_eq!(
+        (t.choice.provider.as_deref(), t.choice.model.as_str(), t.choice.model_name.as_str()),
+        (Some("fal"), "fal-ai/nano-banana-pro", "Nano Banana Pro")
+    );
+    assert_eq!((t.choice.unit, t.choice.pricing.clone(), t.limit, t.limit_on), (Unit::Usd, per_picture.clone(), 5.0, true));
+    let first_count = t.since_ms;
+    assert!(first_count > 0, "its usage counts from now");
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("fal.ai · Nano Banana Pro"));
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("$5.00"));
+    assert!(wait(&mut h, |a| a.facts.asset_usage.contains_key(&Image)));
+    h.run_steps(2);
+    h.get_by_label("$0.00 /");
+    // Another model of the same provider: the limit, its switch and the count stay.
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label_contains("FLUX.1 [dev]").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].choice.model == "fal-ai/flux/dev")));
+    let t = stored_type(&root, Image).unwrap();
+    assert_eq!(
+        (t.limit, t.limit_on, t.since_ms, t.choice.pricing),
+        (5.0, true, first_count, Pricing::Before { unit: Unit::Usd, rate: Rate::PerMegapixel(0.025) })
+    );
+    // A model picked again has the price the provider lists now stored in place of an old one.
+    let stale = Pricing::Unknown;
+    Workspace::open(&root).unwrap().set_person(|m| m.assets.types.get_mut(&Image).unwrap().choice.pricing = Pricing::Unknown).unwrap();
+    h.state_mut().workspace.as_mut().unwrap().manifest.assets.types.get_mut(&Image).unwrap().choice.pricing = Pricing::Unknown;
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label_contains("FLUX.1 [dev]").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].choice.pricing != stale)));
+    let t = stored_type(&root, Image).unwrap();
+    assert_eq!((t.choice.model.as_str(), t.limit, t.since_ms), ("fal-ai/flux/dev", 5.0, first_count), "only the price is refreshed");
+    // Another provider: its own unit, the default limit in it, a count that starts afresh.
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label_contains("Gemini 3.1").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].choice.provider.as_deref() == Some("scenario"))));
+    let t = stored_type(&root, Image).unwrap();
+    assert_eq!((t.choice.unit, t.limit, t.limit_on), (Unit::Credits, 500.0, true));
+    assert!(t.since_ms >= first_count);
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures limit").value().as_deref(), Some("500"));
+    // Off: nothing of this type is made, and there is no limit to show.
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label("Off").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.types[&Image].choice.provider.is_none())));
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Off"));
+    assert!(h.query_by_label("Pictures limit").is_none() && h.query_by_label("Pictures limit switch").is_none());
+}
+
+/// The table fits the side panel at its width: every row's controls sit inside it.
+#[test]
+fn the_asset_rows_stay_inside_the_side_panel() {
+    let d = tempfile::tempdir().unwrap();
+    let ws = project_with_two_types(d.path());
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(4);
+    // The panel is 300 points at the right edge, with 20 points of margin inside it.
+    let (left, right) = (1280.0 - 300.0 + 20.0 - 1.0, 1280.0 - 20.0 + 1.0);
+    for label in [
+        "Pictures",
+        "Pictures model",
+        "Pictures limit",
+        "Pictures limit switch",
+        "3D models limit switch",
+        "Sound effects model",
+        "Music model",
+        "Ignore budget (no limits)",
+    ] {
+        let rect = h.get_by_label(label).rect();
+        assert!(rect.left() >= left && rect.right() <= right, "{label} is at {rect:?}, outside the panel's {left}..{right}");
+    }
+}
+
+/// Pausing generated assets keeps every type's choice and limit, on screen and on disk; turning it back
+/// on resumes those same choices.
+#[test]
+fn pausing_generated_assets_keeps_the_choices() {
+    let d = tempfile::tempdir().unwrap();
+    let ws = project_with_two_types(d.path());
+    let root = ws.root.clone();
+    let before = craft_anything_engine::workspace::Workspace::open(&root).unwrap().manifest.assets;
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    assert!(h.query_by_label("Off. Turning this on uses the choices below.").is_none());
+    h.get_by_label("Generate pictures, models and audio").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.generate_assets)));
+    h.run_steps(3);
+    h.get_by_label("Off. Turning this on uses the choices below.");
+    assert_eq!(craft_anything_engine::workspace::Workspace::open(&root).unwrap().manifest.assets, before, "pausing keeps the choices and limits");
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Scenario · Gemini 3.1"));
+    assert_eq!(h.get_by_label("3D models limit").value().as_deref(), Some("$5.00"));
+    h.get_by_label("Generate pictures, models and audio").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.generate_assets)));
+    assert_eq!(craft_anything_engine::workspace::Workspace::open(&root).unwrap().manifest.assets, before, "resuming starts from the same choices");
+}
+
+/// A project that has chosen nothing shows every type as Off, with no limit to set.
+#[test]
+fn a_project_with_nothing_chosen_shows_every_type_off() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(ws);
+        a
+    });
+    h.run_steps(3);
+    for title in ["Pictures", "3D models", "Speech", "Sound effects", "Music"] {
+        assert_eq!(h.get_by_label(&format!("{title} model")).value().as_deref(), Some("Off"), "{title}");
+        assert!(h.query_by_label(&format!("{title} limit")).is_none() && h.query_by_label(&format!("{title} limit switch")).is_none());
+    }
+    h.get_by_label("Generate pictures, models and audio");
+    h.get_by_label("Ignore budget (no limits)");
+    h.get_by_label("Manage provider keys");
+    // The shared budget field and its summary lines are gone.
+    assert!(
+        h.query_by_label("Save budget").is_none() && h.query_by_label_contains("Budget $").is_none() && h.query_by_label_contains("estimated spent").is_none()
+    );
+}
+
+/// A model with no price, one priced only after each run, and a provider without a key each have a
+/// line under the table that says so.
+#[test]
+fn the_notes_under_the_table_name_the_type_they_are_about() {
+    use craft_anything_engine::workspace::{TargetRef, TypeAssets, Workspace};
+    use craft_anything_engines::assets::AssetKind::{Image, Music, SoundEffect};
+    use craft_anything_engines::assets::model::{Pricing, Unit};
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Snake", "A snake game", TargetRef::None).unwrap();
+    ws.set_person(|m| {
+        m.generate_assets = true;
+        let mut put = |kind, choice| {
+            m.assets.types.insert(kind, TypeAssets { choice, limit: 5.0, limit_on: true, since_ms: 1 });
+        };
+        put(SoundEffect, picked("fal", "fal-ai/stable-audio", "Stable Audio", Unit::Usd, Pricing::Unknown));
+        put(Music, picked("elevenlabs", "music_v1", "Music v1", Unit::Credits, Pricing::After { unit: Unit::Credits }));
+        put(Image, picked("fal", "fal-ai/flux/dev", "FLUX.1 [dev]", Unit::Usd, Pricing::After { unit: Unit::Usd }));
+    })
+    .unwrap();
+    let (engine, _probe) = asset_engine(&["fal"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || project_app(engine, &["fal"], ws));
+    h.run_steps(3);
+    h.get_by_label("Sound effects: price unknown, usage not tracked");
+    h.get_by_label("Music: may pass the limit by one generation");
+    h.get_by_label("Pictures: may pass the limit by one generation");
+    h.get_by_label("Music: no ElevenLabs key");
+    assert!(h.query_by_label_contains("Pictures: no").is_none() && h.query_by_label_contains("Sound effects: no").is_none(), "fal has its key");
+    assert!(h.query_by_label_contains("Speech:").is_none() && h.query_by_label_contains("3D models:").is_none(), "a type that is Off has no note");
+}
+
+/// Opening a project asks no provider for its model lists; opening a type's picker asks for that
+/// type's lists on a worker when they are old, without holding the engine: the panel keeps drawing,
+/// its picker says what it is waiting for, and the panel's switches save meanwhile.
+#[test]
+fn a_types_lists_are_asked_for_when_its_picker_opens() {
+    use craft_anything_engines::assets::AssetKind::Image;
+    let (engine, probe) = asset_engine(&["fal", "scenario"]);
+    probe.hold(true);
+    let d = tempfile::tempdir().unwrap();
+    let ws = project_with_two_types(d.path());
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(engine);
+        a.asset_keys = Some(["fal", "scenario", "elevenlabs"].into_iter().map(|id| (id.to_string(), id != "elevenlabs")).collect());
+        a
+    });
+    h.run_steps(3);
+    h.state_mut().open_workspace(ws);
+    h.run_steps(3);
+    let asking = |h: &Harness<'static, CraftApp>| h.state().jobs.running().filter(|j| j.title == "Ask the providers for their models").count();
+    assert_eq!((asking(&h), probe.total(), h.state().asset_models.len()), (0, 0, 0), "opening the project asks no provider");
+    // The pictures' picker opens: their lists are asked for, on a worker, while the panel draws.
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    assert_eq!(asking(&h), 1, "a request for pictures only");
+    assert!(h.state().asset_models[&Image].loading);
+    h.get_by_label("Asking the providers for their models…");
+    // Closed by clicking its button again (Esc in its search field would leave the project).
+    h.get_by_label("Pictures model").click();
+    h.run_steps(2);
+    assert!(wait(&mut h, |_| probe.total() == 1), "a provider is being asked, and held");
+    // Meanwhile the engine is free: the panel's switch is saved through its tool at once.
+    h.get_by_label("Ignore budget (no limits)").click();
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.assets.ignore_budget)));
+    assert!(craft_anything_engine::workspace::Workspace::open(&root).unwrap().manifest.assets.ignore_budget, "saved with the project");
+    assert!(h.state().asset_models[&Image].loading && probe.total() == 1, "while the provider is still held");
+    probe.hold(false);
+    assert!(wait(&mut h, |a| a.asset_models[&Image].is_read() && !a.asset_models[&Image].loading));
+    assert_eq!((probe.asked("fal"), probe.asked("scenario"), probe.asked("elevenlabs")), (1, 1, 0), "each keyed provider once, for pictures");
+    assert_eq!(h.state().asset_models.len(), 1, "no other type was asked for");
+    // Opened again soon: the list is young, nobody is asked.
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(2);
+    assert_eq!((asking(&h), probe.total()), (0, 2));
+    // A list read more than ten minutes ago is asked for again when its picker opens.
+    let long_ago = craft_anything_engine::inbox::now_ms() - 11 * 60 * 1000;
+    h.state_mut().asset_models.get_mut(&Image).unwrap().fetched_ms = long_ago;
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    assert!(wait(&mut h, |a| a.asset_models[&Image].fetched_ms > long_ago && !a.asset_models[&Image].loading), "asked again, and answered");
+    // The list kept on disk is young, so it is what comes back: no provider is asked again.
+    assert_eq!((h.state().asset_models.len(), probe.total()), (1, 2));
+}
+
+/// A project from before each type had its own choice gets what it takes from Settings stored as the
+/// app opens it; Settings changed afterwards doesn't change its rows or what is stored.
+#[test]
+fn an_old_project_keeps_its_asset_choices_when_settings_change() {
+    use craft_anything_engines::assets::AssetKind::{Image, Music};
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":3,"name":"Old","request":"A game","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true,"asset_budget_usd":12.0}"#;
+    std::fs::write(d.path().join("craft.json"), old).unwrap();
+    let ws = craft_anything_engine::workspace::Workspace::open(d.path()).unwrap();
+    let root = ws.root.clone();
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        with_two_defaults(&mut a);
+        a.open_workspace(ws);
+        a
+    });
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.follows_settings())), "stored as it opens");
+    let (pictures, music) = (stored_type(&root, Image).unwrap(), stored_type(&root, Music).unwrap());
+    assert_eq!((music.choice.model.as_str(), music.limit), ("fal-ai/lyria-3-pro", 12.0), "the old budget is the dollar type's limit");
+    assert_eq!((pictures.choice.model.as_str(), pictures.limit), ("model_gemini-3-1", 500.0));
+    // The person changes Settings afterwards.
+    h.state_mut().settings.assets.defaults.clear();
+    h.state_mut().settings.assets.usd_limit = 1.0;
+    h.state_mut().settings.assets.credit_limit = 9.0;
+    h.run_steps(3);
+    assert_eq!(h.get_by_label("Music model").value().as_deref(), Some("fal.ai · Lyria 3 Pro"));
+    assert_eq!(h.get_by_label("Music limit").value().as_deref(), Some("$12.00"));
+    assert_eq!(h.get_by_label("Pictures model").value().as_deref(), Some("Scenario · Gemini 3.1"));
+    assert_eq!((stored_type(&root, Image).unwrap(), stored_type(&root, Music).unwrap()), (pictures, music), "nothing stored changed");
+}
+
+/// The job that stores an old project's defaults works on the project as it is on disk, not on the copy
+/// it was opened with: the project list's copy can be older than a build's last save, and storing from
+/// it would put the old status, note and reply back.
+#[test]
+fn storing_an_old_projects_defaults_keeps_what_a_build_wrote_since_the_copy_was_read() {
+    use craft_anything_engine::workspace::{Status, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":3,"name":"Old","request":"A game","target":{"kind":"none"},"created_ms":1,"updated_ms":1,"generate_assets":true,"asset_budget_usd":12.0}"#;
+    std::fs::write(d.path().join("craft.json"), old).unwrap();
+    let stale = Workspace::open(d.path()).unwrap();
+    let root = stale.root.clone();
+    assert_eq!((stale.manifest.status, stale.manifest.last_reply.as_str()), (Status::New, ""));
+    // A build saves its progress after that copy was read; the project still takes Settings' defaults.
+    let mut build = Workspace::open(&root).unwrap();
+    build.manifest.status = Status::Ready;
+    build.manifest.note = "Finished".into();
+    build.manifest.last_reply = "Done.".into();
+    build.save().unwrap();
+    assert!(Workspace::open(&root).unwrap().manifest.assets.follows_settings());
+    let mut h = harness_sized(egui::vec2(1280.0, 1100.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.open_workspace(stale);
+        a
+    });
+    assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| !w.manifest.assets.follows_settings())), "stored as it opens");
+    let disk = Workspace::open(&root).unwrap().manifest;
+    assert!(!disk.assets.follows_settings());
+    assert_eq!((disk.status, disk.note.as_str(), disk.last_reply.as_str()), (Status::Ready, "Finished", "Done."), "what the build wrote is still there");
+    let shown = &h.state().workspace.as_ref().unwrap().manifest;
+    assert_eq!((shown.status, shown.last_reply.as_str()), (Status::Ready, "Done."), "and the screen has it too");
+}
+
+/// Asking again for a type's lists (a key was saved or removed) stops the request it replaces, and the
+/// answer of the one stopped is dropped.
+#[test]
+fn asking_for_a_types_lists_again_stops_the_request_it_replaces() {
+    use craft_anything_engines::assets::AssetKind;
+    let (engine, probe) = asset_engine(&["fal"]);
+    probe.hold(true);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || asset_app(engine, &["fal"]));
+    h.run_steps(3);
+    let requests = |h: &Harness<'static, CraftApp>| -> Vec<(u64, bool)> {
+        h.state().jobs.list.iter().filter(|j| j.title == "Ask the providers for their models").map(|j| (j.id, j.cancel.is_cancelled())).collect()
+    };
+    let first = requests(&h);
+    assert_eq!(first.len(), 5);
+    assert!(first.iter().all(|(_, cancelled)| !cancelled));
+    h.state_mut().refresh_asset_models(AssetKind::Image, false);
+    let now = requests(&h);
+    assert_eq!(now.len(), 6);
+    let stopped: Vec<u64> = now.iter().filter(|(_, cancelled)| *cancelled).map(|(id, _)| *id).collect();
+    assert_eq!(stopped.len(), 1, "only the pictures request that was replaced: {now:?}");
+    assert!(first.iter().any(|(id, _)| *id == stopped[0]));
+    probe.hold(false);
+    assert!(lists_read(&mut h));
+    assert!(h.state().state.toasts.is_empty(), "stopping a request is not an error");
+}
+
+/// A provider whose key was just removed is not offered while the lists are asked for again, though
+/// the lists on screen still have it; once the request answers it is gone for good.
+#[test]
+fn a_provider_whose_key_was_just_removed_is_not_offered_while_the_lists_are_asked_again() {
+    use craft_anything_engines::assets::AssetKind::Image;
+    let (engine, probe) = asset_engine(&["fal", "scenario"]);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || asset_app(engine, &["fal", "scenario"]));
+    h.run_steps(3);
+    assert!(lists_read(&mut h));
+    h.run_steps(3);
+    let has_fal = |a: &CraftApp| a.asset_models[&Image].providers.iter().any(|p| p.provider == "fal");
+    assert!(has_fal(h.state()));
+    // The engine is busy with something else, so the request that the removal sends waits its turn.
+    let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+    let engine = h.state().engine.clone();
+    let busy = std::thread::spawn(move || {
+        let _session = engine.session();
+        let _ = held.0.send(());
+        let _ = release.1.recv_timeout(Duration::from_secs(20));
+    });
+    held.1.recv().unwrap();
+    // The key is removed, in the store and for the app.
+    probe.keys.delete(&craft_anything_ai::keys::asset_key_name("fal")).unwrap();
+    let keys: std::collections::BTreeMap<String, bool> =
+        [("fal", false), ("scenario", true), ("elevenlabs", false)].map(|(id, saved)| (id.to_string(), saved)).into();
+    h.state_mut().jobs.spawn("Forget the key", false, move |_| Ok(craft_anything_ui_egui::Done::AssetKeys(keys)));
+    assert!(wait(&mut h, |a| a.asset_models[&Image].loading));
+    h.run_steps(3);
+    assert!(h.state().asset_models[&Image].loading && has_fal(h.state()), "still asking, and the lists on screen are the ones from before");
+    h.get_by_label("Pictures model").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Pictures model").click();
+    h.run_steps(3);
+    h.get_by_label_contains("Gemini 3.1");
+    assert!(h.query_by_label_contains("FLUX.1").is_none() && h.query_by_label_contains("Nano Banana Pro").is_none(), "fal.ai has no key now");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    drop(release.0);
+    busy.join().unwrap();
+    assert!(lists_read(&mut h));
+    assert!(!has_fal(h.state()), "and the answer agrees");
+}
+
+/// The card that asks to loosen a project's asset spending offers "Allow once" and "Don't allow" but
+/// not "Always for this project", which would remember nothing; other approval cards keep it.
+#[test]
+fn the_loosen_card_offers_no_always() {
+    use craft_anything_engine::inbox::{Request, RequestKind};
+    use craft_anything_ui_egui::state::FeedItem;
+    let mut h = harness_sized(egui::vec2(1280.0, 1400.0), || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::fill_project(&mut a);
+        a
+    });
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Always for this project").count(), 1, "the demo's command card offers it");
+    let loosen = Request {
+        id: "1-1-2".into(),
+        kind: RequestKind::Approval,
+        title: "Let the assistant loosen this project's asset spending?".into(),
+        detail: "The assistant asks to: Switch the limit for music off.".into(),
+        choices: vec![],
+        allow_text: false,
+        action: Some(craft_anything_engine::tools::project_tools::LOOSEN_CARD.into()),
+        created_ms: 0,
+    };
+    let feed = &mut h.state_mut().state.feed;
+    feed.retain(|item| !matches!(item, FeedItem::Ask { request, .. } if request.kind == RequestKind::Approval));
+    feed.push(FeedItem::Ask { request: loosen, answer: None });
+    h.run_steps(3);
+    h.get_by_label("Allow once");
+    h.get_by_label("Don't allow");
+    assert!(h.query_by_label("Always for this project").is_none(), "nothing to remember");
+}
+
+/// A request for the model lists doesn't hold the engine: a Settings default changed while the
+/// providers are asked is in the app at once, and reaches the engine's settings and the file without
+/// waiting for the lists. (In a child process with a config folder of its own: the app saves to the
+/// real one.)
+#[test]
+fn a_default_changed_while_the_providers_are_asked_reaches_the_session_and_the_file() {
+    use craft_anything_platform::process::Process;
+    const CHILD: &str = "CRAFT_ANYTHING_HELD_SETTINGS_TEST";
+    let Some(dir) = std::env::var_os(CHILD) else {
+        let dir = tempfile::tempdir().unwrap();
+        let out = Process::new(std::env::current_exe().unwrap())
+            .args(["--exact", "a_default_changed_while_the_providers_are_asked_reaches_the_session_and_the_file", "--nocapture"])
+            .env(CHILD, dir.path())
+            .env("CRAFT_ANYTHING_CONFIG_DIR", dir.path())
+            .timeout(Duration::from_secs(120))
+            .run_checked()
+            .unwrap();
+        // A name that matches no test also exits cleanly, having run nothing.
+        let said = out.stdout_text();
+        assert!(said.contains("1 passed"), "the child ran the test: {said}");
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    assert_eq!(craft_anything_engine::Settings::path(), dir.join("config.toml"));
+    let (engine, probe) = asset_engine(&["fal", "scenario"]);
+    probe.hold(true);
+    let mut h = harness_sized(egui::vec2(1280.0, 1500.0), move || {
+        let mut a = asset_app(engine, &["fal", "scenario"]);
+        a.persist = true;
+        a
+    });
+    h.run_steps(3);
+    assert_eq!(h.state().asset_models.len(), 5);
+    assert!(h.state().asset_models.values().all(|v| v.loading), "the providers are being asked");
+    assert!(wait(&mut h, |_| probe.total() > 0), "and held");
+    assert!(wait(&mut h, |a| a.engine.try_session().is_some()), "while the engine is free");
+    // The person changes a default while that goes on.
+    h.get_by_label("Ignore budget").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Ignore budget").click();
+    h.run_steps(3);
+    assert!(h.state().settings.assets.ignore_budget, "the app has it at once");
+    // The engine gets it, and it is written, with the providers still held.
+    assert!(wait(&mut h, |a| a.engine.try_session().is_some_and(|s| s.settings.assets.ignore_budget)));
+    assert!(wait(&mut h, |_| craft_anything_engine::Settings::load().assets.ignore_budget), "saved without waiting for the lists");
+    assert!(h.state().asset_models.values().any(|v| v.loading), "the providers are still being asked");
+    probe.hold(false);
+    assert!(lists_read(&mut h));
 }
 
 #[test]
@@ -583,6 +1854,7 @@ fn a_finished_game_offers_to_play_it() {
     assert_eq!(h.get_all_by_label("Play the game").count(), 2, "in the sidebar and on the ready card");
 }
 
+/// A finished build can be pinned through scroll-accessible project actions and opened from the sidebar.
 #[test]
 fn a_finished_build_can_be_pinned_and_opened_from_the_sidebar() {
     use craft_anything_engine::workspace::{Status, TargetRef, Workspace};
@@ -614,6 +1886,9 @@ fn a_finished_build_can_be_pinned_and_opened_from_the_sidebar() {
     assert!(wait(&mut h, |a| a.facts.program));
     h.run_steps(2);
     assert!(h.query_by_label("Pinned builds").is_none(), "no Pinned section before anything is pinned");
+    h.get_by_label("Pin this build").scroll_to_me();
+    h.run();
+    assert!(h.get_by_label("Pin this build").rect().bottom() < 820.0, "the project sidebar scrolls to its actions");
     h.get_by_label("Pin this build").click();
     // The dialog works out what a frozen copy takes; frozen is picked.
     assert!(wait(&mut h, |a| matches!(a.state.pin_draft.size, Some(Ok(_)))));
@@ -1364,7 +2639,7 @@ fn settings_controls_change_builds_art_and_studying() {
     h.get_by_label("Use as a goal").click();
     h.run_steps(2);
     assert_eq!(h.state().settings.build.picture_good_enough, Some(80.0));
-    h.get_by_label("Budget for a new project");
+    h.get_by_label("New projects ignore the budget");
     h.get_by_label("Plugins").click();
     h.run_steps(2);
     h.get_by_label("No plugins yet.");
@@ -2525,6 +3800,7 @@ fn the_website_dialog_is_ready_to_type_into() {
     assert!(h.get_by_label("Website address").is_focused());
 }
 
+/// Scroll-accessible project actions rename, duplicate and delete the saved workspace through engine tools.
 #[test]
 fn a_project_is_renamed_duplicated_and_deleted_from_its_page() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
@@ -2540,6 +3816,9 @@ fn a_project_is_renamed_duplicated_and_deleted_from_its_page() {
         a
     });
     h.run_steps(3);
+    h.get_by_label("Rename").scroll_to_me();
+    h.run();
+    assert!(h.get_by_label("Rename").rect().bottom() < 820.0, "the project sidebar scrolls to its actions");
     h.get_by_label("Rename").click();
     h.run_steps(2);
     assert_eq!(h.state().state.modal, Some(Modal::Rename(root.clone())));
@@ -2550,9 +3829,13 @@ fn a_project_is_renamed_duplicated_and_deleted_from_its_page() {
 
     assert!(wait(&mut h, |a| a.workspace.as_ref().is_some_and(|w| w.manifest.name == "Snake II")), "renamed through project_rename");
 
+    h.get_by_label("Duplicate").scroll_to_me();
+    h.run();
     h.get_by_label("Duplicate").click();
     assert!(wait(&mut h, |a| a.projects.iter().any(|w| w.manifest.name == "Snake II copy")), "the copy is listed");
 
+    h.get_by_label("Delete the project").scroll_to_me();
+    h.run();
     h.get_by_label("Delete the project").click();
     h.run_steps(2);
     h.get_by_label("Delete Snake II?");

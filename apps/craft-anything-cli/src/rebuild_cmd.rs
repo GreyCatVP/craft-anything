@@ -1,6 +1,7 @@
 //! `rebuild`: the whole study → build → check workflow, headless. Questions and approvals are
 //! answered on the terminal, or automatically with `--unattended` (first choice; approvals are
-//! refused, so nothing outside the project happens without a person).
+//! refused, so nothing outside the project happens without a person). When an AI started the
+//! command, approvals are refused and a new project starts with generated assets off.
 
 use crate::{Cli, INTERRUPTED, make_engine};
 use clap::Args;
@@ -8,6 +9,7 @@ use craft_anything_ai::rebuild::{self, RebuildRun, RunEvent, RunOptions};
 use craft_anything_ai::{AgentEvent, AiHub, BackendKind};
 use craft_anything_engine::inbox::{Answer, Request, RequestKind};
 use craft_anything_engine::workspace::Workspace;
+use craft_anything_engine::{AGENT_ENV, Caller};
 use craft_anything_evidence::ToolError;
 use std::io::{BufRead as _, Write as _};
 use std::path::PathBuf;
@@ -51,8 +53,10 @@ pub struct RebuildArgs {
     /// New projects only; otherwise it's chosen from the request and target.
     #[arg(long)]
     pub build_with: Option<String>,
-    /// Let the builder generate pictures and 3D models for a new game (needs a fal.ai key; paid
-    /// within the project's asset budget). Change it later with `project-assets-allow`.
+    /// Let the builder generate pictures, 3D models and audio for a new game (needs a key for a
+    /// provider that makes them; paid within each asset type's limit). Change it later with
+    /// `project-assets-allow`, and choose models with `project-assets-choose`. When an AI
+    /// started the command, the project starts with them off: the person turns them on.
     #[arg(long)]
     pub generate_assets: bool,
 }
@@ -84,6 +88,7 @@ fn ensure_agent(hub: &AiHub) -> Result<(), ToolError> {
 }
 
 fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
+    let caller = crate::caller_for(std::env::var_os(AGENT_ENV).as_deref());
     let engine = make_engine(None, cli.deep_for_run())?;
     let hub = AiHub::new(engine.clone());
     ensure_agent(&hub)?;
@@ -94,6 +99,8 @@ fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
     if a.generate_assets && a.continue_in.is_some() {
         return Err(ToolError::invalid("--generate-assets is for new projects.").with_remediation("Use project-assets-allow for an existing project."));
     }
+    // Asked for by an AI (the command is marked as its), they start off, and it is told so below.
+    let generate_assets = rebuild::project::generates_assets(a.generate_assets, caller);
     let (ws, message) = match &a.continue_in {
         Some(dir) => (Workspace::open(&std::path::absolute(dir).map_err(|e| ToolError::io(dir.display(), e))?)?, (!a.resume).then(|| a.request.clone())),
         None => {
@@ -107,7 +114,7 @@ fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
                 (None, Some(d)) => Place::In(d),
                 (None, None) => Place::Projects,
             };
-            let ws = rebuild::project::new_project(&settings, &a.target, &a.request, place, a.build_with.as_deref(), a.generate_assets, a.backend.as_deref())?;
+            let ws = rebuild::project::new_project(&settings, &a.target, &a.request, place, a.build_with.as_deref(), generate_assets, a.backend.as_deref())?;
             if folder.is_some() {
                 engine.session().remember_project(&ws.root)?;
             }
@@ -115,6 +122,9 @@ fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
         }
     };
     println!("Project: {}", ws.root.display());
+    if a.generate_assets && !generate_assets {
+        println!("{}", rebuild::project::ASSETS_LEFT_OFF);
+    }
     // A follow-up shows in the project's feed as the person typed it.
     let shown = message.clone();
     let good_enough = engine.session().settings.build.good_enough;
@@ -166,7 +176,7 @@ fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
                 }
                 RunEvent::Ask(r) => {
                     end_line(&mut line_open);
-                    let answer = if a.unattended { auto_answer(&r) } else { prompt_answer(&r) };
+                    let answer = answer_for(&r, a.unattended, caller);
                     run.answer(&r.id, &answer)?;
                 }
                 RunEvent::Checked(c) => {
@@ -209,6 +219,28 @@ fn end_line(open: &mut bool) {
     }
 }
 
+/// How a card the run relays is answered: on the terminal, or automatically with `--unattended`.
+/// An approval is the person's alone, so when an AI started this command (`caller` is the agent, see
+/// [`AGENT_ENV`]) it is refused without reading the terminal, and the answer says why. The run
+/// relays every pending card in the project's inbox, those of the AI's own requests included.
+fn answer_for(r: &Request, unattended: bool, caller: Caller) -> Answer {
+    match r.kind {
+        RequestKind::Approval if caller == Caller::Agent => refuse(r, NOT_THE_PERSON),
+        _ if unattended => auto_answer(r),
+        _ => prompt_answer(r),
+    }
+}
+
+/// Why an approval was refused without asking, recorded as its answer: `--unattended` …
+const UNATTENDED: &str = "Unattended run: actions outside the project aren't allowed.";
+/// … or an AI started the command, and an approval is not its to answer.
+const NOT_THE_PERSON: &str = "An AI started this run, and approvals are answered only by the person, in the Craft Anything app.";
+
+fn refuse(r: &Request, why: &str) -> Answer {
+    println!("? {} → refused. {why}", r.title);
+    Answer { allow: Some(false), text: Some(why.into()), ..Default::default() }
+}
+
 fn auto_answer(r: &Request) -> Answer {
     match r.kind {
         RequestKind::Question => {
@@ -219,10 +251,7 @@ fn auto_answer(r: &Request) -> Answer {
                 ..Default::default()
             }
         }
-        RequestKind::Approval => {
-            println!("? {} → refused (unattended)", r.title);
-            Answer { allow: Some(false), text: Some("Unattended run: actions outside the project aren't allowed.".into()), ..Default::default() }
-        }
+        RequestKind::Approval => refuse(r, UNATTENDED),
     }
 }
 
@@ -256,5 +285,55 @@ fn prompt_answer(r: &Request) -> Answer {
             let line = read_line().to_lowercase();
             Answer { allow: Some(line.starts_with('y') || line.starts_with('a')), always: line.starts_with('a'), ..Default::default() }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(kind: RequestKind) -> Request {
+        Request {
+            id: "r1".into(),
+            kind,
+            title: "Allow?".into(),
+            detail: String::new(),
+            choices: vec!["Blue".into(), "Red".into()],
+            allow_text: true,
+            action: None,
+            created_ms: 0,
+        }
+    }
+
+    /// The run relays every card in the project's inbox, those an AI's own request posted included, to
+    /// whoever started the command. When that is an AI, an approval is refused without reading the
+    /// terminal (a read here would wait for input that never comes), as `--unattended` refuses it,
+    /// and the answer gives the reason that applies: an AI's command isn't merely unattended.
+    #[test]
+    fn an_approval_is_refused_when_an_ai_started_the_command_and_nothing_is_read() {
+        let approval = card(RequestKind::Approval);
+        for (unattended, caller, why) in [(false, Caller::Agent, NOT_THE_PERSON), (true, Caller::Agent, NOT_THE_PERSON), (true, Caller::Cli, UNATTENDED)] {
+            let a = answer_for(&approval, unattended, caller);
+            assert_eq!((a.allow, a.always), (Some(false), false), "unattended {unattended}, {caller:?}");
+            assert_eq!(a.text.as_deref(), Some(why), "unattended {unattended}, {caller:?}");
+        }
+        assert!(NOT_THE_PERSON.contains("only by the person") && !NOT_THE_PERSON.contains("Unattended"));
+        // A question is still answered by the same rules as before: unattended takes the first choice.
+        let q = answer_for(&card(RequestKind::Question), true, Caller::Agent);
+        assert_eq!(q.choice.as_deref(), Some("Blue"));
+    }
+
+    /// Generated assets spend the person's money: `--generate-assets` from a command an AI started
+    /// (the process is marked) starts the project with them off; the person's own command gets them.
+    #[test]
+    fn generate_assets_from_a_command_an_ai_started_leaves_them_off() {
+        use std::ffi::OsStr;
+        let person = crate::caller_for(None);
+        let ai = crate::caller_for(Some(OsStr::new("1")));
+        assert!(rebuild::project::generates_assets(true, person), "the person asked");
+        assert!(!rebuild::project::generates_assets(false, person), "nobody asked");
+        assert!(!rebuild::project::generates_assets(true, ai), "an AI asked");
+        assert!(!rebuild::project::generates_assets(false, ai));
+        assert!(rebuild::project::ASSETS_LEFT_OFF.contains("Generated assets panel"));
     }
 }
