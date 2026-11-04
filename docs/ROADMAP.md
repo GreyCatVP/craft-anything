@@ -219,6 +219,10 @@ Every round spends the person's money or quota. One that can't do anything shoul
       fired on a local Ollama build (the same built-in loop) after two turns that changed nothing
       in `app/` ("The build stopped after two builder turns changed no files in app/…"); an
       API-key build is still owed
+- [ ] #736: the build check and the stop message say when `app/` is empty, so a builder that
+      claims a build (gemini-cli on v0.3.0 looped without a stop) can't hide that nothing was
+      written. Stopping after two unchanged turns is on main (#557); the empty-folder note is
+      only on the website check (#749) — claimed: claude, branch bugfix/r5.3-empty-app-loop
 
 ### R5.4 Local models can build
 Owner: open · Status: todo
