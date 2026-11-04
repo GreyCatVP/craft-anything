@@ -621,7 +621,7 @@ Gaps found while using the app for real projects.
       — claimed: xerenon, branch feature/r2.9-work-on-my-project; PR #686
 - [x] Leaving "Work on my project" forgets a folder it would edit in place, so a version made on
       Make can't edit that project, and an address in its request isn't read as an original to
-      recreate (review of #686) — claimed: xerenon, branch bugfix/r2.9-own-project-review
+      recreate (review of #686) — claimed: xerenon, branch bugfix/r2.9-own-project-review; PR #750
 - [x] Choose Claude Code's folder (`CLAUDE_CONFIG_DIR`) per AI, so one computer can build with
       two Claude accounts; an app opened from the Dock never sees the shell's variable. Settings →
       AI (a typed folder, and Add another) and `ai folder`; live-checked from the CLI with an empty
