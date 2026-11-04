@@ -1307,7 +1307,7 @@ fn openrouter_with_no_provider_for_tools_falls_back_to_the_text_protocol() {
     assert!(seen[1].body.get("provider").is_none() && seen[1].body.get("tools").is_none(), "the second asks in text: {}", seen[1].body);
 }
 
-/// A ComfyUI server picked as the picture model lets builds make assets with no key of any kind.
+/// A ComfyUI server with a checkpoint, picked as the picture model, lets builds make assets with no key of any kind.
 #[test]
 fn a_comfyui_server_lets_builds_make_assets_without_a_key() {
     if std::env::var_os("FAL_KEY").is_some() {
@@ -1318,9 +1318,11 @@ fn a_comfyui_server_lets_builds_make_assets_without_a_key() {
     h.engine.session().settings.assets.image_model = Some("comfyui".into());
     assert!(!h.can_make_assets(), "ComfyUI picked but no address");
     h.engine.session().settings.assets.comfyui.address = "http://192.168.1.20:8188".into();
+    assert!(!h.can_make_assets(), "an address but no checkpoint can't make a picture");
+    h.engine.session().settings.assets.comfyui.checkpoint = "sd_xl_base_1.0.safetensors".into();
     assert!(h.can_make_assets());
     h.engine.session().settings.assets.image_model = Some("flux-dev".into());
-    assert!(!h.can_make_assets(), "an address alone doesn't count when another model is picked");
+    assert!(!h.can_make_assets(), "a ComfyUI server doesn't count when another model is picked");
 }
 
 /// A run started by a tool asks while that tool holds the session: the answer never waits for it.

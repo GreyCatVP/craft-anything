@@ -724,7 +724,10 @@ impl AiHub {
     /// the person's own ComfyUI server (the picture model, with an address), which needs none.
     pub fn can_make_assets(&self) -> bool {
         let is_comfy = |a: &craft_anything_engine::settings::AssetSettings| {
-            a.image_model.as_deref() == Some(craft_anything_engines::assets::comfyui::ID) && !a.comfyui.address.trim().is_empty()
+            // The same two fields the asset tools need before they send anything.
+            a.image_model.as_deref() == Some(craft_anything_engines::assets::comfyui::ID)
+                && !a.comfyui.address.trim().is_empty()
+                && !a.comfyui.checkpoint.trim().is_empty()
         };
         // Never wait for the session: a run started by a tool is called while that tool holds it.
         let comfy = match self.engine.try_session() {
