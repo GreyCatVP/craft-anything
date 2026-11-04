@@ -63,10 +63,10 @@ const SIGNATURES: &[Signature] = &[
     Signature { offset: 0, bytes: b"fLaC", file_type: "FLAC audio", mime: "audio/flac", confidence: Confidence::Observed },
 
     // Video
-    Signature { offset: 0, bytes: b"\x00\x00\x00\x18\x66\x74\x79\x70", file_type: "MP4 video", mime: "video/mp4", confidence: Confidence::Observed },
-    Signature { offset: 0, bytes: b"\x00\x00\x00\x20\x66\x74\x79\x70", file_type: "MP4 video", mime: "video/mp4", confidence: Confidence::Observed },
-    Signature { offset: 0, bytes: b"\x00\x00\x00\x24\x66\x74\x79\x70", file_type: "MP4 video", mime: "video/mp4", confidence: Confidence::Observed },
-    Signature { offset: 0, bytes: b"\x00\x00\x00\x1C\x66\x74\x79\x70\x6D\x70\x34\x32", file_type: "MP4 video", mime: "video/mp4", confidence: Confidence::Observed },
+    Signature { offset: 0, bytes: b"\x00\x00\x00\x18\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
+    Signature { offset: 0, bytes: b"\x00\x00\x00\x20\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
+    Signature { offset: 0, bytes: b"\x00\x00\x00\x24\x66\x74\x79\x70", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
+    Signature { offset: 0, bytes: b"\x00\x00\x00\x1C\x66\x74\x79\x70\x6D\x70\x34\x32", file_type: "ISO base media (ftyp)", mime: "application/octet-stream", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x1A\x45\xDF\xA3", file_type: "Matroska video (MKV/WebM)", mime: "video/x-matroska", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x4D\x54\x68\x64", file_type: "MIDI file", mime: "audio/midi", confidence: Confidence::Observed },
 
