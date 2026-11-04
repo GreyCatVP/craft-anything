@@ -141,6 +141,24 @@ pub trait AgentAdapter: Send + Sync {
     fn stdin_text(&self, _preamble: &str, prompt: &str) -> String {
         prompt.to_string()
     }
+    /// What to tell the person when the help doesn't list [`required_flags`](AgentAdapter::required_flags)
+    /// and the adapter is kept anyway (no [`plain_fallback`](AgentAdapter::plain_fallback)): a newer
+    /// version, say. `None`: nothing to add.
+    fn missing_flags_fix(&self) -> Option<String> {
+        None
+    }
+    /// A session this agent saved before projects recorded whether it holds the whole conversation
+    /// (`Manifest::agent_session_whole` missing) does: it was always continued from its first
+    /// brief. Codex's wasn't (its runs didn't resume, so its last thread may have begun with only
+    /// a follow-up line).
+    fn unmarked_session_is_whole(&self) -> bool {
+        true
+    }
+    /// Events for one line the CLI printed on stderr, for an agent that says some things only
+    /// there (a saved session it doesn't have). The line itself is kept for logs either way.
+    fn parse_stderr(&self, _p: &mut StreamParser, _line: &str) -> Vec<AgentEvent> {
+        Vec::new()
+    }
     /// The process for a local run of `program` (an adapter may clean its environment).
     fn process(&self, program: &str) -> Process {
         Process::new(program)
@@ -701,7 +719,17 @@ pub fn claude_handoff(saved: &str, max: usize) -> Option<String> {
     (!kept.is_empty()).then(|| kept.join("\n\n"))
 }
 
-/// Codex (`codex exec --json`). Flags are checked against `codex exec --help` before use.
+/// How `codex exec resume` names a thread it doesn't have, on stderr before it exits 1 (0.166:
+/// "thread/resume failed: no rollout found for thread id …"). Its threads are kept per computer
+/// (`~/.codex/sessions`), so a project copied elsewhere names one it can't find.
+const CODEX_NO_SUCH_THREAD: &str = "no rollout found";
+/// The request that failed, in the same line.
+const CODEX_RESUME_FAILED: &str = "thread/resume";
+/// The Codex version these flags and messages were checked with.
+const CODEX_CHECKED: &str = "0.166";
+
+/// Codex (`codex exec --json`, and `codex exec resume <thread> --json` to carry a conversation
+/// on). Flags are checked against `codex exec --help` before use.
 pub struct Codex;
 
 impl AgentAdapter for Codex {
@@ -715,6 +743,7 @@ impl AgentAdapter for Codex {
         true
     }
 
+    /// Codex has no flag for a system prompt, so the preamble leads the message.
     fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
         format!("{preamble}{prompt}")
     }
@@ -723,16 +752,29 @@ impl AgentAdapter for Codex {
         cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop)
     }
 
+    /// Its saved thread is continued with `exec resume <id>`, which has no `--sandbox` flag, so a
+    /// builder's sandbox goes in as configuration there. The message is read from stdin (`-`).
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
-        let mut v = vec!["exec".to_string(), "--json".into()];
+        let mut v = vec!["exec".to_string()];
+        if cx.resume.is_some() {
+            // `exec resume` refuses several of `exec`'s own options (`--profile`, `--oss`,
+            // `--sandbox`, `-C`, `--add-dir`…, 0.166), so the backend's own args go before the
+            // subcommand, where `exec` takes them for the resumed run as well.
+            v.extend(cx.options.args.iter().cloned());
+            v.push("resume".into());
+        }
+        v.push("--json".into());
         // Project folders aren't git repositories, and `codex exec` refuses to run outside one
-        // without this (#69). Not twice: it may already be in the backend's own args.
+        // without this (#69). Not twice at one level: it may already be in the backend's own args
+        // (which a resumed run hands to `exec`, a level up, where it may come again).
         const SKIP_GIT: &str = "--skip-git-repo-check";
-        if !cx.options.args.iter().any(|a| a == SKIP_GIT) {
+        if cx.resume.is_some() || !cx.options.args.iter().any(|a| a == SKIP_GIT) {
             v.push(SKIP_GIT.into());
         }
-        if cx.builder {
-            v.extend(["--sandbox".into(), "workspace-write".into()]);
+        match (cx.builder, cx.resume.is_some()) {
+            (true, false) => v.extend(["--sandbox".into(), "workspace-write".into()]),
+            (true, true) => v.extend(["-c".into(), "sandbox_mode=\"workspace-write\"".into()]),
+            (false, _) => {}
         }
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.command={}", toml_string(&cx.mcp.command))]);
         let args_toml = format!("[{}]", cx.mcp.args.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "));
@@ -746,19 +788,60 @@ impl AgentAdapter for Codex {
         if let Some(m) = &cx.options.cli_model {
             v.extend(["-m".into(), m.clone()]);
         }
-        v.extend(cx.options.args.iter().cloned());
+        if cx.resume.is_none() {
+            v.extend(cx.options.args.iter().cloned());
+        }
+        if let Some(id) = cx.resume {
+            // After `--`, an id is never read as a flag.
+            v.extend(["--".into(), id.to_string()]);
+        }
         // The message itself goes in on stdin (see `stdin_text`).
         v.push("-".into());
         v
     }
 
+    /// `exec resume` takes the same `--json` and `--skip-git-repo-check`; its help is only
+    /// reachable through the subcommand, so `exec --help` is checked for the subcommand itself.
     fn required_flags(&self) -> (&'static [&'static str], &'static [&'static str]) {
-        (&["exec", "--help"], &["--json"])
+        (&["exec", "--help"], &["--json", "resume"])
+    }
+
+    fn missing_flags_fix(&self) -> Option<String> {
+        Some(format!("Craft Anything needs a Codex that has `codex exec resume` (checked with codex-cli {CODEX_CHECKED}): update Codex, then try again."))
     }
 
     /// Plain `codex <prompt>` is the interactive TUI: "stdin is not a terminal".
     fn plain_fallback(&self) -> bool {
         false
+    }
+
+    fn resumes(&self) -> bool {
+        true
+    }
+
+    /// Before Craft Anything resumed Codex's threads, every run started a new one, often with
+    /// only the follow-up line: such a thread doesn't hold the brief.
+    fn unmarked_session_is_whole(&self) -> bool {
+        false
+    }
+
+    /// A thread to resume that this computer doesn't have: said on stderr, with nothing on stdout,
+    /// and only by a run that resumes one.
+    fn parse_stderr(&self, p: &mut StreamParser, line: &str) -> Vec<AgentEvent> {
+        let line = line.to_ascii_lowercase();
+        let missing = line.contains(CODEX_RESUME_FAILED) && line.contains(CODEX_NO_SUCH_THREAD);
+        if !p.resuming || p.session_missing || p.saw_result || !missing {
+            return Vec::new();
+        }
+        p.session_missing = true;
+        vec![AgentEvent::Error {
+            message: "Codex's earlier conversation about this project isn't on this computer.".into(),
+            remediation: Some(
+                "It was started on another computer, or Codex's saved sessions were removed. Ask again: a new conversation starts from what the project already has."
+                    .into(),
+            ),
+            log: None,
+        }]
     }
 
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {

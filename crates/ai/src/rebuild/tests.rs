@@ -381,6 +381,9 @@ mod typed_retries {
         fn session_id(&self) -> Option<String> {
             self.session.clone()
         }
+        fn continues_session(&self) -> bool {
+            self.session.is_some()
+        }
         fn last_failure(&self) -> Option<TurnFailure> {
             self.failure
         }
@@ -1308,11 +1311,40 @@ mod picking_up_a_build {
         Bench { _dir: dir, hub, projects, prompts }
     }
 
+    /// The stand-in continues its session, as Claude Code and Codex do: it's handed the saved one,
+    /// which it notes at the top of the prompt it writes down ("(resuming …)").
+    struct StandIn;
+
+    impl crate::cli_agents::AgentAdapter for StandIn {
+        fn ids(&self) -> &'static [&'static str] {
+            &["stand-in"]
+        }
+        fn args(&self, cx: &crate::cli_agents::ArgsCx) -> Vec<String> {
+            let resuming = cx.resume.map(|id| format!("(resuming {id})\n")).unwrap_or_default();
+            let mut a = cx.options.args.clone();
+            a.push(format!("{resuming}{}{}", cx.preamble, cx.prompt));
+            a
+        }
+        fn streams_json(&self) -> bool {
+            false
+        }
+        fn resumes(&self) -> bool {
+            true
+        }
+    }
+
     fn try_it(b: &Bench, ws: &Workspace) -> (bool, Vec<feed::FeedItem>) {
         try_with(b, ws, RunOptions::default())
     }
 
     fn try_with(b: &Bench, ws: &Workspace, mut opts: RunOptions) -> (bool, Vec<feed::FeedItem>) {
+        opts.adapters.register(Arc::new(StandIn));
+        run_with(b, ws, opts)
+    }
+
+    /// [`try_with`] with the adapters `opts` has (the built-in ones: the plain adapter, which
+    /// doesn't resume, drives the stand-in).
+    fn run_with(b: &Bench, ws: &Workspace, mut opts: RunOptions) -> (bool, Vec<feed::FeedItem>) {
         opts.kinds.register(Arc::new(FlakyKind));
         opts.backend = Some("Stand-in".into());
         let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), opts).unwrap();
@@ -1412,8 +1444,29 @@ mod picking_up_a_build {
         assert!(ok, "{feed:?}");
         assert!(!studied(&feed), "the original isn't studied again");
         let told = std::fs::read_to_string(&b.prompts).unwrap();
-        assert!(told.contains("Pick up where you left off"), "{told}");
+        assert!(told.contains("Pick up where you left off") && told.starts_with("(resuming session-1)"), "{told}");
         assert!(!told.contains("Their request"), "not the first-build brief again: {told}");
+    }
+
+    /// A builder that starts every run afresh (it doesn't resume) is given the whole brief, and
+    /// the project it has worked on still counts as started: a check that couldn't run leaves the
+    /// build to check, and Try again only checks, as it does for one that resumes.
+    #[test]
+    fn a_builder_that_doesnt_resume_gets_the_brief_and_try_again_still_only_checks() {
+        let b = bench();
+        let ws = worked_on(&b);
+        std::fs::write(ws.app_dir().join("check-fails"), "2").unwrap();
+        let (ok, _) = run_with(&b, &ws, RunOptions::default());
+        assert!(!ok, "the check couldn't run");
+        assert_eq!(prompts_given(&b), 1);
+        let told = std::fs::read_to_string(&b.prompts).unwrap();
+        assert!(told.contains("Their request") && told.contains("Pick up where you left off") && !told.contains("(resuming"), "{told}");
+        let saved = Workspace::open(&ws.root).unwrap();
+        assert!(saved.manifest.awaiting_check && saved.builder_started(), "the builder's turn is on record");
+        let (ok, feed) = run_with(&b, &saved, RunOptions::default());
+        assert!(ok, "{feed:?}");
+        assert_eq!(prompts_given(&b), 1, "Try again only checks");
+        assert!(!studied(&feed), "the original isn't studied again");
     }
 
     #[test]
@@ -1803,8 +1856,10 @@ mod picking_up_a_build {
         ws.save().unwrap();
         let (ok, feed) = try_it(&b, &ws);
         assert!(ok, "{feed:?}");
+        // It starts from the whole brief, told to finish what's there, and isn't handed the other
+        // agent's session.
         let told = std::fs::read_to_string(&b.prompts).unwrap();
-        assert!(told.contains("Their request") && !told.contains("Pick up where you left off"), "{told}");
+        assert!(told.contains("Their request") && !told.contains("(resuming"), "{told}");
         let m = Workspace::open(&ws.root).unwrap().manifest;
         assert_eq!((m.agent_session, m.agent_session_by.as_deref()), (None, Some("stand-in")));
 
@@ -1814,7 +1869,8 @@ mod picking_up_a_build {
         ws.save().unwrap();
         let (ok, feed) = try_it(&b, &ws);
         assert!(ok, "{feed:?}");
-        assert!(std::fs::read_to_string(&b.prompts).unwrap().contains("Pick up where you left off"));
+        let told = std::fs::read_to_string(&b.prompts).unwrap();
+        assert!(told.starts_with("(resuming session-1)") && told.contains("Pick up where you left off"), "{told}");
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("session-1"));
     }
 
@@ -2763,7 +2819,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         self_check: None,
         reset_progress_after_notes: false,
     };
-    let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply, None);
+    let first = under_way("THE BRIEF", Without::Elsewhere, &ws.manifest.last_reply, None, None);
     let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
     assert_eq!(reply.trim(), "Carried on: yes");
     let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
@@ -2903,11 +2959,11 @@ fn the_builders_conversation_travels_with_the_project() {
 
     // Where it can't be, the new session's first message carries the kept conversation.
     let handoff = crate::cli_agents::AgentAdapter::handoff(&adapter, &kept_session(&ws).unwrap(), HANDOFF_CHARS);
-    let first = resumed_elsewhere("THE BRIEF", "Last summary.", handoff.as_deref());
+    let first = under_way("THE BRIEF", Without::Elsewhere, "Last summary.", handoff.as_deref(), None);
     assert!(first.starts_with("THE BRIEF") && first.contains("isn't on this computer"), "{first}");
     assert!(first.contains("Craft Anything asked you: Make a notes app.") && first.contains("You answered: Built it with a sidebar."), "{first}");
     // Without a kept conversation, the last summary stands in for it.
-    let bare = resumed_elsewhere("THE BRIEF", "Last summary.", None);
+    let bare = under_way("THE BRIEF", Without::Elsewhere, "Last summary.", None, None);
     assert!(bare.contains("Last summary.") && !bare.contains("as the project kept it"), "{bare}");
 
     // A copy that can't be written is said, and the build goes on.
@@ -2924,4 +2980,241 @@ fn the_builders_conversation_travels_with_the_project() {
 fn a_sign_in_that_stopped_working_is_called_that() {
     assert_eq!(not_signed_in("claude-code", false), "Claude Code isn't signed in on this computer.");
     assert_eq!(not_signed_in("claude-code", true), "Claude Code's sign-in on this computer has expired or was signed out.");
+}
+
+/// A follow-up to a builder that has the conversation that built the project is only what's new;
+/// one that starts without it (it never continues a session, as Codex didn't) gets the whole
+/// brief, what was made, and the person's request last, where it can't be missed.
+#[test]
+fn a_builder_without_its_conversation_gets_the_whole_brief_and_the_request_last() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Tanks", "A tank game prototype in Godot", TargetRef::None).unwrap();
+    ws.manifest.stack = "Godot".into();
+    ws.manifest.last_reply = "Built the prototype in Godot.".into();
+    ws.manifest.agent_session = Some("th-1".into());
+    let k = kind("game");
+    let cx = BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None };
+    let ask = "Migrate it to NUI and C++";
+    let asked = follow_up(ask, "game");
+    let how = |has_history, api_loop| Opening { message: Some(ask), first: false, carrying_on: false, api_loop, has_history, handoff: None };
+    let (short, fresh) = opening(k.as_ref(), &cx, &how(true, false));
+    assert_eq!(short, asked, "only what's new");
+    let (full, _) = opening(k.as_ref(), &cx, &how(false, false));
+    assert!(full.starts_with(&brief(&ws, "game", false, false, None, false, None)), "{full}");
+    assert!(full.contains("you start this one without it") && full.contains("Built the prototype in Godot."), "{full}");
+    assert!(full.ends_with(&asked) && !full.contains("The person also said"), "{full}");
+    // A session that isn't on this computer: the same, said as such.
+    let fresh = fresh.unwrap();
+    assert!(fresh.contains("isn't on this computer") && fresh.ends_with(&asked) && fresh.contains("do what's asked at the end"), "{fresh}");
+    // Carrying on after a stop without the conversation: the carry-on comes last.
+    let stopped = Opening { message: None, first: false, carrying_on: true, api_loop: false, has_history: false, handoff: Some("You answered: Built it.") };
+    let (carry, _) = opening(k.as_ref(), &cx, &stopped);
+    assert!(carry.contains("You answered: Built it.") && carry.ends_with(&continue_prompt(k.as_ref())), "{carry}");
+}
+
+/// The person's request wins: it may change the stack, all of it is done, and a passing check
+/// isn't taken for a request done.
+#[test]
+fn a_follow_up_puts_the_persons_request_first() {
+    for k in KindRegistry::built_in().ids() {
+        let f = follow_up("Migrate it to NUI and C++", k);
+        assert!(f.starts_with("The person asks: \"Migrate it to NUI and C++\""), "{f}");
+        assert!(f.contains("do all of it") && f.contains("language, framework, engine or platform") && f.contains("only defaults"), "{f}");
+        assert!(f.contains("not that the request is done") && f.contains("core_person_ask") && f.contains("what's left"), "{f}");
+        assert!(f.contains("check it with rebuild_check"), "{f}");
+    }
+}
+
+/// Every combination, every kind: the run's first message changes only for a coding agent that
+/// starts without the earlier conversation while something is asked of the project under way.
+/// The other messages are the ones the run sent before (written out here as it chose them).
+#[test]
+fn the_first_message_changes_only_for_a_builder_without_its_conversation() {
+    // The message for a session that isn't on this computer, as it was written before (no handoff).
+    fn old_resumed_elsewhere(brief: &str, last_reply: &str) -> String {
+        let mut s = format!(
+            "{brief}\n\nThis project is already under way: an earlier conversation built it, but that conversation isn't on this computer (the project was started on another computer or in another folder). Everything made so far is in app/. Before changing anything, look through app/ and the open questions (core_unknowns_show) to see what's done, then carry on from there instead of starting again."
+        );
+        let last = last_reply.trim();
+        if !last.is_empty() {
+            let last: String = last.chars().take(2000).collect();
+            s.push_str(&format!("\n\nWhat the earlier conversation last told the person:\n\"{last}\""));
+        }
+        s
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    ws.manifest.last_reply = "Built it.".into();
+    let mut compared = 0;
+    for saved in [false, true] {
+        ws.manifest.agent_session = saved.then(|| "s-1".to_string());
+        for id in KindRegistry::built_in().ids() {
+            let k = kind(id);
+            let cx = BriefCx { ws: &ws, deep: true, ghidra: false, editor: None, assets: false, image_model: None };
+            let now = || k.follow_up_sections(&cx).iter().map(|s| format!("\n\n{s}")).collect::<String>() + &pictures_reminder(&ws);
+            for message in [None, Some("bigger title")] {
+                for bits in 0..16u8 {
+                    let (first, carrying_on, api_loop, has_history) = (bits & 1 != 0, bits & 2 != 0, bits & 4 != 0, bits & 8 != 0);
+                    let how = Opening { message, first, carrying_on, api_loop, has_history, handoff: None };
+                    let (prompt, fresh) = opening(k.as_ref(), &cx, &how);
+                    let before = match message {
+                        Some(m) if !first && has_history => super::follow_up(m, k.as_ref()) + &now(),
+                        None if carrying_on && !first && has_history => continue_prompt(k.as_ref()) + &now(),
+                        _ => {
+                            let b = super::brief(k.as_ref(), &cx, message);
+                            if api_loop { format!("{API_BUILDER}\n\n{b}") } else { b }
+                        }
+                    };
+                    let asked = !first && (message.is_some() || carrying_on);
+                    if !(asked && !has_history && !api_loop) {
+                        assert_eq!(prompt, before, "{id} {bits} {message:?}");
+                        compared += 1;
+                    }
+                    let fresh_before = (!api_loop && saved).then(|| old_resumed_elsewhere(&super::brief(k.as_ref(), &cx, message), "Built it."));
+                    if !asked {
+                        assert_eq!(fresh, fresh_before, "{id} {bits} {message:?}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(compared > 100, "{compared}");
+}
+
+/// A saved session is history only for a builder that continues it: an agent that starts every
+/// run afresh (or never saved one) gets the whole brief again.
+#[test]
+fn only_a_builder_that_continues_its_session_has_its_history() {
+    struct Forgets;
+    impl crate::cli_agents::AgentAdapter for Forgets {
+        fn ids(&self) -> &'static [&'static str] {
+            &["forgets"]
+        }
+        fn args(&self, _cx: &crate::cli_agents::ArgsCx) -> Vec<String> {
+            Vec::new()
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    ws.manifest.agent_session = Some("s-1".into());
+    let spec = |agent: &str| {
+        let config = crate::BackendConfig { name: "B".into(), kind: BackendKind::AgentCli, model: agent.into(), base_url: None, ssh_host: None, enabled: true };
+        let mut s = CliSpec::new(config, crate::config::BackendOptions::default(), false, None);
+        s.adapters.register(Arc::new(Forgets));
+        s
+    };
+    ws.manifest.agent_session_whole = Some(true);
+    assert!(has_history(None, &spec("claude-code"), &ws) && has_history(None, &spec("codex"), &ws));
+    assert!(!has_history(None, &spec("forgets"), &ws) && !has_history(None, &spec("gemini-cli"), &ws));
+    ws.manifest.agent_session_whole = Some(false);
+    assert!(!has_history(None, &spec("claude-code"), &ws) && !has_history(None, &spec("codex"), &ws), "it doesn't hold the brief");
+    ws.manifest.agent_session = None;
+    ws.manifest.agent_session_whole = Some(true);
+    assert!(!has_history(None, &spec("claude-code"), &ws), "nothing saved, nothing to continue");
+}
+
+/// A project Codex built before it resumed keeps the thread of its last run, which began with
+/// only the follow-up line. Its craft.json (version 2, with no mark on the session) is read as it
+/// was written, and that thread isn't taken for history: the next follow-up gets the whole brief.
+/// A Claude Code session from then always held the brief, and still counts.
+#[test]
+fn an_unmarked_codex_thread_from_before_it_resumed_isnt_history() {
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Tanks", "A tank game prototype in Godot", TargetRef::None).unwrap();
+    let path = ws.root.join("craft.json");
+    let mut doc: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let old = doc.as_object_mut().unwrap();
+    old.insert("version".into(), json!(2));
+    old.insert("agent_session".into(), json!("019a-old-thread"));
+    old.insert("agent_session_by".into(), json!("codex"));
+    old.remove("agent_session_whole");
+    std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+    let mut ws = Workspace::open(&ws.root).unwrap();
+    assert_eq!((ws.manifest.agent_session.as_deref(), ws.manifest.agent_session_whole), (Some("019a-old-thread"), None));
+    let spec = |agent: &str| {
+        let config = crate::BackendConfig { name: "B".into(), kind: BackendKind::AgentCli, model: agent.into(), base_url: None, ssh_host: None, enabled: true };
+        CliSpec::new(config, crate::config::BackendOptions::default(), false, None)
+    };
+    assert!(!has_history(None, &spec("codex"), &ws), "Codex's unmarked thread doesn't hold the brief");
+    assert!(has_history(None, &spec("claude-code"), &ws), "Claude Code's always did");
+    // Once a run marks the thread it saves, it counts, and the mark is kept in craft.json.
+    ws.manifest.agent_session_whole = Some(true);
+    ws.save().unwrap();
+    let ws = Workspace::open(&ws.root).unwrap();
+    assert_eq!(ws.manifest.agent_session_whole, Some(true));
+    assert!(has_history(None, &spec("codex"), &ws));
+}
+
+/// A follow-up's turn cut short is picked up ("carry on from where you stopped") only by a builder
+/// that continues its session; to one that starts every run afresh that line would be all it got,
+/// so it's sent the message again, whole, though it reported a saved session.
+#[test]
+fn only_a_builder_that_continues_its_session_is_told_to_carry_on() {
+    struct CutOff {
+        continues: bool,
+        sent: Arc<Mutex<Vec<String>>>,
+        queued: Vec<AgentEvent>,
+    }
+    impl Conversation for CutOff {
+        fn send(&mut self, text: &str) {
+            let mut sent = self.sent.lock().unwrap();
+            sent.push(text.to_string());
+            let done = AgentEvent::TurnDone { backend: "t".into(), input_tokens: 0, output_tokens: 0, cost_usd: None, cost_is_estimate: false };
+            self.queued = if sent.len() == 1 {
+                vec![AgentEvent::Error { message: "The service is busy. Please retry in 0s".into(), remediation: None, log: None }, done]
+            } else {
+                vec![AgentEvent::TextDelta { text: "Finished.".into() }, done]
+            };
+        }
+        fn session_id(&self) -> Option<String> {
+            Some("s-1".into())
+        }
+        fn continues_session(&self) -> bool {
+            self.continues
+        }
+        fn last_failure(&self) -> Option<crate::TurnFailure> {
+            (self.sent.lock().unwrap().len() == 1).then_some(crate::TurnFailure { kind: crate::FailureKind::RateLimited, retry_after_secs: Some(0) })
+        }
+        fn poll(&mut self) -> Vec<AgentEvent> {
+            std::mem::take(&mut self.queued)
+        }
+        fn answer_consent(&mut self, _call_id: &str, _allow: bool) {}
+        fn stop(&mut self) {}
+        fn is_busy(&self) -> bool {
+            !self.queued.is_empty()
+        }
+    }
+    for continues in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut w = Worker {
+            wake: Default::default(),
+            engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+            tx,
+            stop: CancelToken::default(),
+            preview: Arc::default(),
+            seen: HashSet::new(),
+            inbox: Inbox::new(ws.inbox_dir()),
+            editor: None,
+            notes: Arc::default(),
+            feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+            assets: false,
+            decompiled: false,
+            usage: None,
+            self_check: None,
+            reset_progress_after_notes: false,
+        };
+        let sent: Arc<Mutex<Vec<String>>> = Arc::default();
+        let mut agent = CutOff { continues, sent: sent.clone(), queued: Vec::new() };
+        let result = w.turn_with_wait(&mut ws, &mut agent, "The person asks: make it blue", None, |_, _| Ok(()));
+        let sent = sent.lock().unwrap().clone();
+        assert_eq!(result.unwrap().trim(), "Finished.");
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        if continues {
+            assert!(sent[1].contains("Carry on from where you stopped"), "{sent:?}");
+        } else {
+            assert_eq!(sent[1], "The person asks: make it blue");
+        }
+    }
 }

@@ -19,6 +19,13 @@
         "null"
       ]
     },
+    "agent_session_whole": {
+      "description": "Whether `agent_session` holds the whole conversation from the first brief on: true when a\nrun whose builder continues its session saved it, false when that builder starts every\nrun afresh. None: saved before this was kept, and the agent's adapter says what such a\nsession holds (a Codex thread then often began with only a follow-up line). No version\nstep: an older build drops the field, which leaves None and costs at most one more brief.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "allowed_actions": {
       "description": "Kinds of agent action the person allowed for this workspace (\"bash:npm\", \"web_fetch\"…).",
       "type": "array",

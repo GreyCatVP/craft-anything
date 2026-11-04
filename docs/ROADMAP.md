@@ -512,7 +512,32 @@ Owner: open · Status: in progress
       `null`; setup and the builder now approve our tools for Codex (we still ask before running
       code) and a refusal explains the fix (`docs/codex.md`)
 - [ ] Codex (#540): run `codex exec` on a real install and check `rebuild_start` gets through
-- [ ] Codex: resume support (`codex exec resume <id>`), verified on a real install
+- [x] Codex: resume support (`codex exec resume <id>`, the builder's sandbox as `-c sandbox_mode`,
+      the message on stdin as `-`), verified on a real install (codex-cli 0.166: a fresh thread, then
+      the same thread resumed, remembered a word and wrote a file; the ignored test
+      `live_codex_carries_its_conversation_on`). A thread this computer doesn't have ("no rollout
+      found", on stderr) is `session_lost`, so the run starts over from the project. Follow-ups
+      reach a builder as the short follow-up only when it continues its session
+      (`cli_agents::continues_conversation`); any other gets the whole brief, what was made, and the
+      request last
+- [x] A project Codex built before it resumed keeps the thread of its last run, which began with
+      only a follow-up line (no brief, no rules). craft.json now says whether the saved session holds
+      the whole conversation (`agent_session_whole`, none for one saved before; the adapter says what
+      such a session holds: `unmarked_session_is_whole`, false for Codex), so that thread isn't
+      continued: the next follow-up starts a new one from the whole brief, which is kept from then on
+- [ ] Mid-run messages to a builder that doesn't continue its session (Gemini CLI without ACP, the
+      plain adapter) are still the short ones: a check's refinement, notes the person added
+      (`added`), the decompile reminder (`DECOMPILE_FIRST`). Hand those the brief too, or say that
+      such a builder gets one turn per run; a turn cut short is resent whole to it, never "carried on"
+- [ ] Codex's thread doesn't travel with the project (#451): keep its rollout file
+      (`~/.codex/sessions/…/rollout-…-<id>.jsonl`) through `session_file`, `restore_session` and
+      `handoff`, as Claude Code's session is
+- [ ] Codex builds in its `workspace-write` sandbox, which has no network, so a builder that fetches
+      dependencies (npm, cargo, vcpkg) fails there; allow network for a build
+      (`-c sandbox_workspace_write.network_access=true`) or fetch them for it, and say which
+- [ ] Codex: a note sent while it works arrives only after its turn (only Claude Code has the
+      PostToolUse hook), so a long turn carries on without it; find a Codex hook or stop the turn and
+      resume it with the note
 - [ ] Every adapter but Claude Code's still takes the message in argv (`prompt_on_stdin`), so a long
       one can pass Windows' command-line limit as Claude Code's did (#402); hand each its message on
       stdin or in a file where its CLI reads one
@@ -560,6 +585,9 @@ Owner: open · Status: in progress
 - [x] Over ACP, suppress `session/update` notifications until `session/load` answers, keeping
       replayed messages and tool activity out of the current turn
       — commit `38ffc39be084`
+- [ ] Over ACP, an agent without `loadSession` (or whose `session/load` fails) silently starts a new
+      session and gets only the follow-up; report it as `session_lost` so the run sends the whole
+      brief (`continues_conversation` counts every ACP agent as continuing)
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
@@ -642,6 +670,13 @@ Owner: open · Status: in progress
       and hold it only to what it broke
 - [ ] A new project in Python, Go or the like still fails the build check ("No project to build
       found") and has no program for the screenshot check: `[[toolchain]]` could build it too
+- [ ] Build check: it knows only Godot, Unity, Unreal, Cargo and npm projects
+      (`rebuild::check::build_check`), so a request to move a project to another stack (a Godot
+      prototype to C++ with CMake) can never pass, and while project.godot is still in app/ the check
+      builds the old prototype and passes, so neither the loop nor the builder can tell the request
+      was done. A request that changes the stack should update `manifest.stack` (a game engine is
+      never re-recorded today), and the check needs a seam for more build systems (CMake, Meson,
+      Gradle, plain C/C++)
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress

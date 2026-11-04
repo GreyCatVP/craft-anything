@@ -286,9 +286,10 @@ pub enum AgentEvent {
 pub trait Conversation: Send {
     fn send(&mut self, text: &str);
     /// Retry an interrupted turn. Stateless adapters resend `text`; a conversation that keeps
-    /// its own history can continue it without appending the user's message again.
+    /// its own history can continue it without appending the user's message again. A saved id
+    /// alone isn't history: to an agent that doesn't continue it, "carry on" would be all it knew.
     fn retry(&mut self, text: &str) {
-        let prompt = if self.session_id().is_some() { failure::CONTINUE_TURN } else { text };
+        let prompt = if self.session_id().is_some() && self.continues_session() { failure::CONTINUE_TURN } else { text };
         self.send(prompt);
     }
     /// Why the last turn failed, supplied by its protocol or process boundary. An unknown
@@ -304,6 +305,11 @@ pub trait Conversation: Send {
     /// was started on another one, or in another folder): that message did nothing, and the next
     /// one starts a new session, which knows nothing of the old.
     fn session_lost(&self) -> bool {
+        false
+    }
+    /// Each message continues the agent's own session from the one before, so a later message
+    /// needs only what's new (and "carry on" means something). False: every message starts afresh.
+    fn continues_session(&self) -> bool {
         false
     }
     /// Drain new events (non-blocking).

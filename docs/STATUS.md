@@ -247,8 +247,16 @@ laptops are covered by unit tests on fake `/sys/class/drm` folders only.
   with its writing tools, shell and code execution switched off, and Maki refuses anything else
   that would ask (an MCP server's tools, in subagents too) unless the person allowed it in Maki's
   own permissions. It hasn't been run as a `maki -p` builder here.
-- Claude Code is fully wired as a builder; Codex works through its own flags (our tools are pre-approved for
-  `codex exec`, see `docs/codex.md`) but is unverified on a real install and doesn't resume;
+- Claude Code is fully wired as a builder. Codex continues its own thread from run to run
+  (`codex exec resume`, checked live with codex-cli 0.166: remembered across turns, wrote in its
+  sandbox when resumed), takes the message on stdin, has our tools pre-approved for `codex exec`
+  (see `docs/codex.md`), and a thread that isn't on this computer starts a new one from the
+  project; no whole Codex build has been run live, its thread doesn't travel with the project, its
+  sandbox has no network, and notes reach it only after its turn. A thread saved before Codex
+  resumed isn't continued: the next follow-up starts a new one from the whole brief. A builder
+  that doesn't continue its session (Gemini CLI without ACP) gets the whole brief as each run's
+  first message, but a check's refinement or a note later in the run still reaches it as a short
+  message, and a turn cut short is sent to it again whole, never "carried on".
   Copilot builds, model discovery and real-account session
   resume were confirmed by the person using the app. Other agent programs
   without an adapter get plain text in and out. API-key
