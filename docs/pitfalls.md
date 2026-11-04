@@ -73,6 +73,10 @@ merged the day after it shipped. Before calling a report fixed or still open, fi
 names (`git merge-base --is-ancestor <fix> <release tag>`), and check the message text it quotes.
 
 ## Tests
+**A commit went out with a failing test because the shell chain keyed off `grep`.** `cargo test … | grep
+'^test result|FAILED' && git commit …` commits whenever grep printed anything, a FAILED line included.
+Key a chain off cargo's own exit status (`cargo test … ; test ${PIPESTATUS[0]} -eq 0 && git commit …`, or
+run the tests and read the result before a separate commit command), never off a filter's.
 
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
