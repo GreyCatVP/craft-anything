@@ -1,7 +1,9 @@
 //! Keep locale-changing UI checks in one integration-test executable: i18n is process-wide.
 
 use craft_anything_engine::{Mode, Session, Settings};
-use craft_anything_ui_egui::{CraftApp, demo, i18n};
+use craft_anything_engines::assets::AssetKind;
+use craft_anything_engines::assets::model::{Pricing, Rate, Unit};
+use craft_anything_ui_egui::{CraftApp, asset_picker, demo, i18n};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use std::path::Path;
@@ -128,6 +130,25 @@ fn chinese_startup_language_menu_and_saved_selection() {
         assert_eq!(i18n::language(), code);
         existing.get_by_label(label);
         existing.get_by_value(native);
+    }
+    // What a model costs, how long ago the lists were read and what the asset types are called: the
+    // words around a number follow the language, the number stays.
+    for code in ["zh-hans", "zh-hant", "ru", "ko", "cs", "de", "fr", "ja"] {
+        i18n::set_language(code);
+        let credits = Pricing::Before { unit: Unit::Credits, rate: Rate::PerRequest(20.0) };
+        let said = asset_picker::price_words(&credits, AssetKind::Image);
+        assert!(said.starts_with("20 ") && said != "20 credits a picture", "{code}: {said}");
+        let dollars = Pricing::Before { unit: Unit::Usd, rate: Rate::PerMegapixel(0.003) };
+        let said = asset_picker::price_words(&dollars, AssetKind::Image);
+        assert!(said.starts_with("$0.003 ") && said != "$0.003 a megapixel", "{code}: {said}");
+        for fixed in [Pricing::Unknown, Pricing::After { unit: Unit::Usd }, Pricing::Before { unit: Unit::Usd, rate: Rate::Quoted { typical: None } }] {
+            assert_ne!(asset_picker::price_words(&fixed, AssetKind::Image), fixed.shown(AssetKind::Image), "{code}");
+        }
+        for kind in AssetKind::ALL {
+            assert_ne!(i18n::tr(asset_picker::type_title(kind)), asset_picker::type_title(kind), "{code}: {kind:?}");
+        }
+        assert_ne!(asset_picker::type_noun(AssetKind::Image), "pictures", "{code}");
+        assert_ne!(asset_picker::ago(150 * 60_000, 0), "2 hours ago", "{code}");
     }
     i18n::set_language("unsupported-locale");
     assert_eq!(i18n::language(), "en");

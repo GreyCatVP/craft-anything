@@ -103,6 +103,20 @@ pub fn type_title(kind: AssetKind) -> &'static str {
     }
 }
 
+/// The asset type as a plain noun in the middle of a sentence ("pictures"). It has its own words in
+/// the catalogs rather than being the title in lower case, which is wrong in a language that
+/// capitalises its nouns.
+pub fn type_noun(kind: AssetKind) -> String {
+    tr(match kind {
+        AssetKind::Image => "pictures",
+        AssetKind::Model3d => "3D models",
+        AssetKind::Speech => "speech",
+        AssetKind::SoundEffect => "sound effects",
+        AssetKind::Music => "music",
+        _ => "assets",
+    })
+}
+
 /// The few words that say how long ago `then_ms` was at `now_ms` ("just now", "2 minutes ago").
 pub fn ago(now_ms: u64, then_ms: u64) -> String {
     let minutes = now_ms.saturating_sub(then_ms) / 60_000;
@@ -169,6 +183,39 @@ fn matches(provider: &ProviderModels, model: &ListedModel, query: &str) -> bool 
     q.is_empty() || [model.name.as_str(), model.id.as_str(), provider.name.as_str()].iter().any(|s| s.to_lowercase().contains(&q))
 }
 
+/// What `Pricing::shown` ends a price with ("$0.15 a picture"), each a line of the catalogs.
+const PER_WORDS: [&str; 8] = ["a picture", "a 3D model", "a clip", "a sound", "a track", "a megapixel", "a second", "a character"];
+
+/// A model's price in the person's language. `Pricing::shown` words it in English ("$0.15 a
+/// picture", "~20 credits a megapixel", "price unknown"): the catalogs hold its fixed sentences and
+/// the words around a number, and the number stays as it is.
+pub fn price_words(pricing: &Pricing, kind: AssetKind) -> String {
+    let english = pricing.shown(kind);
+    let whole = tr(&english);
+    if whole != english {
+        return whole;
+    }
+    let split = PER_WORDS.iter().find_map(|per| english.strip_suffix(per).and_then(|amount| amount.strip_suffix(' ')).map(|amount| (amount, *per)));
+    match split {
+        Some((amount, per)) => format!("{} {}", amount_words(amount), tr(per)),
+        None => english,
+    }
+}
+
+/// An amount as `Pricing::shown` words it ("$0.15", "~20 credits", "under 0.01 credits") with its
+/// words in the person's language.
+fn amount_words(amount: &str) -> String {
+    let whole = tr(amount);
+    if whole != amount {
+        return whole;
+    }
+    match amount.rsplit_once(' ') {
+        Some((number, "credits")) => format!("{number} {}", tr("credits")),
+        Some((number, "credit")) => format!("{number} {}", tr("credit")),
+        _ => amount.to_string(),
+    }
+}
+
 /// One model as a line of the list: its name, its price (in the warning colour when unknown) and
 /// what it ignores.
 fn model_line(t: &Tokens, kind: AssetKind, model: &ListedModel) -> LayoutJob {
@@ -178,7 +225,7 @@ fn model_line(t: &Tokens, kind: AssetKind, model: &ListedModel) -> LayoutJob {
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     job.append(&model.name, 0.0, part(t.text));
-    let price = tr(&model.pricing.shown(kind));
+    let price = price_words(&model.pricing, kind);
     let unknown = matches!(model.pricing, Pricing::Unknown);
     job.append(" · ", 0.0, part(t.text_faint));
     job.append(&price, 0.0, part(if unknown { t.warning } else { t.text_dim }));
@@ -315,11 +362,7 @@ fn list(ui: &mut Ui, search_id: Id, kind: AssetKind, current: &AssetChoice, view
         words(ui, &trf("Couldn't ask {name}: {error}", &[("name", &p.name), ("error", error)]), t.warning);
     }
     if view.providers.is_empty() {
-        words(
-            ui,
-            &trf("No provider with a saved key makes {type}. Save a key in Settings → Builds.", &[("type", &tr(type_title(kind)).to_lowercase())]),
-            t.text_dim,
-        );
+        words(ui, &trf("No provider with a saved key makes {type}. Save a key in Settings → Builds.", &[("type", &type_noun(kind))]), t.text_dim);
     }
     let mut rows = entries(view, &query);
     if nothing_matches(view, rows.len(), &query) {
@@ -532,5 +575,51 @@ mod tests {
         assert_eq!((at(0).as_str(), at(1).as_str(), at(2).as_str(), at(59).as_str()), ("just now", "1 minute ago", "2 minutes ago", "59 minutes ago"));
         assert_eq!((at(60).as_str(), at(125).as_str()), ("1 hour ago", "2 hours ago"));
         assert_eq!(ago(5, 10), "just now", "a clock that moved back is not a time in the future");
+    }
+
+    #[test]
+    fn a_price_in_english_is_what_the_pricing_says() {
+        let before = |unit, rate| Pricing::Before { unit, rate };
+        let said = |pricing: Pricing, kind| price_words(&pricing, kind);
+        assert_eq!(said(before(Unit::Usd, Rate::PerRequest(0.15)), AssetKind::Image), "$0.15 a picture");
+        assert_eq!(said(before(Unit::Credits, Rate::PerRequest(20.0)), AssetKind::Music), "20 credits a track");
+        assert_eq!(said(before(Unit::Credits, Rate::PerRequest(1.0)), AssetKind::Speech), "1 credit a clip");
+        assert_eq!(said(before(Unit::Credits, Rate::Quoted { typical: Some(0.001) }), AssetKind::Model3d), "under 0.01 credits a 3D model");
+        assert_eq!(said(before(Unit::Credits, Rate::Quoted { typical: Some(20.0) }), AssetKind::Image), "~20 credits a picture");
+        assert_eq!(said(before(Unit::Credits, Rate::Quoted { typical: None }), AssetKind::Image), "quoted before each run");
+        assert_eq!(said(Pricing::After { unit: Unit::Usd }, AssetKind::Image), "cost known after each run");
+        assert_eq!(said(Pricing::Unknown, AssetKind::Image), "price unknown");
+    }
+
+    /// Every price `Pricing::shown` can make is a fixed sentence or ends with a phrase the catalogs
+    /// hold, so a language can word it.
+    #[test]
+    fn every_price_ends_in_a_phrase_the_catalogs_hold() {
+        let fixed = ["quoted before each run", "cost known after each run", "price unknown"];
+        let rates = [
+            Rate::PerRequest(0.15),
+            Rate::PerMegapixel(0.003),
+            Rate::PerSecond(2.0),
+            Rate::PerCharacter(0.0001),
+            Rate::Quoted { typical: Some(20.0) },
+            Rate::Quoted { typical: None },
+        ];
+        for kind in AssetKind::ALL {
+            let mut shown: Vec<String> = [Unit::Usd, Unit::Credits]
+                .into_iter()
+                .flat_map(|unit| rates.iter().map(move |rate| Pricing::Before { unit, rate: rate.clone() }.shown(kind)))
+                .collect();
+            shown.push(Pricing::After { unit: Unit::Usd }.shown(kind));
+            shown.push(Pricing::Unknown.shown(kind));
+            for text in shown {
+                assert!(fixed.contains(&text.as_str()) || PER_WORDS.iter().any(|per| text.ends_with(&format!(" {per}"))), "{kind:?}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_type_has_a_noun_for_the_middle_of_a_sentence() {
+        let nouns: Vec<String> = AssetKind::ALL.into_iter().map(type_noun).collect();
+        assert_eq!(nouns, ["pictures", "3D models", "speech", "sound effects", "music"]);
     }
 }

@@ -80,7 +80,6 @@ About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Около 60
 Add	Добавить
 Add Visual Studio's C++ tools	Добавить инструменты C++ Visual Studio
 Add a brain	Добавить «мозг»
-Add a fal.ai key	Добавить ключ fal.ai
 Add a folder…	Добавить папку…
 Add a plugin	Добавить плагин
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Добавьте «мозг» ИИ, и я прочитаю для вас эти доказательства, отвечу на дополнительные вопросы и укажу на доказательства.
@@ -171,7 +170,6 @@ Best guess: a reasonable reading, but not proven.	Лучшее предполо�
 Binary layout	Бинарная структура
 Blocked	Заблокировано
 Bookmark	Закладка
-Budget for a new project	Бюджет нового проекта
 Bug report	Отчёт об ошибке
 Build	Собрать
 Build a rebuild ledger	Собрать журнал пересборки
@@ -440,16 +438,12 @@ Function references	Ссылки на функцию
 Functions	Функции
 GDB command	Команда GDB
 GDB session status	Состояние сессии GDB
-Game assets	Ресурсы игры
 Game engines	Игровые движки
 Game files	Файлы игры
 General	Общие
 Generate a 3D model	Сгенерировать 3D-модель
 Generate a picture	Сгенерировать изображение
-Generate custom pictures and models	Сгенерировать пользовательские изображения и модели
-Generated art (games)	Сгенерированная графика (игры)
 Generated assets	Сгенерированные ресурсы
-Generated pictures and 3D models are made with fal.ai.	Сгенерированные изображения и 3D-модели создаются с помощью fal.ai.
 Get Ghidra	Получить Ghidra
 Get Ghidra for Deep mode	Получить Ghidra для режима «Глубокий»
 Get Unity Hub	Получить Unity Hub
@@ -585,7 +579,6 @@ Leave a path empty to use the managed install. We never need environment variabl
 Leave empty to use the one Craft Anything sets up.	Оставьте пустым, чтобы использовать тот, который настраивает Craft Anything.
 Let a project generate assets	Разрешить проекту генерировать ресурсы
 Let's go	Поехали
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Позволяет конструктору создавать реалистичные 3D-модели и текстуры для игр, {model} модель, с бюджетом {budget} на проект.
 Library resolution	Разрешение библиотек
 Light copy: shares big files with the project	Лёгкая копия: делит большие файлы с проектом
 Likeness	Сходство
@@ -642,7 +635,6 @@ Looking on this computer…	Поиск на этом компьютере…
 Low	Низкий
 Mach-O structure	Структура Mach-O
 Made a copy: {name}	Создана копия: {name}
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Создано с помощью fal.ai и оплачено с вашего аккаунта: {model} 3D-модель, {picture} изображение. Выключено — игра собирается без них.
 Made with {engine}	Сделано с помощью {engine}
 Made without looking inside the original.	Сделано без просмотра оригинала изнутри.
 Make a game that plays like this	Сделать игру, которая играется как эта
@@ -679,7 +671,6 @@ Name an address	Назвать адрес
 Name at address	Имя по адресу
 Name many addresses	Назвать много адресов
 Names the program's author gave to functions or variables that survived in the file.	Имена, которые автор программы дал функциям или переменным и которые сохранились в файле.
-Needs a fal.ai key. Until then the game is built without them.	Нужен ключ fal.ai. До этого игра собирается без них.
 Needs you	Требует вас
 Network	Сеть
 New	Новый
@@ -815,8 +806,6 @@ Pick the app, game or file to rebuild	Выберите приложение, и�
 Pick the folder for this project	Выберите папку для этого проекта
 Pick the game's folder	Выберите папку игры
 Picture a program's window	Представить окно программы
-Picture model	Модель изображений
-Unavailable model: {id}	Недоступная модель: {id}
 Pictures	Изображения
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	Изображения пока нельзя сохранить из контейнеров IoStore; вы можете посмотреть, что внутри.
 Pictures of the original	Изображения оригинала
@@ -860,8 +849,6 @@ Projects and builds	Проекты и сборки
 Property list	Список свойств
 Pseudo-C	Псевдо-C
 Purpose	Назначение
-Raise the asset budget	Увеличить бюджет ресурсов
-Raise the budget by {amount}	Увеличить бюджет на {amount}
 Raw machine code	Сырой машинный код
 Read AI settings	Читать настройки ИИ
 Read a Unity game's IL2CPP metadata	Читать метаданные IL2CPP игры Unity
@@ -985,7 +972,6 @@ Send (Enter)	Отправить (Enter)
 Send now	Отправить сейчас
 Server address	Адрес сервера
 Session status	Состояние сессии
-Set a project's asset budget	Установить бюджет ресурсов проекта
 Set an AI's program	Установить программу ИИ
 Set one up	Настроить
 Set up a brain…	Настроить «мозг»…
@@ -1069,7 +1055,6 @@ That folder already has {names}, where Craft Anything keeps its own files. Pick 
 That folder is already a project, so it's open now.	Эта папка уже является проектом, поэтому она сейчас открыта.
 The Rust toolchain (rustup.rs).	Инструментарий Rust (rustup.rs).
 The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	Конструктор отвечает на свои вопросы и сообщает, что выбрал («Я решил: …»), чтобы вы могли это изменить.
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Конструктор создаёт 3D-модели и текстуры игры по описаниям оригинальных дизайнов, оплачивая с вашего аккаунта fal.ai. Модели низкополигональные, чтобы игра работала быстро. Текстурированная модель стоит {model}, а изображение {picture}. У каждого проекта бюджет {budget}, и вас спрашивают, прежде чем его превысить. Ключ хранится в системной связке ключей.
 The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	Конструктор читает их (код, заметки, изображения) и собирает приложение в новой папке приложения рядом с ними. Ваши файлы остаются как есть.
 The builder will decide its questions and tell you what it chose.	Конструктор сам решит свои вопросы и сообщит, что выбрал.
 The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	Конструктор работает с этими файлами напрямую и сохраняет то, что работает. Craft Anything добавляет рядом несколько собственных записей.
@@ -1182,7 +1167,6 @@ Website address	Адрес веб-сайта
 Website pages	Страницы веб-сайта
 Websites	Веб-сайты
 Welcome	Добро пожаловать
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Сколько новая игра может потратить на сгенерированные изображения и 3D-модели до того, как вас спросят. Каждый проект хранит свой лимит.
 What a program exports	Что экспортирует программа
 What a program imports	Что импортирует программа
 What are its main parts?	Каковы его основные части?
@@ -1206,7 +1190,6 @@ What is this?	Что это?
 What it calls	Что оно вызывает
 What kind of file is this?	Какой это тип файла?
 What permissions does it ask for?	Какие разрешения оно запрашивает?
-What pictures and textures are made with.	Из чего создаются изображения и текстуры.
 What settings are in here?	Какие настройки здесь?
 What tables are in here?	Какие таблицы здесь?
 What we couldn't check	Что мы не смогли проверить
@@ -1268,7 +1251,6 @@ You chose:	Вы выбрали:
 You're all set	Всё готово
 Your app is ready	Ваше приложение готово
 Your brains	Ваши «мозги»
-Your fal.ai key	Ваш ключ fal.ai
 Your game is ready	Ваша игра готова
 Your message wasn't sent: another project was opened while its pictures were copied.	Ваше сообщение не отправлено: другой проект был открыт, пока копировались его изображения.
 Your own tool installs (optional)	Ваши собственные установки инструментов (необязательно)
@@ -1276,7 +1258,7 @@ Your project starts as soon as it's done.	Ваш проект начнётся, 
 Your version	Ваша версия
 Your website is ready	Ваш веб-сайт готов
 a new folder in {dir}	новая папка в {dir}
-a picture	изображение
+a picture	за изображение
 about ${n}	примерно ${n}
 address, e.g. http://192.168.1.20:11434/v1	адрес, например http://192.168.1.20:11434/v1
 and {n} more	и ещё {n}
@@ -1353,8 +1335,6 @@ your files there are the app, edited in place	ваши файлы там — э�
 {n} picture(s) to match.	Изображений для сопоставления: {n}.
 {n} step(s) didn't work and were retried or skipped.	Шагов, которые не сработали и были повторены или пропущены: {n}.
 {n} tokens	Токенов: {n}
-{n} · ${spent:.2} of ${budget:.2}	{n} · ${spent:.2} из ${budget:.2}
-{n} · ${spent} of ${budget}	{n} · ${spent} из ${budget}
 {scenes} {}	{scenes} {}
 {text}, {}	{text}, {}
 {title} hit a bug and stopped safely. ({what})	{title} столкнулся с ошибкой и безопасно остановился. ({what})
@@ -1392,27 +1372,109 @@ Generate a sound effect	Сгенерировать звуковой эффект
 Generate music	Сгенерировать музыку
 Generate pictures, models and audio	Генерировать изображения, модели и звук
 Needs an asset provider key. Until then the game is built without generated assets.	Нужен ключ провайдера ресурсов. До этого игра собирается без сгенерированных ресурсов.
-Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	Оплачивается с ваших аккаунтов провайдеров: оценочно {model} за 3D-модель и {picture} за изображение. Стоимость звука зависит от длительности. Выключено — игра собирается без сгенерированных ресурсов.
 Add a provider key	Добавить ключ провайдера
 Your asset provider keys	Ваши ключи провайдеров ресурсов
 Use fal.ai, Scenario or ElevenLabs for generated assets.	Используйте fal.ai, Scenario или ElevenLabs для генерируемых ресурсов.
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Создавайте оригинальные изображения и модели, речь, звуковые эффекты и музыку через собственные аккаунты провайдеров. Оценочная стоимость визуальных ресурсов: {model} за модель и {picture} за изображение. У каждого проекта бюджет {budget}. Ключи хранятся в системной связке ключей, если она доступна, иначе в закрытом локальном файле ключей. Провайдеров изображений и 3D выберите в Настройки → Сборки.
-Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Изображения и 3D-модели от fal.ai или Scenario; речь, звуковые эффекты и музыка от ElevenLabs. Оценочно {model} за модель, с бюджетом {budget} на проект. Визуальные модели выберите в Настройки → Сборки.
-3D model generator	Генератор 3D-моделей
-What pictures are turned into 3D models with.	Чем изображения превращаются в 3D-модели.
-What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Сколько новый проект может потратить на сгенерированные изображения, 3D-модели и звук, прежде чем вас спросят. У каждого проекта свой бюджет.
 API secret	Секрет API
 {name} API secret	Секрет API {name}
 Paste your {name} API secret	Вставьте секрет API {name}
 Save asset settings	Сохранить настройки ресурсов
 Key needed	Нужен ключ
-Off. Turning this on uses the providers chosen below.	Выключено. После включения используются провайдеры, выбранные ниже.
 Manage provider keys	Управлять ключами провайдеров
-Assets: {n} · estimated spent ${spent}	Ресурсов: {n} · оценочно потрачено ${spent}
-Budget ${budget} · remaining ${remaining}	Бюджет ${budget} · осталось ${remaining}
-Shared asset budget (USD)	Общий бюджет ресурсов (USD)
-Asset budget in USD	Бюджет ресурсов в USD
 Save budget	Сохранить бюджет
 Saving asset settings…	Сохраняем настройки ресурсов…
-Enter an amount from 0 to {max} USD.	Введите сумму от 0 до {max} USD.
 Asset spending is unavailable. Repair assets.json before generating.	Расходы на ресурсы недоступны. Исправьте assets.json перед генерацией.
+1 hour ago	1 час назад
+1 minute ago	1 минуту назад
+{n} hours ago	{n} ч назад
+{n} minutes ago	{n} мин назад
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	Новый проект копирует эти строки и может изменить свои. Для каждой единицы действует один лимит по умолчанию, поэтому его изменение затрагивает все типы, которые считаются в этой единице.
+Add a key	Добавить ключ
+Add a key for {name}	Добавить ключ для {name}
+Ask the providers for their models	Запросить у провайдеров списки моделей
+Asking the providers for their models…	Запрашиваем у провайдеров списки моделей…
+Asset provider keys	Ключи провайдеров ресурсов
+At least this much: the cost of an earlier one could not be read.	Не меньше этой суммы: стоимость одного из прежних запусков прочитать не удалось.
+Checking for a saved key…	Проверяем, сохранён ли ключ…
+Choose how a project makes one kind of asset	Выбрать, как проект создаёт один тип ресурсов
+Couldn't ask {name}: {error}	Не удалось запросить {name}: {error}
+Enter an amount from 0 to {max} {unit}.	Введите сумму от 0 до {max} {unit}.
+Every limit in this project is off while this is on. What is used is still counted and shown.	Пока это включено, все лимиты в этом проекте выключены. Расход по-прежнему учитывается и показывается.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	Создавайте оригинальные изображения и модели, речь, звуковые эффекты и музыку через собственные аккаунты провайдеров. Цены назначают провайдеры, и у каждого типа ресурсов свой лимит. Ключи хранятся в системной связке ключей, если она доступна, иначе в закрытом локальном файле ключей. Провайдеров и модели выберите в Настройки → Сборки.
+Generated assets for new projects	Сгенерированные ресурсы для новых проектов
+Ignore budget	Игнорировать бюджет
+Ignore budget (no limits)	Игнорировать бюджет (без лимитов)
+Ignore budget is on, so no limit applies. What is used is still counted.	Включено «Игнорировать бюджет», поэтому лимиты не действуют. Расход по-прежнему учитывается.
+Ignored	Игнорируется
+Model lists fetched from {names} {ago}	Списки моделей получены от {names}: {ago}
+New projects ignore the budget, so this limit starts off.	Новые проекты игнорируют бюджет, поэтому этот лимит сначала выключен.
+New projects start with this limit on.	Новые проекты начинают с включённым лимитом.
+No model lists yet. Save a provider key above to list its models.	Списков моделей пока нет. Сохраните выше ключ провайдера, чтобы получить его модели.
+No model matches that.	Подходящих моделей нет.
+No provider with a saved key makes this.	Ни один провайдер с сохранённым ключом не создаёт этот тип.
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	Для типа «{type}» нет провайдера с сохранённым ключом. Сохраните ключ в Настройки → Сборки.
+No {name} key	Нет ключа {name}
+Off. Turning this on uses the choices below.	Выключено. После включения используется выбор ниже.
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	Оплачивается с ваших аккаунтов провайдеров по ценам, которые каждый провайдер назначает выбранной вами модели. Выключено — игра собирается без сгенерированных ресурсов.
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	Изображения, 3D-модели, речь, звуковые эффекты и музыку создают провайдеры, для которых вы сохранили ключ. Ключи хранятся в системной связке ключей, если она доступна, иначе в закрытом локальном файле ключей.
+Reading what this has used…	Считываем расход…
+Refresh	Обновить
+Remove the {name} key	Удалить ключ {name}
+Search models	Поиск моделей
+Set a project's limit for one kind of asset	Задать лимит проекта для одного типа ресурсов
+Showing the first {n} rows. Type to narrow the list.	Показаны первые {n} строк. Введите текст, чтобы сузить список.
+The limit is off: nothing stops this, and what is used is still counted.	Лимит выключен: ничто не остановит расход, но он по-прежнему учитывается.
+The limit is on: you are asked before this goes past it.	Лимит включён: прежде чем он будет превышен, вас спросят.
+The model lists couldn't be read. Try Refresh in Settings → Builds.	Не удалось прочитать списки моделей. Нажмите «Обновить» в Настройки → Сборки.
+The model lists haven't been read yet.	Списки моделей ещё не загружены.
+This model's price is unknown, so what these cost is not counted.	Цена этой модели неизвестна, поэтому расход на них не учитывается.
+credits	кредитов
+credit	кредит
+dollars	долларов
+ignores: {options}	игнорирует: {options}
+price unknown	цена неизвестна
+cost known after each run	стоимость известна после каждого запуска
+quoted before each run	цена называется перед каждым запуском
+under 0.01	меньше 0,01
+under 0.01 credits	меньше 0,01 кредита
+unreadable	не читается
+usage not tracked	расход не учитывается
+{n} made	создано: {n}
+{n} made so far	Создано на данный момент: {n}
+{type} default limit	{type}: лимит по умолчанию
+{type} limit	{type}: лимит
+{type} limit switch	{type}: переключатель лимита
+{type} model	{type}: модель
+{type}: may pass the limit by one generation	{type}: лимит может быть превышен не более чем на один запуск
+{type}: no {name} key	{type}: нет ключа {name}
+{type}: price unknown, usage not tracked	{type}: цена неизвестна, расход не учитывается
+3D models	3D-модели
+Speech	Речь
+Sound effects	Звуковые эффекты
+Music	Музыка
+Assets	Ресурсы
+pictures	изображения
+speech	речь
+sound effects	звуковые эффекты
+music	музыка
+assets	ресурсы
+shape	форма
+faces	число граней
+textures	текстуры
+length	длительность
+instrumental	без вокала
+voice	голос
+New projects ignore the budget	Новые проекты игнорируют бюджет
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	Новый проект начинает со всеми выключенными лимитами, поэтому ничто не ограничивает его расходы. Расход по-прежнему учитывается и показывается.
+Type	Тип
+Provider · model	Провайдер · модель
+Default limit	Лимит по умолчанию
+Limit	Лимит
+and	и
+a 3D model	за 3D-модель
+a clip	за клип
+a sound	за звук
+a track	за трек
+a megapixel	за мегапиксель
+a second	за секунду
+a character	за символ

@@ -92,7 +92,6 @@ About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	约 60 GB，�
 Add	添加
 Add Visual Studio's C++ tools	添加 Visual Studio 的 C++ 工具
 Add a brain	添加 AI
-Add a fal.ai key	添加 fal.ai 密钥
 Add a folder…	添加文件夹…
 Add a plugin	添加插件
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	添加 AI 助手后，我就能为你解读这些证据、回答后续问题，并指出依据。
@@ -182,7 +181,6 @@ Best guess: a reasonable reading, but not proven.	推测：解释合理，但尚
 Binary layout	二进制布局
 Blocked	受阻
 Bookmark	添加书签
-Budget for a new project	新项目预算
 Bug report	错误报告
 Build	构建
 Build a rebuild ledger	建立重建台账
@@ -450,16 +448,12 @@ Function references	函数引用
 Functions	函数
 GDB command	GDB 命令
 GDB session status	GDB 会话状态
-Game assets	游戏素材
 Game engines	游戏引擎
 Game files	游戏文件
 General	常规
 Generate a 3D model	生成 3D 模型
 Generate a picture	生成图片
-Generate custom pictures and models	生成自定义图片和模型
-Generated art (games)	生成美术素材 (游戏)
 Generated assets	生成素材
-Generated pictures and 3D models are made with fal.ai.	使用 fal.ai 生成图片和 3D 模型。
 Get Ghidra	获取 Ghidra
 Get Ghidra for Deep mode	获取 Ghidra 以用于深度模式
 Get Unity Hub	获取 Unity Hub
@@ -595,7 +589,6 @@ Leave a path empty to use the managed install. We never need environment variabl
 Leave empty to use the one Craft Anything sets up.	留空则使用 Craft Anything 安装的版本。
 Let a project generate assets	允许项目生成素材
 Let's go	开始吧
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	允许构建助手为游戏制作逼真的 3D 模型和纹理，每个模型 {model}，每个项目预算 {budget}。
 Library resolution	库解析
 Light copy: shares big files with the project	轻量副本：与项目共享大型文件
 Likeness	相似度
@@ -651,7 +644,6 @@ Looking on this computer…	正在此电脑上查找…
 Low	低
 Mach-O structure	Mach-O 结构
 Made a copy: {name}	已创建副本：{name}
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	使用 fal.ai 制作，费用从你的账户扣除：每个 3D 模型 {model}，每张图片 {picture}。关闭后，构建游戏时不会生成这些素材。
 Made with {engine}	使用 {engine} 制作
 Made without looking inside the original.	未查看原作内部而制作。
 Make a game that plays like this	制作玩法类似的游戏
@@ -687,7 +679,6 @@ Name an address	为地址命名
 Name at address	地址处的名称
 Name many addresses	为多个地址命名
 Names the program's author gave to functions or variables that survived in the file.	程序作者为函数或变量起的名称，仍保留在文件中。
-Needs a fal.ai key. Until then the game is built without them.	需要 fal.ai 密钥。添加之前，构建游戏时不会生成这些素材。
 Needs you	需要你处理
 Network	网络
 New	新建
@@ -820,8 +811,6 @@ Pick the app, game or file to rebuild	选择要重建的应用、游戏或文件
 Pick the folder for this project	选择此项目的文件夹
 Pick the game's folder	选择游戏文件夹
 Picture a program's window	截取程序窗口图片
-Picture model	图片模型
-Unavailable model: {id}	模型不可用：{id}
 Pictures	图片
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	暂不支持从 IoStore 容器保存图片，但可以查看其中的内容。
 Pictures of the original	原作图片
@@ -865,8 +854,6 @@ Projects and builds	项目与构建
 Property list	属性列表
 Pseudo-C	伪 C 代码
 Purpose	用途
-Raise the asset budget	提高素材预算
-Raise the budget by {amount}	增加 {amount} 预算
 Raw machine code	原始机器码
 Read AI settings	读取 AI 设置
 Read a Unity game's IL2CPP metadata	读取 Unity 游戏的 IL2CPP 元数据
@@ -988,7 +975,6 @@ Send (Enter)	发送 (Enter)
 Send now	立即发送
 Server address	服务器地址
 Session status	会话状态
-Set a project's asset budget	设置项目素材预算
 Set an AI's program	设置 AI 的程序
 Set one up	设置一个
 Set up a brain…	设置 AI 助手…
@@ -1072,7 +1058,6 @@ That folder already has {names}, where Craft Anything keeps its own files. Pick 
 That folder is already a project, so it's open now.	该文件夹已经是项目，现已打开。
 The Rust toolchain (rustup.rs).	Rust 工具链 (rustup.rs)。
 The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	构建助手会自行回答问题并说明选择 (“我决定：…”)，方便你修改。
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	构建助手根据原创设计的描述生成游戏的 3D 模型和纹理，费用从你的 fal.ai 账户扣除。模型采用低多边形设计，让游戏运行流畅。带纹理的模型费用为 {model}，图片费用为 {picture}。每个项目的预算为 {budget}，超出前会先询问你。密钥保存在系统钥匙串中。
 The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	构建助手会读取这些文件 (代码、笔记、图片)，并在旁边新建 app 文件夹来构建应用。你的文件保持不变。
 The builder will decide its questions and tell you what it chose.	构建助手会自行决定，并告知你它的选择。
 The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	构建助手直接编辑这些文件，并保留已有的有效内容。Craft Anything 会在旁边添加少量自身记录。
@@ -1182,7 +1167,6 @@ Website address	网站地址
 Website pages	网站页面
 Websites	网站
 Welcome	欢迎
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	新游戏在询问你之前可用于生成图片和 3D 模型的金额。每个项目分别保存预算。
 What a program exports	程序导出的内容
 What a program imports	程序导入的内容
 What are its main parts?	它主要由哪些部分组成？
@@ -1206,7 +1190,6 @@ What is this?	这是什么？
 What it calls	它调用了什么
 What kind of file is this?	这是什么类型的文件？
 What permissions does it ask for?	它请求哪些权限？
-What pictures and textures are made with.	用于生成图片和纹理的模型。
 What settings are in here?	这里面有哪些设置？
 What tables are in here?	这里有哪些数据表？
 What we couldn't check	无法检查的内容
@@ -1268,7 +1251,6 @@ You chose:	你的选择：
 You're all set	准备就绪
 Your app is ready	你的应用已就绪
 Your brains	你的 AI 助手
-Your fal.ai key	你的 fal.ai 密钥
 Your game is ready	你的游戏已就绪
 Your message wasn't sent: another project was opened while its pictures were copied.	消息未发送：复制图片期间打开了另一个项目。
 Your own tool installs (optional)	自行安装的工具 (可选)
@@ -1353,8 +1335,6 @@ your files there are the app, edited in place	该位置的文件就是应用，�
 {n} picture(s) to match.	有 {n} 张参考图片。
 {n} step(s) didn't work and were retried or skipped.	{n} 个步骤未成功，已重试或跳过。
 {n} tokens	{n} 个 token
-{n} · ${spent:.2} of ${budget:.2}	{n} · 已用 ${spent:.2} / ${budget:.2}
-{n} · ${spent} of ${budget}	{n} · 已用 ${spent}，预算 ${budget}
 {scenes} {}	{scenes} {}
 {text}, {}	{text}，{}
 {title} hit a bug and stopped safely. ({what})	{title} 遇到错误，已安全停止。({what})
@@ -1393,27 +1373,109 @@ Generate a sound effect	生成音效
 Generate music	生成音乐
 Generate pictures, models and audio	生成图片、模型和音频
 Needs an asset provider key. Until then the game is built without generated assets.	需要素材服务密钥。在添加密钥之前，游戏构建不会使用生成素材。
-Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	费用从你的服务账户扣除：估算每个 3D 模型 {model}，每张图片 {picture}。音频费用取决于长度。关闭后，游戏构建不使用生成素材。
 Add a provider key	添加服务密钥
 Your asset provider keys	你的素材服务密钥
 Use fal.ai, Scenario or ElevenLabs for generated assets.	使用 fal.ai、Scenario 或 ElevenLabs 生成素材。
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	使用你自己的服务账户生成原创图片、模型、语音、音效和音乐。视觉素材估算费用：每个模型 {model}，每张图片 {picture}。每个项目预算为 {budget}。密钥在系统钥匙串可用时存储于其中，否则保存在私有本地密钥文件中。在设置 → 构建中选择图片和 3D 服务。
-Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	通过 fal.ai 或 Scenario 生成图片和 3D 模型；通过 ElevenLabs 生成语音、音效和音乐。每个模型估算 {model}，每个项目预算为 {budget}。在设置 → 构建中选择视觉模型。
-3D model generator	3D 模型生成器
-What pictures are turned into 3D models with.	用于将图片转换为 3D 模型的服务。
-What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	新项目在请求你批准之前可用于生成图片、3D 模型和音频的金额。每个项目保留自己的预算。
 API secret	API 密钥机密
 {name} API secret	{name} API 密钥机密
 Paste your {name} API secret	粘贴你的 {name} API 密钥机密
 Save asset settings	保存素材设置
 Key needed	需要密钥
-Off. Turning this on uses the providers chosen below.	已关闭。打开后将使用下方选择的服务。
 Manage provider keys	管理服务商密钥
-Assets: {n} · estimated spent ${spent}	素材：{n} · 预计已花费 ${spent}
-Budget ${budget} · remaining ${remaining}	预算 ${budget} · 剩余 ${remaining}
-Shared asset budget (USD)	共享素材预算（美元）
-Asset budget in USD	素材预算（美元）
 Save budget	保存预算
 Saving asset settings…	正在保存素材设置…
-Enter an amount from 0 to {max} USD.	请输入 0 到 {max} 美元之间的金额。
 Asset spending is unavailable. Repair assets.json before generating.	无法读取素材支出。请先修复 assets.json，再生成素材。
+1 hour ago	1 小时前
+1 minute ago	1 分钟前
+{n} hours ago	{n} 小时前
+{n} minutes ago	{n} 分钟前
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	新项目会复制这些行，并可以自行修改。每种计费单位只有一个默认上限，因此修改它会影响所有以该单位计费的类型。
+Add a key	添加密钥
+Add a key for {name}	为 {name} 添加密钥
+Ask the providers for their models	向服务商获取模型列表
+Asking the providers for their models…	正在向服务商获取模型列表…
+Asset provider keys	素材服务商密钥
+At least this much: the cost of an earlier one could not be read.	至少这么多：之前某次生成的费用无法读取。
+Checking for a saved key…	正在检查是否已保存密钥…
+Choose how a project makes one kind of asset	选择项目如何制作某一类素材
+Couldn't ask {name}: {error}	无法向 {name} 查询：{error}
+Enter an amount from 0 to {max} {unit}.	请输入 0 到 {max} {unit} 之间的金额。
+Every limit in this project is off while this is on. What is used is still counted and shown.	开启后，本项目的所有上限都会关闭。已用量仍会被统计并显示。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	使用你自己的服务账户生成原创图片、模型、语音、音效和音乐。价格由服务商提供，每种素材类型都有各自的上限。密钥在系统钥匙串可用时存储于其中，否则保存在私有本地密钥文件中。在设置 → 构建中选择服务商和模型。
+Generated assets for new projects	新项目的生成素材
+Ignore budget	忽略预算
+Ignore budget (no limits)	忽略预算（不设上限）
+Ignore budget is on, so no limit applies. What is used is still counted.	已开启“忽略预算”，因此任何上限都不生效。已用量仍会被统计。
+Ignored	已忽略
+Model lists fetched from {names} {ago}	模型列表获取自 {names}，{ago}
+New projects ignore the budget, so this limit starts off.	新项目会忽略预算，因此该上限初始为关闭。
+New projects start with this limit on.	新项目默认开启该上限。
+No model lists yet. Save a provider key above to list its models.	还没有模型列表。请在上方保存服务商密钥以列出其模型。
+No model matches that.	没有匹配的模型。
+No provider with a saved key makes this.	没有已保存密钥的服务商能制作这一类。
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	没有已保存密钥的服务商能制作{type}。请在设置 → 构建中保存密钥。
+No {name} key	没有 {name} 密钥
+Off. Turning this on uses the choices below.	已关闭。打开后将使用下方的选择。
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	费用从你的服务账户扣除，价格按各服务商为你所选模型给出的标价计算。关闭后，游戏构建不使用生成素材。
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	图片、3D 模型、语音、音效和音乐由你保存了密钥的服务商制作。密钥在系统钥匙串可用时存储于其中，否则保存在私有本地密钥文件中。
+Reading what this has used…	正在读取已用量…
+Refresh	刷新
+Remove the {name} key	移除 {name} 密钥
+Search models	搜索模型
+Set a project's limit for one kind of asset	设置项目某一类素材的上限
+Showing the first {n} rows. Type to narrow the list.	显示前 {n} 行。输入文字可缩小范围。
+The limit is off: nothing stops this, and what is used is still counted.	上限已关闭：不会有任何限制，已用量仍会被统计。
+The limit is on: you are asked before this goes past it.	上限已开启：超出前会先询问你。
+The model lists couldn't be read. Try Refresh in Settings → Builds.	无法读取模型列表。请在设置 → 构建中尝试刷新。
+The model lists haven't been read yet.	尚未读取模型列表。
+This model's price is unknown, so what these cost is not counted.	该模型的价格未知，因此不统计这些的费用。
+credits	积分
+credit	积分
+dollars	美元
+ignores: {options}	忽略：{options}
+price unknown	价格未知
+cost known after each run	每次生成后才知道费用
+quoted before each run	每次生成前报价
+under 0.01	低于 0.01
+under 0.01 credits	低于 0.01 积分
+unreadable	无法读取
+usage not tracked	不统计用量
+{n} made	已生成 {n} 个
+{n} made so far	目前已生成 {n} 个
+{type} default limit	{type}默认上限
+{type} limit	{type}上限
+{type} limit switch	{type}上限开关
+{type} model	{type}模型
+{type}: may pass the limit by one generation	{type}：上限可能被多超出一次生成
+{type}: no {name} key	{type}：没有 {name} 密钥
+{type}: price unknown, usage not tracked	{type}：价格未知，不统计用量
+3D models	3D 模型
+Speech	语音
+Sound effects	音效
+Music	音乐
+Assets	素材
+pictures	图片
+speech	语音
+sound effects	音效
+music	音乐
+assets	素材
+shape	形状
+faces	面数
+textures	纹理
+length	时长
+instrumental	纯音乐
+voice	声音
+New projects ignore the budget	新项目忽略预算
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	新项目一开始所有上限都是关闭的，因此不会有任何东西限制其支出。已用量仍会被统计并显示。
+Type	类型
+Provider · model	服务商 · 模型
+Default limit	默认上限
+Limit	上限
+and	和
+a 3D model	每个 3D 模型
+a clip	每段语音
+a sound	每段音效
+a track	每首曲目
+a megapixel	每百万像素
+a second	每秒
+a character	每个字符

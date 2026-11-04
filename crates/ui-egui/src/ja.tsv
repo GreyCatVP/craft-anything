@@ -29,7 +29,6 @@ API key (stored in your system keychain)	API キー(システムのキーチェ�
 Add	追加
 Add Visual Studio's C++ tools	Visual Studio の C++ ツールを追加
 Add a brain	AI を追加
-Add a fal.ai key	fal.ai のキーを追加
 Add a folder…	フォルダを追加…
 Add a plugin	プラグインを追加
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	AI を追加すると、このエビデンスを読み、追加の質問に答え、根拠を示します。
@@ -88,7 +87,6 @@ Automatic	自動
 Automatic ({name})	自動({name})
 Back	戻る
 Best guess: a reasonable reading, but not proven.	推測: もっともな解釈だが、証明されていないもの。
-Budget for a new project	新規プロジェクトの予算
 Build with	ビルドに使う
 Build with this	これでビルド
 Build with {name}	{name} でビルド
@@ -232,28 +230,18 @@ Found on this computer	このコンピュータで見つかりました
 From	再現元
 Frozen copy	凍結コピー
 Functions	関数
-Game assets	ゲームアセット
 Game engines	ゲームエンジン
 Game files	ゲームファイル
 General	一般
-Generate custom pictures and models	独自の画像とモデルを生成
 Generate pictures, models and audio	画像、モデル、音声を生成
 Generate speech	読み上げを生成
 Generate a sound effect	効果音を生成
 Generate music	音楽を生成
 Needs an asset provider key. Until then the game is built without generated assets.	素材サービスのキーが必要です。追加するまで、生成素材を使わずにゲームを作成します。
-Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	各サービスのアカウントで支払います。3D モデルは約 {model}、画像は約 {picture}。音声の料金は長さによって異なります。オフの場合、生成素材を使わずにゲームを作成します。
 Add a provider key	サービスのキーを追加
 Your asset provider keys	素材サービスのキー
 Use fal.ai, Scenario or ElevenLabs for generated assets.	fal.ai、Scenario、ElevenLabs で素材を生成します。
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	ご自身のサービスアカウントでオリジナルの画像、モデル、読み上げ、効果音、音楽を生成します。視覚素材の概算料金はモデルが {model}、画像が {picture} です。各プロジェクトの予算は {budget} です。キーは利用可能な場合はシステムのキーチェーンに、それ以外の場合は非公開のローカルキーファイルに保存されます。設定 → ビルドで画像と 3D のサービスを選択できます。
-Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	fal.ai または Scenario で画像と 3D モデルを、ElevenLabs で読み上げ、効果音、音楽を生成します。モデルは約 {model}、各プロジェクトの予算は {budget} です。設定 → ビルドで視覚モデルを選択できます。
-3D model generator	3D モデル生成サービス
-What pictures are turned into 3D models with.	画像を 3D モデルに変換するサービス。
-What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	承認を求める前に、新しいプロジェクトが画像、3D モデル、音声の生成に使用できる金額です。各プロジェクトが独自の予算を保持します。
-Generated art (games)	生成アート(ゲーム)
 Generated assets	生成アセット
-Generated pictures and 3D models are made with fal.ai.	生成画像と 3D モデルは fal.ai で作成します。
 Get Ghidra	Ghidra を入手
 Get Ghidra for Deep mode	ディープモード用に Ghidra を入手
 Get Unity Hub	Unity Hub を入手
@@ -351,7 +339,6 @@ Leave a few GB for the rest of your computer.	コンピュータの他の用途�
 Leave a path empty to use the managed install. We never need environment variables.	パスを空にすると管理インストールを使います。環境変数は不要です。
 Leave empty to use the one Craft Anything sets up.	空にすると Craft Anything が用意したものを使います。
 Let's go	始めましょう
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	ビルダーがゲーム用のリアルな 3D モデルとテクスチャを作れるようにします。1 モデルあたり {model}、プロジェクトごとの予算は {budget} です。
 Light copy: shares big files with the project	軽量コピー: 大きなファイルをプロジェクトと共有
 Likeness	類似度
 Live: the project's latest build	ライブ: プロジェクトの最新ビルド
@@ -376,7 +363,6 @@ Looking inside needs Deep mode	中を覗くにはディープモードが必要�
 Looking inside software you own or are allowed to examine is normal and often protected (learning, compatibility, security). Saying why helps you keep to it; it stays on this computer.	自分が所有している、または調べる許可があるソフトの中を見るのは普通のことで、多くの場合に保護されています(学習、互換性、セキュリティ)。理由を書いておくと遵守しやすくなります。この内容はこのコンピュータから出ません。
 Looking on this computer…	このコンピュータを探しています…
 Made a copy: {name}	コピーを作成しました: {name}
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	fal.ai で作成し、あなたのアカウントに課金されます(3D モデル 1 点あたり {model}、画像 1 枚あたり {picture})。オフの場合は、それらなしでゲームをビルドします。
 Made with {engine}	{engine} 製
 Made without looking inside the original.	元の中を見ずに作成しました。
 Make a game that plays like this	このゲームと同じ遊び方のゲームを作る
@@ -396,7 +382,6 @@ More detail	詳細を表示
 More makes a big program's first look faster.	メモリが多いほど、大きなプログラムの初回解析が速くなります。
 More memory makes Ghidra's first look at a big program faster; leave some for the rest of the computer. Used from the next time Ghidra starts.	メモリが多いほど大きなプログラムの初回解析が速くなります。コンピュータの他の用途のために残してください。次回 Ghidra 起動時から反映されます。
 Name (optional)	名前(任意)
-Needs a fal.ai key. Until then the game is built without them.	fal.ai のキーが必要です。それまでは、それらなしでゲームをビルドします。
 Needs you	あなたの対応待ち
 Network	ネットワーク
 New project	新規プロジェクト
@@ -509,8 +494,6 @@ Pick the app or game folder	アプリまたはゲームのフォルダを選ぶ
 Pick the app, game or file to rebuild	再構築するアプリ、ゲーム、ファイルを選ぶ
 Pick the folder for this project	このプロジェクトのフォルダを選ぶ
 Pick the game's folder	ゲームのフォルダを選ぶ
-Picture model	画像モデル
-Unavailable model: {id}	利用できないモデル: {id}
 Pictures	画像
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	IoStore コンテナからはまだ画像を保存できません。中身を見ることはできます。
 Pictures of the original	元の画像
@@ -543,8 +526,6 @@ Projects	プロジェクト
 Projects and builds	プロジェクトとビルド
 Pseudo-C	疑似 C
 Purpose	目的
-Raise the asset budget	アセット予算を増やす
-Raise the budget by {amount}	予算を {amount} 増やす
 Read AI settings	AI 設定を読み込む
 Read a game's files	ゲームのファイルを読む
 Read its tools	ツールを読み込む
@@ -664,7 +645,6 @@ Targets	対象
 That folder already has {names}, where Craft Anything keeps its own files. Pick another folder, or move those out first.	そのフォルダには、Craft Anything が自分のファイルを置く {names} が既にあります。別のフォルダを選ぶか、先にそれらを移してください。
 That folder is already a project, so it's open now.	そのフォルダはすでにプロジェクトなので、開きました。
 The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	ビルダーは自分の質問に自分で答え、選んだ内容(「こう決めました: …」)を伝えるので、あとから変更できます。
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	ビルダーは、元のデザインを説明した内容からゲームの 3D モデルとテクスチャを作ります。費用はあなたの fal.ai アカウントから支払います。モデルは軽量(ローポリゴン)なので、ゲームが軽快に動きます。テクスチャ付きモデル 1 点が {model}、画像 1 枚が {picture}。プロジェクトごとに {budget} の予算があり、超える前に確認します。キーはシステムのキーチェーンに保存されます。
 The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	ビルダーがそれら(コード、メモ、画像)を読み、隣の新しい app フォルダにアプリをビルドします。あなたのファイルはそのまま残ります。
 The builder will decide its questions and tell you what it chose.	ビルダーが質問への答えを自分で決め、選んだ内容を伝えます。
 The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	ビルダーがこれらのファイルを直接編集し、うまくいったものを残します。Craft Anything はそれらの隣に、自身の記録を少しだけ追加します。
@@ -744,7 +724,6 @@ We read its code and files with every tool we have. For your private use.	すべ
 Website address	Web サイトのアドレス
 Website pages	Web サイトのページ数
 Welcome	ようこそ
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	新しいゲームが生成画像と 3D モデルに使える上限。超える前に確認します。プロジェクトごとに管理されます。
 What are its main parts?	主な構成は?
 What brings you here?	ここに来た目的は?
 What can Craft Anything do?	Craft Anything でできること
@@ -764,7 +743,6 @@ What happened in this build	このビルドで起きたこと
 What is it	何のファイルか
 What kind of file is this?	これは何のファイル?
 What permissions does it ask for?	どんな権限を要求する?
-What pictures and textures are made with.	画像とテクスチャの生成に使うもの。
 What settings are in here?	どんな設定がある?
 What tables are in here?	どんなテーブルがある?
 What we couldn't check	確認できなかったこと
@@ -804,13 +782,12 @@ You can add a Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studi
 You chose:	あなたの選択:
 You're all set	準備が整いました
 Your brains	登録済みの AI
-Your fal.ai key	fal.ai のキー
 Your message wasn't sent: another project was opened while its pictures were copied.	メッセージは送信されませんでした。画像のコピー中に別のプロジェクトが開かれました。
 Your own tool installs (optional)	自分で入れたツール(任意)
 Your project starts as soon as it's done.	完了するとすぐにプロジェクトが始まります。
 Your version	あなたの版
 a new folder in {dir}	{dir} 内の新しいフォルダ
-a picture	画像 1 枚
+a picture	1 枚あたり
 about ${n}	約 ${n}
 and {n} more	ほか {n} 件
 arguments (optional)	引数(任意)
@@ -862,13 +839,101 @@ API secret	API シークレット
 Paste your {name} API secret	{name} の API シークレットを貼り付け
 Save asset settings	素材設定を保存
 Key needed	キーが必要
-Off. Turning this on uses the providers chosen below.	オフです。オンにすると、下で選んだサービスを使います。
 Manage provider keys	プロバイダーのキーを管理
-Assets: {n} · estimated spent ${spent}	素材：{n} · 推定支出 ${spent}
-Budget ${budget} · remaining ${remaining}	予算 ${budget} · 残額 ${remaining}
-Shared asset budget (USD)	素材の共有予算（USD）
-Asset budget in USD	素材の予算（USD）
 Save budget	予算を保存
 Saving asset settings…	素材設定を保存中…
-Enter an amount from 0 to {max} USD.	0〜{max} USD の金額を入力してください。
 Asset spending is unavailable. Repair assets.json before generating.	素材の支出を読み取れません。生成する前に assets.json を修復してください。
+1 hour ago	1 時間前
+1 minute ago	1 分前
+{n} hours ago	{n} 時間前
+{n} minutes ago	{n} 分前
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	新しいプロジェクトはこれらの行をコピーし、プロジェクトごとに変更できます。既定の上限は単位ごとに 1 つなので、変更するとその単位で課金されるすべての種類に影響します。
+Add a key	キーを追加
+Add a key for {name}	{name} のキーを追加
+Ask the providers for their models	プロバイダーにモデル一覧を問い合わせ
+Asking the providers for their models…	プロバイダーにモデル一覧を問い合わせ中…
+Asset provider keys	素材プロバイダーのキー
+At least this much: the cost of an earlier one could not be read.	少なくともこの額です。以前の生成の 1 件で、費用を読み取れませんでした。
+Checking for a saved key…	保存済みのキーを確認中…
+Choose how a project makes one kind of asset	プロジェクトが素材の 1 種類を作る方法を選択
+Couldn't ask {name}: {error}	{name} に問い合わせできませんでした: {error}
+Enter an amount from 0 to {max} {unit}.	0 から {max} {unit} までの金額を入力してください。
+Every limit in this project is off while this is on. What is used is still counted and shown.	オンの間、このプロジェクトのすべての上限が無効になります。使用量は引き続き集計・表示されます。
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	ご自身のプロバイダーアカウントでオリジナルの画像、モデル、読み上げ、効果音、音楽を生成します。料金はプロバイダーが提示し、素材の種類ごとに上限があります。キーは利用可能な場合はシステムのキーチェーンに、それ以外の場合は非公開のローカルキーファイルに保存されます。設定 → ビルドでプロバイダーとモデルを選択できます。
+Generated assets for new projects	新規プロジェクトの生成アセット
+Ignore budget	予算を無視
+Ignore budget (no limits)	予算を無視（上限なし）
+Ignore budget is on, so no limit applies. What is used is still counted.	「予算を無視」がオンのため、上限は適用されません。使用量は引き続き集計されます。
+Ignored	無視中
+Model lists fetched from {names} {ago}	モデル一覧を {names} から取得しました: {ago}
+New projects ignore the budget, so this limit starts off.	新規プロジェクトは予算を無視するため、この上限はオフの状態で始まります。
+New projects start with this limit on.	新規プロジェクトはこの上限をオンにして始まります。
+No model lists yet. Save a provider key above to list its models.	モデル一覧はまだありません。上でプロバイダーのキーを保存すると、そのモデルが表示されます。
+No model matches that.	一致するモデルはありません。
+No provider with a saved key makes this.	キーを保存済みのプロバイダーに、これを作れるものはありません。
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	キーを保存済みのプロバイダーに、{type}を作れるものはありません。設定 → ビルドでキーを保存してください。
+No {name} key	{name} のキーがありません
+Off. Turning this on uses the choices below.	オフです。オンにすると、下で選んだものを使います。
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	各プロバイダーのアカウントで、選んだモデルに対してプロバイダーが提示する料金で支払います。オフの場合、生成素材を使わずにゲームを作成します。
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	画像、3D モデル、読み上げ、効果音、音楽は、キーを保存したプロバイダーが作成します。キーは利用可能な場合はシステムのキーチェーンに、それ以外の場合は非公開のローカルキーファイルに保存されます。
+Reading what this has used…	使用量を読み取り中…
+Refresh	更新
+Remove the {name} key	{name} のキーを削除
+Search models	モデルを検索
+Set a project's limit for one kind of asset	プロジェクトの素材 1 種類の上限を設定
+Showing the first {n} rows. Type to narrow the list.	先頭の {n} 行を表示しています。入力すると絞り込めます。
+The limit is off: nothing stops this, and what is used is still counted.	上限はオフです。何も制限されませんが、使用量は引き続き集計されます。
+The limit is on: you are asked before this goes past it.	上限はオンです。超える前に確認します。
+The model lists couldn't be read. Try Refresh in Settings → Builds.	モデル一覧を読み取れませんでした。設定 → ビルドで「更新」を試してください。
+The model lists haven't been read yet.	モデル一覧はまだ読み取られていません。
+This model's price is unknown, so what these cost is not counted.	このモデルの料金は不明なため、これらの費用は集計されません。
+credits	クレジット
+credit	クレジット
+dollars	ドル
+ignores: {options}	無視: {options}
+price unknown	料金不明
+cost known after each run	費用は生成のたびに後でわかります
+quoted before each run	生成のたびに事前に見積もり
+under 0.01	0.01 未満
+under 0.01 credits	0.01 クレジット未満
+unreadable	読み取れません
+usage not tracked	使用量は集計されません
+{n} made	{n} 件生成
+{n} made so far	これまでに {n} 件生成
+{type} default limit	{type}の既定の上限
+{type} limit	{type}の上限
+{type} limit switch	{type}の上限スイッチ
+{type} model	{type}のモデル
+{type}: may pass the limit by one generation	{type}: 上限を 1 回分の生成だけ超える場合があります
+{type}: no {name} key	{type}: {name} のキーがありません
+{type}: price unknown, usage not tracked	{type}: 料金が不明のため、使用量は集計されません
+3D models	3D モデル
+Speech	読み上げ
+Sound effects	効果音
+Music	音楽
+Assets	アセット
+pictures	画像
+speech	読み上げ
+sound effects	効果音
+music	音楽
+assets	アセット
+shape	形状
+faces	面数
+textures	テクスチャ
+length	長さ
+instrumental	インストゥルメンタル
+voice	声
+New projects ignore the budget	新規プロジェクトは予算を無視
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	新規プロジェクトはすべての上限をオフにして始まるため、支出を止めるものはありません。使用量は引き続き集計・表示されます。
+Type	種類
+Provider · model	プロバイダー · モデル
+Default limit	既定の上限
+Limit	上限
+and	と
+a 3D model	1 モデルあたり
+a clip	1 クリップあたり
+a sound	1 音あたり
+a track	1 曲あたり
+a megapixel	1 メガピクセルあたり
+a second	1 秒あたり
+a character	1 文字あたり

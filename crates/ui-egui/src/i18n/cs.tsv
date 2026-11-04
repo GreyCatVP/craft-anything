@@ -92,7 +92,6 @@ About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Přibližně 
 Add	Přidat
 Add Visual Studio's C++ tools	Přidat nástroje C++ pro Visual Studio
 Add a brain	Přidat AI asistenta
-Add a fal.ai key	Přidat klíč fal.ai
 Add a folder…	Přidat složku…
 Add a plugin	Přidat plugin
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Přidejte AI asistenta a já pro vás tyto důkazy přečtu, odpovím na doplňující otázky a odkážu na doklady.
@@ -182,7 +181,6 @@ Best guess: a reasonable reading, but not proven.	Nejlepší odhad: rozumný vý
 Binary layout	Rozložení binárního souboru
 Blocked	Blokováno
 Bookmark	Přidat záložku
-Budget for a new project	Rozpočet nového projektu
 Bug report	Hlášení chyby
 Build	Sestavení
 Build a rebuild ledger	Vytvořit evidenci rekonstrukce
@@ -450,16 +448,12 @@ Function references	Odkazy na funkci
 Functions	Funkce
 GDB command	Příkaz GDB
 GDB session status	Stav relace GDB
-Game assets	Herní podklady
 Game engines	Herní enginy
 Game files	Soubory hry
 General	Obecné
 Generate a 3D model	Vygenerovat 3D model
 Generate a picture	Vygenerovat obrázek
-Generate custom pictures and models	Generovat vlastní obrázky a modely
-Generated art (games)	Generovaná grafika (hry)
 Generated assets	Generované podklady
-Generated pictures and 3D models are made with fal.ai.	Generované obrázky a 3D modely vytváří fal.ai.
 Get Ghidra	Získat Ghidra
 Get Ghidra for Deep mode	Získat Ghidra pro Hloubkový režim
 Get Unity Hub	Získat Unity Hub
@@ -595,7 +589,6 @@ Leave a path empty to use the managed install. We never need environment variabl
 Leave empty to use the one Craft Anything sets up.	Ponechte prázdné pro použití instalace, kterou nastaví Craft Anything.
 Let a project generate assets	Povolit projektu generovat podklady
 Let's go	Začít
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Umožní sestavovacímu agentovi vytvářet realistické 3D modely a textury pro hry, {model} za model, s rozpočtem {budget} na projekt.
 Library resolution	Vyhledání knihoven
 Light copy: shares big files with the project	Odlehčená kopie: sdílí velké soubory s projektem
 Likeness	Podobnost
@@ -651,7 +644,6 @@ Looking on this computer…	Vyhledávání v tomto počítači…
 Low	Nízká
 Mach-O structure	Struktura Mach-O
 Made a copy: {name}	Vytvořena kopie: {name}
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Vytváří fal.ai a platí se z vašeho účtu: {model} za 3D model, {picture} za obrázek. Při vypnutí se hra sestaví bez nich.
 Made with {engine}	Vytvořeno pomocí {engine}
 Made without looking inside the original.	Vytvořeno bez nahlížení dovnitř originálu.
 Make a game that plays like this	Vytvořit hru s podobnou hratelností
@@ -687,7 +679,6 @@ Name an address	Pojmenovat adresu
 Name at address	Název na adrese
 Name many addresses	Pojmenovat více adres
 Names the program's author gave to functions or variables that survived in the file.	Názvy, které autor programu dal funkcím nebo proměnným a které se v souboru zachovaly.
-Needs a fal.ai key. Until then the game is built without them.	Vyžaduje klíč fal.ai. Do té doby se hra sestavuje bez nich.
 Needs you	Vyžaduje vaši reakci
 Network	Síť
 New	Nový
@@ -820,7 +811,6 @@ Pick the app, game or file to rebuild	Vybrat aplikaci, hru nebo soubor pro rekon
 Pick the folder for this project	Vybrat složku pro tento projekt
 Pick the game's folder	Vybrat složku této hry
 Picture a program's window	Pořídit snímek okna programu
-Picture model	Model pro obrázky
 Pictures	Obrázky
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	Obrázky z kontejnerů IoStore zatím nelze uložit; jejich obsah si můžete prohlédnout.
 Pictures of the original	Obrázky originálu
@@ -864,8 +854,6 @@ Projects and builds	Projekty a sestavení
 Property list	Seznam vlastností
 Pseudo-C	Pseudokód C
 Purpose	Účel
-Raise the asset budget	Navýšit rozpočet podkladů
-Raise the budget by {amount}	Navýšit rozpočet o {amount}
 Raw machine code	Surový strojový kód
 Read AI settings	Načíst nastavení AI
 Read a Unity game's IL2CPP metadata	Přečíst metadata IL2CPP hry Unity
@@ -987,7 +975,6 @@ Send (Enter)	Odeslat (Enter)
 Send now	Odeslat nyní
 Server address	Adresa serveru
 Session status	Stav relace
-Set a project's asset budget	Nastavit rozpočet podkladů projektu
 Set an AI's program	Nastavit program AI
 Set one up	Nastavit
 Set up a brain…	Nastavit AI asistenta…
@@ -1071,7 +1058,6 @@ That folder already has {names}, where Craft Anything keeps its own files. Pick 
 That folder is already a project, so it's open now.	Tato složka již je projektem, proto se nyní otevřela.
 The Rust toolchain (rustup.rs).	Sada nástrojů Rust (rustup.rs).
 The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	Sestavovací agent si odpovídá sám a sdělí svou volbu („Rozhodl jsem: …“), abyste ji mohli změnit.
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Sestavovací agent vytváří 3D modely a textury hry podle popisů originálních návrhů; platí se z vašeho účtu fal.ai. Modely mají málo polygonů, aby hra běžela rychle. Model s texturou stojí {model} a obrázek {picture}. Každý projekt má rozpočet {budget} a před jeho překročením se vás aplikace zeptá. Klíč je uložen v systémové klíčence.
 The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	Sestavovací agent je přečte (kód, poznámky, obrázky) a sestaví aplikaci v nové sousední složce app. Vaše soubory zůstanou beze změny.
 The builder will decide its questions and tell you what it chose.	Sestavovací agent své otázky rozhodne sám a sdělí vám svou volbu.
 The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	Sestavovací agent pracuje přímo s těmito soubory a zachová funkční části. Craft Anything k nim přidá několik vlastních záznamů.
@@ -1181,7 +1167,6 @@ Website address	Adresa webu
 Website pages	Stránky webu
 Websites	Weby
 Welcome	Vítejte
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Kolik může nová hra utratit za generované obrázky a 3D modely, než se vás aplikace zeptá. Každý projekt má vlastní limit.
 What a program exports	Co program exportuje
 What a program imports	Co program importuje
 What are its main parts?	Jaké jsou hlavní části?
@@ -1205,7 +1190,6 @@ What is this?	Co je tohle?
 What it calls	Co to volá
 What kind of file is this?	O jaký druh souboru jde?
 What permissions does it ask for?	Jaká oprávnění požaduje?
-What pictures and textures are made with.	Čím se vytvářejí obrázky a textury.
 What settings are in here?	Jaká nastavení jsou uvnitř?
 What tables are in here?	Jaké tabulky jsou uvnitř?
 What we couldn't check	Co jsme nemohli zkontrolovat
@@ -1267,7 +1251,6 @@ You chose:	Vaše volba:
 You're all set	Vše je připraveno
 Your app is ready	Vaše aplikace je hotová
 Your brains	Vaši AI asistenti
-Your fal.ai key	Váš klíč fal.ai
 Your game is ready	Vaše hra je hotová
 Your message wasn't sent: another project was opened while its pictures were copied.	Zpráva nebyla odeslána: během kopírování obrázků se otevřel jiný projekt.
 Your own tool installs (optional)	Vlastní instalace nástrojů (volitelné)
@@ -1275,7 +1258,7 @@ Your project starts as soon as it's done.	Váš projekt začne hned po dokončen
 Your version	Vaše verze
 Your website is ready	Váš web je hotový
 a new folder in {dir}	nová složka v {dir}
-a picture	obrázek
+a picture	za obrázek
 about ${n}	asi ${n}
 address, e.g. http://192.168.1.20:11434/v1	adresa, např. http://192.168.1.20:11434/v1
 and {n} more	a další: {n}
@@ -1352,8 +1335,6 @@ your files there are the app, edited in place	vaše soubory ve složce jsou apli
 {n} picture(s) to match.	Referenční obrázky: {n}.
 {n} step(s) didn't work and were retried or skipped.	Neúspěšné kroky (opakovány nebo přeskočeny): {n}.
 {n} tokens	tokeny: {n}
-{n} · ${spent:.2} of ${budget:.2}	{n} · ${spent:.2} z ${budget:.2}
-{n} · ${spent} of ${budget}	{n} · ${spent} z ${budget}
 {scenes} {}	{scenes} {}
 {text}, {}	{text}, {}
 {title} hit a bug and stopped safely. ({what})	{title}: chyba způsobila bezpečné zastavení. ({what})
@@ -1386,33 +1367,114 @@ your files there are the app, edited in place	vaše soubory ve složce jsou apli
 … {} older	… starší: {}
 ← Back	← Zpět
 ↑↓ to move · Enter to run · Esc to close	↑↓ pro pohyb · Enter pro spuštění · Esc pro zavření
-Unavailable model: {id}	Nedostupný model: {id}
 Generate speech	Vygenerovat řeč
 Generate a sound effect	Vygenerovat zvukový efekt
 Generate music	Vygenerovat hudbu
 Generate pictures, models and audio	Generovat obrázky, modely a zvuk
 Needs an asset provider key. Until then the game is built without generated assets.	Vyžaduje klíč poskytovatele podkladů. Do té doby se hra sestaví bez generovaných podkladů.
-Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	Platí se z vašich účtů u poskytovatelů: odhadem {model} za 3D model a {picture} za obrázek. Cena zvuku závisí na délce. Když je vypnuto, hra se sestaví bez generovaných podkladů.
 Add a provider key	Přidat klíč poskytovatele
 Your asset provider keys	Vaše klíče poskytovatelů podkladů
 Use fal.ai, Scenario or ElevenLabs for generated assets.	Pro generované podklady použijte fal.ai, Scenario nebo ElevenLabs.
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Generujte původní obrázky a modely, řeč, zvukové efekty a hudbu pomocí vlastních účtů u poskytovatelů. Odhadované náklady na vizuální podklady: {model} za model a {picture} za obrázek. Každý projekt má rozpočet {budget}. Klíče se ukládají do systémové klíčenky, pokud je k dispozici, jinak do soukromého místního souboru s klíči. Poskytovatele obrázků a 3D modelů vyberte v Nastavení → Sestavení.
-Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Obrázky a 3D modely z fal.ai nebo Scenario; řeč, zvukové efekty a hudba z ElevenLabs. Odhadem {model} za model a rozpočet {budget} na projekt. Vizuální modely vyberte v Nastavení → Sestavení.
-3D model generator	Generátor 3D modelů
-What pictures are turned into 3D models with.	Čím se obrázky převádějí na 3D modely.
-What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Kolik může nový projekt utratit za generované obrázky, 3D modely a zvuk, než se vás zeptá. Každý projekt si drží vlastní rozpočet.
 API secret	Tajný klíč API
 {name} API secret	Tajný klíč API {name}
 Paste your {name} API secret	Vložte tajný klíč API {name}
 Save asset settings	Uložit nastavení podkladů
 Key needed	Chybí klíč
-Off. Turning this on uses the providers chosen below.	Vypnuto. Po zapnutí se použijí poskytovatelé vybraní níže.
 Manage provider keys	Spravovat klíče poskytovatelů
-Assets: {n} · estimated spent ${spent}	Podklady: {n} · odhadem utraceno ${spent}
-Budget ${budget} · remaining ${remaining}	Rozpočet ${budget} · zbývá ${remaining}
-Shared asset budget (USD)	Sdílený rozpočet podkladů (USD)
-Asset budget in USD	Rozpočet podkladů v USD
 Save budget	Uložit rozpočet
 Saving asset settings…	Ukládání nastavení podkladů…
-Enter an amount from 0 to {max} USD.	Zadejte částku od 0 do {max} USD.
 Asset spending is unavailable. Repair assets.json before generating.	Výdaje za podklady nejsou k dispozici. Před generováním opravte assets.json.
+1 hour ago	před 1 hodinou
+1 minute ago	před 1 minutou
+{n} hours ago	před {n} hodinami
+{n} minutes ago	před {n} minutami
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	Nový projekt tyto řádky zkopíruje a může si je změnit po svém. Pro každou jednotku existuje jediný výchozí limit, takže jeho změna se projeví u všech typů účtovaných v této jednotce.
+Add a key	Přidat klíč
+Add a key for {name}	Přidat klíč pro {name}
+Ask the providers for their models	Zeptat se poskytovatelů na jejich modely
+Asking the providers for their models…	Ptáme se poskytovatelů na jejich modely…
+Asset provider keys	Klíče poskytovatelů podkladů
+At least this much: the cost of an earlier one could not be read.	Alespoň tolik: náklady na jeden z dřívějších podkladů se nepodařilo přečíst.
+Checking for a saved key…	Kontrola uloženého klíče…
+Choose how a project makes one kind of asset	Zvolit, jak projekt vytváří jeden typ podkladů
+Couldn't ask {name}: {error}	{name} se nepodařilo oslovit: {error}
+Enter an amount from 0 to {max} {unit}.	Zadejte částku od 0 do {max} {unit}.
+Every limit in this project is off while this is on. What is used is still counted and shown.	Dokud je to zapnuto, jsou všechny limity v tomto projektu vypnuty. Spotřeba se přesto počítá a zobrazuje.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	Generujte původní obrázky a modely, řeč, zvukové efekty a hudbu pomocí vlastních účtů u poskytovatelů. Ceny určují poskytovatelé a každý typ podkladů má svůj vlastní limit. Klíče se ukládají do systémové klíčenky, pokud je k dispozici, jinak do soukromého místního souboru s klíči. Poskytovatele a modely vyberte v Nastavení → Sestavení.
+Generated assets for new projects	Generované podklady pro nové projekty
+Ignore budget	Ignorovat rozpočet
+Ignore budget (no limits)	Ignorovat rozpočet (bez limitů)
+Ignore budget is on, so no limit applies. What is used is still counted.	Ignorování rozpočtu je zapnuto, takže se žádný limit neuplatní. Spotřeba se přesto počítá.
+Ignored	Ignorováno
+Model lists fetched from {names} {ago}	Seznamy modelů načteny od {names}: {ago}
+New projects ignore the budget, so this limit starts off.	Nové projekty ignorují rozpočet, takže tento limit začíná vypnutý.
+New projects start with this limit on.	Nové projekty začínají se zapnutým limitem.
+No model lists yet. Save a provider key above to list its models.	Zatím nejsou žádné seznamy modelů. Uložte nahoře klíč poskytovatele a zobrazí se jeho modely.
+No model matches that.	Nic takového mezi modely není.
+No provider with a saved key makes this.	Tento typ nevytváří žádný poskytovatel s uloženým klíčem.
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	Pro typ „{type}“ není žádný poskytovatel s uloženým klíčem. Uložte klíč v Nastavení → Sestavení.
+No {name} key	Chybí klíč {name}
+Off. Turning this on uses the choices below.	Vypnuto. Po zapnutí se použije volba níže.
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	Platí se z vašich účtů u poskytovatelů podle cen, které každý poskytovatel uvádí pro zvolený model. Když je vypnuto, hra se sestaví bez generovaných podkladů.
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	Obrázky, 3D modely, řeč, zvukové efekty a hudbu vytvářejí poskytovatelé, pro které uložíte klíč. Klíče se ukládají do systémové klíčenky, pokud je k dispozici, jinak do soukromého místního souboru s klíči.
+Reading what this has used…	Načítání spotřeby…
+Refresh	Obnovit
+Remove the {name} key	Odebrat klíč {name}
+Search models	Hledat modely
+Set a project's limit for one kind of asset	Nastavit limit projektu pro jeden typ podkladů
+Showing the first {n} rows. Type to narrow the list.	Zobrazuje se prvních {n} řádků. Zadáním textu seznam zúžíte.
+The limit is off: nothing stops this, and what is used is still counted.	Limit je vypnutý: nic to nezastaví, ale spotřeba se přesto počítá.
+The limit is on: you are asked before this goes past it.	Limit je zapnutý: než ho překročíte, budete dotázáni.
+The model lists couldn't be read. Try Refresh in Settings → Builds.	Seznamy modelů se nepodařilo přečíst. Zkuste Obnovit v Nastavení → Sestavení.
+The model lists haven't been read yet.	Seznamy modelů zatím nebyly načteny.
+This model's price is unknown, so what these cost is not counted.	Cena tohoto modelu není známa, takže se náklady na ně nepočítají.
+credits	kreditů
+credit	kredit
+dollars	dolarů
+ignores: {options}	ignoruje: {options}
+price unknown	cena neznámá
+cost known after each run	cena je známa po každém spuštění
+quoted before each run	cena se uvádí před každým spuštěním
+under 0.01	méně než 0,01
+under 0.01 credits	méně než 0,01 kreditu
+unreadable	nečitelné
+usage not tracked	spotřeba se nesleduje
+{n} made	vytvořeno: {n}
+{n} made so far	Dosud vytvořeno: {n}
+{type} default limit	{type}: výchozí limit
+{type} limit	{type}: limit
+{type} limit switch	{type}: přepínač limitu
+{type} model	{type}: model
+{type}: may pass the limit by one generation	{type}: limit může být překročen nejvýše o jedno vygenerování
+{type}: no {name} key	{type}: chybí klíč {name}
+{type}: price unknown, usage not tracked	{type}: cena je neznámá, spotřeba se nesleduje
+3D models	3D modely
+Speech	Řeč
+Sound effects	Zvukové efekty
+Music	Hudba
+Assets	Podklady
+pictures	obrázky
+speech	řeč
+sound effects	zvukové efekty
+music	hudba
+assets	podklady
+shape	tvar
+faces	počet ploch
+textures	textury
+length	délka
+instrumental	instrumentální
+voice	hlas
+New projects ignore the budget	Nové projekty ignorují rozpočet
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	Nový projekt začíná se všemi limity vypnutými, takže jeho výdaje nic neomezuje. Spotřeba se přesto počítá a zobrazuje.
+Type	Typ
+Provider · model	Poskytovatel · model
+Default limit	Výchozí limit
+Limit	Limit
+and	a
+a 3D model	za 3D model
+a clip	za klip
+a sound	za zvuk
+a track	za skladbu
+a megapixel	za megapixel
+a second	za sekundu
+a character	za znak

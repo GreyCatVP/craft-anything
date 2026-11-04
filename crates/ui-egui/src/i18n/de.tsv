@@ -92,7 +92,6 @@ About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Etwa 60 GB, e
 Add	Hinzufügen
 Add Visual Studio's C++ tools	C++-Werkzeuge von Visual Studio hinzufügen
 Add a brain	KI hinzufügen
-Add a fal.ai key	fal.ai-Schlüssel hinzufügen
 Add a folder…	Ordner hinzufügen …
 Add a plugin	Plugin hinzufügen
 Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Füge eine KI hinzu, dann lese ich diese Belege für dich, beantworte Anschlussfragen und zeige auf die Beweise.
@@ -182,7 +181,6 @@ Best guess: a reasonable reading, but not proven.	Beste Vermutung: eine vernünf
 Binary layout	Binärlayout
 Blocked	Blockiert
 Bookmark	Lesezeichen
-Budget for a new project	Budget für ein neues Projekt
 Bug report	Fehlerbericht
 Build	Build
 Build a rebuild ledger	Ein Nachbau-Protokoll erstellen
@@ -450,16 +448,12 @@ Function references	Funktionsverweise
 Functions	Funktionen
 GDB command	GDB-Befehl
 GDB session status	Status der GDB-Sitzung
-Game assets	Spiel-Assets
 Game engines	Spiel-Engines
 Game files	Spieldateien
 General	Allgemein
 Generate a 3D model	Ein 3D-Modell erzeugen
 Generate a picture	Ein Bild erzeugen
-Generate custom pictures and models	Eigene Bilder und Modelle erzeugen
-Generated art (games)	Generierte Grafiken (Spiele)
 Generated assets	Generierte Assets
-Generated pictures and 3D models are made with fal.ai.	Generierte Bilder und 3D-Modelle werden mit fal.ai erstellt.
 Get Ghidra	Ghidra holen
 Get Ghidra for Deep mode	Ghidra für den Deep-Modus holen
 Get Unity Hub	Unity Hub holen
@@ -595,7 +589,6 @@ Leave a path empty to use the managed install. We never need environment variabl
 Leave empty to use the one Craft Anything sets up.	Leer lassen, um die von Craft Anything eingerichtete zu verwenden.
 Let a project generate assets	Ein Projekt Assets erzeugen lassen
 Let's go	Los geht’s
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Lässt den Builder realistische 3D-Modelle und Texturen für Spiele erzeugen, {model} pro Modell, mit einem Budget von {budget} pro Projekt.
 Library resolution	Bibliotheksauflösung
 Light copy: shares big files with the project	Leichte Kopie: teilt große Dateien mit dem Projekt
 Likeness	Ähnlichkeit
@@ -651,7 +644,6 @@ Looking on this computer…	Es wird auf diesem Computer gesucht …
 Low	Niedrig
 Mach-O structure	Mach-O-Struktur
 Made a copy: {name}	Kopie erstellt: {name}
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Mit fal.ai erstellt und von deinem Konto bezahlt: {model} pro 3D-Modell, {picture} pro Bild. Aus: Das Spiel wird ohne sie gebaut.
 Made with {engine}	Gemacht mit {engine}
 Made without looking inside the original.	Gemacht, ohne ins Original hineinzusehen.
 Make a game that plays like this	Ein Spiel machen, das sich so spielt
@@ -687,7 +679,6 @@ Name an address	Eine Adresse benennen
 Name at address	Name an Adresse
 Name many addresses	Viele Adressen benennen
 Names the program's author gave to functions or variables that survived in the file.	Namen, die der Autor des Programms Funktionen oder Variablen gegeben hat und die in der Datei erhalten blieben.
-Needs a fal.ai key. Until then the game is built without them.	Braucht einen fal.ai-Schlüssel. Bis dahin wird das Spiel ohne sie gebaut.
 Needs you	Braucht dich
 Network	Netzwerk
 New	Neu
@@ -820,7 +811,6 @@ Pick the app, game or file to rebuild	Wähle die App, das Spiel oder die Datei z
 Pick the folder for this project	Wähle den Ordner für dieses Projekt
 Pick the game's folder	Wähle den Ordner des Spiels
 Picture a program's window	Das Fenster eines Programms abbilden
-Picture model	Bildmodell
 Pictures	Bilder
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	Bilder können noch nicht aus IoStore-Containern gespeichert werden; du kannst sehen, was darin ist.
 Pictures of the original	Bilder des Originals
@@ -864,8 +854,6 @@ Projects and builds	Projekte und Builds
 Property list	Property List
 Pseudo-C	Pseudo-C
 Purpose	Zweck
-Raise the asset budget	Das Asset-Budget erhöhen
-Raise the budget by {amount}	Das Budget um {amount} erhöhen
 Raw machine code	Roher Maschinencode
 Read AI settings	KI-Einstellungen lesen
 Read a Unity game's IL2CPP metadata	Die IL2CPP-Metadaten eines Unity-Spiels lesen
@@ -987,7 +975,6 @@ Send (Enter)	Senden (Enter)
 Send now	Jetzt senden
 Server address	Serveradresse
 Session status	Sitzungsstatus
-Set a project's asset budget	Das Asset-Budget eines Projekts festlegen
 Set an AI's program	Das Programm einer KI festlegen
 Set one up	Eine einrichten
 Set up a brain…	KI einrichten …
@@ -1071,7 +1058,6 @@ That folder already has {names}, where Craft Anything keeps its own files. Pick 
 That folder is already a project, so it's open now.	Dieser Ordner ist schon ein Projekt, deshalb ist er jetzt geöffnet.
 The Rust toolchain (rustup.rs).	Die Rust-Toolchain (rustup.rs).
 The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	Der Builder beantwortet seine Fragen selbst und sagt, was er gewählt hat („Ich habe entschieden: …“), sodass du es ändern kannst.
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Der Builder erstellt die 3D-Modelle und Texturen des Spiels aus Beschreibungen eigener Entwürfe, bezahlt von deinem fal.ai-Konto. Die Modelle sind Low-Poly, damit das Spiel schnell läuft. Ein texturiertes Modell kostet {model} und ein Bild {picture}. Jedes Projekt hat ein Budget von {budget}, und bevor es überschritten wird, wirst du gefragt. Der Schlüssel wird in deinem System-Schlüsselbund gespeichert.
 The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	Der Builder liest sie (Code, Notizen, Bilder) und baut die App in einem neuen App-Ordner daneben. Deine Dateien bleiben unverändert.
 The builder will decide its questions and tell you what it chose.	Der Builder entscheidet seine Fragen selbst und sagt dir, was er gewählt hat.
 The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	Der Builder arbeitet direkt an diesen Dateien und behält, was funktioniert. Craft Anything legt ein paar eigene Aufzeichnungen daneben ab.
@@ -1181,7 +1167,6 @@ Website address	Website-Adresse
 Website pages	Website-Seiten
 Websites	Websites
 Welcome	Willkommen
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Was ein neues Spiel für generierte Bilder und 3D-Modelle ausgeben darf, bevor du gefragt wirst. Jedes Projekt hat sein eigenes.
 What a program exports	Was ein Programm exportiert
 What a program imports	Was ein Programm importiert
 What are its main parts?	Was sind seine Hauptteile?
@@ -1205,7 +1190,6 @@ What is this?	Was ist das?
 What it calls	Was es aufruft
 What kind of file is this?	Was für eine Datei ist das?
 What permissions does it ask for?	Welche Berechtigungen verlangt es?
-What pictures and textures are made with.	Womit Bilder und Texturen gemacht werden.
 What settings are in here?	Welche Einstellungen sind hier drin?
 What tables are in here?	Welche Tabellen sind hier drin?
 What we couldn't check	Was wir nicht prüfen konnten
@@ -1267,7 +1251,6 @@ You chose:	Du hast gewählt:
 You're all set	Alles bereit
 Your app is ready	Deine App ist fertig
 Your brains	Deine KIs
-Your fal.ai key	Dein fal.ai-Schlüssel
 Your game is ready	Dein Spiel ist fertig
 Your message wasn't sent: another project was opened while its pictures were copied.	Deine Nachricht wurde nicht gesendet: Während die Bilder kopiert wurden, wurde ein anderes Projekt geöffnet.
 Your own tool installs (optional)	Deine eigenen Werkzeug-Installationen (optional)
@@ -1275,7 +1258,7 @@ Your project starts as soon as it's done.	Dein Projekt startet, sobald es fertig
 Your version	Deine Version
 Your website is ready	Deine Website ist fertig
 a new folder in {dir}	ein neuer Ordner in {dir}
-a picture	ein Bild
+a picture	pro Bild
 about ${n}	etwa ${n}
 address, e.g. http://192.168.1.20:11434/v1	Adresse, z. B. http://192.168.1.20:11434/v1
 and {n} more	und {n} weitere
@@ -1352,8 +1335,6 @@ your files there are the app, edited in place	deine Dateien dort sind die App, d
 {n} picture(s) to match.	{n} Bild(er) zum Abgleichen.
 {n} step(s) didn't work and were retried or skipped.	{n} Schritt(e) haben nicht funktioniert und wurden wiederholt oder übersprungen.
 {n} tokens	{n} Tokens
-{n} · ${spent:.2} of ${budget:.2}	{n} · ${spent:.2} von ${budget:.2}
-{n} · ${spent} of ${budget}	{n} · ${spent} von ${budget}
 {scenes} {}	{scenes} {}
 {text}, {}	{text}, {}
 {title} hit a bug and stopped safely. ({what})	{title} hatte einen Fehler und hat sicher gestoppt. ({what})
@@ -1386,33 +1367,114 @@ your files there are the app, edited in place	deine Dateien dort sind die App, d
 … {} older	… {} ältere
 ← Back	← Zurück
 ↑↓ to move · Enter to run · Esc to close	↑↓ zum Bewegen · Enter zum Ausführen · Esc zum Schließen
-Unavailable model: {id}	Nicht verfügbares Modell: {id}
 Generate speech	Sprache erzeugen
 Generate a sound effect	Einen Soundeffekt erzeugen
 Generate music	Musik erzeugen
 Generate pictures, models and audio	Bilder, Modelle und Audio erzeugen
 Needs an asset provider key. Until then the game is built without generated assets.	Braucht einen Schlüssel für einen Asset-Anbieter. Bis dahin wird das Spiel ohne generierte Assets gebaut.
-Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	Bezahlt über deine Anbieterkonten: geschätzt {model} pro 3D-Modell und {picture} pro Bild. Audiokosten hängen von der Länge ab. Ausgeschaltet wird das Spiel ohne generierte Assets gebaut.
 Add a provider key	Anbieterschlüssel hinzufügen
 Your asset provider keys	Deine Schlüssel für Asset-Anbieter
 Use fal.ai, Scenario or ElevenLabs for generated assets.	Nutze fal.ai, Scenario oder ElevenLabs für generierte Assets.
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Erzeuge originale Bilder und Modelle, Sprache, Soundeffekte und Musik über deine eigenen Anbieterkonten. Geschätzte Kosten für Grafik: {model} pro Modell und {picture} pro Bild. Jedes Projekt hat ein Budget von {budget}. Schlüssel liegen im System-Schlüsselbund, wenn verfügbar, sonst in einer privaten lokalen Schlüsseldatei. Wähle Bild- und 3D-Anbieter unter Einstellungen → Builds.
-Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Bilder und 3D-Modelle von fal.ai oder Scenario; Sprache, Soundeffekte und Musik von ElevenLabs. Geschätzt {model} pro Modell, mit einem Budget von {budget} pro Projekt. Wähle die Grafikmodelle unter Einstellungen → Builds.
-3D model generator	3D-Modell-Generator
-What pictures are turned into 3D models with.	Womit Bilder in 3D-Modelle verwandelt werden.
-What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Was ein neues Projekt für generierte Bilder, 3D-Modelle und Audio ausgeben darf, bevor du gefragt wirst. Jedes Projekt behält sein eigenes.
 API secret	API-Secret
 {name} API secret	{name}-API-Secret
 Paste your {name} API secret	Füge dein {name}-API-Secret ein
 Save asset settings	Asset-Einstellungen speichern
 Key needed	Schlüssel nötig
-Off. Turning this on uses the providers chosen below.	Aus. Eingeschaltet werden die unten gewählten Anbieter verwendet.
 Manage provider keys	Anbieterschlüssel verwalten
-Assets: {n} · estimated spent ${spent}	Assets: {n} · geschätzt ausgegeben ${spent}
-Budget ${budget} · remaining ${remaining}	Budget ${budget} · übrig ${remaining}
-Shared asset budget (USD)	Gemeinsames Asset-Budget (USD)
-Asset budget in USD	Asset-Budget in USD
 Save budget	Budget speichern
 Saving asset settings…	Asset-Einstellungen werden gespeichert…
-Enter an amount from 0 to {max} USD.	Gib einen Betrag von 0 bis {max} USD ein.
 Asset spending is unavailable. Repair assets.json before generating.	Asset-Ausgaben sind nicht verfügbar. Repariere assets.json vor dem Erzeugen.
+1 hour ago	vor 1 Stunde
+1 minute ago	vor 1 Minute
+{n} hours ago	vor {n} Stunden
+{n} minutes ago	vor {n} Minuten
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	Ein neues Projekt übernimmt diese Zeilen und kann sie für sich ändern. Pro Einheit gibt es ein Standardlimit; wenn du es änderst, gilt das für alle Typen, die in dieser Einheit abgerechnet werden.
+Add a key	Schlüssel hinzufügen
+Add a key for {name}	Schlüssel für {name} hinzufügen
+Ask the providers for their models	Anbieter nach ihren Modellen fragen
+Asking the providers for their models…	Die Anbieter werden nach ihren Modellen gefragt…
+Asset provider keys	Schlüssel für Asset-Anbieter
+At least this much: the cost of an earlier one could not be read.	Mindestens so viel: Die Kosten einer früheren Erzeugung konnten nicht gelesen werden.
+Checking for a saved key…	Es wird nach einem gespeicherten Schlüssel gesucht…
+Choose how a project makes one kind of asset	Festlegen, wie ein Projekt eine Art von Assets erzeugt
+Couldn't ask {name}: {error}	{name} konnte nicht gefragt werden: {error}
+Enter an amount from 0 to {max} {unit}.	Gib einen Betrag von 0 bis {max} {unit} ein.
+Every limit in this project is off while this is on. What is used is still counted and shown.	Solange das an ist, sind alle Limits in diesem Projekt aus. Was verbraucht wird, wird weiterhin gezählt und angezeigt.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	Erzeuge originale Bilder und Modelle, Sprache, Soundeffekte und Musik über deine eigenen Anbieterkonten. Die Preise kommen von den Anbietern, und jede Asset-Art hat ihr eigenes Limit. Schlüssel liegen im System-Schlüsselbund, wenn verfügbar, sonst in einer privaten lokalen Schlüsseldatei. Wähle Anbieter und Modelle unter Einstellungen → Builds.
+Generated assets for new projects	Generierte Assets für neue Projekte
+Ignore budget	Budget ignorieren
+Ignore budget (no limits)	Budget ignorieren (keine Limits)
+Ignore budget is on, so no limit applies. What is used is still counted.	„Budget ignorieren“ ist an, daher gilt kein Limit. Was verbraucht wird, wird weiterhin gezählt.
+Ignored	Ignoriert
+Model lists fetched from {names} {ago}	Modelllisten von {names} abgerufen: {ago}
+New projects ignore the budget, so this limit starts off.	Neue Projekte ignorieren das Budget, daher beginnt dieses Limit ausgeschaltet.
+New projects start with this limit on.	Neue Projekte starten mit eingeschaltetem Limit.
+No model lists yet. Save a provider key above to list its models.	Noch keine Modelllisten. Speichere oben einen Anbieterschlüssel, um dessen Modelle aufzulisten.
+No model matches that.	Dazu passt kein Modell.
+No provider with a saved key makes this.	Kein Anbieter mit gespeichertem Schlüssel erzeugt das.
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	Kein Anbieter mit gespeichertem Schlüssel erzeugt {type}. Speichere einen Schlüssel unter Einstellungen → Builds.
+No {name} key	Kein {name}-Schlüssel
+Off. Turning this on uses the choices below.	Aus. Eingeschaltet wird die Auswahl unten verwendet.
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	Bezahlt über deine Anbieterkonten, zu den Preisen, die jeder Anbieter für das gewählte Modell nennt. Ausgeschaltet wird das Spiel ohne generierte Assets gebaut.
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	Bilder, 3D-Modelle, Sprache, Soundeffekte und Musik werden von den Anbietern erzeugt, für die du einen Schlüssel speicherst. Schlüssel liegen im System-Schlüsselbund, wenn verfügbar, sonst in einer privaten lokalen Schlüsseldatei.
+Reading what this has used…	Verbrauch wird gelesen…
+Refresh	Neu laden
+Remove the {name} key	Den {name}-Schlüssel entfernen
+Search models	Modelle durchsuchen
+Set a project's limit for one kind of asset	Das Limit eines Projekts für eine Art von Assets festlegen
+Showing the first {n} rows. Type to narrow the list.	Die ersten {n} Zeilen werden angezeigt. Tippe, um die Liste einzugrenzen.
+The limit is off: nothing stops this, and what is used is still counted.	Das Limit ist aus: Nichts hält das auf, aber was verbraucht wird, wird weiterhin gezählt.
+The limit is on: you are asked before this goes past it.	Das Limit ist an: Bevor es überschritten wird, wirst du gefragt.
+The model lists couldn't be read. Try Refresh in Settings → Builds.	Die Modelllisten konnten nicht gelesen werden. Versuche „Neu laden“ unter Einstellungen → Builds.
+The model lists haven't been read yet.	Die Modelllisten wurden noch nicht gelesen.
+This model's price is unknown, so what these cost is not counted.	Der Preis dieses Modells ist unbekannt, daher werden die Kosten dafür nicht mitgezählt.
+credits	Credits
+credit	Credit
+dollars	Dollar
+ignores: {options}	ignoriert: {options}
+price unknown	Preis unbekannt
+cost known after each run	Kosten erst nach jedem Lauf bekannt
+quoted before each run	Preis vor jedem Lauf angegeben
+under 0.01	unter 0,01
+under 0.01 credits	unter 0,01 Credits
+unreadable	nicht lesbar
+usage not tracked	Verbrauch wird nicht gezählt
+{n} made	{n} erzeugt
+{n} made so far	Bisher {n} erzeugt
+{type} default limit	{type}: Standardlimit
+{type} limit	{type}: Limit
+{type} limit switch	{type}: Limit-Schalter
+{type} model	{type}: Modell
+{type}: may pass the limit by one generation	{type}: Das Limit kann um eine Erzeugung überschritten werden
+{type}: no {name} key	{type}: Kein {name}-Schlüssel
+{type}: price unknown, usage not tracked	{type}: Preis unbekannt, Verbrauch wird nicht gezählt
+3D models	3D-Modelle
+Speech	Sprache
+Sound effects	Soundeffekte
+Music	Musik
+Assets	Assets
+pictures	Bilder
+speech	Sprache
+sound effects	Soundeffekte
+music	Musik
+assets	Assets
+shape	Format
+faces	Flächenzahl
+textures	Texturen
+length	Länge
+instrumental	instrumental
+voice	Stimme
+New projects ignore the budget	Neue Projekte ignorieren das Budget
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	Ein neues Projekt startet mit allen Limits aus, sodass nichts seine Ausgaben bremst. Was verbraucht wird, wird weiterhin gezählt und angezeigt.
+Type	Typ
+Provider · model	Anbieter · Modell
+Default limit	Standardlimit
+Limit	Limit
+and	und
+a 3D model	pro 3D-Modell
+a clip	pro Clip
+a sound	pro Sound
+a track	pro Titel
+a megapixel	pro Megapixel
+a second	pro Sekunde
+a character	pro Zeichen

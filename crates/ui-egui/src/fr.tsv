@@ -148,31 +148,16 @@ Forget the key	Oublier la clé
 Allow generated assets	Autoriser les ressources générées
 Stop generated assets	Arrêter les ressources générées
 Paste your {name} key	Collez votre clé {name}
-Generate custom pictures and models	Générer des images et des modèles sur mesure
 Generate pictures, models and audio	Générer des images, des modèles et du son
 Generate speech	Générer une voix
 Generate a sound effect	Générer un effet sonore
 Generate music	Générer de la musique
 Needs an asset provider key. Until then the game is built without generated assets.	Une clé de fournisseur est nécessaire. En attendant, le jeu est créé sans ressources générées.
-Paid from your provider accounts: estimates of {model} a 3D model and {picture} a picture. Audio costs depend on length. Off, the game is built without generated assets.	Facturé sur vos comptes fournisseurs : environ {model} par modèle 3D et {picture} par image. Le coût audio dépend de la durée. Désactivé, le jeu est créé sans ressources générées.
 Add a provider key	Ajouter une clé de fournisseur
 Your asset provider keys	Vos clés de fournisseurs de ressources
 Use fal.ai, Scenario or ElevenLabs for generated assets.	Utilisez fal.ai, Scenario ou ElevenLabs pour générer des ressources.
-Generate original pictures and models, speech, sound effects and music with your own provider accounts. Estimated visual costs: {model} a model and {picture} a picture. Each project has a {budget} budget. Keys use the system keychain when available, otherwise a private local key file. Choose picture and 3D providers in Settings → Builds.	Générez des images et modèles originaux, des voix, des effets sonores et de la musique avec vos comptes fournisseurs. Coûts visuels estimés : {model} par modèle et {picture} par image. Chaque projet dispose d'un budget de {budget}. Les clés utilisent le trousseau du système s'il est disponible, sinon un fichier local privé. Choisissez les fournisseurs d'images et de 3D dans Réglages → Créations.
-Pictures and 3D models from fal.ai or Scenario; speech, sound effects and music from ElevenLabs. Estimated {model} per model, with a {budget} budget per project. Choose visual models in Settings → Builds.	Images et modèles 3D via fal.ai ou Scenario ; voix, effets sonores et musique via ElevenLabs. Environ {model} par modèle, avec un budget de {budget} par projet. Choisissez les modèles visuels dans Réglages → Créations.
-3D model generator	Générateur de modèles 3D
-What pictures are turned into 3D models with.	Le service qui transforme les images en modèles 3D.
-What a new project may spend on generated pictures, 3D models and audio before you're asked. Each project keeps its own.	Ce qu'un nouveau projet peut dépenser en images, modèles 3D et sons générés avant de vous demander. Chaque projet conserve son propre budget.
-Needs a fal.ai key. Until then the game is built without them.	Nécessite une clé fal.ai. En attendant, le jeu est construit sans.
-Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Faits avec fal.ai et payés depuis votre compte : {model} par modèle 3D, {picture} par image. Désactivé, le jeu est construit sans.
-Add a fal.ai key	Ajouter une clé fal.ai
-Your fal.ai key	Votre clé fal.ai
-Generated pictures and 3D models are made with fal.ai.	Les images et modèles 3D générés sont faits avec fal.ai.
-The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Le constructeur crée les modèles 3D et les textures du jeu à partir de descriptions de designs originaux, payés depuis votre compte fal.ai. Les modèles sont low-poly pour que le jeu tourne vite. Un modèle texturé coûte {model} et une image {picture}. Chaque projet a un budget de {budget}, et on vous demande avant de le dépasser. La clé est gardée dans le trousseau de votre système.
 Save	Enregistrer
 Get a key at {name}	Obtenir une clé sur {name}
-Game assets	Ressources de jeu
-Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Permet au constructeur de créer des modèles 3D et des textures réalistes pour les jeux, {model} par modèle, avec un budget de {budget} par projet.
 Key saved	Clé enregistrée
 Remove	Retirer
 Made with {engine}	Fait avec {engine}
@@ -543,9 +528,7 @@ Load a screenshot	Charger une capture d'écran
 Plan	Plan
 {done} of {all} done	{done} sur {all} terminé(s)
 Read the project	Lire le projet
-Raise the asset budget	Augmenter le budget de ressources
 Generated assets	Ressources générées
-Raise the budget by {amount}	Augmenter le budget de {amount}
 Project details	Détails du projet
 From	Source
 Add pictures of the original	Ajouter des images de l'original
@@ -700,13 +683,7 @@ Apps and games: keep refining until they look this alike to your pictures. Off, 
 Use as a goal	Utiliser comme objectif
 Builds at once	Constructions simultanées
 How many projects may build at the same time. More wait their turn.	Combien de projets peuvent construire en même temps. Les autres attendent leur tour.
-Generated art (games)	Graphismes générés (jeux)
-Budget for a new project	Budget d'un nouveau projet
-What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Ce qu'un nouveau jeu peut dépenser en images et modèles 3D générés avant qu'on vous demande. Chaque projet garde le sien.
-Picture model	Modèle d'images
-Unavailable model: {id}	Modèle indisponible : {id}
-What pictures and textures are made with.	Ce qui sert à créer les images et les textures.
-a picture	une image
+a picture	par image
 Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	Les plugins ajoutent des outils que Craft Anything propose comme les siens : serveurs MCP (une commande ou une adresse ; lisez leurs outils après l'ajout) ou composants WebAssembly (un fichier .wasm, qui ne peut toucher ni à vos fichiers ni au réseau).
 No plugins yet.	Aucun plugin pour l'instant.
 Runs its tools without asking	Lance ses outils sans demander
@@ -860,13 +837,101 @@ API secret	Secret API
 Paste your {name} API secret	Collez votre secret API {name}
 Save asset settings	Enregistrer les réglages des ressources
 Key needed	Clé requise
-Off. Turning this on uses the providers chosen below.	Désactivé. L'activer utilise les fournisseurs choisis ci-dessous.
 Manage provider keys	Gérer les clés des fournisseurs
-Assets: {n} · estimated spent ${spent}	Ressources : {n} · dépense estimée ${spent}
-Budget ${budget} · remaining ${remaining}	Budget ${budget} · reste ${remaining}
-Shared asset budget (USD)	Budget partagé des ressources (USD)
-Asset budget in USD	Budget des ressources en USD
 Save budget	Enregistrer le budget
 Saving asset settings…	Enregistrement des réglages des ressources…
-Enter an amount from 0 to {max} USD.	Saisissez un montant entre 0 et {max} USD.
 Asset spending is unavailable. Repair assets.json before generating.	Dépenses indisponibles. Réparez assets.json avant de générer des ressources.
+1 hour ago	il y a 1 heure
+1 minute ago	il y a 1 minute
+{n} hours ago	il y a {n} heures
+{n} minutes ago	il y a {n} minutes
+A new project copies these rows and can change its own. There is one default limit for each unit, so changing it changes every type billed in that unit.	Un nouveau projet copie ces lignes et peut modifier les siennes. Il n'y a qu'une limite par défaut pour chaque unité : la modifier change tous les types facturés dans cette unité.
+Add a key	Ajouter une clé
+Add a key for {name}	Ajouter une clé pour {name}
+Ask the providers for their models	Demander leurs modèles aux fournisseurs
+Asking the providers for their models…	Demande des modèles aux fournisseurs…
+Asset provider keys	Clés des fournisseurs de ressources
+At least this much: the cost of an earlier one could not be read.	Au moins ce montant : le coût d'une génération précédente n'a pas pu être lu.
+Checking for a saved key…	Recherche d'une clé enregistrée…
+Choose how a project makes one kind of asset	Choisir comment un projet produit un type de ressource
+Couldn't ask {name}: {error}	Impossible d'interroger {name} : {error}
+Enter an amount from 0 to {max} {unit}.	Saisissez un montant de 0 à {max} {unit}.
+Every limit in this project is off while this is on. What is used is still counted and shown.	Tant que cette option est activée, toutes les limites de ce projet sont désactivées. Ce qui est utilisé reste compté et affiché.
+Generate original pictures and models, speech, sound effects and music with your own provider accounts. Prices come from the providers, and each type of asset has its own limit. Keys use the system keychain when available, otherwise a private local key file. Choose providers and models in Settings → Builds.	Générez des images et modèles originaux, des voix, des effets sonores et de la musique avec vos comptes fournisseurs. Les prix viennent des fournisseurs, et chaque type de ressource a sa propre limite. Les clés utilisent le trousseau du système s'il est disponible, sinon un fichier local privé. Choisissez les fournisseurs et les modèles dans Réglages → Constructions.
+Generated assets for new projects	Ressources générées pour les nouveaux projets
+Ignore budget	Ignorer le budget
+Ignore budget (no limits)	Ignorer le budget (aucune limite)
+Ignore budget is on, so no limit applies. What is used is still counted.	« Ignorer le budget » est activé, donc aucune limite ne s'applique. Ce qui est utilisé reste compté.
+Ignored	Ignorée
+Model lists fetched from {names} {ago}	Listes de modèles obtenues auprès de {names} : {ago}
+New projects ignore the budget, so this limit starts off.	Les nouveaux projets ignorent le budget : cette limite démarre donc désactivée.
+New projects start with this limit on.	Les nouveaux projets démarrent avec cette limite activée.
+No model lists yet. Save a provider key above to list its models.	Aucune liste de modèles pour l'instant. Enregistrez ci-dessus une clé de fournisseur pour lister ses modèles.
+No model matches that.	Aucun modèle ne correspond.
+No provider with a saved key makes this.	Aucun fournisseur disposant d'une clé enregistrée ne produit cela.
+No provider with a saved key makes {type}. Save a key in Settings → Builds.	Aucun fournisseur disposant d'une clé enregistrée n'offre le type « {type} ». Enregistrez une clé dans Réglages → Constructions.
+No {name} key	Pas de clé {name}
+Off. Turning this on uses the choices below.	Désactivé. L'activer utilise les choix ci-dessous.
+Paid from your provider accounts, at the prices each provider gives for the model you choose. Off, the game is built without generated assets.	Facturé sur vos comptes fournisseurs, aux prix que chaque fournisseur indique pour le modèle choisi. Désactivé, le jeu est créé sans ressources générées.
+Pictures, 3D models, speech, sound effects and music are made by the providers you save a key for. Keys use the system keychain when available, otherwise a private local key file.	Les images, modèles 3D, voix, effets sonores et musiques sont produits par les fournisseurs dont vous enregistrez une clé. Les clés utilisent le trousseau du système s'il est disponible, sinon un fichier local privé.
+Reading what this has used…	Lecture de la consommation…
+Refresh	Actualiser
+Remove the {name} key	Supprimer la clé {name}
+Search models	Rechercher des modèles
+Set a project's limit for one kind of asset	Définir la limite d'un projet pour un type de ressource
+Showing the first {n} rows. Type to narrow the list.	Affichage des {n} premières lignes. Saisissez du texte pour restreindre la liste.
+The limit is off: nothing stops this, and what is used is still counted.	La limite est désactivée : rien ne l'arrête, et ce qui est utilisé reste compté.
+The limit is on: you are asked before this goes past it.	La limite est activée : on vous demande avant de la dépasser.
+The model lists couldn't be read. Try Refresh in Settings → Builds.	Les listes de modèles n'ont pas pu être lues. Essayez « Actualiser » dans Réglages → Constructions.
+The model lists haven't been read yet.	Les listes de modèles n'ont pas encore été lues.
+This model's price is unknown, so what these cost is not counted.	Le prix de ce modèle est inconnu : ce qu'ils coûtent n'est donc pas compté.
+credits	crédits
+credit	crédit
+dollars	dollars
+ignores: {options}	ignore : {options}
+price unknown	prix inconnu
+cost known after each run	coût connu après chaque exécution
+quoted before each run	prix indiqué avant chaque exécution
+under 0.01	moins de 0,01
+under 0.01 credits	moins de 0,01 crédit
+unreadable	illisible
+usage not tracked	consommation non suivie
+{n} made	{n} produits
+{n} made so far	{n} produits jusqu'à présent
+{type} default limit	{type} : limite par défaut
+{type} limit	{type} : limite
+{type} limit switch	{type} : interrupteur de limite
+{type} model	{type} : modèle
+{type}: may pass the limit by one generation	{type} : la limite peut être dépassée d'une génération
+{type}: no {name} key	{type} : pas de clé {name}
+{type}: price unknown, usage not tracked	{type} : prix inconnu, consommation non suivie
+3D models	Modèles 3D
+Speech	Voix
+Sound effects	Effets sonores
+Music	Musique
+Assets	Ressources
+pictures	images
+speech	voix
+sound effects	effets sonores
+music	musique
+assets	ressources
+shape	forme
+faces	nombre de faces
+textures	textures
+length	durée
+instrumental	instrumental
+voice	voix
+New projects ignore the budget	Les nouveaux projets ignorent le budget
+A new project starts with every limit off, so nothing stops its spending. What is used is still counted and shown.	Un nouveau projet démarre avec toutes les limites désactivées : rien ne freine donc ses dépenses. Ce qui est utilisé reste compté et affiché.
+Type	Type
+Provider · model	Fournisseur · modèle
+Default limit	Limite par défaut
+Limit	Limite
+and	et
+a 3D model	par modèle 3D
+a clip	par clip
+a sound	par son
+a track	par morceau
+a megapixel	par mégapixel
+a second	par seconde
+a character	par caractère
