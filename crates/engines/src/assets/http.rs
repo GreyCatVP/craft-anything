@@ -38,6 +38,15 @@ pub(super) fn network() -> ToolError {
     ToolError::new(ErrorCode::EngineMissing, "The asset service could not be reached or its request timed out.")
         .with_remediation("Check your connection and provider account before retrying; an accepted job may already have been charged.")
 }
+
+/// Whether a failed request had reached the provider and was waiting for its answer when it
+/// failed: its answer (or the whole call) ran out of time after it was sent. A paid request like
+/// that may have been made all the same, so it is a possible charge; one that could not be sent at
+/// all (no connection) is not.
+pub(super) fn sent_but_unanswered(e: &ureq::Error) -> bool {
+    use ureq::Timeout;
+    matches!(e, ureq::Error::Timeout(Timeout::RecvResponse | Timeout::RecvBody | Timeout::Global | Timeout::PerCall))
+}
 // Shared by the providers' model lists (`Fal::list`, `Scenario::list`, ...).
 
 /// The longest model name kept, and the longest next-page cursor or token followed.

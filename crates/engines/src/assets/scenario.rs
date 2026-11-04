@@ -108,7 +108,12 @@ impl Scenario {
             // A GET (a job's state, an asset's address) starts nothing paid, so it may be asked again.
             None => http::get(|| agent.get(&url).header("Authorization", auth).call()),
         }
-        .map_err(|_| http::network())?;
+        // A paid submission sent whose answer never came in time may have started a job all the
+        // same: it is a possible charge at its quote. One that could not be sent is not.
+        .map_err(|e| match charge {
+            Some(cost) if http::sent_but_unanswered(&e) => charged(http::network(), cost),
+            _ => http::network(),
+        })?;
         http::status(response.status().as_u16())?;
         if path.ends_with("?dryRun=api") && response.status().as_u16() != 269 {
             return Err(http::garbled("Scenario did not confirm an API-tier price check; check your account before trying again."));
@@ -161,7 +166,7 @@ impl AssetProvider for Scenario {
     fn validate_key(&self, key: &str) -> Result<(), ToolError> {
         let key = http::key(key)?;
         if !key.split_once(':').is_some_and(|(k, s)| !k.is_empty() && !s.is_empty()) {
-            return Err(http::bad("Enter both the Scenario API key and API secret in Settings → AI."));
+            return Err(http::bad("Enter both the Scenario API key and API secret in Settings → Builds → Asset provider keys."));
         }
         Ok(())
     }
@@ -951,6 +956,33 @@ mod tests {
         assert!(seen[4].starts_with("GET /assets/asset_test "));
         assert!(seen[0].to_ascii_lowercase().contains("authorization: basic "));
         assert!(!seen[5].to_ascii_lowercase().contains("authorization"));
+    }
+
+    /// A submission Scenario received but never answered in time may have started a job: it is
+    /// charged its quote. A quote that times out, or a submission that never reached Scenario, is not.
+    #[test]
+    fn a_submission_whose_answer_never_came_is_a_possible_charge() {
+        // Each answer comes 1.2 s after its request: the quote in time, the submission too late.
+        let (base, seen) = http::tests::serve_after(Duration::from_millis(1200), |_| {
+            vec![(269, json!({"creativeUnitsCost":19}).to_string()), (200, json!({"job":{"jobId":"job_test"}}).to_string())]
+        });
+        let slow = Scenario { timeout: Duration::from_millis(2000), ..quick(base) };
+        let error = image(&slow).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert_eq!(charged_amount(&error), Some(19.0), "the quoted credits");
+        assert_eq!(seen.lock().unwrap().len(), 2, "quoted and submitted");
+        // The quote itself times out: nothing was submitted, nothing charged.
+        let (base, _) = http::tests::serve_after(Duration::from_millis(800), |_| vec![(269, json!({"creativeUnitsCost":19}).to_string())]);
+        let error = image(&Scenario { timeout: Duration::from_millis(200), ..quick(base) }).unwrap_err();
+        assert!(!was_charged(&error), "a price check is never a charge");
+        // Nothing listens: nothing was sent, nothing charged.
+        let nobody = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", listener.local_addr().unwrap())
+        };
+        let error = image(&quick(nobody)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert!(!was_charged(&error));
     }
 
     /// The estimate is Scenario's quote for the very request, by a dry run that submits nothing.

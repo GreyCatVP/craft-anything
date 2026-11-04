@@ -17,6 +17,8 @@ pub const ID: &str = "elevenlabs";
 const NAME: &str = "ElevenLabs";
 pub struct ElevenLabs {
     base: String,
+    /// How long one generation may take ([`GENERATE_TIMEOUT`]; shorter in tests).
+    generate_timeout: Duration,
     /// The speech models described lately.
     described: Described,
 }
@@ -29,7 +31,7 @@ impl Default for ElevenLabs {
 impl ElevenLabs {
     /// ElevenLabs' API at `base`.
     fn at(base: impl Into<String>) -> ElevenLabs {
-        ElevenLabs { base: base.into(), described: Described::default() }
+        ElevenLabs { base: base.into(), generate_timeout: GENERATE_TIMEOUT, described: Described::default() }
     }
 }
 
@@ -128,20 +130,24 @@ impl AssetProvider for ElevenLabs {
         request(model, req)?;
         Ok(estimate_from(&model.pricing, req))
     }
-    /// Send the request and return the MP3 it answers with. What it cost is ElevenLabs' own count of
-    /// credits for speech, where it gives one, else the model's rate for the request.
+    /// Send the request and return the audio it answers with. What it cost is ElevenLabs' own count
+    /// of credits for speech, where it gives one, else the model's rate for the request. The answer
+    /// is synchronous (music may take minutes): a request sent whose answer never came in time may
+    /// have been made all the same, so it is a possible charge at that rate; one that could not be
+    /// sent at all is not.
     fn generate(&self, key: &str, model: &ModelDetail, req: &AssetRequest) -> Result<Generated, ToolError> {
         let key = http::key(key)?;
         let Sent { path, body, ignored } = request(model, req)?;
-        let response = http::agent(GENERATE_TIMEOUT)
+        let estimate = estimate_from(&model.pricing, req);
+        let response = http::agent(self.generate_timeout)
             .post(format!("{}/{path}", self.base))
             .header("xi-api-key", key)
             .header("Content-Type", "application/json")
             .send(Value::Object(body).to_string())
-            .map_err(|_| http::network())?;
+            .map_err(|e| if http::sent_but_unanswered(&e) { charged_or_unknown(http::network(), estimate) } else { http::network() })?;
         http::status(response.status().as_u16())?;
         let counted = if req.kind() == AssetKind::Speech { character_cost(response.headers()) } else { None };
-        let cost = counted.or_else(|| estimate_from(&model.pricing, req));
+        let cost = counted.or(estimate);
         // The request was accepted, so a failed body read still reports the charge.
         let bytes = http::bytes(response.into_body(), http::MAX_BYTES).map_err(|e| charged_or_unknown(e, cost))?;
         Ok(Generated { url: String::new(), bytes, cost, ignored })
@@ -488,6 +494,29 @@ mod tests {
         let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_test" };
         let error = provider.generate("sk-test", &speech_model(Pricing::Unknown), &speech).unwrap_err();
         assert!(was_charged(&error) && charged_amount(&error).is_none());
+    }
+
+    /// A request ElevenLabs received but never answered in time may have been made: it is charged
+    /// what it would cost (unknown when nobody can say); one that never reached ElevenLabs is not.
+    #[test]
+    fn a_request_whose_answer_never_came_is_a_possible_charge() {
+        let (base, seen) = http::tests::serve_after(Duration::from_millis(800), |_| vec![(200, "ID3 late".into()), (200, "ID3 late".into())]);
+        let slow = ElevenLabs { generate_timeout: Duration::from_millis(200), ..ElevenLabs::at(base) };
+        let error = slow.generate("sk-test", &fixed("eleven_text_to_sound_v2"), &sound(2.0)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert_eq!(charged_amount(&error), Some(80.0), "two seconds at the app's rate");
+        let speech = AssetRequest::Speech { text: "hello", voice_id: "voice_test" };
+        let error = slow.generate("sk-test", &speech_model(Pricing::Unknown), &speech).unwrap_err();
+        assert!(was_charged(&error) && charged_amount(&error).is_none(), "a cost nobody can say: unknown");
+        assert!(!seen.lock().unwrap().is_empty(), "the requests were sent");
+        // Nothing listens: nothing was sent, nothing charged.
+        let nobody = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", listener.local_addr().unwrap())
+        };
+        let error = ElevenLabs::at(nobody).generate("sk-test", &fixed("eleven_text_to_sound_v2"), &sound(2.0)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::EngineMissing);
+        assert!(!was_charged(&error));
     }
 }
 

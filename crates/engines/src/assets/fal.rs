@@ -182,17 +182,10 @@ impl Fal {
             .header("Authorization", &format!("Key {key}"))
             .header("Content-Type", "application/json")
             .send(body.to_string())
-            .map_err(|e| if sent_but_unanswered(&e) { charged_or_unknown(http::network(), if_sent) } else { http::network() })?;
+            .map_err(|e| if http::sent_but_unanswered(&e) { charged_or_unknown(http::network(), if_sent) } else { http::network() })?;
         refusal(response.status().as_u16())?;
         Ok(Answer { units: billable_units(response.headers()), body: response.into_body() })
     }
-}
-
-/// Whether a failed request had reached fal and was waiting for its answer when it failed: its
-/// answer (or the whole call) ran out of time after it was sent.
-fn sent_but_unanswered(e: &ureq::Error) -> bool {
-    use ureq::Timeout;
-    matches!(e, ureq::Error::Timeout(Timeout::RecvResponse | Timeout::RecvBody | Timeout::Global | Timeout::PerCall))
 }
 
 /// What a status fal answered a generation with means, its own words for the refusals the person
