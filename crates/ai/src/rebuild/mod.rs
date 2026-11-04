@@ -563,6 +563,21 @@ impl Worker {
         }
     }
 
+    /// The Kotlin stack builds with Gradle, which needs a JDK and the Android SDK: say so before
+    /// the first turn rather than after it.
+    fn check_android_tools(&self, stack: &str) -> Result<(), ToolError> {
+        if stack != kinds::AndroidAppKind::STACK {
+            return Ok(());
+        }
+        let settings = self.engine.session().settings.clone();
+        match kinds::android_homes(&settings) {
+            Some(_) => Ok(()),
+            None => Err(ToolError::new(ErrorCode::BadSettings, "Building an Android app needs a JDK (17 or newer) and the Android SDK, and one of them wasn't found.").with_remediation(
+                "Install them (a JDK, and the Android SDK with its command-line tools, platform 36 and build-tools), set JAVA_HOME and ANDROID_HOME or point Settings → Engines at javac and sdkmanager, then start again.",
+            )),
+        }
+    }
+
     /// How the builder's agent runs. Reads the session once: a lock taken twice in one statement
     /// is held by the first until the statement ends, and the second then waits forever.
     fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions) -> CliSpec {
@@ -635,6 +650,7 @@ impl Worker {
         self.self_check = Some((kind.clone(), opts.good_enough));
         let kind = kind.as_ref();
         self.editor = self.find_editor(&ws.manifest.stack)?;
+        self.check_android_tools(&ws.manifest.stack)?;
         let carrying_on = opts.continuing || (opts.message.is_none() && ws.builder_started());
         let first = (opts.message.is_none() && !carrying_on) || !ws.capture_dir().exists();
         if first {
