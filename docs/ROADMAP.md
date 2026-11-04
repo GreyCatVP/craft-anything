@@ -556,7 +556,7 @@ Owner: open · Status: in progress
       package.json and Cargo.toml dependencies, then `found_by` in `stacks.toml`, and a project
       whose dependencies name no stack there is left to the builder. A request that read as a game
       used to ask for Unity even in a Godot project, and an app got the kind's default
-      — claimed: xerenon, branch bugfix/r2.7-stack-from-files
+      — claimed: xerenon, branch bugfix/r2.7-stack-from-files; PR #755
 - [ ] What a project edited in place is checked by: its kind still comes from the request's words,
       so a website or a Python tool whose request doesn't say so is an app, and the app check then
       fails with "There's no built program to start yet" (read in the code, not run). Let the
