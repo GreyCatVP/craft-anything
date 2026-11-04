@@ -5,8 +5,10 @@
 # `asked_by` phrases are matched on the request's lower-case words with punctuation turned into
 # spaces and padded with spaces ("Next.js," reads " next js "), first stack in this order wins.
 #
-# `uses` lists package.json or Cargo.toml dependencies that show a build was made with the stack,
-# so a build left to the builder ("Builder's choice") is recorded under the stack it really used.
+# `uses` lists package.json dependencies that show a build was made with the stack, so a build
+# left to the builder ("Builder's choice") is recorded under the stack it really used. They, and
+# Cargo.toml dependencies, also show what a person's own project is built with; `needs` lists what
+# must be there too before it counts (Vite alone could be Vue or Svelte).
 #
 # `found_by` lists files, relative to a folder, that show a person's own project is built with
 # the stack (`*.uproject` matches by its ending). An engine's file says most, then `uses`, then
@@ -42,6 +44,7 @@ found_by = ["pyproject.toml", "requirements.txt", "setup.py"]
 name = "React + TypeScript (Vite)"
 asked_by = [" in typescript", " in react", " with react", " in javascript", " vite "]
 uses = ["vite"]
+needs = ["react"]
 steps = "Use Vite + React + TypeScript. Create the project files directly in app/ (package.json with scripts \"build\": \"tsc -b && vite build\" or \"vite build\", vite.config.ts with base './', index.html, src/). Then run `npm install` and `npm run build` from app/ until it succeeds; the output must be app/dist and must work when served as static files."
 
 [[stack]]
