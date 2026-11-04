@@ -705,6 +705,8 @@ Gaps found while using the app for real projects.
       ended 30 s later. Not run on a Mac
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
+- [ ] Delete a private browser's temporary profile when it closes or fails to start (#810)
+      — claimed: Agapenordev, branch bugfix/r2.9-browser-profile-cleanup
 - [ ] Claude Code's Ultracode switch (a setting, not an effort level; the effort environment
       variable we use can't turn it on)
 - [x] A model the list doesn't offer (`opusplan`, `[1m]` variants, one another harness serves) can
