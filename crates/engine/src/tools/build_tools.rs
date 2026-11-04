@@ -497,8 +497,13 @@ mod tests {
         for caller in [Caller::Agent, Caller::Mcp] {
             assert_eq!(run(caller), "1", "{caller:?}");
         }
-        // The app and the command line add nothing: the command sees what this process was started with.
-        let inherited = if cfg!(windows) { "%CRAFT_ANYTHING_AGENT%".to_string() } else { std::env::var("CRAFT_ANYTHING_AGENT").unwrap_or_default() };
+        // The app and the command line add nothing: the command sees what this process was started with. That
+        // can be a value (an AI started this shell); only when it is unset does cmd print its placeholder.
+        let inherited = match std::env::var("CRAFT_ANYTHING_AGENT") {
+            Ok(value) => value.trim().to_string(),
+            Err(_) if cfg!(windows) => "%CRAFT_ANYTHING_AGENT%".to_string(),
+            Err(_) => String::new(),
+        };
         for caller in [Caller::Cli, Caller::Ui] {
             assert_eq!(run(caller), inherited, "{caller:?}");
         }
