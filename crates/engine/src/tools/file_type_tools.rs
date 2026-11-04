@@ -74,7 +74,7 @@ const SIGNATURES: &[Signature] = &[
     Signature { offset: 0, bytes: b"\x7FELF", file_type: "ELF executable", mime: "application/x-executable", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"MZ", file_type: "PE executable (Windows .exe/.dll/.sys)", mime: "application/x-dosexec", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\xCA\xFE\xBA\xBE", file_type: "Java class file", mime: "application/java-vm", confidence: Confidence::Derived },
-    Signature { offset: 0, bytes: b"PK\x03\x04", file_type: "Java JAR / Android APK (ZIP-based)", mime: "application/java-archive", confidence: Confidence::Derived },
+    Signature { offset: 0, bytes: b"PK\x03\x04", file_type: "ZIP archive (or DOCX/XLSX/PPTX/ODT/etc.)", mime: "application/java-archive", confidence: Confidence::Derived },
     Signature { offset: 0, bytes: b"\x7F\x45\x4C\x46", file_type: "ELF shared object", mime: "application/x-sharedlib", confidence: Confidence::Observed },
     Signature { offset: 0, bytes: b"\x00\x61\x73\x6D", file_type: "WebAssembly module", mime: "application/wasm", confidence: Confidence::Observed },
 
@@ -122,11 +122,12 @@ fn looks_like_text(data: &[u8]) -> bool {
     let mut i = 0;
     while i < sample {
         let b = data[i];
+        // Allow tab, newline, carriage return, and printable ASCII
         if b == 0x09 || b == 0x0A || b == 0x0D || (0x20..=0x7E).contains(&b) {
             valid_utf8 += 1;
             i += 1;
         } else if (0xC2..=0xDF).contains(&b) {
-            // 2-byte UTF-8 sequence
+            // 2-byte UTF-8: U+0080 to U+07FF
             if i + 1 < sample && (0x80..=0xBF).contains(&data[i + 1]) {
                 valid_utf8 += 2;
                 i += 2;
@@ -134,16 +135,37 @@ fn looks_like_text(data: &[u8]) -> bool {
                 return false;
             }
         } else if (0xE0..=0xEF).contains(&b) {
-            // 3-byte UTF-8 sequence
-            if i + 2 < sample && (0x80..=0xBF).contains(&data[i + 1]) && (0x80..=0xBF).contains(&data[i + 2]) {
+            // 3-byte UTF-8: U+0800 to U+FFFF, with scalar range restrictions
+            if i + 2 >= sample {
+                return false;
+            }
+            let b2 = data[i + 1];
+            let b3 = data[i + 2];
+            let valid = match b {
+                0xE0 => (0xA0..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3),
+                0xED => (0x80..=0x9F).contains(&b2) && (0x80..=0xBF).contains(&b3),
+                _ => (0x80..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3),
+            };
+            if valid {
                 valid_utf8 += 3;
                 i += 3;
             } else {
                 return false;
             }
         } else if (0xF0..=0xF4).contains(&b) {
-            // 4-byte UTF-8 sequence
-            if i + 3 < sample && (0x80..=0xBF).contains(&data[i + 1]) && (0x80..=0xBF).contains(&data[i + 2]) && (0x80..=0xBF).contains(&data[i + 3]) {
+            // 4-byte UTF-8: U+10000 to U+10FFFF, with scalar range restrictions
+            if i + 3 >= sample {
+                return false;
+            }
+            let b2 = data[i + 1];
+            let b3 = data[i + 2];
+            let b4 = data[i + 3];
+            let valid = match b {
+                0xF0 => (0x90..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
+                0xF4 => (0x80..=0x8F).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
+                _ => (0x80..=0xBF).contains(&b2) && (0x80..=0xBF).contains(&b3) && (0x80..=0xBF).contains(&b4),
+            };
+            if valid {
                 valid_utf8 += 4;
                 i += 4;
             } else {
@@ -198,11 +220,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             "whole_file": input.whole,
         });
         let summary = format!("{file_type} ({mime})");
-        let subject = Subject {
-            kind: "file".into(),
-            sha256: input.sha256,
-            name: Some(input.name.clone()),
-        };
+        let subject = input.subject.clone();
         let evidence = EvidenceBuilder::new(
             "file_type_detect",
             subject,
@@ -216,6 +234,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             status: craft_anything_evidence::CoverageStatus::Partial,
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
+            next_offset: None,
         })
         .limitation(Limitation::new(
             "magic-bytes-only",
@@ -237,11 +256,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             "whole_file": input.whole,
         });
         let summary = format!("{file_type} ({mime})");
-        let subject = Subject {
-            kind: "file".into(),
-            sha256: input.sha256,
-            name: Some(input.name.clone()),
-        };
+        let subject = input.subject.clone();
         let evidence = EvidenceBuilder::new(
             "file_type_detect",
             subject,
@@ -255,6 +270,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             status: craft_anything_evidence::CoverageStatus::Partial,
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
+            next_offset: None,
         })
         .limitation(Limitation::new(
             "magic-bytes-only",
@@ -279,11 +295,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             "whole_file": input.whole,
         });
         let summary = format!("{file_type} ({mime})");
-        let subject = Subject {
-            kind: "file".into(),
-            sha256: input.sha256,
-            name: Some(input.name.clone()),
-        };
+        let subject = input.subject.clone();
         let evidence = EvidenceBuilder::new(
             "file_type_detect",
             subject,
@@ -297,6 +309,7 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
             status: craft_anything_evidence::CoverageStatus::Partial,
             examined: Some(data.len() as u64),
             total: Some(input.file_size),
+            next_offset: None,
         })
         .limitation(Limitation::new(
             "magic-bytes-only",
@@ -319,31 +332,28 @@ fn file_type_detect(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Tool
         "whole_file": input.whole,
     });
     let summary = format!("{file_type} ({mime})");
-    let subject = Subject {
-        kind: "file".into(),
-        sha256: input.sha256,
-        name: Some(input.name.clone()),
-    };
-    let evidence = EvidenceBuilder::new(
-        "file_type_detect",
-        subject,
-        craft_anything_evidence::Environment::builtin(ctx.session.clean_room()),
-    )
-    .params(params)
-    .result(result.clone())
-    .summary(summary)
-    .confidence(confidence)
-    .coverage(Coverage {
-        status: craft_anything_evidence::CoverageStatus::Partial,
-        examined: Some(data.len() as u64),
-        total: Some(input.file_size),
-    })
-    .limitation(Limitation::new(
-        "magic-bytes-only",
-        "magic-byte detection only inspects the first few kilobytes; container formats (ZIP, RIFF) may hide inner types",
-    ))
-    .location(Location::new("file", input.path.display().to_string()))
-    .build()?;
+        let subject = input.subject.clone();
+        let evidence = EvidenceBuilder::new(
+            "file_type_detect",
+            subject,
+            craft_anything_evidence::Environment::builtin(ctx.session.clean_room()),
+        )
+        .params(params)
+        .result(result.clone())
+        .summary(summary)
+        .confidence(confidence)
+        .coverage(Coverage {
+            status: craft_anything_evidence::CoverageStatus::Partial,
+            examined: Some(data.len() as u64),
+            total: Some(input.file_size),
+            next_offset: None,
+        })
+        .limitation(Limitation::new(
+            "magic-bytes-only",
+            "magic-byte detection only inspects the first few kilobytes; container formats (ZIP, RIFF) may hide inner types",
+        ))
+        .location(Location::new("file", input.path.display().to_string()))
+        .build()?;
 
     Ok(ToolOutput::evidence(evidence))
 }
@@ -373,7 +383,7 @@ mod tests {
         let data = b"PK\x03\x04\x14\x00";
         let hit = detect(data);
         assert!(hit.is_some());
-        assert_eq!(hit.unwrap().0, "Java JAR / Android APK (ZIP-based)");
+        assert_eq!(hit.unwrap().0, "ZIP archive (or DOCX/XLSX/PPTX/ODT/etc.)");
     }
 
     #[test]

@@ -21,14 +21,14 @@ pub struct LangInfo {
 pub static LANGUAGES: &[LangInfo] = &[
     LangInfo { code: "en", name: "English", source: "" },
     LangInfo { code: "ar", name: "العربية", source: include_str!("i18n/ar.tsv") },
+    LangInfo { code: "cs", name: "Čeština", source: include_str!("i18n/cs.tsv") },
     LangInfo { code: "de", name: "Deutsch", source: include_str!("i18n/de.tsv") },
     LangInfo { code: "fr", name: "Français", source: include_str!("fr.tsv") },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv") },
+    LangInfo { code: "ko", name: "한국어", source: include_str!("i18n/ko.tsv") },
+    LangInfo { code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv") },
     LangInfo { code: "zh-hans", name: "简体中文", source: include_str!("i18n/zh-hans.tsv") },
     LangInfo { code: "zh-hant", name: "繁體中文", source: include_str!("i18n/zh-hant.tsv") },
-    LangInfo { code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv") },
-    LangInfo { code: "ko", name: "한국어", source: include_str!("i18n/ko.tsv") },
-    LangInfo { code: "cs", name: "Čeština", source: include_str!("i18n/cs.tsv") },
 ];
 
 /// Match a locale to a registered UI language. An explicit script wins over the region.
