@@ -253,11 +253,17 @@ pub fn messages_json(m: &Msg, react: bool) -> Vec<Value> {
                 .into_iter()
                 .map(|(id, name, input)| json!({"id": id, "type": "function", "function": {"name": name, "arguments": input.to_string()}}))
                 .collect();
-            let mut v = json!({"role": "assistant", "content": text});
-            if !calls.is_empty()
-                && let Some(o) = v.as_object_mut()
-            {
-                o.insert("tool_calls".into(), Value::Array(calls));
+            if text.is_empty() && calls.is_empty() {
+                return Vec::new();
+            }
+            let mut v = json!({"role": "assistant"});
+            if let Some(o) = v.as_object_mut() {
+                if !text.is_empty() {
+                    o.insert("content".into(), Value::String(text));
+                }
+                if !calls.is_empty() {
+                    o.insert("tool_calls".into(), Value::Array(calls));
+                }
             }
             vec![v]
         }
@@ -885,7 +891,7 @@ mod tests {
         let m = b["messages"].as_array().unwrap();
         assert_eq!(m[0]["role"], "system");
         assert_eq!(m[2]["tool_calls"][0]["function"]["arguments"], "{\"a\":1}");
-        assert_eq!(m[2]["content"], "");
+        assert!(m[2].get("content").is_none());
         assert_eq!(m[3]["role"], "tool");
         assert_eq!(m[4]["tool_call_id"], "c2");
         assert_eq!(b["tool_choice"], "auto");
@@ -895,5 +901,47 @@ mod tests {
         assert!(b.get("tools").is_none());
         assert!(b["messages"][0]["content"].as_str().unwrap().contains("Action Input:"));
         assert!(b["messages"][3]["content"].as_str().unwrap().contains("Observation (error): bad"));
+    }
+
+    #[test]
+    fn tool_only_assistant_omits_content_key() {
+        let tool_only = Msg { role: Speaker::Assistant, blocks: vec![Block::ToolUse { id: "c1".into(), name: "look".into(), input: json!({"path": "."}) }] };
+        let m = messages_json(&tool_only, false);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0]["role"], "assistant");
+        assert!(m[0].get("content").is_none(), "tool-only assistant must omit empty content");
+        assert_eq!(m[0]["tool_calls"][0]["function"]["name"], "look");
+    }
+
+    #[test]
+    fn empty_assistant_message_is_omitted() {
+        let empty = Msg { role: Speaker::Assistant, blocks: vec![] };
+        assert!(messages_json(&empty, false).is_empty(), "empty assistant turn must produce no wire messages");
+    }
+
+    #[test]
+    fn text_only_assistant_retains_content_key() {
+        let text_only = Msg { role: Speaker::Assistant, blocks: vec![Block::Text { text: "Hello".into() }] };
+        let m = messages_json(&text_only, false);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0]["role"], "assistant");
+        assert_eq!(m[0]["content"], "Hello");
+        assert!(m[0].get("tool_calls").is_none());
+    }
+
+    #[test]
+    fn text_and_tools_assistant_retains_both_content_and_tools() {
+        let text_and_tool = Msg {
+            role: Speaker::Assistant,
+            blocks: vec![
+                Block::Text { text: "Checking directory".into() },
+                Block::ToolUse { id: "c2".into(), name: "look".into(), input: json!({"path": "."}) },
+            ],
+        };
+        let m = messages_json(&text_and_tool, false);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0]["role"], "assistant");
+        assert_eq!(m[0]["content"], "Checking directory");
+        assert_eq!(m[0]["tool_calls"][0]["id"], "c2");
     }
 }
