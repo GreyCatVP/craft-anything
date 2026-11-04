@@ -540,6 +540,9 @@ Owner: open · Status: in progress
 - [ ] macOS: `/Applications/Antigravity.app` ended up as the agent's command (#467); find what
       writes it (no code for it was found; maybe the file picker)
 - [x] Windows: look in `%LOCALAPPDATA%\agy\bin` too (#62) — claimed: Afloat16, branch bugfix/r2.2-antigravity-search-20261103
+- [ ] Windows: `usual_windows_dirs_come_after_path` counts Antigravity's second folder (#748
+      added it; the test runs only on Windows, which CI doesn't) — claimed: FuryNocturn, branch
+      test/windows-search-path-count
 - [ ] "Claude Code on <ssh host>" is offered for any SSH host, whether or not it has Claude Code
       (#62)
 - [ ] Gemini CLI's sign-in reportedly refuses individuals now (#400): check, and stop recommending
