@@ -631,6 +631,52 @@ fn a_server_is_added_by_its_address() {
     assert_eq!(h.backends().len(), 2, "only the ones that answered");
 }
 
+/// Models are listed and a request is tried for a service that isn't saved: nothing is added, a key
+/// given outright is the one sent, and a bad address is refused before any I/O.
+#[test]
+fn models_are_listed_and_tried_without_saving_anything() {
+    let (h, _d) = hub();
+    let (url, seen) = mock(vec![(200, "application/json", r#"{"data":[{"id":"nomic-embed-text"},{"id":"qwen3:8b"}]}"#.into())]);
+    let ids = h.list_models_at(BackendKind::OpenaiCompatible, Some(&format!("{url}/")), Some(" sk-typed ".into())).unwrap();
+    assert_eq!(ids, ["nomic-embed-text", "qwen3:8b"]);
+    assert_eq!(seen.lock().unwrap()[0].path, "/models");
+    assert_eq!(seen.lock().unwrap()[0].header("authorization"), Some("Bearer sk-typed"));
+
+    let reply = chat_sse(&[json!({"model":"m1","choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]})]);
+    let (url, seen) = mock(vec![(200, "text/event-stream", reply)]);
+    let config = BackendConfig { name: "Tryout".into(), kind: BackendKind::Openai, model: "m1".into(), base_url: Some(url), ssh_host: None, enabled: true };
+    let report = h.test_config(&config, Some("sk-typed".into())).unwrap();
+    assert_eq!((report.reply.as_str(), report.backend.as_str(), report.version_only), ("ready", "Tryout", false));
+    assert_eq!(seen.lock().unwrap()[0].header("authorization"), Some("Bearer sk-typed"), "the typed key is the one sent");
+
+    assert!(h.backends().is_empty(), "nothing was saved");
+    assert!(h.keys.get("Tryout").is_none(), "no key was stored");
+
+    // An own server with no model named is tried with the chat model adding it would pick.
+    let reply = chat_sse(&[json!({"model":"qwen3:8b","choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]})]);
+    let (url, seen) =
+        mock(vec![(200, "application/json", r#"{"data":[{"id":"nomic-embed-text"},{"id":"qwen3:8b"}]}"#.into()), (200, "text/event-stream", reply)]);
+    let config =
+        BackendConfig { name: "Box".into(), kind: BackendKind::OpenaiCompatible, model: String::new(), base_url: Some(url), ssh_host: None, enabled: true };
+    let report = h.test_config(&config, None).unwrap();
+    assert_eq!((report.reply.as_str(), report.model.as_str()), ("ready", "qwen3:8b"));
+    assert_eq!(seen.lock().unwrap()[1].body["model"], "qwen3:8b", "the chat model is the one asked");
+}
+
+#[test]
+fn listing_models_at_a_closed_port_or_a_bad_address_is_a_plain_error() {
+    let (h, _d) = hub();
+    let e = h.list_models_at(BackendKind::OpenaiCompatible, Some("http://127.0.0.1:9/v1"), None).unwrap_err();
+    assert!(e.remediation.as_deref().is_some_and(|r| r.contains("Check the address")), "{e:?}");
+    // Refused before any connection: this address would otherwise be waited for.
+    let e = h.list_models_at(BackendKind::OpenaiCompatible, Some("192.168.1.20:8080/v1"), None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadInput);
+    assert!(e.remediation.is_some());
+    assert!(h.list_models_at(BackendKind::OpenaiCompatible, None, None).is_err(), "a server needs an address");
+    assert!(h.list_models_at(BackendKind::AgentCli, None, None).is_err());
+    assert!(h.backends().is_empty());
+}
+
 #[test]
 fn a_backend_context_budget_reaches_the_model() {
     let (hub, dir) = hub();
