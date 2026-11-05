@@ -58,7 +58,7 @@ pub fn not_found_help(id: &str, set: Option<&Path>, flatpak: bool) -> (String, S
     };
     let remediation = if flatpak && manual {
         format!(
-            "This app is running as a Flatpak, and its sandbox can't see programs in your system's folders, even at a path you set. To use {name} from your computer, run the AppImage, .deb, .rpm or tarball version instead."
+            "This app is running as a Flatpak, and its sandbox can't see programs in your system's folders, so a path to one won't work. To use {name} from your computer, run the AppImage, .deb, .rpm or tarball version instead."
         )
     } else if set.is_some() {
         "Correct the path in Settings → Engines, or clear it to look in the usual places.".to_string()
