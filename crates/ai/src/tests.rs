@@ -427,6 +427,15 @@ fn an_ais_model_is_changed() {
     assert_eq!(h.options().get("Claude Code").and_then(|o| o.cli_model.clone()), None);
     assert!(!h.set_model("Nobody", "m").unwrap());
     assert!(h.set_model("Box", " ").is_err());
+
+    // The Claude Code adapter is also registered as `claude`; the default must clear for that id
+    // too, or a run would pass `--model default` (#470 review).
+    let alias = BackendConfig { name: "Claude".into(), kind: BackendKind::AgentCli, model: "claude".into(), base_url: None, ssh_host: None, enabled: true };
+    h.add_backend(alias, None).unwrap();
+    assert!(h.set_model("Claude", "my-custom-model").unwrap());
+    assert_eq!(h.options().get("Claude").and_then(|o| o.cli_model.as_deref()), Some("my-custom-model"));
+    assert!(h.set_model("Claude", crate::anthropic::CLAUDE_CODE_DEFAULT).unwrap());
+    assert_eq!(h.options().get("Claude").and_then(|o| o.cli_model.clone()), None);
 }
 
 /// Every Claude effort level can be chosen for the Claude API and Claude Code, and only for them.
