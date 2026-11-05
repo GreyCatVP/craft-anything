@@ -706,7 +706,14 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
                             PlanStatus::Todo => text.color(t.text_dim),
                             PlanStatus::Stopped => text.color(t.text_dim),
                         };
-                        ui.add(egui::Label::new(text).wrap());
+                        let resp = ui.add(egui::Label::new(text).wrap());
+                        if s.status == PlanStatus::Stopped {
+                            // Sighted users get the warning marker above; screen readers
+                            // get the status through the accessible label and the text.
+                            let name = format!("{}: {}", s.text, tr("Stopped here"));
+                            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
+                            ui.label(RichText::new(tr("Stopped here")).size(theme::SMALL).color(t.warning));
+                        }
                     });
                 }
             });
