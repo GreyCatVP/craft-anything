@@ -50,9 +50,9 @@ impl<'a> DetectCx<'a> {
     }
 
     /// Any of these whole words appears (punctuation already stripped). Use it where a substring
-    /// would catch a different word — "oyun" inside "oyuncak", a toy.
+    /// would catch a different word - "oyun" inside "oyuncak", a toy.
     pub fn says_word(&self, words: &[&str]) -> bool {
-        words.iter().any(|w| self.words.contains(&format!(" {w} ")))
+        words.iter().any(|w| self.words.contains(&format!(" {} ", crate::rebuild::stacks::fold(w))))
     }
 }
 

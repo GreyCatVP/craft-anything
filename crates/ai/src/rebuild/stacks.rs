@@ -115,18 +115,17 @@ pub fn words(request: &str) -> String {
     format!(" {} ", lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
 }
 
-/// Turkish-aware lower-casing: Rust maps `I` to `i` and splits `İ` into `i` + a combining dot,
-/// so `OYUNLARI` would not match `oyunları` and `İNTERNET` would not match `internet`.
+/// Turkish-aware lowering for matching: `I` and `İ` both become `i` (so ASCII uppercase English
+/// still matches), and the dotless `ı` is folded to `i` as well so `OYUNLARI` matches `oyunları`.
 pub fn fold(text: &str) -> String {
-    let mut mapped = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            'I' => mapped.push('ı'),
-            'İ' => mapped.push('i'),
-            _ => mapped.push(ch),
-        }
-    }
-    mapped.to_lowercase()
+    let mapped: String = text
+        .chars()
+        .map(|ch| match ch {
+            'I' | 'İ' => 'i',
+            _ => ch,
+        })
+        .collect();
+    mapped.to_lowercase().replace('ı', "i")
 }
 
 pub fn get(name: &str) -> Option<&'static Stack> {

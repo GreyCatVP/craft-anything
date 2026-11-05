@@ -86,6 +86,9 @@ fn turkish_requests_keep_their_project_kind() {
     // Türkçe büyük harf: "I" noktasız "ı"ya, "İ" noktalı "i"ye katlanmalı.
     assert_eq!(choose("BASİT BİR YILAN OYUNU", &TargetRef::None), ("game", "Unity"), "OYUNU");
     assert_eq!(choose("İNTERNET SİTESİ yap", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "SİTESİ");
+    // İngilizce büyük harf bozulmamalı: ASCII "I" Türkçeye çevrilip "websıte" olmamalı.
+    assert_eq!(choose("Build a WEBSITE", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "WEBSITE");
+    assert_eq!(choose("INTERNET SITESI", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "SITESI");
 }
 
 #[test]
