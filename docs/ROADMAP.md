@@ -322,11 +322,12 @@ Owner: open · Status: todo
 - [x] `--backend <a name that is turned off>` no longer builds with it: `builder_backend`'s named
       branch doesn't check `enabled`, while Settings treats an AI that is off as unusable
       — claimed: kuseidos, branch `bugfix/r5.5-named-backend-that-is-turned-off`
-- [ ] **decision** An explicit backend chosen in this session, turned off while a draft waits, falls back
-      to the default instead of saying so: `question.rs` reaches `builder_backend` through
-      `project_builder`, which filters `enabled`, and the project's saved builder is meant to fall back
-      (its test says so). Say whether a choice made in the session should be remembered apart from the
-      saved one, and refused when it is off
+- [ ] **decision** A backend chosen for a Make draft, turned off while the draft waits (for Ghidra, say),
+      builds with the default instead of saying so: `start_draft` passes `draft.ai` to the UI's
+      `builder_backend` (`crates/ui-egui/src/builders.rs`), whose `or_else(default_builder)` drops the
+      choice once it is no longer on. That is a different path from the saved project builder, which is
+      meant to fall back (its test says so) and from `question.rs`, which only ever sees that saved one.
+      Say whether a draft's choice should be refused when it is off, rather than quietly built another way
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
