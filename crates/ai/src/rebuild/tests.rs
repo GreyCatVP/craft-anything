@@ -2732,6 +2732,28 @@ fn a_named_backend_that_is_turned_off_does_not_build() {
     assert_eq!(builder_backend(&cfg, None).unwrap().config.name, "Claude Code");
 }
 
+/// R5.5, the path a build takes: `RebuildRun::start` is what a person's `--backend` reaches, so the
+/// refusal has to survive it. If the run dropped the name and let the default build, the helper-level
+/// test above would still pass and this one would not.
+#[test]
+fn a_build_named_for_a_backend_that_is_turned_off_stops_before_any_work() {
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let mut s = craft_anything_engine::testing::session();
+    s.settings.ai = toml::from_str(
+        "[[backends]]\nname = \"Codex\"\nkind = \"agent_cli\"\nmodel = \"codex\"\nenabled = false\n\n\
+         [[backends]]\nname = \"Claude Code\"\nkind = \"agent_cli\"\nmodel = \"claude-code\"\n",
+    )
+    .unwrap();
+    let hub = AiHub::new(Arc::new(Engine::new(s)));
+    let opts = RunOptions { backend: Some("Codex".into()), ..RunOptions::default() };
+    let err = match RebuildRun::start(&hub, ws, opts) {
+        Ok(_) => panic!("a backend that is turned off must not build, even with an enabled default"),
+        Err(e) => e,
+    };
+    assert!(err.message.contains("Codex") && err.message.contains("turned off"), "{}", err.message);
+}
+
 /// #446: a project copied from another computer keeps the id of a Claude Code session that lives
 /// only there. The builder (a stand-in that answers like Claude Code 2.1) can't resume it, so the
 /// turn starts a new session from the brief and what's in app/, and keeps the new id.
