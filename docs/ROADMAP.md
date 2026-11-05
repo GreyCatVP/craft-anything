@@ -678,9 +678,9 @@ Gaps found while using the app for real projects.
       (between builds: a fold during a build can be overwritten by its next save). The steps stay
       in the conversation (`FEED_VERSION` 4, `FeedItem::PlanDismissed`), and a later run's
       checklist shows again — claimed: claude, branch bugfix/r2.9-plan-card-dismiss
-- [ ] A run that ends with steps still open marks them as stopped on its card, instead of
+- [x] A run that ends with steps still open marks them as stopped on its card, instead of
       showing "Doing" until someone folds it (#504: Claude's runs left the plan unticked)
-      — claimed: rust-craft, branch feature/R2.9-stop-open-steps
+      — claimed: rust-craft, branch feature/R2.9-stop-open-steps; PR #876
 - [x] #666: a long line in a feed's tool-work row (a Deep-mode decompile, a status note) ran off
       the window and pushed the feed left; the header title can't wrap in egui, so it's the note's
       first line now, cut at 90 characters, and the full note wraps in the body — claimed: claude,

@@ -1,7 +1,7 @@
 # Status
 
 What works today and how it was checked. The plan, owners and order of work are in
-[ROADMAP.md](ROADMAP.md). Last updated 2026-11-04. The baseline audit on 2026-10-23 from `main` had 923 tests passing;
+[ROADMAP.md](ROADMAP.md). Last updated 2026-11-05. The baseline audit on 2026-10-23 from `main` had 923 tests passing;
 workspace clippy, layers, fmt and the secret scan of all history were clean. Chinese UI checks are listed separately below.
 
 ## What works, and how it was checked
@@ -55,6 +55,8 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | Builder discovery smoke fixture | The missing-builder smoke fixture controls discovery state and supplies a synthetic result. | All original warning, modal, action and build-availability assertions are retained. Source inspection only; automated validation has not yet run for this change. |
 | Parser review follow-ups | Java reference scans retain partial coverage; DEX signed LEB128 enforces 32-bit values; legacy AAPT strings stay inside their pool with a shared recovery probe limit; missing classic ext indirect metadata is not recovered as zeros. | Shared-budget revision `29c48e03` passed [full Linux CI](https://github.com/storytold/craft-anything/actions/runs/41762780268). The merge with main `41d2175e` awaits a new CI run. Extent-tree metadata handling is unchanged. |
 | Stand-in retained body budgets | Check per-body limits after redaction and charge the capture budget only for distinct retained samples. Budget-rejected cached 304 responses remain unavailable. | All four original capture regressions and six deduplication regressions passed in [full Linux CI](https://github.com/storytold/craft-anything/actions/runs/41788735130) at revision `d601bc4e`. Workspace tests, strict Clippy, formatting, layers, locks, secrets, wasm-plugin checks, shared WASM compilation and the lockfile check passed. |
+
+| Plan steps stopped at a run's end | A run that finishes (ready, failed or paused) marks still-open steps `Stopped` on the plan card instead of leaving them "Doing" until the card is folded (#504). The stopped steps stay in the saved conversation (`FEED_VERSION` 5); a later run's checklist updates the list again, and a plan left partly unticked still shows with its stopped steps | Regression tests in `ai::rebuild::feed` (ready, paused and no-checklist finishes, a later run taking the list over) and an engine save/load round trip of a stopped step; the checklist draws a warning circle for stopped steps. Not checked: a live desktop run |
 
 ### Builder retry policy
 
