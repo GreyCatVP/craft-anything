@@ -1417,3 +1417,30 @@ Providers	供應商
 Harnesses	代理
 Nothing of this kind was found.	沒有找到這類項目。
 Another model	其他模型
+Fold a project's plan	摺疊專案的計畫
+Fold the plan	摺疊計畫
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	已安裝 Claude 桌面應用程式，但建置需要 Claude Code，也就是它獨立的命令列工具。請安裝 Claude Code，在終端機中登入一次，然後重新尋找。
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal 已安裝，但找不到其內建的 Clang C++ 工具鏈。
+Add Unreal's Linux C++ toolchain	新增 Unreal 的 Linux C++ 工具鏈
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	在引擎資料夾中執行 Engine/Build/BatchFiles/Linux/SetupToolchain.sh，安裝其內建的 Clang 工具鏈。如果是原始碼建置，Setup.sh 會改為下載原生工具鏈。系統 Clang 可能與引擎版本不相符。
+Unreal is here, but it also needs Xcode.	已安裝 Unreal，但還需要 Xcode。
+About 60 GB, an Epic Games account, and Xcode.	約 60 GB，需要 Epic Games 帳戶和 Xcode。
+File	檔案
+View	顯示方式
+Window	視窗
+Help	輔助說明
+Command palette	命令面板
+Craft Anything on GitHub	GitHub 上的 Craft Anything
+Report a problem…	回報問題…
+Quit Craft Anything	結束 Craft Anything
+About Craft Anything	關於 Craft Anything
+Services	服務
+Hide Craft Anything	隱藏 Craft Anything
+Hide others	隱藏其他
+Show all	顯示全部
+Close window	關閉視窗
+Full screen	全螢幕
+Zoom	縮放
+Bring all to front	將全部視窗移至最前
+Drag to give the plan more or less room; double-click to reset	拖曳以調整計畫佔用的空間；按兩下恢復預設
+Copy the message	複製這則訊息

@@ -35,6 +35,18 @@ impl CraftApp {
         self.workspace.as_ref().and_then(|ws| self.runs.get(&ws.root))
     }
 
+    /// Fold the open project's plan card (#504). Only between runs: the saved conversation keeps
+    /// the steps, and a later run's checklist shows again.
+    fn fold_plan(&mut self) {
+        let Some(ws) = &self.workspace else { return };
+        match craft_anything_engine::feed::dismiss_plan_saved(ws) {
+            Ok(_) => {
+                craft_anything_engine::feed::dismiss_plan(&mut self.state.feed);
+            }
+            Err(e) => self.toast(e.message, true),
+        }
+    }
+
     /// The open project's place in the queue (1 starts next).
     pub fn queue_position(&self) -> Option<usize> {
         self.workspace.as_ref().and_then(|ws| self.runs.position(&ws.root))
@@ -601,21 +613,56 @@ pub enum Thumb {
     Missing,
 }
 
-/// The open project's checklist, if the builder made one.
+/// The open project's checklist, if the builder made one and the person hasn't folded it (#504).
 fn plan(feed: &[FeedItem]) -> Option<&[PlanStep]> {
-    feed.iter().find_map(|i| if let FeedItem::Plan(p) = i { Some(p.as_slice()) } else { None })
+    craft_anything_engine::feed::visible_plan(feed)
+}
+
+/// How tall the plan's steps get before they scroll, unless the person dragged the divider above
+/// the plan to another height (#826), and the least they can be dragged to.
+const PLAN_HEIGHT: f32 = 240.0;
+const PLAN_MIN: f32 = 48.0;
+
+/// The divider between the feed and the plan. Dragging it (or Up and Down while it has focus)
+/// sets how tall the plan's steps are, kept across restarts; a double-click goes back to the usual
+/// height. `shown` is the height the steps had on the last frame.
+fn plan_divider(ui: &mut Ui, t: &Tokens, height: &mut Option<f32>, shown: f32) {
+    let hint = tr("Drag to give the plan more or less room; double-click to reset");
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 10.0), egui::Sense::click_and_drag());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &hint));
+    let resp = resp.on_hover_cursor(egui::CursorIcon::ResizeVertical).on_hover_text(&hint);
+    let active = resp.hovered() || resp.dragged() || resp.has_focus();
+    ui.painter().rect_filled(egui::Rect::from_center_size(rect.center(), Vec2::new(36.0, 3.0)), 2.0, if active { t.text_faint } else { t.card_border });
+    widgets::focus_ring(ui, &resp, rect);
+    let mut by = -resp.drag_delta().y;
+    if resp.has_focus() {
+        ui.memory_mut(|m| m.set_focus_lock_filter(resp.id, egui::EventFilter { vertical_arrows: true, ..Default::default() }));
+        by += ui.input(|i| f32::from(i8::from(i.key_pressed(egui::Key::ArrowUp)) - i8::from(i.key_pressed(egui::Key::ArrowDown)))) * 24.0;
+    }
+    if resp.double_clicked() {
+        *height = None;
+    } else if by != 0.0 {
+        let most = (ui.ctx().content_rect().height() * 0.6).max(PLAN_MIN);
+        *height = Some((height.unwrap_or(shown) + by).clamp(PLAN_MIN, most));
+    }
 }
 
 /// The builder's checklist, pinned above the prompt box: what's done, what it's on now, what's
 /// next, and while it works how long it has been at it. Shown while it works, and afterwards only
-/// if something was left undone.
-fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>) {
+/// if something was left undone. `fold` offers a control to fold it away (between runs); the
+/// returned flag says the person pressed it. Its steps scroll past `height`; the height they
+/// were shown at is kept under `shown_id` for the divider above.
+fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>, fold: bool, height: f32, shown_id: egui::Id) -> bool {
     let done = steps.iter().filter(|s| s.status == PlanStatus::Done).count();
+    let mut folded = false;
     widgets::card(t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             widgets::caption(ui, "Plan");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if fold && icons::button(ui, "x", 18.0, false, &tr("Fold the plan")).clicked() {
+                    folded = true;
+                }
                 if let Some(b) = began {
                     ui.label(RichText::new(crate::usage::duration_words(b.elapsed())).font(theme::mono(12.0)).color(t.text_faint));
                     ui.add(crate::widgets::Spinner::new().size(12.0).color(t.accent));
@@ -629,32 +676,37 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
             });
         });
         ui.add_space(6.0);
-        for s in steps {
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
-                match s.status {
-                    PlanStatus::Done => {
-                        ui.painter().circle_filled(r.center(), 7.0, t.success);
-                        icons::paint(ui, r.shrink(4.0), "check", 10.0, t.canvas);
-                    }
-                    PlanStatus::Doing => {
-                        ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.5, t.accent));
-                        ui.painter().circle_filled(r.center(), 3.0, t.accent);
-                    }
-                    PlanStatus::Todo => {
-                        ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.0, t.field_border));
-                    }
+        let list =
+            egui::ScrollArea::vertical().id_salt("plan-steps").max_height(height).min_scrolled_height(height).auto_shrink([false, true]).show(ui, |ui| {
+                for s in steps {
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+                        match s.status {
+                            PlanStatus::Done => {
+                                ui.painter().circle_filled(r.center(), 7.0, t.success);
+                                icons::paint(ui, r.shrink(4.0), "check", 10.0, t.canvas);
+                            }
+                            PlanStatus::Doing => {
+                                ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.5, t.accent));
+                                ui.painter().circle_filled(r.center(), 3.0, t.accent);
+                            }
+                            PlanStatus::Todo => {
+                                ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.0, t.field_border));
+                            }
+                        }
+                        let text = RichText::new(&s.text).size(theme::BODY);
+                        let text = match s.status {
+                            PlanStatus::Done => text.color(t.text_faint).strikethrough(),
+                            PlanStatus::Doing => text.color(t.text).strong(),
+                            PlanStatus::Todo => text.color(t.text_dim),
+                        };
+                        ui.add(egui::Label::new(text).wrap());
+                    });
                 }
-                let text = RichText::new(&s.text).size(theme::BODY);
-                let text = match s.status {
-                    PlanStatus::Done => text.color(t.text_faint).strikethrough(),
-                    PlanStatus::Doing => text.color(t.text).strong(),
-                    PlanStatus::Todo => text.color(t.text_dim),
-                };
-                ui.add(egui::Label::new(text).wrap());
             });
-        }
+        ui.data_mut(|d| d.insert_temp(shown_id, list.inner_rect.height()));
     });
+    folded
 }
 
 /// What the Project screen shows from the project's files, read on a worker when the project
@@ -1303,8 +1355,7 @@ fn draw_items(
             FeedItem::Step { text, .. } => chat::activity_row(ui, RichText::new(text).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Paused => chat::activity_row(ui, RichText::new(tr("Paused.")).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Agent { text, streaming } => {
-                chat::bubble(&t, false, false).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                chat::answer_bubble(ui, false, text.trim(), |ui| {
                     chat::rich_text(ui, text.trim(), !advanced);
                     if *streaming {
                         widgets::thinking(ui);
@@ -1315,7 +1366,7 @@ fn draw_items(
             FeedItem::Work { tools, notes } if advanced => work(ui, tools, notes, advanced, &t),
             FeedItem::Work { .. } => {}
             // Pinned above the prompt box instead (see `checklist`).
-            FeedItem::Plan(_) => {}
+            FeedItem::Plan(_) | FeedItem::PlanDismissed => {}
             FeedItem::Ask { request, answer } => {
                 if let Some(a) = ask_card(app, ui, request, answer.as_deref()) {
                     answers.push(a);
@@ -1371,11 +1422,14 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
     let running = tools.iter().any(|(_, d)| d.is_none());
     let failed = tools.iter().filter(|(_, d)| *d == Some(false)).count();
     let title = if tools.is_empty() {
-        notes.last().cloned().unwrap_or_default()
+        one_line(notes.last().map(String::as_str).unwrap_or_default())
     } else {
         let n = tools.len().to_string();
         if running { trf("Working… ({n} steps so far)", &[("n", &n)]) } else { trf("Worked through {n} steps", &[("n", &n)]) }
     };
+    // The notes in the body wrap inside the window (#666). A collapsing header's title never wraps
+    // (egui lays it out on one line), so with no tool the title is the note's first line only.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     egui::CollapsingHeader::new(RichText::new(title).color(t.text_dim).size(theme::CAPTION)).default_open(advanced).icon(widgets::disclosure_icon).show(
         ui,
         |ui| {
@@ -1402,6 +1456,18 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
             }
         },
     );
+}
+
+/// A note's first line, cut to a length a header title can show on one line (#666).
+fn one_line(text: &str) -> String {
+    const MAX: usize = 90;
+    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
+    if first.chars().count() <= MAX {
+        first.to_string()
+    } else {
+        let cut: String = first.chars().take(MAX).collect();
+        format!("{}…", cut.trim_end())
+    }
 }
 
 /// A question or approval card. Returns the person's answer when they give one.
@@ -1650,7 +1716,18 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
     let running = app.running();
     if let Some(steps) = plan(&app.state.feed).filter(|p| running || p.iter().any(|s| s.status != PlanStatus::Done)) {
         let began = app.open_run().filter(|_| running).map(RebuildRun::started);
-        ui.allocate_ui(Vec2::new(width, 0.0), |ui| checklist(ui, steps, t, began));
+        let mut fold = false;
+        let shown_id = egui::Id::new("plan-steps-shown");
+        let mut height = app.state.plan_height;
+        ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
+            let shown = ui.data(|d| d.get_temp::<f32>(shown_id)).unwrap_or(PLAN_HEIGHT);
+            plan_divider(ui, t, &mut height, shown);
+            fold = checklist(ui, steps, t, began, !running, height.unwrap_or(PLAN_HEIGHT), shown_id);
+        });
+        app.state.plan_height = height;
+        if fold {
+            app.fold_plan();
+        }
         ui.add_space(8.0);
     }
     if let Some(n) = app.queue_position() {
@@ -2374,5 +2451,24 @@ mod tests {
         apply(&mut feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
         assert!(matches!(feed.last(), Some(FeedItem::Paused)));
         assert_eq!(feed.iter().filter(|f| matches!(f, FeedItem::Error { .. })).count(), 1, "a pause adds no error");
+    }
+}
+
+#[cfg(test)]
+mod one_line_tests {
+    use super::one_line;
+
+    /// #666: a header title is one short line; the first line of a note, cut at 90 characters.
+    #[test]
+    fn a_header_title_is_the_first_line_cut_short() {
+        assert_eq!(one_line("  Reading the code  \nmore"), "Reading the code");
+        assert_eq!(one_line("\n\nSecond\n"), "Second");
+        assert_eq!(one_line(""), "");
+        let long = "x".repeat(200);
+        let cut = one_line(&long);
+        assert_eq!(cut.chars().count(), 91, "90 characters and an ellipsis");
+        assert!(cut.ends_with('…'));
+        let spaced = format!("{} tail", "a".repeat(89));
+        assert_eq!(one_line(&spaced), format!("{}…", "a".repeat(89)), "a cut never leaves a space before the ellipsis");
     }
 }

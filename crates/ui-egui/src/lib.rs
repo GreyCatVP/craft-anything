@@ -25,6 +25,8 @@ pub mod jobs;
 pub mod just_ask;
 pub mod make;
 pub mod manage;
+#[cfg(target_os = "macos")]
+pub mod menu;
 pub mod palette;
 pub mod paste;
 pub mod pins;
@@ -152,7 +154,8 @@ pub enum Done {
         path: PathBuf,
         result: Result<Value, ToolError>,
     },
-    Detected(Vec<Detected>),
+    /// What a scan found, and why an expected coding agent may be missing.
+    Detected(Vec<Detected>, Vec<craft_anything_ai::detect::DetectHint>),
     /// The configured backends, the ones chosen to build with and to extract with, and each one's
     /// options.
     Backends(Vec<BackendConfig>, Option<String>, Option<String>, std::collections::BTreeMap<String, craft_anything_ai::BackendOptions>),
@@ -422,6 +425,9 @@ pub struct CraftApp {
     pub persist: bool,
     /// Never open native dialogs (tests and snapshots).
     pub headless: bool,
+    /// The macOS menu bar, once the window is open ([`CraftApp::install_menu_bar`]).
+    #[cfg(target_os = "macos")]
+    pub menu_bar: Option<menu::MenuBar>,
     pub view: SessionView,
     pub jobs: jobs::Jobs<Done>,
     pub conversation: Option<Box<dyn Conversation>>,
@@ -443,6 +449,8 @@ pub struct CraftApp {
     /// The backend chosen to take a game's files out in Deep mode, if any.
     pub extractor: Option<String>,
     pub detected: Option<Vec<Detected>>,
+    /// Why an expected coding agent may be missing, from the last scan.
+    pub detect_hints: Vec<craft_anything_ai::detect::DetectHint>,
     pub detecting: bool,
     /// Counts AI choices, so an add that finishes later doesn't undo one made meanwhile.
     pub backend_choices: u64,
@@ -545,6 +553,8 @@ impl CraftApp {
             first_frames: None,
             persist: true,
             headless: false,
+            #[cfg(target_os = "macos")]
+            menu_bar: None,
             view: SessionView::default(),
             jobs: jobs::Jobs::default(),
             conversation: None,
@@ -559,6 +569,7 @@ impl CraftApp {
             builder: None,
             extractor: None,
             detected: None,
+            detect_hints: Vec::new(),
             detecting: false,
             backend_choices: 0,
             log: Vec::new(),
@@ -611,6 +622,16 @@ impl CraftApp {
     pub fn setup_context(ctx: &egui::Context) {
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
+    }
+
+    /// Gives the macOS app its menu bar (nothing elsewhere). Call once the window is open.
+    pub fn install_menu_bar(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "macos")]
+        {
+            self.menu_bar = menu::MenuBar::install(ctx);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = ctx;
     }
 
     /// Call `done` once [`FIRST_FRAMES`] frames have been drawn and shown: the window is really up by
@@ -1182,7 +1203,7 @@ impl CraftApp {
         }
         self.detecting = true;
         let hub = self.hub.clone();
-        self.jobs.spawn("Look for AI on this computer", true, move |_| Ok(Done::Detected(hub.detect())));
+        self.jobs.spawn("Look for AI on this computer", true, move |_| Ok(Done::Detected(hub.detect(), hub.detect_hints())));
     }
 
     pub fn add_backend(&mut self, config: BackendConfig, key: Option<String>) {
@@ -1433,7 +1454,8 @@ impl CraftApp {
                     self.toast(e.for_people(), true);
                 }
             },
-            Done::Detected(d) => {
+            Done::Detected(d, hints) => {
+                self.detect_hints = hints;
                 self.detecting = false;
                 self.log(false, format!("Found {} AI option(s) on this computer", d.len()));
                 self.detected = Some(d);
@@ -1731,6 +1753,8 @@ impl CraftApp {
         let ctx = ui.ctx().clone();
         self.tick(&ctx);
         self.shortcuts(&ctx);
+        #[cfg(target_os = "macos")]
+        menu::update(self, &ctx);
         let t = theme::Tokens::get(&ctx);
         // The title bar is on every screen: it is how the window moves, resizes and closes.
         egui::Panel::top("titlebar").exact_size(titlebar::HEIGHT).frame(egui::Frame::new().fill(t.chrome)).show(ui, |ui| {
@@ -1847,13 +1871,12 @@ impl CraftApp {
         painter.galley(inner.center() - g.size() / 2.0, g, t.text);
     }
 
+    /// Keys that work on every screen: Ctrl/⌘ K for the palette, and Esc to close what's on top
+    /// (the palette, a dialog, Settings) or go back home.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let (palette, esc) = ctx.input_mut(|i| (i.consume_key(egui::Modifiers::COMMAND, egui::Key::K), i.key_pressed(egui::Key::Escape)));
-        if palette && self.settings.first_run_done {
-            self.state.palette.open = !self.state.palette.open;
-            self.state.palette.query.clear();
-            self.state.palette.selected = 0;
-            self.state.palette.form_tool = None;
+        if palette {
+            palette::toggle(self);
         }
         if esc {
             if self.state.palette.open {

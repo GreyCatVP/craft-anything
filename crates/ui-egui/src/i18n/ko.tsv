@@ -1417,3 +1417,30 @@ Providers	제공자
 Harnesses	에이전트
 Nothing of this kind was found.	이런 종류는 찾지 못했습니다.
 Another model	다른 모델
+Fold a project's plan	프로젝트 계획 접기
+Fold the plan	계획 접기
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	Claude 데스크톱 앱은 설치되어 있지만, 빌드에는 별도의 명령줄 도구인 Claude Code가 필요합니다. Claude Code를 설치하고 터미널에서 한 번 로그인한 다음 다시 찾아보세요.
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal은 설치되어 있지만 함께 제공되는 Clang C++ 도구 체인을 찾지 못했습니다.
+Add Unreal's Linux C++ toolchain	Unreal의 Linux C++ 도구 체인 추가
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	엔진 폴더에서 Engine/Build/BatchFiles/Linux/SetupToolchain.sh를 실행해 함께 제공되는 Clang 도구 체인을 설치하세요. 소스 빌드라면 Setup.sh가 대신 네이티브 도구 체인을 내려받습니다. 시스템 Clang은 엔진 버전과 맞지 않을 수 있습니다.
+Unreal is here, but it also needs Xcode.	Unreal은 있지만 Xcode도 필요합니다.
+About 60 GB, an Epic Games account, and Xcode.	약 60 GB, Epic Games 계정, Xcode가 필요합니다.
+File	파일
+View	보기
+Window	윈도우
+Help	도움말
+Command palette	명령 팔레트
+Craft Anything on GitHub	GitHub의 Craft Anything
+Report a problem…	문제 신고…
+Quit Craft Anything	Craft Anything 종료
+About Craft Anything	Craft Anything에 관하여
+Services	서비스
+Hide Craft Anything	Craft Anything 가리기
+Hide others	기타 가리기
+Show all	모두 보기
+Close window	윈도우 닫기
+Full screen	전체 화면
+Zoom	확대/축소
+Bring all to front	모두 앞으로 가져오기
+Drag to give the plan more or less room; double-click to reset	끌어서 계획이 차지하는 공간을 조절하고, 두 번 클릭하면 원래대로 돌아갑니다
+Copy the message	메시지 복사

@@ -4,6 +4,9 @@ use super::*;
 #[path = "note_progress_tests.rs"]
 mod note_progress;
 
+#[path = "stall_tests.rs"]
+mod stall;
+
 // Helpers that take a built-in kind's id, so each test reads as one line.
 fn kind(id: &str) -> Arc<dyn TargetKind> {
     KindRegistry::built_in().get(id).unwrap()

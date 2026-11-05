@@ -13,9 +13,10 @@ use std::path::{Path, PathBuf};
 /// Where the conversation is kept in the project folder.
 pub const FEED_FILE: &str = "feed.json";
 
-/// The format written today (3 saved a prompt's pictures with it); files without a version are
-/// the earlier bare list.
-pub const FEED_VERSION: u32 = 3;
+/// The format written today (4 saves a dismissed plan card with it; 3 saved a prompt's pictures);
+/// files without a version are the earlier bare list. An older Craft Anything won't rewrite a file
+/// it can't read (`save` refuses a newer version).
+pub const FEED_VERSION: u32 = 4;
 
 /// What the person sent: as the feed shows it, and the pictures attached to it (their copies in
 /// the project's `attachments/`).
@@ -107,6 +108,40 @@ pub enum FeedItem {
     },
     /// The person paused the run (not a failure); a message or Continue carries on.
     Paused,
+    /// The person folded the plan card above the prompt box (#504). It marks the plan before it as
+    /// hidden; the steps are kept, and a later run's checklist shows again.
+    PlanDismissed,
+}
+
+/// The plan card to show: the checklist, unless the person folded it after it was last updated.
+pub fn visible_plan(feed: &[FeedItem]) -> Option<&[PlanStep]> {
+    let at = feed.iter().rposition(|i| matches!(i, FeedItem::Plan(_)))?;
+    if feed[at + 1..].iter().any(|i| matches!(i, FeedItem::PlanDismissed)) {
+        return None;
+    }
+    match &feed[at] {
+        FeedItem::Plan(steps) => Some(steps.as_slice()),
+        _ => None,
+    }
+}
+
+/// Fold the plan card in a feed. Returns false when there's no plan to fold or it's folded already.
+pub fn dismiss_plan(feed: &mut Vec<FeedItem>) -> bool {
+    if visible_plan(feed).is_none() {
+        return false;
+    }
+    feed.push(FeedItem::PlanDismissed);
+    true
+}
+
+/// Fold the plan card in a project's saved conversation (the UI's write, while no run is going).
+pub fn dismiss_plan_saved(ws: &Workspace) -> Result<bool, ToolError> {
+    let mut feed = load(ws);
+    let folded = dismiss_plan(&mut feed);
+    if folded {
+        save(&ws.root, &feed)?;
+    }
+    Ok(folded)
 }
 
 /// Mark a question or approval answered, with the words shown for the answer.
@@ -238,6 +273,26 @@ mod tests {
         let raw: Value = serde_json::from_slice(&std::fs::read(ws.root.join(FEED_FILE)).unwrap()).unwrap();
         assert_eq!(raw["items"][0]["User"], "Add tags");
         assert!(raw["items"][0]["User"].is_string());
+    }
+
+    /// #504: a plan card can be folded, the steps stay in the conversation, and a folded plan stays
+    /// folded after a restart. A file from before folding (version 3) still shows its plan.
+    #[test]
+    fn a_folded_plan_stays_folded_and_its_steps_are_kept() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "x", "A game", TargetRef::None).unwrap();
+        let steps = vec![PlanStep { text: "Lay out the arena".into(), doing: "Laying out the arena".into(), status: PlanStatus::Doing }];
+        save(&ws.root, &[FeedItem::User(UserItem::Text("A game".into())), FeedItem::Plan(steps.clone())]).unwrap();
+        assert!(visible_plan(&load(&ws)).is_some(), "the plan shows before it's folded");
+        assert!(dismiss_plan_saved(&ws).unwrap(), "the plan folds");
+        let folded = load(&ws);
+        assert!(visible_plan(&folded).is_none(), "folded after a restart too");
+        assert!(folded.iter().any(|i| matches!(i, FeedItem::Plan(p) if p == &steps)), "the steps are kept");
+        assert!(!dismiss_plan_saved(&ws).unwrap(), "folding again changes nothing");
+        save(&ws.root, &[FeedItem::User(UserItem::Text("Hi".into()))]).unwrap();
+        assert!(!dismiss_plan_saved(&ws).unwrap(), "a conversation with no plan has nothing to fold");
+        std::fs::write(ws.root.join(FEED_FILE), br#"{"version":3,"items":[{"Plan":[{"text":"Lay out","doing":"Laying out","status":"Doing"}]}]}"#).unwrap();
+        assert!(visible_plan(&load(&ws)).is_some(), "a version 3 plan still shows");
     }
 
     #[test]

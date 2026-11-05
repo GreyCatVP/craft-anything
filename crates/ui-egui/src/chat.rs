@@ -362,26 +362,60 @@ enum ChatAction {
     OpenLog(std::path::PathBuf),
 }
 
+/// The side of a message's copy button.
+const COPY: f32 = 22.0;
+
+fn margin(dense: bool) -> Margin {
+    if dense { Margin::symmetric(10, 6) } else { Margin::symmetric(16, 12) }
+}
+
 pub(crate) fn bubble(t: &Tokens, user: bool, dense: bool) -> egui::Frame {
     let fill = if user { t.accent_soft } else { t.card };
     let stroke = if user { egui::Stroke::NONE } else { egui::Stroke::new(1.0, t.card_border) };
-    let m = if dense { Margin::symmetric(10, 6) } else { Margin::symmetric(16, 12) };
-    egui::Frame::new().fill(fill).stroke(stroke).corner_radius(t.r_lg()).inner_margin(m)
+    egui::Frame::new().fill(fill).stroke(stroke).corner_radius(t.r_lg()).inner_margin(margin(dense))
 }
 
-/// The person's message on the right. Labels in a right-to-left row don't wrap by themselves,
-/// so a long prompt would run off the side: wrap it inside the bubble.
+/// A button at `at` that copies a whole message (#825: selecting text in the feed is
+/// unreliable). Shown while the pointer is over the message (`over`) or the button has keyboard
+/// focus; it's always laid out, so Tab reaches it.
+fn copy_button(ui: &mut Ui, over: egui::Rect, at: egui::Pos2, text: &str) {
+    let at = egui::Rect::from_min_size(at, Vec2::splat(COPY));
+    let mut slot = ui.new_child(egui::UiBuilder::new().max_rect(at));
+    if !(ui.rect_contains_pointer(over.union(at)) || ui.memory(|m| m.has_focus(slot.next_auto_id()))) {
+        slot.set_opacity(0.0);
+    }
+    if icons::button(&mut slot, "copy", COPY, false, "Copy the message").clicked() {
+        ui.ctx().copy_text(text.to_owned());
+    }
+}
+
+/// The person's message on the right, with its copy button beside it. Labels in a right-to-left
+/// row don't wrap by themselves, so a long prompt would run off the side: wrap it inside the bubble.
 pub(crate) fn user_bubble(ui: &mut Ui, text: &str, dense: bool) {
     let t = Tokens::get(ui.ctx());
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-        bubble(&t, true, dense).show(ui, |ui| {
-            ui.set_max_width(ui.available_width().min(560.0));
+        let shown = bubble(&t, true, dense).show(ui, |ui| {
+            ui.set_max_width((ui.available_width() - COPY - 4.0).min(560.0));
             // The bubble sits on the right; its lines still read from the left.
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.add(egui::Label::new(RichText::new(text).color(t.text)).wrap());
             });
         });
+        let r = shown.response.rect;
+        copy_button(ui, r, egui::pos2(r.left() - COPY - 4.0, r.top() + f32::from(margin(dense).top) - 1.0), text);
     });
+}
+
+/// An answer in its bubble, with its copy button in a column of its own on the right, so it
+/// never covers the text.
+pub(crate) fn answer_bubble(ui: &mut Ui, dense: bool, text: &str, content: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let shown = bubble(&t, false, dense).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.allocate_ui_with_layout(Vec2::new((ui.available_width() - COPY - 4.0).max(0.0), 0.0), egui::Layout::top_down(egui::Align::Min), content);
+    });
+    let (r, m) = (shown.response.rect, margin(dense));
+    copy_button(ui, r, egui::pos2(r.right() - f32::from(m.right) - COPY, r.top() + f32::from(m.top) - 1.0), text);
 }
 
 /// A one-line activity row (icon and text) that wraps instead of running off the side.
@@ -398,8 +432,7 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
     match item {
         ChatItem::User(text) => user_bubble(ui, text, dense),
         ChatItem::Assistant { text, backend, streaming } => {
-            bubble(&t, false, dense).show(ui, |ui| {
-                ui.set_width(ui.available_width());
+            answer_bubble(ui, dense, text, |ui| {
                 rich_text(ui, text, beginner && !dense);
                 if *streaming {
                     widgets::thinking(ui);
@@ -674,6 +707,23 @@ fn code_block(ui: &mut Ui, code: &str, t: &Tokens) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #825: the person's message and the answer each have a button that copies all of it.
+    #[test]
+    fn a_message_is_copied_whole() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        let text = "Run `cargo build` in the app folder,\nthen open it.";
+        for item in [ChatItem::User(text.into()), ChatItem::Assistant { text: text.into(), backend: None, streaming: false }] {
+            let mut h = Harness::builder().build_ui(move |ui| {
+                theme::install_fonts(ui.ctx());
+                item_ui(ui, &item, false, false, false, &mut Vec::new());
+            });
+            h.get_by_label("Copy the message").click();
+            h.step();
+            let commands = &h.output().platform_output.commands;
+            assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(t) if t == text)), "{commands:?}");
+        }
+    }
 
     #[test]
     fn events_fold_into_a_tidy_conversation() {

@@ -59,8 +59,10 @@ pub const DEFAULT_STDERR_CAP: usize = 1024 * 1024;
 /// How long to wait for the output threads after the child exits (an escaped grandchild may hold
 /// the pipe open; we stop waiting rather than hang).
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
-/// Longest partial line kept before it is delivered anyway.
-const MAX_LINE: usize = 1024 * 1024;
+/// Longest partial line kept before it is delivered anyway. MCP servers answer `tools/list` as
+/// one JSON-RPC line that can be megabytes (a plugin with many richly described tools), so this
+/// must cover such a whole line: a fragment is not JSON, and the answer would never parse.
+const MAX_LINE: usize = 16 * 1024 * 1024;
 
 /// A program to run, built fluently.
 #[derive(Clone)]
@@ -300,7 +302,7 @@ impl Process {
         // output is piped here, so it never needs one.
         #[cfg(windows)]
         wrap.wrap(process_wrap::std::JobObject).wrap(process_wrap::std::CreationFlags(windows::Win32::System::Threading::CREATE_NO_WINDOW));
-        let mut child = wrap.spawn().map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
+        let mut child = spawn_retrying(|| wrap.spawn()).map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
         let pid = child.id();
         let start = Instant::now();
         let activity = Arc::new(AtomicU64::new(0));
@@ -357,6 +359,21 @@ impl Process {
         }
         Ok(RunningProcess { pid, name, stdin: user_stdin, kill, rx, result: None, hands_off: self.hands_off })
     }
+}
+
+/// Start a program, trying again for about a third of a second while its file is busy. A program
+/// just written (an agent's update, a test's stand-in) can still be open for writing in a child
+/// another thread is starting, and Linux then refuses to run it ("Text file busy").
+fn spawn_retrying<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut wait = Duration::from_millis(5);
+    for _ in 0..6 {
+        match spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => std::thread::sleep(wait),
+            started => return started,
+        }
+        wait = wait.saturating_mul(2);
+    }
+    spawn()
 }
 
 /// The child gets [`search_path`](crate::which::search_path), which is also where a bare program
@@ -932,7 +949,7 @@ impl Launch {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd.spawn().map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
+        let child = spawn_retrying(|| cmd.spawn()).map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
         let launched = Launched { pid: child.id(), started: Instant::now(), state: Arc::new(Mutex::new(LaunchState { child: Some(child), ended: None })) };
         // Reap it when it closes. If no thread can be made the child still runs (and `ended`
         // stays unknown); on Unix it stays a zombie until we exit, which is harmless.
@@ -1284,6 +1301,30 @@ mod launch_tests {
 mod error_tests {
     use super::*;
 
+    /// A busy program file is tried again; any other error, or a file that stays busy, is returned.
+    #[test]
+    fn a_busy_program_file_is_tried_again() {
+        let busy = || std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy);
+        let mut tries = 0;
+        let started = spawn_retrying(|| {
+            tries += 1;
+            if tries < 3 { Err(busy()) } else { Ok(tries) }
+        });
+        assert_eq!(started.ok(), Some(3));
+        let mut tries = 0;
+        let missing = spawn_retrying(|| -> std::io::Result<()> {
+            tries += 1;
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        });
+        assert_eq!((missing.map_err(|e| e.kind()), tries), (Err(std::io::ErrorKind::NotFound), 1));
+        let mut tries = 0;
+        let stays_busy = spawn_retrying(|| -> std::io::Result<()> {
+            tries += 1;
+            Err(busy())
+        });
+        assert_eq!((stays_busy.map_err(|e| e.kind()), tries), (Err(std::io::ErrorKind::ExecutableFileBusy), 7));
+    }
+
     #[test]
     fn a_crash_is_named_by_its_error_not_its_last_stack_frame() {
         let bun = "error: No provider is set up\n      at loadConfig (/$bunfs/root/chunk-qqmzrn42.js:12:40)\n      at <anonymous> (/$bunfs/root/chunk-qqmzrn42.js:96:6417)\n";
@@ -1404,6 +1445,27 @@ mod tests {
         assert!(!help.contains("by hand"), "{help}");
         assert_eq!(err.code, ErrorCode::ProgramFailed);
         assert!(err.message.contains("bad thing"), "{}", err.message);
+    }
+
+    /// An MCP plugin answers `tools/list` as one JSON-RPC line that can be megabytes (a server with
+    /// many richly described tools). A line past the old 1 MiB cap arrived in fragments, so the
+    /// answer never parsed and the plugin timed out: the whole line must arrive as one line.
+    #[cfg(unix)]
+    #[test]
+    fn a_multimegabyte_line_arrives_whole() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let wanted = 3 * 1024 * 1024 + 7; // past the old cap, and not a round number
+        let out = Process::new("sh")
+            .args(["-c", &format!("head -c {wanted} /dev/zero | tr '\\0' a; echo")])
+            .on_stdout_line(move |l| {
+                let _ = tx.send(l.len());
+            })
+            .timeout(Duration::from_secs(30))
+            .run()
+            .unwrap();
+        assert!(out.success);
+        let lines: Vec<usize> = rx.into_iter().collect();
+        assert_eq!(lines, vec![wanted], "one line of {wanted} bytes, not {} fragments of {:?}", lines.len(), lines);
     }
 
     #[test]

@@ -103,6 +103,30 @@ fn a_coding_agent_test_says_it_only_checked_the_version() {
     let r = h.test_backend("Agent").unwrap();
     assert!(r.version_only && r.reply.starts_with("cargo "), "{r:?}");
     assert_eq!(serde_json::to_value(&r).unwrap()["version_only"], true, "the CLI's ai test prints it");
+    assert_eq!((r.program.as_deref(), r.saved_program_replaced), (Some("cargo"), None), "the saved program ran");
+}
+
+/// #721: a saved path an update removed. A test that passes through the usual program says so, and
+/// doctor doesn't blame PATH when nothing can be found.
+#[test]
+fn a_saved_program_that_is_gone_is_named_by_test_and_doctor() {
+    let (h, _d) = hub();
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("old-build").join("agent").display().to_string();
+    let backend = |name: &str, model: &str| BackendEntry {
+        config: BackendConfig { name: name.into(), kind: BackendKind::AgentCli, model: model.into(), base_url: None, ssh_host: None, enabled: true },
+        options: BackendOptions { command: Some(gone.clone()), ..Default::default() },
+    };
+    // cargo stands in for the agent's usual program: it's there wherever these tests run.
+    h.add_backend_with(backend("Usual", "cargo"), None).unwrap();
+    h.add_backend_with(backend("Nowhere", "no-such-agent-program"), None).unwrap();
+
+    let r = h.test_backend("Usual").unwrap();
+    assert_eq!((r.program.as_deref(), r.saved_program_replaced.as_deref()), (Some("cargo"), Some(gone.as_str())));
+
+    let reach = h.check_reachability();
+    let nowhere = reach.iter().find(|(name, _)| name == "Nowhere").map(|(_, r)| r.clone()).unwrap();
+    assert_eq!(nowhere, Err(format!("there's no program at {gone}")));
 }
 
 /// Every known agent with an adapter of its own is offered when adding a coding agent.
@@ -302,6 +326,43 @@ fn an_agent_apps_program_is_set_and_cleared() {
     assert!(!h.set_command("Nobody", Some("/x")).unwrap(), "only a configured backend");
     assert!(h.set_command("OpenCode", Some(" ")).unwrap());
     assert_eq!(program(&h), None, "blank finds it by its usual name again");
+}
+
+/// #467: a folder or app bundle can't be an agent's program (the file picker returns
+/// `Antigravity.app` on a Mac); it's refused and the saved program stays as it was.
+#[test]
+fn an_app_bundle_is_refused_as_an_agents_program() {
+    let (h, d) = hub();
+    add(&h, "OpenCode", BackendKind::AgentCli, "http://127.0.0.1:9", None);
+    let program = |h: &AiHub| h.options().get("OpenCode").and_then(|o| o.command.clone());
+    let bundle = d.path().join("Antigravity.app");
+    std::fs::create_dir_all(bundle.join("Contents")).unwrap();
+    let err = h.set_command("OpenCode", Some(&bundle.display().to_string())).unwrap_err();
+    assert_eq!(err.code, ErrorCode::BadInput, "{err:?}");
+    assert!(err.message.contains("is a folder"), "{}", err.message);
+    assert_eq!(program(&h), None, "nothing is saved for a refused folder");
+    // A file, and a bare name, are still accepted.
+    let file = d.path().join("agy");
+    std::fs::write(&file, "#!/bin/sh\n").unwrap();
+    assert!(h.set_command("OpenCode", Some(&file.display().to_string())).unwrap());
+    assert!(h.set_command("OpenCode", Some("agy")).unwrap());
+    assert_eq!(program(&h).as_deref(), Some("agy"));
+}
+
+/// #423: a saved AI that is switched off isn't set up, so a copy found on the computer is offered
+/// again (to be turned on); one that is on is left out.
+#[test]
+fn a_switched_off_agent_is_found_again() {
+    let (h, _d) = hub();
+    add(&h, "Claude Code", BackendKind::AgentCli, "http://127.0.0.1:9", None);
+    let saved = h.backends().into_iter().next().unwrap();
+    let found = |name: &str| Detected { suggestion: BackendConfig { name: name.into(), ..saved.clone() }, reason: "Found".into(), needs_key: false };
+    let offered =
+        |h: &AiHub| leave_out_set_up(vec![found("Claude Code"), found("Codex")], &h.backends()).into_iter().map(|d| d.suggestion.name).collect::<Vec<_>>();
+    assert_eq!(offered(&h), ["Codex"], "on: Claude Code is set up, so it isn't offered");
+    h.set_enabled("Claude Code", false).unwrap();
+    assert_eq!(offered(&h), ["Claude Code", "Codex"], "off: it's found again, to be turned on");
+    assert!(!is_on(&h.backends(), "Claude Code") && !is_on(&h.backends(), "Codex"));
 }
 
 /// Claude Code's folder (`CLAUDE_CONFIG_DIR`) is chosen per AI, so two can be two accounts; only

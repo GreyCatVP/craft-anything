@@ -64,6 +64,11 @@ pub fn program_of(config: &BackendConfig, options: &BackendOptions) -> String {
     let usual = program_for(&config.model);
     let Some(chosen) = options.command.as_deref().map(str::trim).filter(|c| !c.is_empty()) else { return usual };
     let local = config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
+    // A folder or app bundle saved before set_command refused it (#467) can't be started: the usual
+    // program is used, as when none is chosen.
+    if local && Path::new(chosen).is_dir() {
+        return usual;
+    }
     let path = Path::new(chosen);
     if !local || path.parent().is_none_or(|p| p.as_os_str().is_empty()) || path.exists() {
         return chosen.to_string();
@@ -1118,6 +1123,12 @@ mod tests {
         assert_eq!(program_of(&config(None), &chosen(&new)), new.display().to_string(), "a path that's there is used as it is");
         assert_eq!(program_of(&config(Some("box")), &chosen(&gone)), gone.display().to_string(), "another computer's path isn't checked here");
         assert_eq!(program_of(&config(None), &BackendOptions::default()), "codex", "nothing chosen: the usual name");
+        // #467: a saved app bundle is never started; the usual name is looked up instead.
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("Codex.app");
+        std::fs::create_dir_all(&bundle).unwrap();
+        assert_eq!(program_of(&config(None), &chosen(&bundle)), "codex", "an app bundle is not the program");
+        assert_eq!(program_of(&config(Some("box")), &chosen(&bundle)), bundle.display().to_string(), "another computer's path isn't checked here");
         let bare = BackendOptions { command: Some("my-codex".into()), ..Default::default() };
         assert_eq!(program_of(&config(None), &bare), "my-codex", "a bare name is left to PATH");
     }
@@ -1456,7 +1467,14 @@ mod tests {
         let o = BackendOptions { args: vec!["--skip-git-repo-check".into()], ..Default::default() };
         assert_eq!(skip(&build_args(adapter_for("codex").as_ref(), &o, "q", "P:", &mcp(), None, Access::Build)), 1);
         assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
-        assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
+        // #538: Codex doesn't refresh its callable tools after enable_toolset, so list all permitted
+        // tools from startup. Clean room still filters what the server lists and allows.
+        assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\", \"--all-tools\"]".to_string()));
+        let mut already_all = mcp();
+        already_all.args.push("--all-tools".into());
+        let deep = build_args(adapter_for("codex").as_ref(), &BackendOptions::default(), "q", "P:", &already_all, None, Access::Build);
+        let args = deep.iter().find(|a| a.starts_with("mcp_servers.craft-anything.args=")).unwrap();
+        assert_eq!(args.matches("--all-tools").count(), 1, "a Deep build already lists every tool");
         // #528: the message goes in on stdin; `-` tells `codex exec` to read it there.
         assert_eq!(a.last().unwrap(), "-");
         // #540: `codex exec` can't ask, so the tools that ask for themselves are approved in the
@@ -1483,7 +1501,7 @@ mod tests {
         assert!(a.contains(&"--skip-git-repo-check".to_string()));
         assert!(a.windows(2).any(|w| w[0] == "--sandbox" && w[1] == "workspace-write"));
         assert!(a.contains(&"mcp_servers.craft-anything.command=\"/opt/ca/craft-anything-cli\"".to_string()));
-        assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\"]".to_string()));
+        assert!(a.contains(&"mcp_servers.craft-anything.args=[\"mcp\", \"--project\", \"/p/x.cany\", \"--all-tools\"]".to_string()));
     }
 
     #[test]

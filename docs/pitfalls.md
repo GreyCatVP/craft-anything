@@ -110,6 +110,12 @@ CI the banner moved the layout under another test running beside it, and its cli
 same temp directory, and game detection walked up and found the game. Give each case its own
 `tempfile::tempdir()`.
 
+**A script written and run at once.** Tests that write a stand-in program and start it failed now
+and then on Linux with "Text file busy": another test thread was starting a child at that moment,
+and the child still held the new file open for writing. Starting a program goes through
+`process::spawn_retrying`, which tries a busy file again for a moment; don't add a sleep to a test
+instead.
+
 **Proving a refactor changed nothing.** Unit tests that check substrings can miss changed prompts.
 For a refactor that must keep output identical, dump the outputs for every combination before and
 after and compare them byte for byte (done for every brief across 162 combinations in R1.1).
@@ -518,6 +524,11 @@ and run `cargo xtask secrets` before every commit (the `.githooks/pre-commit` ho
 **An empty float sum is `-0.0`.** `iter().map(..).sum::<f64>()` over nothing gives `-0.0`, which
 `{:.2}` shows as "$-0.00". Sum money with `fold(0.0, ..)`.
 
+**A per-run budget that a retry resets.** The build's refinement cap (`max_rounds`) counted from zero on every
+run, while the round numbers carried over, so "Try again" bought six more checks each press and a build that never
+worked reached check 40 and 49 (#736). A limit that must hold across runs is a count saved with the project, and
+it's reset only by a new request. Test it with several runs in a row, not one.
+
 **Docs that drift.** `STATUS.md` described a branch 25 commits old and the tool count was stale.
 Update STATUS, the roadmap and generated docs (`cargo xtask tools`, `cargo xtask schemas`) in the
 same PR as the change.
@@ -723,3 +734,16 @@ sum the same payload repeatedly. Count checksum byte visits across the whole sca
 cancellation callback inside long sums, and distinguish skipped verification from a mismatch.
 Test overlapping candidates with correct checksums and a complete nested archive so a structural
 trailer cannot turn unchecked data into a high-confidence result.
+
+**A line cap that cut a JSON-RPC answer in pieces.** MCP over stdio answers one message per line,
+and a server with many richly described tools answers `tools/list` as several megabytes on that
+one line. The process reader capped a partial line at 1 MiB and delivered it anyway, so the answer
+arrived as fragments that never parsed and the plugin failed as a `tools/list` timeout — while the
+same server answered a direct probe in under a second. A cap protects memory, but a JSON-RPC line
+must arrive whole to parse at all: keep the cap at the size the MCP client already allows, and test
+with a multi-megabyte line, not a short one.
+
+**A capture budget checked before deduplication changed the replay.** Redaction expanded a repeated
+body, so its second copy was rejected before it could be discarded as a duplicate. Apply aggregate
+budgets only to distinct bodies actually retained. When a budget removes a body, preserve unavailable
+cached 304 responses and deduplicate identical omitted samples.

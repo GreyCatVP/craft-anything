@@ -654,6 +654,32 @@ pub fn build_with(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
+// `xtask i18n-coverage` only scans direct `tr("…")` literals. These keys are
+// translated by `status_line`/`step`, so keep the TSV catalogs in sync with them.
+/// What the status line says when Unreal is installed but its C++ tools are missing.
+fn unreal_tools_missing(os: &str) -> &'static str {
+    match os {
+        "linux" => "Unreal is here, but its bundled Clang C++ toolchain wasn't found.",
+        "macos" => "Unreal is here, but it also needs Xcode.",
+        _ => "Unreal is here, but it also needs Visual Studio's C++ tools.",
+    }
+}
+
+/// The C++ toolchain step for Unreal: title, detail, and the page to open (if any).
+fn cpp_step(os: &str) -> (&'static str, &'static str, Option<&'static str>) {
+    match os {
+        "linux" => (
+            "Add Unreal's Linux C++ toolchain",
+            "Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.",
+            None,
+        ),
+        "macos" => ("Install Xcode", "Unreal builds games with Apple's Xcode, free in the App Store.", None),
+        _ => {
+            ("Add Visual Studio's C++ tools", "Install Visual Studio Community (free) and tick \"Game development with C++\".", Some(game::VISUAL_STUDIO_PAGE))
+        }
+    }
+}
+
 /// "Ready — Unity 6000.0.23f1" or "Not on this computer yet" with the way to get it.
 fn status_line(app: &mut CraftApp, ui: &mut Ui, b: Builder, offer: bool) {
     let t = Tokens::get(ui.ctx());
@@ -672,7 +698,7 @@ fn status_line(app: &mut CraftApp, ui: &mut Ui, b: Builder, offer: bool) {
         Some(inv) => {
             icons::show(ui, "download", 16.0, t.warning);
             let text = if b == Builder::Unreal && inv.best(b).is_some() {
-                tr("Unreal is here, but it also needs Visual Studio's C++ tools.")
+                tr(unreal_tools_missing(std::env::consts::OS))
             } else {
                 format!("{} {}", trf("{name} isn't on this computer yet.", &[("name", b.name())]), tr(b.needs()))
             };
@@ -761,12 +787,8 @@ fn steps(app: &CraftApp, b: Builder, inv: &Inventory) -> Vec<Step> {
                 inv.best(b).is_some(),
                 launcher.map(Action::OpenApp),
             ));
-            let (title, detail) = if cfg!(target_os = "macos") {
-                ("Install Xcode", "Unreal builds games with Apple's Xcode, free in the App Store.")
-            } else {
-                ("Add Visual Studio's C++ tools", "Install Visual Studio Community (free) and tick \"Game development with C++\".")
-            };
-            v.push(step(title, detail, inv.cpp_tools, (!cfg!(target_os = "macos")).then_some(Action::OpenPage(game::VISUAL_STUDIO_PAGE))));
+            let (title, detail, page) = cpp_step(std::env::consts::OS);
+            v.push(step(title, detail, inv.cpp_tools, page.map(Action::OpenPage)));
             v
         }
     }
@@ -957,6 +979,32 @@ fn open_app(app: &mut CraftApp, b: Builder) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_unreal_guidance_names_the_bundled_clang() {
+        let (title, detail, page) = cpp_step("linux");
+        assert!(title.contains("Linux"));
+        assert!(detail.contains("Engine/Build/BatchFiles/Linux/SetupToolchain.sh"));
+        assert!(detail.contains("bundled Clang"));
+        assert!(detail.contains("native toolchain"), "Setup.sh must be described as the source-build path");
+        assert!(!detail.contains("Visual Studio"), "Linux must not send people to Visual Studio");
+        assert_eq!(page, None, "Linux must not open the Visual Studio download page");
+        let status = unreal_tools_missing("linux");
+        assert!(status.contains("bundled Clang"));
+        assert!(!status.contains("Visual Studio"));
+    }
+
+    #[test]
+    fn other_platforms_keep_their_unreal_guidance() {
+        let (mac_title, _mac_detail, mac_page) = cpp_step("macos");
+        assert_eq!(mac_title, "Install Xcode");
+        assert_eq!(mac_page, None);
+        assert_eq!(unreal_tools_missing("macos"), "Unreal is here, but it also needs Xcode.");
+        let (win_title, _win_detail, win_page) = cpp_step("windows");
+        assert_eq!(win_title, "Add Visual Studio's C++ tools");
+        assert_eq!(win_page, Some(game::VISUAL_STUDIO_PAGE));
+        assert!(unreal_tools_missing("windows").contains("Visual Studio"));
+    }
 
     #[test]
     fn the_request_picks_the_engine_or_none() {

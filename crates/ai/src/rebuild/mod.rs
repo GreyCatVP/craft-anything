@@ -694,6 +694,16 @@ impl Worker {
             resumed_elsewhere(&brief(kind, &cx, opts.message.as_deref()), &ws.manifest.last_reply, handoff.as_deref())
         });
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
+        // A new request starts the count of checks that found no working build again. "Try again" on
+        // a build that already reached the limit stops before another builder turn is paid for (#736).
+        if opts.message.is_some() {
+            if ws.manifest.not_working_checks != 0 {
+                ws.manifest.not_working_checks = 0;
+                ws.save()?;
+            }
+        } else if ws.manifest.not_working_checks >= NOT_WORKING_CHECK_LIMIT {
+            return Err(not_working(ws));
+        }
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
         let must_decompile = !self.engine.session().clean_room() && matches!(ws.manifest.target, TargetRef::Local { .. });
@@ -766,6 +776,7 @@ impl Worker {
                 if let Some(p) = self.added(ws) {
                     progress.reset();
                     progress.save(&ws.root)?;
+                    ws.manifest.not_working_checks = 0;
                     prompt = p;
                     continue;
                 }
@@ -781,6 +792,9 @@ impl Worker {
             let checks = self.checks_with_a_retry(ws, kind, round)?;
             ws.manifest.checks.extend(checks.iter().cloned());
             ws.manifest.awaiting_check = false;
+            // A round in which every check works (built and served) ends the streak; any other
+            // round adds to it, across runs, until the limit stops the build.
+            ws.manifest.not_working_checks = if checks.iter().all(|c| c.passed) { 0 } else { ws.manifest.not_working_checks.saturating_add(1) };
             ws.save()?;
             for c in &checks {
                 self.emit(RunEvent::Checked(c.clone()));
@@ -788,6 +802,7 @@ impl Worker {
             if let Some(p) = self.added(ws) {
                 progress.reset();
                 progress.save(&ws.root)?;
+                ws.manifest.not_working_checks = 0;
                 prompt = p;
                 continue;
             }
@@ -804,11 +819,17 @@ impl Worker {
                 }
             }
             let Some(check) = not_good else { break };
+            if ws.manifest.not_working_checks >= NOT_WORKING_CHECK_LIMIT {
+                return Err(not_working(ws));
+            }
             if refinements >= opts.max_rounds {
                 break;
             }
             refinements += 1;
-            prompt = kind.refine(check) + &pictures_reminder(ws);
+            // Nothing written yet: a fix for a build that doesn't exist sends the builder looking for one.
+            // It is asked to write the project and to show its build output (#736).
+            let refined = if app_is_empty(ws) { NO_PROJECT_PROMPT.to_string() } else { kind.refine(check) };
+            prompt = refined + &pictures_reminder(ws);
             if !api_loop {
                 prompt.push_str(CHECK_BEFORE_REPLYING);
             }
@@ -1128,6 +1149,20 @@ impl Worker {
         }
     }
 }
+
+/// Checks in a row that may find the build not working before the run stops and asks for a new
+/// request. Each "Try again" used to start another `max_rounds` of checks, with nothing counting
+/// across runs, so a build that never came up was checked 40 and 49 times (#736).
+pub const NOT_WORKING_CHECK_LIMIT: u32 = 10;
+
+fn not_working(ws: &Workspace) -> ToolError {
+    ToolError::new(ErrorCode::OverLimit, format!("The build still isn't working after {} checks in a row, so it stopped.", ws.manifest.not_working_checks))
+        .with_remediation("Send a new request with a concrete correction to start again. The last check's note in the feed says what it found.")
+}
+
+/// The builder's next request when app/ holds no files: write the project first, then say what the
+/// build printed. The reporter's agent claimed `npm run build` had passed while app/ was empty (#736).
+const NO_PROJECT_PROMPT: &str = "The check found no project: app/ has no files, so nothing has been written yet and nothing can be built. Create the project's files in app/ now (for a website, a package.json and an index.html or the source files), then build it. Reply with the exact command you ran and the last lines of its output. Say something is built only when that output says so.";
 
 fn no_build_progress(ws: &Workspace) -> ToolError {
     let stop = format!("The build stopped after two builder turns changed no files in {}.", ws.app_place());

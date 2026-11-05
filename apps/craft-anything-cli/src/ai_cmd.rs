@@ -225,6 +225,10 @@ pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
         }
         AiCommand::Detect => {
             emit(&serde_json::to_value(hub.detect()).unwrap_or(Value::Null), f);
+            // On stderr, so the list on stdout stays what scripts read.
+            for hint in hub.detect_hints() {
+                eprintln!("note: {} {}", hint.message(), hint.remediation());
+            }
             0
         }
         AiCommand::Add { name, kind, model, base_url, ssh_host, key_env, key_stdin } => {

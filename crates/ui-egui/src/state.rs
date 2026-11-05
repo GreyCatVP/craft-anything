@@ -453,6 +453,9 @@ pub struct UiState {
     /// The project's prompt box asks questions about the build instead of asking for changes.
     #[serde(default)]
     pub just_ask: bool,
+    /// How tall the plan's steps are, dragged by the person (#826); `None`: the usual height.
+    #[serde(default)]
+    pub plan_height: Option<f32>,
     /// What the Pin dialog is choosing.
     #[serde(skip)]
     pub pin_draft: crate::pins::PinDraft,
@@ -570,6 +573,7 @@ impl Default for UiState {
             sidebar_folded: false,
             pins_collapsed: false,
             just_ask: false,
+            plan_height: None,
             pin_draft: Default::default(),
             answers: BTreeMap::new(),
             plugin_form: PluginForm::default(),

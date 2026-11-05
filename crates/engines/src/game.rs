@@ -118,9 +118,15 @@ impl Builder {
 
     /// Roughly what getting it involves, in plain words.
     pub fn needs(self) -> &'static str {
+        self.needs_for(std::env::consts::OS)
+    }
+
+    /// [`needs`](Builder::needs) for a named OS, so every platform's words are testable here.
+    fn needs_for(self, os: &str) -> &'static str {
         match self {
             Builder::Unity => "About 10 GB. Free for personal use with a Unity account.",
-            Builder::Unreal if cfg!(target_os = "linux") => "An Unreal Engine Linux installation with its bundled Clang C++ toolchain.",
+            Builder::Unreal if os == "linux" => "An Unreal Engine Linux installation with its bundled Clang C++ toolchain.",
+            Builder::Unreal if os == "macos" => "About 60 GB, an Epic Games account, and Xcode.",
             Builder::Unreal => "About 60 GB, an Epic Games account, and Visual Studio's C++ tools.",
             Builder::Godot => "A small download (under 200 MB). Free, no account needed.",
             Builder::Rust => "The Rust toolchain (rustup.rs).",
@@ -970,6 +976,14 @@ mod tests {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, bytes).unwrap();
+    }
+
+    #[test]
+    fn unreal_needs_names_the_toolchain_for_each_platform() {
+        assert!(Builder::Unreal.needs_for("linux").contains("bundled Clang"));
+        assert!(Builder::Unreal.needs_for("macos").contains("Xcode"));
+        assert!(!Builder::Unreal.needs_for("macos").contains("Visual Studio"));
+        assert!(Builder::Unreal.needs_for("windows").contains("Visual Studio"));
     }
 
     #[test]

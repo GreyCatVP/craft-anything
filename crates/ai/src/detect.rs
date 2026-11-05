@@ -157,6 +157,59 @@ pub fn agent_clis() -> Vec<Detected> {
         .collect()
 }
 
+/// What a scan found that isn't an AI to use but explains why one is missing.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DetectHint {
+    /// The Claude desktop app is installed, but not Claude Code, the `claude` command builds run:
+    /// "Claude" installed from its website wasn't found and nothing said why (#259).
+    ClaudeDesktopWithoutCli { app: PathBuf },
+}
+
+impl DetectHint {
+    pub fn message(&self) -> String {
+        match self {
+            Self::ClaudeDesktopWithoutCli { app } => {
+                format!("The Claude desktop app is installed ({}), but Claude Code, the `claude` command-line tool building uses, isn't.", app.display())
+            }
+        }
+    }
+
+    pub fn remediation(&self) -> &'static str {
+        match self {
+            Self::ClaudeDesktopWithoutCli { .. } => "Install Claude Code apart from the desktop app, sign in to it once in a terminal, then look again.",
+        }
+    }
+}
+
+/// Hints for what [`agent_clis`] can't offer.
+pub fn hints() -> Vec<DetectHint> {
+    if craft_anything_platform::which("claude").is_some() {
+        return Vec::new();
+    }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let local_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    claude_desktop_app(home.as_deref(), local_data.as_deref()).map(|app| DetectHint::ClaudeDesktopWithoutCli { app }).into_iter().collect()
+}
+
+/// Where the Claude desktop app is, if it's installed. On Windows the Store package leaves a
+/// `claude-desktop` app alias (a link that only `symlink_metadata` can read) and the older
+/// installer an `AnthropicClaude` folder; on macOS it's `Claude.app`. There's no Linux app.
+fn claude_desktop_app(home: Option<&std::path::Path>, local_data: Option<&std::path::Path>) -> Option<PathBuf> {
+    let places: Vec<PathBuf> = if cfg!(windows) {
+        let local_data = local_data.map(PathBuf::from).or_else(|| home.map(|h| h.join("AppData").join("Local")));
+        local_data
+            .into_iter()
+            .flat_map(|d| [d.join("Microsoft").join("WindowsApps").join("claude-desktop.exe"), d.join("AnthropicClaude").join("claude.exe")])
+            .collect()
+    } else if cfg!(target_os = "macos") {
+        std::iter::once(PathBuf::from("/Applications/Claude.app")).chain(home.map(|h| h.join("Applications").join("Claude.app"))).collect()
+    } else {
+        Vec::new()
+    };
+    places.into_iter().find(|p| std::fs::symlink_metadata(p).is_ok())
+}
+
 /// The most servers taken from OpenCode's settings.
 const OPENCODE_MAX: usize = 6;
 
@@ -322,6 +375,34 @@ mod model_id_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #259: the desktop app is found where its installers put it, and nothing is made up where
+    /// there's none.
+    #[test]
+    fn the_claude_desktop_app_is_found_where_its_installers_put_it() {
+        let empty = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("AnthropicClaude").join("claude.exe");
+        std::fs::create_dir_all(app.parent().unwrap()).unwrap();
+        std::fs::write(&app, b"app").unwrap();
+        let mac = dir.path().join("Applications").join("Claude.app");
+        std::fs::create_dir_all(&mac).unwrap();
+        let found = claude_desktop_app(Some(dir.path()), Some(dir.path()));
+        if cfg!(windows) {
+            assert_eq!(found, Some(app));
+            assert_eq!(claude_desktop_app(Some(empty.path()), Some(empty.path())), None);
+            // The Store package's alias wins over an old install.
+            let alias = dir.path().join("Microsoft").join("WindowsApps").join("claude-desktop.exe");
+            std::fs::create_dir_all(alias.parent().unwrap()).unwrap();
+            std::fs::write(&alias, b"").unwrap();
+            assert_eq!(claude_desktop_app(None, Some(dir.path())), Some(alias));
+        } else if cfg!(target_os = "linux") {
+            assert_eq!(found, None, "there's no Claude desktop app for Linux");
+        }
+        let hint = DetectHint::ClaudeDesktopWithoutCli { app: PathBuf::from("Claude") };
+        assert!(hint.message().contains("desktop app") && hint.message().contains("`claude`"), "{}", hint.message());
+        assert_eq!(serde_json::to_value(&hint).unwrap()["kind"], "claude_desktop_without_cli");
+    }
 
     /// Non-Git SSH hosts offer both supported agent suggestions without probing the remote computer.
     #[test]

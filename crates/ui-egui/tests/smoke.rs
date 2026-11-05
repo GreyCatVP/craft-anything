@@ -391,6 +391,41 @@ fn the_builders_checklist_is_pinned_above_the_prompt_box() {
     h.get_by_label("Keep score");
 }
 
+/// #826: a long plan scrolls instead of pushing the feed away, and the divider above it sets how
+/// tall it is, with the keyboard too; a double-click goes back to the usual height.
+#[test]
+fn a_long_plan_scrolls_and_its_divider_sets_its_height() {
+    use craft_anything_ui_egui::state::{FeedItem, PlanStatus, PlanStep};
+    const DIVIDER: &str = "Drag to give the plan more or less room; double-click to reset";
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::fill_project(&mut a);
+        let steps = (1..=40).map(|n| PlanStep { text: format!("Step {n}"), doing: String::new(), status: PlanStatus::Todo }).collect();
+        a.state.feed.push(FeedItem::Plan(steps));
+        a
+    });
+    h.run_steps(3);
+    let top = |h: &Harness<'static, CraftApp>| h.get_by_label(DIVIDER).rect().top();
+    let usual = top(&h);
+    assert!(usual > 820.0 / 3.0, "the feed keeps room above a long plan: the plan starts at {usual}");
+    h.get_by_label(DIVIDER).focus();
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(3);
+    let taller = h.state().state.plan_height.expect("Up gives the plan more room");
+    assert!((top(&h) - (usual - 24.0)).abs() < 1.0, "the plan grew upwards by a step: {} from {usual}", top(&h));
+    // Both clicks in one frame, so they're a double-click.
+    let at = h.get_by_label(DIVIDER).rect().center();
+    h.hover_at(at);
+    h.step();
+    for pressed in [true, false, true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    h.run_steps(3);
+    assert_eq!(h.state().state.plan_height, None, "a double-click resets {taller}");
+    assert!((top(&h) - usual).abs() < 1.0);
+}
+
 #[test]
 fn the_sidebar_lists_projects_and_moves_between_them() {
     let mut h = harness(|| {
@@ -2295,6 +2330,29 @@ fn with_nothing_to_build_with_start_offers_what_was_found_instead_of_a_dead_end(
     h.get_by_label("Build with Claude Code");
 }
 
+/// #259: with only the Claude desktop app installed, the dialog says that building needs Claude
+/// Code apart from it, instead of only "No coding agent was found".
+#[test]
+fn only_the_claude_desktop_app_is_named_when_nothing_can_build() {
+    use craft_anything_ai::detect::DetectHint;
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.backends.clear();
+        a.detected = Some(Vec::new());
+        a
+    });
+    h.run_steps(3);
+    h.state_mut().state.make.request = "A notes app".into();
+    h.state_mut().start_make();
+    // The dialog looks on this computer when it opens; let that finish before standing in for it.
+    assert!(wait(&mut h, |a| !a.detecting));
+    h.state_mut().detected = Some(Vec::new());
+    h.state_mut().detect_hints = vec![DetectHint::ClaudeDesktopWithoutCli { app: "Claude".into() }];
+    h.run_steps(2);
+    h.get_by_label("No coding agent was found on this computer yet.");
+    h.get_by_label("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.");
+}
+
 #[test]
 fn an_ai_can_be_turned_off_and_removed_in_settings() {
     use craft_anything_ai::rebuild::StandIns;
@@ -2593,4 +2651,46 @@ fn the_first_frames_callback_runs_once_after_frames_were_shown() {
     assert_eq!(calls.load(Ordering::SeqCst), 1, "once the frames were shown, and only once");
     h.run_steps(8);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// #666: a builder's words with a long decompiled line (a Deep-mode dump, with literal `\n`
+/// sequences) stay inside the window instead of running off the feed to the left.
+#[test]
+fn a_long_line_in_the_builders_words_stays_in_the_window() {
+    use craft_anything_ui_egui::state::FeedItem;
+    let dump = "local_10b0 = (undefined8 *)0x1;\\n ".repeat(40);
+    let text = format!("Decompiled:\n```c\n{dump}\n```\nDone.");
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::fill_project(&mut a);
+        a.state.feed.push(FeedItem::Agent { text, streaming: false });
+        a
+    });
+    h.run_steps(3);
+    let r = h.get_by_label_contains("local_10b0").rect();
+    eprintln!("RECT {r:?}");
+    assert!(r.min.x >= 0.0 && r.max.x <= 1280.0, "the builder's line leaves the window: {r:?}");
+}
+
+/// #666: in Experienced mode, the tool-work rows (their status notes) wrap inside the window too.
+#[test]
+fn a_long_status_note_in_the_work_rows_stays_in_the_window() {
+    use craft_anything_ui_egui::state::FeedItem;
+    let note = "local_10b0 = 0;\\n ".repeat(30);
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_project(&mut a);
+        a.state.feed.push(FeedItem::Work { tools: vec![("ghidra_decompile".into(), Some(true))], notes: vec![format!("first {note}")] });
+        a.state.feed.push(FeedItem::Work { tools: Vec::new(), notes: vec![format!("header {note}")] });
+        a
+    });
+    h.run_steps(3);
+    let r = h.get_by_label_contains("first local_10b0").rect();
+    eprintln!("RECT {r:?}");
+    assert!(r.min.x >= 0.0 && r.max.x <= 1280.0, "the note leaves the window: {r:?}");
+    for n in h.get_all_by_label_contains("header local_10b0") {
+        let r = n.rect();
+        eprintln!("HEADER {r:?}");
+        assert!(r.min.x >= 0.0 && r.max.x <= 1280.0, "the header leaves the window: {r:?}");
+    }
 }

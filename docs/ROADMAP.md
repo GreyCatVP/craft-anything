@@ -50,7 +50,7 @@ The project should be easy to fork and bend. New features land behind a seam, no
 | Milestone | Goal | Owner | Where it stands (2026-11-02) |
 |---|---|---|---|
 | M0 Foundations | Docs match the code, licences checked, one live end-to-end run | maintainers | Done |
-| M1 Extensibility | Seams for target kinds, checks, builders, asset providers, engines, plugins | maintainers | Done, except engine pins (R1.5) and Unreal's Linux guidance (R1.6) |
+| M1 Extensibility | Seams for target kinds, checks, builders, asset providers, engines, plugins | maintainers | Done, except engine pins (R1.5) |
 | M2 Product completeness | Every kind of target gets study → build → check → refine with a real check | maintainers | Websites complete; apps and games build and run; API-key builds have never run live (R5.5); agents other than Claude Code are only partly wired (R2.2) |
 | M3 Engine depth | More tools, and the known partial ones | open | 314 tools; the open lane |
 | M4 Release | Packaging, signing, a managed tier | maintainers | v0.3.0 released, signed, on every platform; a macOS CLI question and the managed tier remain |
@@ -84,7 +84,7 @@ Issues are ranked by people affected and how badly, after leaving out what's alr
 | 3 | R2.4 Runtime study, R2.5 Behaviour checks | scripted input (R2.4) before R2.5's sheet check | Makes "ready" mean more for apps and games |
 | 3 | R2.7, R2.8 | — | Small gaps left in finished work |
 | 3 | R2.9 Everyday use, R2.10 Pinned builds | — | Open to anyone at any time; most lines stand alone |
-| 3 | R1.5, R1.6 | — | Small leftovers |
+| 3 | R1.5 | — | Small leftovers |
 | Any | M3: R3.3, R3.9, R3.11 | — | Open lane |
 | Later | R4.1 macOS CLI, R4.2 Managed tier | **decision** | Not before M5 |
 
@@ -229,6 +229,16 @@ Every round spends the person's money or quota. One that can't do anything shoul
       empty-folder wording to the build check (it failed first, before #749's website check) and
       to the stop message — claimed: claude, branch bugfix/r5.3-empty-app-loop
 
+- [x] A build whose checks keep finding no working build stops after 10 in a row, across "Try again"
+      presses, until a new request starts the count again (`NOT_WORKING_CHECK_LIMIT`, kept in craft.json as
+      `not_working_checks`). "Try again" used to start six more rounds every time with nothing counted across
+      runs, so #736's build went on to check 40 and 49 times. A run at the limit stops before a builder turn.
+      The unchanged-turn guard already stops a builder that writes nothing; #736's exact Windows run (gemini-cli)
+      is not reproduced here. An empty `app/` is named as having no files yet (#771's wording) and the builder is asked to
+      write the project and show its build's output, not to fix a build (`NO_PROJECT_PROMPT`). — claimed: fabox-os, branch bugfix/736-stop-empty-build-loop
+- [ ] Live-check #736 on Windows with gemini-cli: an empty app/ and a builder that claims `npm run build`
+      stops after two turns (or 10 checks) with the "no files yet" note, and Try again doesn't restart it
+
 ### R5.4 Local models can build
 Owner: open · Status: todo
 The built-in agent loop assumes a capable tool-calling model. Reports #24, #44, #110, #403, #417 and
@@ -305,9 +315,12 @@ been run live.
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
-- [ ] `rebuild --backend <an API backend>` still adds the first agent app it finds to the person's
+- [x] `rebuild --backend <an API backend>` still adds the first agent app it finds to the person's
       settings and prints "Using Claude Code (…)": `ensure_agent` (`rebuild_cmd.rs`) runs whenever no
       agent app is set up, though this run won't use one. Run it only when the build needs one
+      — claimed: AlexJoaquimPereira, branch `bugfix/r5.5-no-agent-with-api-backend`
+- [ ] `--backend <a name that is turned off>` still builds with it: `builder_backend`'s named
+      branch doesn't check `enabled`, while Settings treats an AI that is off as unusable
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
@@ -382,7 +395,8 @@ yet, and the quick start is how every new person begins.
 **A real program, device or file:**
 - [ ] Cutter sessions: try them against a real Cutter, including whether `=h&` keeps Cutter
       responsive (only a stand-in server so far)
-- [ ] Vineflower: run it once on a real JAR (no Java on the machine it was written on)
+- [x] Vineflower: run it once on a real JAR (no Java on the machine it was written on)
+      — claimed: hasnain607, branch docs/r5.7-vineflower-live-run
 - [ ] Verify the 23 unverified adb tools; record results in tool-status.md
 - [ ] Android locales: try `only_locales` on a real APK (only the test fixture so far)
 - [ ] `app_graphs_compare` on the two real Electron releases again, to count how many of the
@@ -408,8 +422,11 @@ Owner: open · Status: in progress
 
 ### R1.6 Headless first
 Owner: maintainers · Status: in progress
-- [ ] Give Linux-specific Clang guidance in Unreal's guided installer when the bundled compiler
+- [x] Give Linux-specific Clang guidance in Unreal's guided installer when the bundled compiler
       is missing (the requirements summary is already platform-specific).
+      — claimed: AlexJoaquimPereira, branch `bugfix/r1.6-linux-unreal-clang`
+- [x] Give macOS the right C++ guidance when Xcode is missing: the status line and
+      requirements summary now name Xcode, matching the guided step.
 - [x] Find Visual Studio's C++ tools on Windows when Visual Studio is installed outside Program
       Files (through the Visual Studio Installer's `ProgramData` instance state or developer
       environment variables, #669, [PR #726](https://github.com/storytold/craft-anything/pull/726))
@@ -427,9 +444,11 @@ Owner: open · Status: in progress
 - [x] A relative program path started in another folder is looked up where it was started
       before it's reported as missing (Unix: a script whose interpreter is missing was said to
       have no file there)
-- [ ] When a saved Codex desktop path is gone, offer the CLI found in its newest build folder
-      (asking first, never replacing a custom program silently), and let Detect/Test check the
-      configured program itself (#721)
+- [x] `ai test` names the program it ran and the saved one it replaced, and `doctor` says a saved
+      path has no program there instead of blaming PATH (#721)
+- [ ] Settings says when a saved agent program is gone and which one runs in its place; today a
+      build moves to the newest build folder or the usual program without saying so, and the
+      setting keeps the old path (read on a worker, not while drawing) (#721)
 - [x] GitHub Copilot through its own CLI login and ACP, without credential import:
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
@@ -492,9 +511,10 @@ Owner: open · Status: in progress
 - [x] Aider has no adapter, so the plain one hands it the prompt as a file name, and it can open a
       browser sign-in nobody agreed to (#72). Give it an adapter, or stop offering it — claimed: Afloat16, branch bugfix/r2.2-aider-recommendations-20261103
 - [ ] Add a non-interactive Aider adapter before recommending it again; detection currently leaves it out.
-- [ ] Codex (#499): in a chat the tool server has no active target, tools turned on with
-      `enable_toolset` can't be called, The
-      reporter attached a patch for chat continuity; look at that first
+- [ ] Codex (#499): in a chat the tool server has no active target. The reporter attached a patch
+      for chat continuity; look at that first
+- [x] Codex (#538): list every permitted tool from startup, since Codex doesn't refresh its callable
+      list after `enable_toolset` changes it — PR #805
 - [x] Codex (#540): `rebuild_start` was refused by `codex exec`'s approval policy and showed as
       `null`; setup and the builder now approve our tools for Codex (we still ask before running
       code) and a refusal explains the fix (`docs/codex.md`)
@@ -555,10 +575,20 @@ Owner: open · Status: in progress
 - [ ] #105, #135, #259, #385 and #423 predate 0.3.0, which looks in more places, and came through
       the ticket relay, so nobody can ask them for `doctor` output. Close them pointing at 0.3.0,
       and add search paths only for a new report that has that output
-- [ ] Say plainly when what's found is the Claude desktop app rather than the `claude` program
+- [x] #423: an agent that is set up but switched off is never offered again, so "No coding agent was
+      found" stays on screen with Claude installed: the setup card and "Look again" leave out every saved
+      AI by name, on or off. Offer a switched-off agent as found and turn it on, keeping its options.
+      Cause is not confirmed on the reporter's machine (needs their config.toml); the fix covers the
+      switched-off case that the code leaves out (`is_on`, `leave_out_set_up`, `builder_backend`). — claimed: fabox-os,
+      branch bugfix/423-disabled-agent-not-offered
+- [x] Say plainly when what's found is the Claude desktop app rather than the `claude` program
       (#259, a guess at its cause)
-- [ ] macOS: `/Applications/Antigravity.app` ended up as the agent's command (#467); find what
-      writes it (no code for it was found; maybe the file picker)
+- [ ] macOS: check that `Claude.app` is where the desktop app is found (#259's hint is untried there)
+- [x] macOS: `/Applications/Antigravity.app` ended up as the agent's command (#467). Found: the "Where is
+      the program?" picker (`pick_file`) returns the bundle, and `set_command` saved any path. Refuse a
+      folder or app bundle when it's saved (`set_command`), and don't run one that was saved before
+      (`program_of` uses the usual name). Tests: `an_app_bundle_is_refused_as_an_agents_program`, `program_of`
+      cases. — claimed: fabox-os, branch bugfix/467-agent-program-app-bundle
 - [x] Windows: look in `%LOCALAPPDATA%\agy\bin` too (#62) — claimed: Afloat16, branch bugfix/r2.2-antigravity-search-20261103
 - [x] Windows: `usual_windows_dirs_come_after_path` counts Antigravity's second folder (#748
       added it; the test runs only on Windows, which CI doesn't)
@@ -644,6 +674,16 @@ Gaps found while using the app for real projects.
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
       total, so a forked answer shows none; count questions in the project's usage
 - [ ] "Make this change" on an answer that suggests one (sends it as a normal message)
+- [x] #504: the builder's plan card can be folded away with its X, or with `project_plan_fold`
+      (between builds: a fold during a build can be overwritten by its next save). The steps stay
+      in the conversation (`FEED_VERSION` 4, `FeedItem::PlanDismissed`), and a later run's
+      checklist shows again — claimed: claude, branch bugfix/r2.9-plan-card-dismiss
+- [ ] A run that ends with steps still open marks them as stopped on its card, instead of
+      showing "Doing" until someone folds it (#504: Claude's runs left the plan unticked)
+- [x] #666: a long line in a feed's tool-work row (a Deep-mode decompile, a status note) ran off
+      the window and pushed the feed left; the header title can't wrap in egui, so it's the note's
+      first line now, cut at 90 characters, and the full note wraps in the body — claimed: claude,
+      branch bugfix/r2.9-feed-text-overflow
 - [ ] **decision** A program started from the CLI (`project_play`) keeps the shell's output pipe
       open, so the command doesn't return until it closes (#207). Every fix found needs `unsafe` or
       an unstable API: an exception to rule 9, or a limit we document. Meanwhile a reproducing test
@@ -665,6 +705,9 @@ Gaps found while using the app for real projects.
       ended 30 s later. Not run on a Mac
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
       `web_site_capture` for a second page, seen once; the same capture passed 41 s earlier)
+- [x] Delete a private browser's temporary profile when it closes or fails to start (#810) — PR #822
+- [ ] Stop private browsers that outlive the app after an abrupt exit, and investigate the Brave
+      Helper crash (#810); both still need macOS reproduction
 - [ ] Claude Code's Ultracode switch (a setting, not an effort level; the effort environment
       variable we use can't turn it on)
 - [x] A model the list doesn't offer (`opusplan`, `[1m]` variants, one another harness serves) can
@@ -705,6 +748,12 @@ Gaps found while using the app for real projects.
 - [ ] Keep the builder-availability smoke regression independent of live agent discovery.
       — claimed: Afloat16, branch test/r2.9-builder-discovery-fixture-20261104
       Test fixture implemented with controlled discovery; automated validation remains pending.
+- [x] macOS: a menu bar with the app's own actions (open a file or folder, new project, settings,
+      Simple / Advanced, Clean room / Deep, the command palette, help); the system's menu bar
+      showed only the app menu
+      — claimed: sanketdofe, branch feature/r2.9-macos-menu-bar
+- [ ] macOS: an Edit menu (Undo, Cut, Copy, Paste, Select All). The keys work in text boxes, but
+      the system's Edit items need the text box to answer them, so they'd show greyed out today
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -760,6 +809,11 @@ Owner: open · Status: in progress
       it's there
 - [ ] `native_publisher_show` hashes the file minus the signature fields, not section by section;
       a file with unusual gaps between sections can read as different
+- [x] Enforce stand-in per-body and total byte budgets on the text that is actually retained after redaction;
+      deduplicate consecutive samples before charging the capture budget.
+      — claimed: Afloat16, branch bugfix/r3.11-standin-redacted-budget-20261103b
+      Revision `d601bc4e` passed [full Linux CI](https://github.com/storytold/craft-anything/actions/runs/41788735130):
+      all four retained-budget regressions and six deduplication regressions passed.
 
 ### R3.12 Format parser correctness
 Owner: open · Status: in progress

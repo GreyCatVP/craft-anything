@@ -26,9 +26,16 @@ pub fn apply(feed: &mut Vec<FeedItem>, e: &RunEvent) {
         // Claude Code's TodoWrite, or our build_checklist (same shape) for API builders.
         RunEvent::Agent(AgentEvent::ToolStarted { tool, input, .. }) if tool == "TodoWrite" || tool == "build_checklist" => {
             if let Some(steps) = plan_from(input) {
-                match feed.iter_mut().find_map(|i| if let FeedItem::Plan(p) = i { Some(p) } else { None }) {
-                    Some(p) => *p = steps,
-                    None => feed.push(FeedItem::Plan(steps)),
+                if feed.iter().any(|i| matches!(i, FeedItem::Plan(_))) && craft_anything_engine::feed::visible_plan(feed).is_none() {
+                    // The person folded the last list (#504): a new list is a new card at the end,
+                    // and the folded one goes.
+                    feed.retain(|i| !matches!(i, FeedItem::Plan(_) | FeedItem::PlanDismissed));
+                    feed.push(FeedItem::Plan(steps));
+                } else {
+                    match feed.iter_mut().find_map(|i| if let FeedItem::Plan(p) = i { Some(p) } else { None }) {
+                        Some(p) => *p = steps,
+                        None => feed.push(FeedItem::Plan(steps)),
+                    }
                 }
             }
         }
@@ -200,6 +207,26 @@ mod tests {
         let mut feed2 = Vec::new();
         apply(&mut feed2, &RunEvent::Agent(AgentEvent::ToolStarted { call_id: "c".into(), tool: "build_checklist".into(), input: todo("in_progress") }));
         assert!(matches!(feed2.as_slice(), [FeedItem::Plan(p)] if p.len() == 2));
+    }
+
+    /// #504: a folded checklist doesn't come back by being updated; the next one a run writes is
+    /// a new card at the end, and there's only ever one checklist in the feed.
+    #[test]
+    fn a_folded_checklist_gives_way_to_the_next_one() {
+        let todo = |status: &str| json!({"todos": [{"content": "Lay out the arena", "activeForm": "Laying out the arena", "status": status}]});
+        let call = |status: &str| RunEvent::Agent(AgentEvent::ToolStarted { call_id: "t".into(), tool: "TodoWrite".into(), input: todo(status) });
+        let plans = |f: &[FeedItem]| f.iter().filter(|i| matches!(i, FeedItem::Plan(_))).count();
+        let mut feed = vec![FeedItem::User(UserItem::Text("A game".into()))];
+        apply(&mut feed, &call("in_progress"));
+        apply(&mut feed, &call("completed"));
+        assert_eq!(plans(&feed), 1, "updates in place while the list isn't folded");
+        assert!(craft_anything_engine::feed::dismiss_plan(&mut feed), "the list folds");
+        assert!(craft_anything_engine::feed::visible_plan(&feed).is_none());
+        apply(&mut feed, &call("in_progress"));
+        assert_eq!(plans(&feed), 1, "one checklist, not one folded and one new");
+        assert!(!feed.iter().any(|i| matches!(i, FeedItem::PlanDismissed)), "the fold went with the old list");
+        assert!(craft_anything_engine::feed::visible_plan(&feed).is_some(), "the new list shows");
+        assert!(matches!(feed.last(), Some(FeedItem::Plan(p)) if p[0].status == PlanStatus::Doing));
     }
 
     #[test]

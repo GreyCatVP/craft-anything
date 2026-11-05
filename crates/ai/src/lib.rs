@@ -194,6 +194,17 @@ pub fn default_builder<'a>(backends: &'a [BackendConfig], chosen: Option<&str>) 
         .or_else(|| on().find(|b| b.kind != BackendKind::AgentCli))
 }
 
+/// Whether `name` is a saved AI that is switched on. One saved but switched off is not set up:
+/// it's offered again when found, so it can be turned on (#423).
+pub fn is_on(backends: &[BackendConfig], name: &str) -> bool {
+    backends.iter().any(|b| b.enabled && b.name == name)
+}
+
+/// The found AIs that aren't already set up and on.
+pub fn leave_out_set_up(found: Vec<Detected>, backends: &[BackendConfig]) -> Vec<Detected> {
+    found.into_iter().filter(|d| !is_on(backends, &d.suggestion.name)).collect()
+}
+
 /// What a backend does in a crew.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -316,6 +327,13 @@ pub struct TestReport {
     /// whether it's signed in, has a model and quota shows only when it gets a message (#48).
     #[serde(default)]
     pub version_only: bool,
+    /// The coding agent's program that ran, which `reply` is the answer of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    /// The saved program that couldn't be used, when `program` ran in its place (#721: an update
+    /// moved it), so a passing test doesn't hide a setting that's out of date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_program_replaced: Option<String>,
 }
 
 /// Text kept in the journal for a user message (bounded).
@@ -408,8 +426,12 @@ impl AiHub {
     /// Look for keys, local servers and agent CLIs (runs quickly; network probes are bounded).
     /// Things already configured (by name) are left out.
     pub fn detect(&self) -> Vec<Detected> {
-        let have: Vec<String> = self.backends().into_iter().map(|b| b.name).collect();
-        detect::detect_all().into_iter().filter(|d| !have.contains(&d.suggestion.name)).collect()
+        leave_out_set_up(detect::detect_all(), &self.backends())
+    }
+
+    /// Why a coding agent people expect may not be found (only the Claude desktop app, say).
+    pub fn detect_hints(&self) -> Vec<detect::DetectHint> {
+        detect::hints()
     }
 
     /// Host aliases from `~/.ssh/config`, for the "run on another machine" picker.
@@ -522,9 +544,20 @@ impl AiHub {
     /// The program an agent app runs (`None` or empty: found by its usual name, on PATH and in the
     /// usual install folders). Returns false when there was no such backend.
     pub fn set_command(&self, name: &str, command: Option<&str>) -> Result<bool, ToolError> {
+        let command = command.map(str::trim).filter(|c| !c.is_empty());
         let mut cfg = self.config_to_change()?;
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
-        b.options.command = command.map(str::trim).filter(|c| !c.is_empty()).map(str::to_string);
+        // A folder can't be started, and on a Mac an app is one (#467: the file picker returned
+        // `Antigravity.app`). Another computer's path isn't looked at here.
+        let local = b.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
+        if let Some(c) = command
+            && local
+            && std::path::Path::new(c).is_dir()
+        {
+            return Err(ToolError::invalid(format!("{c} is a folder, so it can't be the agent's program. On a Mac an app is a folder."))
+                .with_remediation("Pick the agent's command-line program instead, such as `agy`, or clear the program to use the usual one."));
+        }
+        b.options.command = command.map(str::to_string);
         self.save_config(&cfg)?;
         Ok(true)
     }
@@ -921,6 +954,8 @@ impl AiHub {
                 latency_ms: start.elapsed().as_millis() as u64,
                 reply: out.stdout_text().lines().next().unwrap_or_default().trim().to_string(),
                 version_only: true,
+                saved_program_replaced: e.options.command.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != program).map(str::to_string),
+                program: Some(program),
             });
         }
         let mut slot = self.build_model(&e)?;
@@ -943,6 +978,8 @@ impl AiHub {
             latency_ms: start.elapsed().as_millis() as u64,
             reply: r.message.text().trim().to_string(),
             version_only: false,
+            program: None,
+            saved_program_replaced: None,
         })
     }
 
@@ -1021,7 +1058,11 @@ fn reach(e: &BackendEntry, key: Option<String>) -> Result<u64, String> {
         }
         BackendKind::AgentCli => {
             let program = cli_agents::program_of(&e.config, &e.options);
-            craft_anything_platform::which(&program).map(|_| ()).ok_or_else(|| format!("{program} isn't on PATH"))
+            // A saved path that's gone (#721): PATH has nothing to do with it.
+            let by_path = std::path::Path::new(&program).parent().is_some_and(|p| !p.as_os_str().is_empty());
+            craft_anything_platform::which(&program)
+                .map(|_| ())
+                .ok_or_else(|| if by_path { format!("there's no program at {program}") } else { format!("{program} isn't on PATH") })
         }
     };
     r.map(|_| start.elapsed().as_millis() as u64)

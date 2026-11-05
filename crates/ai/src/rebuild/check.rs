@@ -308,7 +308,8 @@ mod tests {
         let (d, stop) = (tempfile::tempdir().unwrap(), CancelToken::default());
         std::fs::write(d.path().join("package.json"), "").unwrap();
         let table = stacks::toolchain_in(d.path()).expect("the table has Node.js");
-        let node = stacks::Toolchain { test: vec!["no-such-program-here".into()], ..table.clone() };
+        // Without the Windows name (npm.cmd), which would start the real npm instead of the stand-in.
+        let node = stacks::Toolchain { test: vec!["no-such-program-here".into()], windows_program: None, ..table.clone() };
         for json in [r#"{"name":"x"}"#, r#"{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}"#] {
             std::fs::write(d.path().join("package.json"), json).unwrap();
             let (passed, note) = own_tests_check(d.path(), Some(&node), &stop);
