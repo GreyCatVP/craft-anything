@@ -334,6 +334,24 @@ impl ClaudeCode {
     fn config_dir(&self) -> Option<std::path::PathBuf> {
         self.folder.clone().or_else(claude_config_dir)
     }
+
+    /// The plain-words fix for a failed run, when one exists. For Free Claude Code (`fcc-claude`)
+    /// the Anthropic sign-in command (`claude auth login`) doesn't apply — it authenticates through
+    /// its own proxy token — so that guidance is left out, while billing and configuration fixes
+    /// still show. `hint` is the sign-in (or too-old) fix the failure text suggested.
+    fn remediation_for(&self, free: bool, failure: &TurnFailure, hint: Option<String>) -> Option<String> {
+        match (free, failure.kind) {
+            (true, FailureKind::Billing) => Some("Check the account's credits, plan and spending limit before trying again.".into()),
+            (true, FailureKind::Configuration) => Some("Check the chosen model and Claude Code settings before trying again.".into()),
+            (true, _) => None,
+            (false, _) => hint.or_else(|| match failure.kind {
+                FailureKind::Authentication => self.sign_in_fix(),
+                FailureKind::Billing => Some("Check the account's credits, plan and spending limit before trying again.".into()),
+                FailureKind::Configuration => Some("Check the chosen model and Claude Code settings before trying again.".into()),
+                _ => None,
+            }),
+        }
+    }
 }
 
 impl AgentAdapter for ClaudeCode {
@@ -433,12 +451,7 @@ impl AgentAdapter for ClaudeCode {
                     p.failure = Some(failure);
                     let why = v.pointer("/message/content").map(content_text).unwrap_or_else(|| code.to_string());
                     let (message, hint) = claude_code_failure_in(&why, self.folder.as_deref());
-                    let remediation = hint.or_else(|| match failure.kind {
-                        FailureKind::Authentication => self.sign_in_fix(),
-                        FailureKind::Billing => Some("Check the account's credits, plan and spending limit before trying again.".into()),
-                        FailureKind::Configuration => Some("Check the chosen model and Claude Code settings before trying again.".into()),
-                        _ => None,
-                    });
+                    let remediation = self.remediation_for(p.free_claude_code, &failure, hint);
                     return vec![AgentEvent::Error { message, remediation, log: None }];
                 }
                 for b in v.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default() {
@@ -485,9 +498,10 @@ impl AgentAdapter for ClaudeCode {
                         log: None,
                     });
                 } else if v.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
-                    p.failure.get_or_insert(TurnFailure::new(FailureKind::Unknown));
+                    let failure = p.failure.get_or_insert_with(|| TurnFailure::new(FailureKind::Unknown));
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
-                    let (message, remediation) = claude_code_failure_in(&why, self.folder.as_deref());
+                    let (message, hint) = claude_code_failure_in(&why, self.folder.as_deref());
+                    let remediation = self.remediation_for(p.free_claude_code, failure, hint);
                     out.push(AgentEvent::Error { message, remediation, log: None });
                 }
             }
@@ -516,10 +530,11 @@ impl AgentAdapter for ClaudeCode {
         }
     }
 
+    /// Whether it's signed in to Anthropic, probed with `claude auth status`. Free Claude Code
+    /// (`fcc-claude`) authenticates through its own proxy with a token, not Anthropic OAuth, so
+    /// the probe doesn't apply: `None` ("not checked") lets the run proceed, as with any
+    /// provider-backed agent.
     fn signed_in(&self, program: &str) -> Option<bool> {
-        // Free Claude Code authenticates through its own proxy with a token, not Anthropic OAuth,
-        // so the `claude auth status` probe doesn't apply here. `None` ("not checked") lets the
-        // run proceed, as with any provider-backed agent.
         if crate::cli_agents::is_free_claude_code(program) {
             return None;
         }

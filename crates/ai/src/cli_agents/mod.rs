@@ -358,6 +358,10 @@ fn standalone(program: &str) -> Process {
 /// Parses one CLI's output stream: the adapter reads each line, this keeps what it learned.
 pub struct StreamParser {
     adapter: Arc<dyn AgentAdapter>,
+    /// Whether the program being run is Free Claude Code (`fcc-claude`), whose runs authenticate
+    /// through its own proxy rather than Anthropic OAuth, so Anthropic sign-in guidance doesn't
+    /// apply to its failures.
+    free_claude_code: bool,
     pub session_id: Option<String>,
     pub tool_names: HashMap<String, String>,
     pub input_tokens: u64,
@@ -407,6 +411,7 @@ impl StreamParser {
     pub fn new(adapter: Arc<dyn AgentAdapter>) -> Self {
         StreamParser {
             adapter,
+            free_claude_code: false,
             session_id: None,
             tool_names: HashMap::new(),
             input_tokens: 0,
@@ -849,6 +854,7 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let _ =
         tx.send(AgentEvent::Status { text: format!("Asking {}{}…", display_for(&agent), remote.as_ref().map(|h| format!(" on {h}")).unwrap_or_default()) });
     let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
+    parser.lock().unwrap_or_else(PoisonError::into_inner).free_claude_code = is_free_claude_code(&program);
     let (p2, tx2, tx_err, lost2, failure2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone(), failure.clone());
     let failed_tools = Arc::new(AtomicBool::new(false));
     let (failed_tools2, failed_tools3) = (failed_tools.clone(), failed_tools.clone());
@@ -1750,6 +1756,27 @@ mod tests {
         // No Anthropic auth-status probe runs for it: `None` means "not checked", so a build
         // proceeds on FCC's own token setup.
         assert_eq!(adapter.signed_in("fcc-claude"), None);
+    }
+
+    #[test]
+    fn free_claude_code_failures_omit_anthropic_sign_in_guidance() {
+        let err = json!({"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired"}).to_string();
+        // Claude Code's own failure suggests signing in with `claude auth login`.
+        let mut claude = StreamParser::new(adapter_for("claude-code"));
+        match &claude.line(&err)[0] {
+            AgentEvent::Error { remediation: Some(r), .. } => assert!(r.contains("claude auth login"), "{r}"),
+            other => panic!("{other:?}"),
+        }
+        // Free Claude Code authenticates through its own proxy, so it gets no Anthropic sign-in fix.
+        let mut fcc = StreamParser::new(adapter_for("free-claude-code"));
+        fcc.free_claude_code = true;
+        match &fcc.line(&err)[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert_eq!(message, "Claude Code stopped: Failed to authenticate: OAuth session expired");
+                assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
