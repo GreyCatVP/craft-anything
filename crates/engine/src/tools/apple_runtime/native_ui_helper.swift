@@ -94,7 +94,8 @@ guard let req = try? JSONDecoder().decode(Request.self, from: input), let pid = 
 }
 
 if !AXIsProcessTrusted() {
-    emit(["error": "accessibility permission not granted", "nodes": []])
+    // A typed reason so the caller can report a permission problem, not an empty tree.
+    emit(["error": "accessibility permission not granted", "reason": "accessibility_not_granted", "nodes": []])
     exit(0)
 }
 

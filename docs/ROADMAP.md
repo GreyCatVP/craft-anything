@@ -344,8 +344,8 @@ Owner: open · Status: todo
 Owner: open · Status: todo
 Golden rule 3: the result is evidence. All four tickets are confirmed in the code, with no PR yet.
 Each fix needs a Mac to test on.
-- [ ] macOS: a denied Accessibility permission is reported as success with an empty tree (#240)
-      — claimed: mavericzz, branch bugfix/r5.6-accessibility-denied
+- [x] macOS: a denied Accessibility permission is reported as success with an empty tree (#240)
+      — claimed: mavericzz, branch bugfix/r5.6-accessibility-denied; PR #887
 - [ ] macOS: `runtime_ui_read` ignores `screenshot` (#248) and `accessibility` (#307): the Swift
       helper declares both and reads neither
 - [ ] macOS: call observation writes a literal `\n` into its lldb callback, so the Python is
