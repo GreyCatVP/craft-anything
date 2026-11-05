@@ -732,14 +732,6 @@ impl Worker {
                     _ => "Improving the build…",
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
-                // Marked only now: anything above can still stop the run before the builder is told.
-                let told = std::mem::take(&mut asked);
-                if !told.is_empty()
-                    && let Err(e) = craft_anything_engine::questions::mark_told(ws, &told)
-                {
-                    // The cost of not saving this is telling the builder once more, not a stopped build.
-                    log::warn!("couldn't record which questions the builder was told: {}", e.message);
-                }
                 ws.manifest.awaiting_check = false;
                 let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take());
                 // Kept even when the turn failed: the conversation is still worth carrying.
@@ -764,6 +756,14 @@ impl Worker {
                         return Err(error);
                     }
                 };
+                // Only a finished turn counts: telling the builder twice costs little, and a turn that
+                // failed may not have told it at all.
+                let told = std::mem::take(&mut asked);
+                if !told.is_empty()
+                    && let Err(e) = craft_anything_engine::questions::mark_told(ws, &told)
+                {
+                    log::warn!("couldn't record which questions the builder was told: {}", e.message);
+                }
                 if !reply.trim().is_empty() {
                     ws.manifest.last_reply = reply.trim().to_string();
                 }

@@ -1432,6 +1432,39 @@ mod picking_up_a_build {
         assert!(later.contains("how does saving work") && later.contains("now add saving"), "{later}");
     }
 
+    /// A turn that failed may never have reached the builder, so its questions are still to tell.
+    #[test]
+    fn a_failed_turn_leaves_just_ask_questions_to_tell_with_the_next_message() {
+        use craft_anything_engine::questions::{self, AskedQuestion};
+        let b = bench();
+        let ws = worked_on(&b);
+        questions::add(
+            &ws,
+            AskedQuestion { deep: false, ..AskedQuestion::new("where is the score kept".into(), "In src.".into(), true, "Stand-in".into(), None, 0) },
+        )
+        .unwrap();
+        // As in the test above: a typed failure, which isn't retried after a wait.
+        let mut config = b.hub.config();
+        let mut entry = config.get("Stand-in").unwrap().clone();
+        entry.config.model = "opencode".into();
+        config.upsert(entry);
+        b.hub.engine.session().settings.ai = config.to_table().unwrap();
+        let agent = b._dir.path().join("agent.sh");
+        let works = std::fs::read_to_string(&agent).unwrap().replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format'; exit 0; fi\n",
+            1,
+        );
+        let error = json!({"type":"error","error":{"name":"APIError","data":{"message":"fixture sign in needed","statusCode":401,"isRetryable":false}}});
+        std::fs::write(&agent, works.replace("echo Done.", &format!("printf '%s\\n' '{error}'\nexit 1"))).unwrap();
+        let say = |m: &str| try_with(&b, &ws, RunOptions { message: Some(m.into()), ..RunOptions::default() }).0;
+        assert!(!say("make it bigger"));
+        assert_eq!(questions::untold(&ws, false).len(), 1, "the turn failed");
+        std::fs::write(&agent, works).unwrap();
+        say("make it bigger");
+        assert!(questions::untold(&ws, false).is_empty(), "the turn finished");
+    }
+
     #[test]
     fn try_again_after_the_builder_stopped_carries_on_instead_of_starting_over() {
         let b = bench();
@@ -1945,6 +1978,9 @@ fn just_ask_is_told_to_the_builder_shortly_and_cut_on_a_character() {
     assert!(!told.contains("question 2") && told.contains("question 3") && told.contains("question 7"), "the latest five: {told}");
     assert!(told.contains(&format!("{}…", "é".repeat(2000))) && !told.contains(&"é".repeat(2001)), "a long answer is cut");
     assert!(told.contains("A: short\n"), "a short one isn't marked as cut");
+    // The most a person can ask, five times over, still leaves room on a Windows command line.
+    let longest: Vec<_> = (0..5).map(|_| AskedQuestion::new("q".repeat(4000), "a".repeat(100_000), true, "Claude".into(), None, 0)).collect();
+    assert!(super::just_asked(&longest).chars().count() < 14_000);
 }
 
 fn check_worker(ws: &Workspace, deep: bool) -> Worker {
