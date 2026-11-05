@@ -1124,31 +1124,6 @@ fn an_ais_model_is_changed_in_settings() {
     assert!(h.state().model_picker.is_none(), "the picker closes once a model is chosen");
 }
 
-/// #470: a model the list doesn't offer can be typed in.
-#[test]
-fn a_model_the_list_doesnt_offer_can_be_typed_in() {
-    let url = model_server();
-    let mut h = harness(move || {
-        let mut a = demo::app(demo::engine(Mode::Experienced, true));
-        a.hub.add_server("Box", &url, Some("nomic-embed-text"), None).unwrap();
-        a.state.settings_open = true;
-        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
-        a
-    });
-    h.state_mut().refresh_backends();
-    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box")));
-    h.run_steps(2);
-    h.get_by_label("Change…").click();
-    assert!(wait(&mut h, |a| a.model_picker.as_ref().is_some_and(|(_, m)| m.is_some())));
-    h.run_steps(2);
-    h.get_by_label("Another model").click();
-    h.run_steps(1);
-    h.get_by_label("Another model").type_text("my-own-model");
-    h.run_steps(1);
-    h.key_press(egui::Key::Enter);
-    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box" && b.model == "my-own-model")));
-}
-
 /// #54, #98: an AI server on another computer is added by its address in Settings → AI, with a
 /// model that can chat, and the form empties once it's added.
 #[test]
