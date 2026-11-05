@@ -322,6 +322,11 @@ Owner: open · Status: todo
 - [x] `--backend <a name that is turned off>` no longer builds with it: `builder_backend`'s named
       branch doesn't check `enabled`, while Settings treats an AI that is off as unusable
       — claimed: kuseidos, branch `bugfix/r5.5-named-backend-that-is-turned-off`
+- [ ] **decision** An explicit backend chosen in this session, turned off while a draft waits, falls back
+      to the default instead of saying so: `question.rs` reaches `builder_backend` through
+      `project_builder`, which filters `enabled`, and the project's saved builder is meant to fall back
+      (its test says so). Say whether a choice made in the session should be remembered apart from the
+      saved one, and refused when it is off
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
