@@ -185,9 +185,7 @@ impl Engine {
             Requires::Engine(id) => match session.settings.engine_path(id) {
                 Some(_) => Availability::ok(),
                 None => {
-                    use craft_anything_engines::ToolPathLookup;
-                    let set = session.settings.engines.tools.override_for(id);
-                    let (reason, remediation) = craft_anything_engines::not_found_help(id, set.as_deref(), craft_anything_platform::in_flatpak());
+                    let (reason, remediation) = session.settings.engine_not_found(id);
                     Availability::no(reason, remediation)
                 }
             },

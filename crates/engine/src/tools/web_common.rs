@@ -145,8 +145,13 @@ impl Browser {
     }
 
     pub(crate) fn launch(ctx: &Ctx<'_>, opts: &LaunchOptions, dl: &Deadline) -> Result<Browser, ToolError> {
-        let exe = craft_anything_engines::locate("chromium", &ctx.session.settings.engines.tools, &ctx.session.settings.engine_store_dir())
-            .ok_or_else(|| engine_missing("no Chromium-based browser was found"))?;
+        let exe =
+            craft_anything_engines::locate("chromium", &ctx.session.settings.engines.tools, &ctx.session.settings.engine_store_dir()).ok_or_else(|| {
+                // Browser tools that take an endpoint come here without `Requires::Engine`'s check.
+                let (reason, fix) = ctx.session.settings.engine_not_found("chromium");
+                ToolError::new(ErrorCode::EngineMissing, reason)
+                    .with_remediation(format!("{fix} Or give a loopback CDP endpoint (start a browser with --remote-debugging-port)."))
+            })?;
         let profile = BrowserProfile(super::artifact_tools::fresh_dir_in(&profile_base(&exe, dirs::home_dir()), "craft-browser")?);
         let mut args: Vec<String> = vec![
             format!("--user-data-dir={}", profile.0.display()),

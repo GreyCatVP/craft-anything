@@ -56,16 +56,18 @@ pub fn not_found_help(id: &str, set: Option<&Path>, flatpak: bool) -> (String, S
         Some(p) => format!("This needs {name}, and the path set for it in Settings → Engines ({}) isn't there.", p.display()),
         None => format!("This needs {name} installed."),
     };
-    let remediation = if flatpak && manual {
+    const CORRECT: &str = "Correct the path in Settings → Engines, or clear it to look in the usual places.";
+    let sandbox = (flatpak && manual).then(|| {
         format!(
             "This app is running as a Flatpak, and its sandbox can't see programs in your system's folders, so a path to one won't work. To use {name} from your computer, run the AppImage, .deb, .rpm or tarball version instead."
         )
-    } else if set.is_some() {
-        "Correct the path in Settings → Engines, or clear it to look in the usual places.".to_string()
-    } else if manual {
-        format!("Install {name}, then set its path in Settings → Engines if it still isn't found.")
-    } else {
-        format!("Install {name} from Settings → Engines.")
+    });
+    let remediation = match (set, sandbox) {
+        (Some(_), Some(sandbox)) => format!("{CORRECT} {sandbox}"),
+        (Some(_), None) => CORRECT.to_string(),
+        (None, Some(sandbox)) => sandbox,
+        (None, None) if manual => format!("Install {name}, then set its path in Settings → Engines if it still isn't found."),
+        (None, None) => format!("Install {name} from Settings → Engines."),
     };
     (reason, remediation)
 }
@@ -206,9 +208,11 @@ mod tests {
         let set = Path::new("/usr/bin/brave");
         let (reason, fix) = not_found_help("chromium", Some(set), true);
         assert!(reason.contains(&set.display().to_string()), "{reason}");
-        assert!(fix.contains("Flatpak") && fix.contains("AppImage"), "{fix}");
-        // A Flatpak can't reach a browser with no path set either.
-        assert!(not_found_help("chromium", None, true).1.contains("Flatpak"));
+        // The path may only be mistyped, and one in the home folder can work, so correcting it comes first.
+        assert!(fix.starts_with("Correct the path") && fix.contains("Flatpak") && fix.contains("AppImage"), "{fix}");
+        // A Flatpak can't reach a browser with no path set either, and there's no path to correct.
+        let (_, fix) = not_found_help("chromium", None, true);
+        assert!(fix.contains("Flatpak") && !fix.contains("Correct the path"), "{fix}");
 
         let (reason, fix) = not_found_help("chromium", Some(set), false);
         assert!(reason.contains("isn't there") && fix.contains("Correct the path") && !fix.contains("Flatpak"), "{reason} {fix}");
