@@ -182,6 +182,7 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
             }
             rule(ui);
             backend_picker(app, ui);
+    quick_model_picker(app, ui);
             deep_toggle(app, ui);
             usage_pill(app, ui);
             if app.jobs.busy() {
@@ -273,8 +274,7 @@ fn deep_toggle(app: &mut CraftApp, ui: &mut Ui) {
 }
 
 /// AI backend picker: configured brains, "No AI", "Set up…".
-fn backend_picker(app: &mut CraftApp, ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
+fn backend_picker(app: &mut CraftApp, ui: &mut Ui) {    let t = Tokens::get(ui.ctx());
     let current = format!("{} · {}", tr("AI"), app.state.backend.clone().unwrap_or_else(|| tr("None")));
     let mut choice: Option<Option<String>> = None;
     let mut setup = false;
@@ -309,5 +309,125 @@ fn backend_picker(app: &mut CraftApp, ui: &mut Ui) {
         app.state.settings_open = true;
         app.state.settings_tab = crate::state::SettingsTab::Ai;
         app.detect_backends();
+    }
+}
+
+/// `claude-sonnet-5-5` → `Claude Sonnet 5.5`, `gpt-5.4-mini` → `GPT 5.4 mini`.
+fn pretty_model(id: &str) -> String {
+    let short = id.rsplit('/').next().unwrap_or(id);
+    let mut words: Vec<String> = Vec::new();
+    for part in short.split('-').filter(|p| !p.is_empty()) {
+        let word = match part {
+            "gpt" => "GPT".to_string(),
+            "llm" => "LLM".to_string(),
+            "ai" => "AI".to_string(),
+            other => {
+                let mut chars = other.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            }
+        };
+        words.push(word);
+    }
+    // "5 5" ya da "4 5" gibi sürüm parçalarını "5.5" yap.
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        let numeric = |w: &String| w.chars().all(|c| c.is_ascii_digit());
+        if i + 1 < words.len() && numeric(&words[i]) && numeric(&words[i + 1]) {
+            out.push(format!("{}.{}", words[i], words[i + 1]));
+            i += 2;
+        } else {
+            out.push(words[i].clone());
+            i += 1;
+        }
+    }
+    out.join(" ")
+}
+
+/// Title-bar model picker: every model the current AI offers, searchable, one click away.
+fn quick_model_picker(app: &mut CraftApp, ui: &mut Ui) {
+    let Some(name) = app.state.backend.clone() else { return };
+    let Some(config) = app.backends.iter().find(|b| b.name == name) else { return };
+    let current = config.model.clone();
+
+    app.load_quick_models(&name);
+    let models = app.quick_models.get(&name).cloned().unwrap_or_default();
+
+    let t = Tokens::get(ui.ctx());
+    let mut chosen: Option<String> = None;
+    let mut opened = false;
+    let mut filter = app.model_filter.clone();
+    let focus = app.model_focus;
+    app.model_focus = false;
+
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 30.0;
+        let response = egui::ComboBox::from_id_salt("quick-model-picker")
+            .selected_text(theme::label_text(&pretty_model(&current), 12.0).color(t.text))
+            .icon(widgets::combo_icon)
+            .width(170.0)
+            .show_ui(ui, |ui| {
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut filter)
+                        .hint_text(tr("Filter"))
+                        .desired_width(f32::INFINITY),
+                );
+                if focus {
+                    search.request_focus();
+                }
+                ui.add_space(4.0);
+
+                if models.is_empty() {
+                    ui.label(tr("Nothing found"));
+                    return;
+                }
+
+                let needle = filter.trim().to_lowercase();
+                let matches: Vec<&String> = models
+                    .iter()
+                    .filter(|m| {
+                        needle.is_empty()
+                            || m.to_lowercase().contains(&needle)
+                            || pretty_model(m).to_lowercase().contains(&needle)
+                    })
+                    .collect();
+
+                if matches.is_empty() {
+                    ui.label(tr("Nothing matches."));
+                    return;
+                }
+
+                egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                    for model in matches {
+                        let on = *model == current;
+                        if ui.selectable_label(on, pretty_model(model)).on_hover_text(model).clicked() {
+                            chosen = Some(model.clone());
+                        }
+                    }
+                });
+            })
+            .response;
+        if response.clicked() {
+            opened = true;
+        }
+        response.on_hover_text(tr("Model"));
+    });
+
+    app.model_filter = filter;
+    if opened {
+        // Yeniden açıldığında boş bir arama kutusu ve imleç olsun.
+        app.model_filter.clear();
+        app.model_focus = true;
+    }
+
+    if let Some(model) = chosen
+        && model != current
+    {
+        app.model_filter.clear();
+        app.set_model(&name, &model);
+        app.choose_backend(Some(name));
     }
 }

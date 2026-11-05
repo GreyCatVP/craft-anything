@@ -164,6 +164,11 @@ pub enum Done {
         name: String,
         result: Result<Vec<String>, ToolError>,
     },
+    /// Model lists for the title bar's quick picker (no Settings panel involved).
+    QuickModels {
+        name: String,
+        result: Result<Vec<String>, ToolError>,
+    },
     AgentModelChoices {
         request: u64,
         context: craft_anything_ai::ModelContext,
@@ -437,6 +442,12 @@ pub struct CraftApp {
     /// The AI whose model is being chosen in Settings → AI, and the models it offers once they've
     /// come (`None`: still asking).
     pub model_picker: Option<(String, Option<Vec<String>>)>,
+    /// Quick model lists for the title bar's model picker, by AI name, and the ones being asked for.
+    pub quick_models: std::collections::BTreeMap<String, Vec<String>>,
+    pub quick_models_asking: std::collections::BTreeSet<String>,
+    /// Title bar's model list: what's typed in its search box, and whether to focus it next frame.
+    pub model_filter: String,
+    pub model_focus: bool,
     pub agent_model_picker: Option<builders::AgentModelPicker>,
     model_request: u64,
     pub model_tuning: std::collections::BTreeMap<String, ModelTuningDraft>,
@@ -561,6 +572,10 @@ impl CraftApp {
             backends: Vec::new(),
             backend_options: Default::default(),
             model_picker: None,
+            quick_models: Default::default(),
+            quick_models_asking: Default::default(),
+            model_filter: String::new(),
+            model_focus: false,
             agent_model_picker: None,
             model_request: 0,
             model_tuning: Default::default(),
@@ -1464,6 +1479,13 @@ impl CraftApp {
                 if self.state.backend.as_ref().is_some_and(|n| !b.iter().any(|c| &c.name == n)) {
                     self.state.backend = None;
                 }
+                // Tek bir AI yapilandirilmissa onu kendiliginden sec: "AI: Hicbiri" ile
+                // baslamak, ayarlari dogru olan kisiyi yaniltiyor.
+                if self.state.backend.is_none()
+                    && let Some(first) = b.iter().find(|c| c.enabled)
+                {
+                    self.state.backend = Some(first.name.clone());
+                }
                 self.backends = b;
                 self.builder = builder;
                 self.extractor = extractor;
@@ -1482,6 +1504,19 @@ impl CraftApp {
                     self.toast(e.for_people(), true);
                 }
             },
+            Done::QuickModels { name, result } => {
+                self.quick_models_asking.remove(&name);
+                match result {
+                    Ok(models) => {
+                        self.quick_models.insert(name, models);
+                    }
+                    Err(e) => {
+                        // Boş liste yaz: aynı istek her karede yeniden denenmesin.
+                        self.quick_models.insert(name, Vec::new());
+                        self.toast(e.for_people(), true);
+                    }
+                }
+            }
             Done::AgentModelChoices { request, context, result } => {
                 // Keep a matching result even while the engine is busy. Settings invalidates
                 // changed contexts once it can read the session again; saving rechecks too.

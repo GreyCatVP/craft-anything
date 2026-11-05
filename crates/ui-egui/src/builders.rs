@@ -168,9 +168,20 @@ impl CraftApp {
         });
     }
 
-    /// Ask an AI which models it can use, for Settings → AI's model picker.
-    pub fn pick_model(&mut self, name: &str) {
+    /// Load the models an AI offers for the title bar's quick picker, once.
+    pub fn load_quick_models(&mut self, name: &str) {
+        if self.quick_models.contains_key(name) || !self.quick_models_asking.insert(name.to_string()) {
+            return;
+        }
         let (hub, name) = (self.hub.clone(), name.to_string());
+        self.jobs.spawn(tr("List an AI's models"), false, move |_| {
+            let result = hub.model_choices(&name);
+            Ok(crate::Done::QuickModels { name, result })
+        });
+    }
+
+    /// Ask an AI which models it can use, for Settings → AI's model picker.
+    pub fn pick_model(&mut self, name: &str) {        let (hub, name) = (self.hub.clone(), name.to_string());
         self.model_picker = Some((name.clone(), None));
         self.jobs.spawn(tr("List an AI's models"), false, move |_| {
             let result = hub.model_choices(&name);
