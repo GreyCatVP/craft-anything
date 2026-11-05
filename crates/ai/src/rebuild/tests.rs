@@ -83,6 +83,9 @@ fn turkish_requests_keep_their_project_kind() {
     // Benzer sözcükler yanlış tür seçtirmemeli: "oyuncak" bir oyun değil, "apartman sitesi" bir site değil.
     assert_ne!(choose("Basit bir oyuncak yap", &TargetRef::None).0, "game", "oyuncak");
     assert_ne!(choose("Apartman sitesi için bir form yap", &TargetRef::None).0, "website", "apartman sitesi");
+    // Türkçe büyük harf: "I" noktasız "ı"ya, "İ" noktalı "i"ye katlanmalı.
+    assert_eq!(choose("BASİT BİR YILAN OYUNU", &TargetRef::None), ("game", "Unity"), "OYUNU");
+    assert_eq!(choose("İNTERNET SİTESİ yap", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "SİTESİ");
 }
 
 #[test]

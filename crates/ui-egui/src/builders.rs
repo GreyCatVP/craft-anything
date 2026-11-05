@@ -176,10 +176,10 @@ impl CraftApp {
         {
             return;
         }
-        let (hub, name) = (self.hub.clone(), name.to_string());
+        let (hub, name, generation) = (self.hub.clone(), name.to_string(), self.quick_models_generation);
         self.jobs.spawn(tr("List an AI's models"), false, move |_| {
             let result = hub.model_choices(&name);
-            Ok(crate::Done::QuickModels { name, result })
+            Ok(crate::Done::QuickModels { generation, name, result })
         });
     }
 

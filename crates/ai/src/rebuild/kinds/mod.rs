@@ -40,7 +40,7 @@ pub struct DetectCx<'a> {
 impl<'a> DetectCx<'a> {
     pub fn new(request: &str, target: &'a TargetRef, stack: &'a str) -> DetectCx<'a> {
         let words = stacks::words(request);
-        let request = format!(" {} ", request.to_lowercase());
+        let request = format!(" {} ", stacks::fold(request));
         DetectCx { request, words, target, stack, deep: false }
     }
 

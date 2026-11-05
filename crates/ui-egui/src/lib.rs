@@ -166,6 +166,7 @@ pub enum Done {
     },
     /// Model lists for the title bar's quick picker (no Settings panel involved).
     QuickModels {
+        generation: u64,
         name: String,
         result: Result<Vec<String>, ToolError>,
     },
@@ -447,6 +448,8 @@ pub struct CraftApp {
     pub quick_models_asking: std::collections::BTreeSet<String>,
     /// Backends whose model list failed; they are retried when the picker is opened again.
     pub quick_models_failed: std::collections::BTreeSet<String>,
+    /// Counts backend refreshes, so a discovery that started before one is ignored when it lands.
+    pub quick_models_generation: u64,
     /// Title bar's model list: what's typed in its search box, and whether to focus it next frame.
     pub model_filter: String,
     pub model_focus: bool,
@@ -577,6 +580,7 @@ impl CraftApp {
             quick_models: Default::default(),
             quick_models_asking: Default::default(),
             quick_models_failed: Default::default(),
+            quick_models_generation: 0,
             model_filter: String::new(),
             model_focus: false,
             agent_model_picker: None,
@@ -1492,7 +1496,9 @@ impl CraftApp {
                 {
                     self.state.backend = Some(first.name.clone());
                 }
-                // Yapilandirma degismis olabilir: model listelerini yeniden sor.
+                // Yapilandirma degismis olabilir: model listelerini yeniden sor. Sayaci artir ki
+                // bundan once baslamis bir kesif sonucu yeni listeyi ezmesin.
+                self.quick_models_generation = self.quick_models_generation.wrapping_add(1);
                 self.quick_models.clear();
                 self.quick_models_asking.clear();
                 self.quick_models_failed.clear();
@@ -1514,19 +1520,22 @@ impl CraftApp {
                     self.toast(e.for_people(), true);
                 }
             },
-            Done::QuickModels { name, result } => {
-                self.quick_models_asking.remove(&name);
-                match result {
-                    Ok(models) => {
-                        self.quick_models_failed.remove(&name);
-                        self.quick_models.insert(name, models);
-                    }
-                    Err(e) => {
-                        // Bossa: her karede yeniden denenmesin; ama secici yeniden acildiginda
-                        // (gecici bir hata gectiyse) bir kez daha sans verilsin.
-                        self.quick_models.remove(&name);
-                        self.quick_models_failed.insert(name);
-                        self.toast(e.for_people(), true);
+            Done::QuickModels { generation, name, result } => {
+                // Bu keşif, arada olmuş bir arka uç yenilemesinden eski: sonucu yok say.
+                if generation == self.quick_models_generation {
+                    self.quick_models_asking.remove(&name);
+                    match result {
+                        Ok(models) => {
+                            self.quick_models_failed.remove(&name);
+                            self.quick_models.insert(name, models);
+                        }
+                        Err(e) => {
+                            // Bossa: her karede yeniden denenmesin; ama secici yeniden acildiginda
+                            // (gecici bir hata gectiyse) bir kez daha sans verilsin.
+                            self.quick_models.remove(&name);
+                            self.quick_models_failed.insert(name);
+                            self.toast(e.for_people(), true);
+                        }
                     }
                 }
             }
@@ -1571,6 +1580,8 @@ impl CraftApp {
                         && let Some(mut c) = self.conversation.take()
                     {
                         c.stop();
+                        // Son baloncuk "dusunuyor" gostergesinde kalmasin.
+                        crate::chat::end_streaming(&mut self.state.chat);
                     }
                     self.model_tuning.remove(&name);
                 }

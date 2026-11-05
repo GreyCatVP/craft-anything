@@ -82,7 +82,7 @@ pub fn apply_event(chat: &mut Vec<ChatItem>, e: AgentEvent) {
     }
 }
 
-fn end_streaming(chat: &mut [ChatItem]) {
+pub(crate) fn end_streaming(chat: &mut [ChatItem]) {
     if let Some(ChatItem::Assistant { streaming, .. }) = chat.last_mut() {
         *streaming = false;
     }

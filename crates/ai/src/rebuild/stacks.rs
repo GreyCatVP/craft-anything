@@ -111,8 +111,22 @@ fn parse(text: &str) -> Result<Table, toml::de::Error> {
 /// A request as `asked_by` phrases are matched: lower-case words, punctuation turned into
 /// spaces, padded with spaces (`"Use Next.js, shadcn/ui"` → `" use next js shadcn ui "`).
 pub fn words(request: &str) -> String {
-    let lower = request.to_lowercase();
+    let lower = fold(request);
     format!(" {} ", lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
+}
+
+/// Turkish-aware lower-casing: Rust maps `I` to `i` and splits `İ` into `i` + a combining dot,
+/// so `OYUNLARI` would not match `oyunları` and `İNTERNET` would not match `internet`.
+pub fn fold(text: &str) -> String {
+    let mut mapped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            'I' => mapped.push('ı'),
+            'İ' => mapped.push('i'),
+            _ => mapped.push(ch),
+        }
+    }
+    mapped.to_lowercase()
 }
 
 pub fn get(name: &str) -> Option<&'static Stack> {
