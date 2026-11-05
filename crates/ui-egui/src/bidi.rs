@@ -45,11 +45,9 @@ pub fn has_rtl(text: &str) -> bool {
     text.chars().any(is_rtl_letter)
 }
 
-/// True if the first paragraph of `text` reads right to left (its first strong letter is RTL).
+/// True if the first paragraph of `text` reads right to left: its first strong character is RTL,
+/// a right-to-left letter or a mark such as U+200F, as the layout decides it.
 pub fn is_rtl_paragraph(text: &str) -> bool {
-    if !has_rtl(text) {
-        return false;
-    }
     BidiInfo::new(text, None).paragraphs.first().is_some_and(|p| p.level.is_rtl())
 }
 
@@ -1084,6 +1082,8 @@ mod tests {
         assert!(!caret_paragraph_is_rtl("مرحبا\n123", 8), "a line of numbers reads left to right, as it's drawn");
         assert!(!caret_paragraph_is_rtl("مرحبا\n(1) - 2", 8), "numbers and punctuation only: left to right");
         assert!(caret_paragraph_is_rtl("مرحبا\n123", 2), "the Arabic line above it still swaps");
+        assert!(caret_paragraph_is_rtl("مرحبا\n\u{200F}😀😃", 8), "a right-to-left mark makes its line right to left");
+        assert!(!caret_paragraph_is_rtl("مرحبا\n\u{200E}😀😃", 8), "a left-to-right mark makes its line left to right");
     }
 
     /// Pressing Left through a wrapped Arabic paragraph in a real text field moves the painted
