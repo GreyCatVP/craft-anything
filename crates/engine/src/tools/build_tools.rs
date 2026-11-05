@@ -361,7 +361,7 @@ fn build_command_run(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     });
     // A model that reads file paths and commands from one base starts with `cd app`, or makes its
     // project with `cargo new app`, from inside app/.
-    let first = p.command.split(['&', ';']).next().unwrap_or_default().trim().replace('\\', "/");
+    let first = p.command.split(['&', ';', '\n']).next().unwrap_or_default().trim().replace('\\', "/");
     if ["cd app", "cd app/", "cd ./app", "cd ./app/"].contains(&first.as_str()) && !inner.is_dir() {
         v["note"] = json!(format!("Commands already run in {}: leave out `cd app`.", ws.app_place()));
     } else if !had_inner && inner.is_dir() && app != ws.root {
@@ -501,6 +501,8 @@ mod tests {
         let lost = call(&e, "build_command_run", json!({"command": "cd app && echo built"})).unwrap();
         assert_eq!(lost["succeeded"], false, "{lost}");
         assert!(lost["note"].as_str().is_some_and(|n| n.contains("already run in app/")), "{lost}");
+        let lines = call(&e, "build_command_run", json!({"command": "cd app\necho built"})).unwrap();
+        assert!(lines["note"].as_str().is_some_and(|n| n.contains("already run in app/")), "{lines}");
         // Live, its first command was `cargo new app`, which made app/app/.
         let nested = call(&e, "build_command_run", json!({"command": "mkdir app"})).unwrap();
         assert!(nested["note"].as_str().is_some_and(|n| n.contains("This made app/app/")), "{nested}");
