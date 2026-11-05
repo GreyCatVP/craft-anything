@@ -321,6 +321,7 @@ Owner: open · Status: todo
       — claimed: AlexJoaquimPereira, branch `bugfix/r5.5-no-agent-with-api-backend`
 - [ ] `--backend <a name that is turned off>` still builds with it: `builder_backend`'s named
       branch doesn't check `enabled`, while Settings treats an AI that is off as unusable
+      — claimed: kuseidos, branch `bugfix/r5.5-named-backend-that-is-turned-off`
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
