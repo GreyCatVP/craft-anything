@@ -485,8 +485,11 @@ Owner: open · Status: todo
 Golden rule 3: the result is evidence. Each fix needs a Mac to test on.
 - [x] macOS: a denied Accessibility permission is reported as success with an empty tree (#240)
       — claimed: mavericzz, branch bugfix/r5.6-accessibility-denied; PR #887
-- [ ] macOS: `runtime_ui_read` ignores `screenshot` (#248): the Swift helper declares it but
-      never captures an image — claimed: Codex, branch bugfix/r5.6-macos-screenshot
+- [x] macOS: `runtime_ui_read` captures a requested screenshot (#248): one on-screen window
+      belonging to the pid, restricted by `window_id` when supplied; PNG/base64 up to 2048 px
+      per side. Missing permission, window or capture produces an explicit limitation and partial
+      evidence. Requires macOS 14+ and existing Screen Recording permission; opens no dialog
+      — claimed: Codex, branch bugfix/r5.6-macos-screenshot
 - [x] macOS: `runtime_ui_read` honours `accessibility: false` (#307): the Swift helper skips
       the tree and its permission check, returns no nodes without truncation, and the evidence
       records the flag and says the tree was skipped. Walkthroughs still require Accessibility

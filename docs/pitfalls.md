@@ -193,6 +193,12 @@ PATH lookup can return a relative path too. Resolve workspace paths against the 
 current directory, look up only bare program names, and make the result absolute without
 dereferencing the virtualenv symlink. Test the generated capture request without opening a GUI.
 
+**A screenshot helper aborted inside CoreGraphics.** The first macOS screenshot probe used
+ScreenCaptureKit from a command-line Swift helper without initializing AppKit's WindowServer
+connection. An owned-window capture aborted in `CGS_REQUIRE_INIT`, while no-window regressions
+passed. Initialize `NSApplication.shared` on the main actor before capture, and verify an actual
+owned-window PNG as well as missing-window errors.
+
 **A model catalogue queried in the wrong project.** OpenCode V2's raw `api get /api/model` does
 not reliably select the invoking CLI's directory. Use the `model.list` operation with an explicit
 `location[directory]` parameter, and test that the returned Location matches it. Over SSH,

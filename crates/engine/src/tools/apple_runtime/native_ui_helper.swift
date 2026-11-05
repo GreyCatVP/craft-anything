@@ -12,6 +12,65 @@
 
 import Foundation
 import ApplicationServices
+import ScreenCaptureKit
+import ImageIO
+import AppKit
+
+func screenshotFailure(_ code: String, _ message: String) -> [String: Any] {
+    return ["screenshot_error": ["code": code, "message": message]]
+}
+
+// Never capture a display or fall back to a different process's window. Enumeration needs
+// existing Screen Recording permission; preflight avoids opening a permission dialog.
+@MainActor
+func captureScreenshot(pid: Int32, windowID: UInt64?) async -> [String: Any] {
+    guard #available(macOS 14.0, *) else {
+        return screenshotFailure("screenshot_unsupported", "Screenshots need macOS 14 or later.")
+    }
+    // A command-line helper has no AppKit application yet. ScreenCaptureKit needs its
+    // WindowServer connection initialized, or CoreGraphics can abort in CGS_REQUIRE_INIT.
+    _ = NSApplication.shared
+    guard CGPreflightScreenCaptureAccess() else {
+        return screenshotFailure("screen_recording_denied", "Screenshot unavailable: grant Screen Recording permission to the invoking app in System Settings, then retry.")
+    }
+    do {
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        let candidates = content.windows.filter {
+            $0.owningApplication?.processID == pid && $0.windowLayer == 0 &&
+                $0.frame.width > 0 && $0.frame.height > 0 &&
+                (windowID == nil || UInt64($0.windowID) == windowID)
+        }
+        guard let window = candidates.first else {
+            return screenshotFailure("screenshot_window_not_found", "No capturable on-screen window matches this pid and window_id. Open the target window and retry.")
+        }
+        let width = window.frame.width
+        let height = window.frame.height
+        guard width.isFinite && height.isFinite else {
+            return screenshotFailure("screenshot_invalid_size", "The target window has invalid dimensions.")
+        }
+        // Bound pixels before capture and encoded bytes before base64/JSON allocation.
+        let scale = min(1.0, 2048.0 / max(width, height))
+        let config = SCStreamConfiguration()
+        config.width = max(1, Int((width * scale).rounded(.down)))
+        config.height = max(1, Int((height * scale).rounded(.down)))
+        config.showsCursor = false
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: config)
+        let png = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(png, "public.png" as CFString, 1, nil) else {
+            return screenshotFailure("screenshot_encoding_failed", "Could not create a PNG encoder for the screenshot.")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination), png.length <= 6 * 1024 * 1024 else {
+            return screenshotFailure("screenshot_encoding_failed", "Screenshot PNG encoding failed or exceeded the 6 MiB limit.")
+        }
+        return ["screenshot": ["mime_type": "image/png", "base64": (png as Data).base64EncodedString(),
+            "window_id": window.windowID, "width": image.width, "height": image.height,
+            "scaled": scale < 1.0]]
+    } catch {
+        return screenshotFailure("screenshot_capture_failed", "The window screenshot could not be captured. Check Screen Recording permission and that the target window is still open, then retry.")
+    }
+}
 
 struct Request: Decodable {
     var command: String
@@ -105,7 +164,11 @@ if readAccessibility && !AXIsProcessTrusted() {
 switch req.command {
 case "observe":
     let nodes = readAccessibility ? snapshot(pid: pid, maxNodes: req.max_nodes ?? 5000) : []
-    emit(["nodes": nodes, "truncated": readAccessibility && nodes.count >= (req.max_nodes ?? 5000)])
+    var result: [String: Any] = ["nodes": nodes, "truncated": readAccessibility && nodes.count >= (req.max_nodes ?? 5000)]
+    if req.screenshot ?? false {
+        result.merge(await captureScreenshot(pid: pid, windowID: req.window_id)) { _, new in new }
+    }
+    emit(result)
 case "walkthrough":
     let app = AXUIElementCreateApplication(pid)
     var steps: [[String: Any]] = []
