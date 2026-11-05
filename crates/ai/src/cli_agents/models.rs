@@ -299,6 +299,8 @@ mod tests {
         let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
         let (_, args) = query_command(&cfg, &options, Some(Path::new("/local/ignored"))).unwrap();
         let output = Process::new("sh").arg("-c").arg(args.last().unwrap()).cwd(&remote).timeout(Duration::from_secs(2)).run_checked().unwrap();
+        // The shell resolves aliases in its working directory (macOS /var points to /private/var).
+        let remote = remote.canonicalize().unwrap();
         assert_eq!(output.stdout_text().lines().collect::<Vec<_>>(), ["api", "model.list", "--param", &format!("location[directory]={}", remote.display())]);
     }
 

@@ -174,9 +174,9 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [ ] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes fails when several crates'
       tests run at once and passes alone: it writes a script and runs it straight away, which a
       busy machine can refuse while another test's child still holds the file open
-- [ ] `a_remote_query_expands_only_the_remote_working_directory` (ai crate) fails on a Mac: the
-      temp folder is `/var/…`, a link to `/private/var/…`, and the shell's `$PWD` gives the second.
-      Compare with the folder's canonical path
+- [x] `a_remote_query_expands_only_the_remote_working_directory` compares the shell's `$PWD`
+      with the fixture's canonical path, so macOS's `/var` → `/private/var` alias does not fail
+      the test. Remote expansion and special-character quoting checks are retained — PR #949
       — claimed: Codex, branch test/r5.2-macos-remote-query-path
 - [ ] Revisit the two advisory exceptions in `deny.toml`: `rsa` (no fix; we only verify with public
       keys) when rsa 0.10 lands, and unmaintained `zbus_names`/`zvariant` (Linux-only via keyring
