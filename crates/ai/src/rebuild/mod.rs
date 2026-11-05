@@ -444,6 +444,15 @@ struct UsageClock {
 /// How often a long agent turn saves the time worked so far, so a crash loses little of it.
 const USAGE_FLUSH: Duration = Duration::from_secs(60);
 
+/// Record `e` in the feed, send it and wake the window, under one lock.
+fn emit_event(feed: &Mutex<feed::FeedLog>, tx: &Sender<RunEvent>, wake: &Wake, e: RunEvent) {
+    let mut feed = feed.lock().unwrap_or_else(PoisonError::into_inner);
+    feed.record(&e);
+    let _ = tx.send(e);
+    drop(feed);
+    wake.call();
+}
+
 impl Worker {
     /// Add the time worked since the last record (and an agent turn's tokens and reported cost)
     /// to the project's usage.json. The run is its only writer; a failure is logged and the build
@@ -465,11 +474,7 @@ impl Worker {
 
     /// Recorded and sent under one lock, so [`RebuildRun::feed_now`] sees each event once.
     fn emit(&self, e: RunEvent) {
-        let mut feed = self.feed.lock().unwrap_or_else(PoisonError::into_inner);
-        feed.record(&e);
-        let _ = self.tx.send(e);
-        drop(feed);
-        self.wake.call();
+        emit_event(&self.feed, &self.tx, &self.wake, e);
     }
 
     fn step(&self, ws: &mut Workspace, step: Step, status: Status, text: &str) -> Result<(), ToolError> {

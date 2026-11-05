@@ -244,12 +244,22 @@ impl Worker {
         };
         let program = program.to_path_buf();
         let (tx, rx) = std::sync::mpsc::channel();
+        let (feed, events, wake) = (self.feed.clone(), self.tx.clone(), self.wake.clone());
         std::thread::Builder::new()
             .name("ghidra-prepare".into())
             .spawn(move || {
                 let result = std::fs::read(&program).map_err(|e| e.to_string()).and_then(|bytes| {
                     let sha = craft_anything_evidence::sha256_hex(&bytes);
-                    craft_anything_engine::tools::deep::prepare(&settings, &bytes, &sha, &|_| {})
+                    // Said in the feed (once per change), so a wait for an earlier analysis shows.
+                    let last = Mutex::new(String::new());
+                    let said = |m: &str| {
+                        let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
+                        if *last != m {
+                            *last = m.to_string();
+                            emit_event(&feed, &events, &wake, RunEvent::Step { step: Step::Study, text: m.to_string() });
+                        }
+                    };
+                    craft_anything_engine::tools::deep::prepare(&settings, &bytes, &sha, &said)
                 });
                 if let Err(e) = &result {
                     log::warn!("Ghidra's analysis of {} failed: {e}", program.display());
