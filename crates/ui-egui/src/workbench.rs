@@ -524,7 +524,7 @@ fn code_view(ui: &mut Ui, code: &str, t: &Tokens) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     ui.add_sized(Vec2::new(38.0, row_h), egui::Label::new(RichText::new(format!("{:>4}", i + 1)).font(theme::mono(12.0)).color(t.text_faint)));
-                    crate::bidi::text(ui, highlight(line, t));
+                    crate::bidi::code_text(ui, highlight(line, t));
                 });
             }
         });

@@ -228,6 +228,7 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                 let font = egui::FontId::proportional(b.font_size);
                 let ink = ui.visuals().override_text_color.unwrap_or_else(|| ui.visuals().widgets.inactive.text_color());
                 let rtl = crate::bidi::text_edit_style(ui, text);
+                crate::bidi::arrow_keys_follow_direction(ui, id, text);
                 let output = egui::TextEdit::multiline(text)
                     .id(id)
                     .hint_text(&b.hint)

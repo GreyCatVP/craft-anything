@@ -101,7 +101,7 @@ fn details(ui: &mut Ui, e: &Evidence, t: &Tokens) {
         widgets::caption(ui, "The code");
         egui::Frame::new().fill(t.code_bg).corner_radius(t.r()).inner_margin(Margin::same(10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            crate::bidi::text(ui, RichText::new(truncate(code, 4000)).font(theme::mono(12.5)).color(t.text));
+            crate::bidi::code_text(ui, RichText::new(truncate(code, 4000)).font(theme::mono(12.5)).color(t.text));
         });
         ui.add_space(6.0);
     }

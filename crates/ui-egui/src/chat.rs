@@ -664,7 +664,7 @@ fn paragraph(ui: &mut Ui, text: &str, bullet: bool, with_glossary: bool, body: &
     }
     if rtl_text {
         let (galley, rtl) = crate::bidi::layout(ui, job);
-        crate::bidi::show(ui, galley, rtl);
+        crate::bidi::show(ui, galley, rtl, text);
         return;
     }
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
