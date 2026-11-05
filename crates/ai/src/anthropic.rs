@@ -109,7 +109,20 @@ impl Anthropic {
         let v = http::get_json(&agent, "Anthropic", &self.url("models"), &self.headers())?;
         Ok(v.get("data")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter(|m| {
+                        // Katalog bir modelin hangi uclara hizmet ettigini soyluyorsa, yalnizca
+                        // Messages ucunu destekleyenleri listele: aksi halde secilebilen bir model
+                        // istek aninda "bu ucda desteklenmiyor" hatasi verir.
+                        match m.get("supported_endpoints").and_then(Value::as_array) {
+                            Some(endpoints) => endpoints.iter().any(|e| e.as_str() == Some("/messages")),
+                            None => true,
+                        }
+                    })
+                    .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default())
     }
 }
