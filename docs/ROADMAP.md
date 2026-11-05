@@ -339,6 +339,7 @@ Owner: open · Status: todo
 - [ ] Let API-key builds run side by side: give each an engine of its own, as a question has. This
       also closes the gap left in working alone: the app and the `rebuild_start` tool each keep a
       queue, so a build the in-app chat starts isn't kept apart from one the app started
+      — claimed: justinjohn0306, branch bugfix/api-builds-own-engine
 - [ ] Check #369 live with Kimi K3 and a key limited to Kimi/Moonshot models (needs the person's
       OpenRouter key): that the build starts, or that the error now names the provider's reason
 - [ ] A live API-key build (needs a key on the test machine)
