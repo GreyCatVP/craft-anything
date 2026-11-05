@@ -287,16 +287,10 @@ const READING_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS", "NotebookRead"];
 /// (`--fork-session`) and the copy not kept, no tool server, and only Read, Glob and Grep (none in
 /// Clean room).
 fn question_args(mut a: Vec<String>, cx: &ArgsCx) -> Vec<String> {
-    a.extend([
-        "-p".into(),
-        "--output-format".into(),
-        "stream-json".into(),
-        "--verbose".into(),
-        "--append-system-prompt".into(),
-        cx.preamble.to_string(),
-        "--model".into(),
-        cx.options.cli_model.clone().unwrap_or_else(|| crate::anthropic::DEFAULT_MODEL.into()),
-    ]);
+    a.extend(["-p".into(), "--output-format".into(), "stream-json".into(), "--verbose".into(), "--append-system-prompt".into(), cx.preamble.to_string()]);
+    if let Some(model) = cx.options.cli_model.as_deref().filter(|m| !m.trim().is_empty()) {
+        a.extend(["--model".into(), model.to_string()]);
+    }
     if let Some(r) = cx.resume {
         a.extend(["--resume".into(), r.to_string(), "--fork-session".into()]);
     }
@@ -354,11 +348,13 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn model_in_use(&self, options: Option<&BackendOptions>) -> Option<String> {
-        Some(options.and_then(|options| options.cli_model.clone()).unwrap_or_else(|| crate::anthropic::DEFAULT_MODEL.into()))
+        Some(options.and_then(|options| options.cli_model.clone()).unwrap_or_else(|| "Claude Code default".into()))
     }
 
     fn model_choices(&self, _config: &BackendConfig, _options: &BackendOptions) -> Result<Vec<String>, ToolError> {
-        Ok(crate::anthropic::MODELS.iter().map(|model| model.to_string()).collect())
+        let mut models = vec![crate::anthropic::CLAUDE_CODE_DEFAULT.to_string()];
+        models.extend(crate::anthropic::MODELS.iter().map(|model| model.to_string()));
+        Ok(models)
     }
 
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
@@ -368,9 +364,11 @@ impl AgentAdapter for ClaudeCode {
         }
         let mcp_json = json!({"mcpServers": {MCP_NAME: {"command": cx.mcp.command, "args": cx.mcp.args}}}).to_string();
         a.extend(["-p".into(), "--output-format".into(), "stream-json".into(), "--verbose".into(), "--append-system-prompt".into(), cx.preamble.to_string()]);
-        // Opus 5.5 everywhere unless config.toml names another model on purpose; the effort
-        // goes in through the environment (see `run_cli`).
-        a.extend(["--model".into(), cx.options.cli_model.clone().unwrap_or_else(|| crate::anthropic::DEFAULT_MODEL.into())]);
+        // Omit --model unless config.toml names one: users may have custom models configured in
+        // Claude Code, and forcing a hardcoded default blocks them.
+        if let Some(model) = cx.options.cli_model.as_deref().filter(|m| !m.trim().is_empty()) {
+            a.extend(["--model".into(), model.to_string()]);
+        }
         if let Some(r) = cx.resume {
             a.extend(["--resume".into(), r.to_string()]);
         }

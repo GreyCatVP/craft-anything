@@ -1229,6 +1229,61 @@ fn a_claude_ais_effort_is_set_in_settings() {
     h.get_by_value("max");
 }
 
+/// Claude Code's model can be left at "Default (its own settings)", so a model customised in the
+/// person's own Claude Code config isn't overridden by a built-in default.
+#[test]
+fn claude_codes_model_can_be_left_to_its_own_settings() {
+    use craft_anything_ai::BackendConfig;
+    let mut h = harness(|| {
+        let a = demo::app(demo::engine(Mode::Experienced, true));
+        a.hub
+            .add_backend(
+                BackendConfig {
+                    name: "Claude Code".into(),
+                    kind: craft_anything_ai::BackendKind::AgentCli,
+                    model: "claude-code".into(),
+                    base_url: None,
+                    ssh_host: None,
+                    enabled: true,
+                },
+                None,
+            )
+            .unwrap();
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code")));
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    // With no choice saved, the picker says the default, and no model is passed on a run.
+    h.get_by_label("Model: Claude Code default");
+    h.get_by_label("Change…").click();
+    assert!(wait(&mut h, |a| {
+        a.model_picker
+            .as_ref()
+            .is_some_and(|(_, m)| m.as_deref().is_some_and(|models| models.first().is_some_and(|m| m == craft_anything_ai::anthropic::CLAUDE_CODE_DEFAULT)))
+    }));
+    h.run_steps(2);
+    // The dropdown shows the saved choice and lists "Default (its own settings)" first.
+    h.get_by_value("Default (its own settings)").click();
+    h.run_steps(2);
+    h.get_by_label("claude-sonnet-5-5").click();
+    assert!(wait(&mut h, |a| a.backend_options.get("Claude Code").and_then(|o| o.cli_model.as_deref()) == Some("claude-sonnet-5-5")));
+    h.run_steps(2);
+    // "Default (its own settings)" as the first choice: choosing it clears the saved model, so the
+    // run passes no `--model` and the person's own Claude Code config decides.
+    h.get_by_label("Change…").click();
+    assert!(wait(&mut h, |a| a.model_picker.as_ref().is_some_and(|(_, m)| m.is_some())));
+    h.run_steps(2);
+    h.get_by_value("claude-sonnet-5-5").click();
+    h.run_steps(2);
+    h.get_by_label("Default (its own settings)").click();
+    assert!(wait(&mut h, |a| a.backend_options.get("Claude Code").is_some_and(|o| o.cli_model.is_none())));
+    h.run_steps(2);
+    h.get_by_label("Model: Claude Code default");
+}
+
 /// The picker exposes only the chosen model's depths and clears an old depth when changing models.
 #[test]
 fn opencode_picker_offers_only_the_selected_models_thinking_depths() {

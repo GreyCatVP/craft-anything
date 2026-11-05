@@ -411,11 +411,20 @@ fn an_ais_model_is_changed() {
     let claude =
         BackendConfig { name: "Claude Code".into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled: true };
     h.add_backend(claude, None).unwrap();
-    assert_eq!(h.model_choices("Claude Code").unwrap(), crate::anthropic::MODELS);
+    assert_eq!(
+        h.model_choices("Claude Code").unwrap(),
+        [crate::anthropic::CLAUDE_CODE_DEFAULT, "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"]
+    );
     assert!(h.set_model("Claude Code", "claude-sonnet-5-5").unwrap());
     let claude = h.options().get("Claude Code").and_then(|o| o.cli_model.clone());
     assert_eq!(claude.as_deref(), Some("claude-sonnet-5-5"), "the CLI is asked for it; the agent stays Claude Code");
     assert_eq!(h.backends().into_iter().find(|b| b.name == "Claude Code").unwrap().model, "claude-code");
+    // A custom model id the catalogue doesn't list, as a person's Claude Code settings may name.
+    assert!(h.set_model("Claude Code", "my-custom-model").unwrap());
+    assert_eq!(h.options().get("Claude Code").and_then(|o| o.cli_model.clone()).as_deref(), Some("my-custom-model"));
+    // "default" clears the choice: no --model is passed, so Claude Code uses its own settings.
+    assert!(h.set_model("Claude Code", crate::anthropic::CLAUDE_CODE_DEFAULT).unwrap());
+    assert_eq!(h.options().get("Claude Code").and_then(|o| o.cli_model.clone()), None);
     assert!(!h.set_model("Nobody", "m").unwrap());
     assert!(h.set_model("Box", " ").is_err());
 }

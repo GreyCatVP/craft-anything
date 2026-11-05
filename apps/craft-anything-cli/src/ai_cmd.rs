@@ -64,14 +64,15 @@ pub enum AiCommand {
     /// computer it runs on. Leave the path out for its usual folder.
     Folder { name: String, path: Option<String> },
     /// Set the model an AI uses (Claude Code: the model it's asked for); leave it out to list the
-    /// ones it can use.
+    /// ones it can use. `default` for Claude Code passes no `--model`, so it uses the model its own
+    /// settings name (which may be a custom model), rather than a built-in default.
     Model {
         name: String,
         model: Option<String>,
         /// OpenCode thinking variant; only those offered by the selected model are accepted.
         #[arg(long, value_parser = ["low", "medium", "high", "xhigh", "max"])]
         thinking: Option<String>,
-        /// Use OpenCode's default model and thinking depth.
+        /// Use the agent's own default model (OpenCode's default; Claude Code's own settings).
         #[arg(long, conflicts_with_all = ["model", "thinking"])]
         default: bool,
     },

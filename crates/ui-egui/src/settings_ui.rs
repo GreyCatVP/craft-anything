@@ -471,13 +471,30 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                     ui.label(RichText::new(tr("Asking for its models…")).color(t.text_faint).size(theme::CAPTION));
                                 }
                                 Some((_, Some(models))) => {
-                                    egui::ComboBox::from_id_salt(("model", &b.name)).icon(widgets::combo_icon).selected_text(&current).show_ui(ui, |ui| {
-                                        for m in models {
-                                            if ui.selectable_label(*m == current, m).clicked() && *m != current {
-                                                chosen_model = Some((b.name.clone(), m.clone()));
-                                            }
+                                    // `default` means "no --model": Claude Code uses the model its own
+                                    // settings name, which may be one a person customs there.
+                                    let picked = app
+                                        .backend_options
+                                        .get(&b.name)
+                                        .and_then(|o| o.cli_model.clone())
+                                        .unwrap_or_else(|| craft_anything_ai::anthropic::CLAUDE_CODE_DEFAULT.to_string());
+                                    let shown = |m: &str| {
+                                        if m == craft_anything_ai::anthropic::CLAUDE_CODE_DEFAULT {
+                                            tr("Default (its own settings)").to_string()
+                                        } else {
+                                            m.to_string()
                                         }
-                                    });
+                                    };
+                                    egui::ComboBox::from_id_salt(("model", &b.name)).icon(widgets::combo_icon).selected_text(shown(&picked)).show_ui(
+                                        ui,
+                                        |ui| {
+                                            for m in models {
+                                                if ui.selectable_label(*m == picked, shown(m)).clicked() && *m != picked {
+                                                    chosen_model = Some((b.name.clone(), m.clone()));
+                                                }
+                                            }
+                                        },
+                                    );
                                     // A model the list doesn't offer: a newer one, a variant such as
                                     // `opusplan`, or one another harness serves (#470).
                                     let id = egui::Id::new(("other-model", &b.name));

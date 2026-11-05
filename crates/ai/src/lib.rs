@@ -605,12 +605,13 @@ impl AiHub {
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
         match b.config.kind {
             BackendKind::AgentCli => {
-                if model_options::supported(&b.config) && b.options.cli_model.as_deref() != Some(model) {
+                let clear = b.config.model == "claude-code" && model == crate::anthropic::CLAUDE_CODE_DEFAULT;
+                if model_options::supported(&b.config) && (clear || b.options.cli_model.as_deref() != Some(model)) {
                     b.options.cli_context = None;
                     b.options.cli_reasoning_effort = None;
                     b.options.effort = None;
                 }
-                b.options.cli_model = Some(model.to_string());
+                b.options.cli_model = if clear { None } else { Some(model.to_string()) };
             }
             _ => b.config.model = model.to_string(),
         }

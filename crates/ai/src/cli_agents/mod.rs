@@ -1409,10 +1409,19 @@ mod tests {
         }
         assert_eq!(a[pos("--resume") + 1], "sess-1");
         assert_eq!(a[pos("--allowedTools") + 1], "mcp__craft-anything__*");
-        assert_eq!(a[pos("--model") + 1], "claude-opus-5-5", "Opus 5.5 unless configured otherwise");
+        assert!(!a.iter().any(|x| x == "--model"), "no --model by default: respect the user's Claude Code config");
         let o = BackendOptions { cli_model: Some("opus".into()), ..Default::default() };
         let b = build_args(adapter_for("claude-code").as_ref(), &o, "q", "PRE", &mcp(), None, Access::Analyse);
         assert_eq!(b[b.iter().position(|x| x == "--model").unwrap() + 1], "opus");
+        // Any model string the user configured (including custom aliases) is passed through.
+        let custom = BackendOptions { cli_model: Some("my-custom-model".into()), ..Default::default() };
+        let c = build_args(adapter_for("claude-code").as_ref(), &custom, "q", "PRE", &mcp(), None, Access::Analyse);
+        assert_eq!(c[c.iter().position(|x| x == "--model").unwrap() + 1], "my-custom-model");
+        // A question (forked read-only session) also respects the configured/default model.
+        let q = build_args(adapter_for("claude-code").as_ref(), &BackendOptions::default(), "q", "PRE", &mcp(), Some("s1"), Access::Question);
+        assert!(!q.iter().any(|x| x == "--model"), "question: no --model by default");
+        let q2 = build_args(adapter_for("claude-code").as_ref(), &custom, "q", "PRE", &mcp(), Some("s1"), Access::Question);
+        assert_eq!(q2[q2.iter().position(|x| x == "--model").unwrap() + 1], "my-custom-model");
         let cfg: Value = serde_json::from_str(&a[pos("--mcp-config") + 1]).unwrap();
         assert_eq!(cfg["mcpServers"]["craft-anything"]["args"][0], "mcp");
         // variadic flags come last: nothing after them is read as one of their values
