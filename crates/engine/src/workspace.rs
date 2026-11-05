@@ -413,10 +413,6 @@ pub struct Manifest {
     /// (`Settings::questions`). The person's, like the budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub questions: Option<Questions>,
-    /// When the newest "Just ask" question the builder has been told about was asked, so each is
-    /// told once (#857).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub questions_told_ms: Option<u64>,
     /// The builder finished its turn and the run's checks haven't reported on it yet, so a run
     /// that picks this up only needs to check: nothing is left to build.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -461,7 +457,6 @@ impl Manifest {
             start_files: Vec::new(),
             builder: None,
             questions: None,
-            questions_told_ms: None,
             awaiting_check: false,
             not_working_checks: 0,
         }

@@ -238,7 +238,6 @@ fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: S
             start_files: Vec::new(),
             builder: None,
             questions: None,
-            questions_told_ms: None,
             awaiting_check: false,
             not_working_checks: 0,
         },

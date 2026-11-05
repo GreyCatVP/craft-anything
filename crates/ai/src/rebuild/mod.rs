@@ -695,14 +695,10 @@ impl Worker {
         });
         // "Just ask" runs apart from the builder's session, and the person's message may follow on from it (#857).
         let new_request = opts.message.as_deref().is_some_and(|m| !m.trim().is_empty());
-        let asked = if new_request { craft_anything_engine::questions::since(ws, ws.manifest.questions_told_ms.unwrap_or(0), deep) } else { Vec::new() };
+        let mut asked = if new_request { craft_anything_engine::questions::untold(ws, deep) } else { Vec::new() };
         let just_asked = just_asked(&asked);
         prompt.insert_str(0, &just_asked);
         fresh = fresh.map(|f| format!("{just_asked}{f}"));
-        if let Some(newest) = asked.iter().map(|q| q.at_ms).max() {
-            ws.manifest.questions_told_ms = Some(newest);
-            ws.save()?;
-        }
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
         // A new request starts the count of checks that found no working build again. "Try again" on
         // a build that already reached the limit stops before another builder turn is paid for (#736).
@@ -736,6 +732,14 @@ impl Worker {
                     _ => "Improving the build…",
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
+                // Marked only now: anything above can still stop the run before the builder is told.
+                let told = std::mem::take(&mut asked);
+                if !told.is_empty()
+                    && let Err(e) = craft_anything_engine::questions::mark_told(ws, &told)
+                {
+                    // The cost of not saving this is telling the builder once more, not a stopped build.
+                    log::warn!("couldn't record which questions the builder was told: {}", e.message);
+                }
                 ws.manifest.awaiting_check = false;
                 let reply = self.turn(ws, agent.as_mut(), &prompt, fresh.take());
                 // Kept even when the turn failed: the conversation is still worth carrying.
