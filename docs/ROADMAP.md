@@ -177,6 +177,7 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [ ] `a_remote_query_expands_only_the_remote_working_directory` (ai crate) fails on a Mac: the
       temp folder is `/var/…`, a link to `/private/var/…`, and the shell's `$PWD` gives the second.
       Compare with the folder's canonical path
+      — claimed: Codex, branch test/r5.2-macos-remote-query-path
 - [ ] Revisit the two advisory exceptions in `deny.toml`: `rsa` (no fix; we only verify with public
       keys) when rsa 0.10 lands, and unmaintained `zbus_names`/`zvariant` (Linux-only via keyring
       and accesskit) when those move on. `deny.toml`'s comments say this is tracked in R0.3: point
