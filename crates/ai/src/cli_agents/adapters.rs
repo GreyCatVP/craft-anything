@@ -338,9 +338,11 @@ impl ClaudeCode {
     /// The plain-words fix for a failed run, when one exists. For Free Claude Code (`fcc-claude`)
     /// the Anthropic sign-in command (`claude auth login`) doesn't apply — it authenticates through
     /// its own proxy token — so that guidance is left out, while billing and configuration fixes
-    /// still show. `hint` is the sign-in (or too-old) fix the failure text suggested.
-    fn remediation_for(&self, free: bool, failure: &TurnFailure, hint: Option<String>) -> Option<String> {
+    /// still show. `hint` is the fix the failure text suggested, and `too_old` says that fix is to
+    /// update the `claude` tool (which applies to Free Claude Code too), not to sign in.
+    fn remediation_for(&self, free: bool, failure: &TurnFailure, hint: Option<String>, too_old: bool) -> Option<String> {
         match (free, failure.kind) {
+            (true, _) if too_old => hint,
             (true, FailureKind::Billing) => Some("Check the account's credits, plan and spending limit before trying again.".into()),
             (true, FailureKind::Configuration) => Some("Check the chosen model and Claude Code settings before trying again.".into()),
             (true, _) => None,
@@ -451,7 +453,7 @@ impl AgentAdapter for ClaudeCode {
                     p.failure = Some(failure);
                     let why = v.pointer("/message/content").map(content_text).unwrap_or_else(|| code.to_string());
                     let (message, hint) = claude_code_failure_in(&why, self.folder.as_deref());
-                    let remediation = self.remediation_for(p.free_claude_code, &failure, hint);
+                    let remediation = self.remediation_for(p.free_claude_code, &failure, hint, claude_too_old(&why));
                     return vec![AgentEvent::Error { message, remediation, log: None }];
                 }
                 for b in v.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default() {
@@ -501,7 +503,7 @@ impl AgentAdapter for ClaudeCode {
                     let failure = p.failure.get_or_insert_with(|| TurnFailure::new(FailureKind::Unknown));
                     let why = if s("result").is_empty() { s("subtype") } else { s("result") };
                     let (message, hint) = claude_code_failure_in(&why, self.folder.as_deref());
-                    let remediation = self.remediation_for(p.free_claude_code, failure, hint);
+                    let remediation = self.remediation_for(p.free_claude_code, failure, hint, claude_too_old(&why));
                     out.push(AgentEvent::Error { message, remediation, log: None });
                 }
             }

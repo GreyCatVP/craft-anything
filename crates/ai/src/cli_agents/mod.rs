@@ -310,6 +310,13 @@ fn flatpak_sign_in(quoted: &str) -> String {
 /// to use (#165).
 pub const TOO_OLD_FOR_MODEL: &str = "does not support this model";
 
+/// Whether `why` says the installed Claude Code is too old for the requested model (#165). The
+/// fix — updating the `claude` tool — applies to Free Claude Code too, so it's told apart from
+/// the Anthropic sign-in guidance that doesn't.
+pub(crate) fn claude_too_old(why: &str) -> bool {
+    why.to_ascii_lowercase().contains(TOO_OLD_FOR_MODEL)
+}
+
 /// Claude Code's failure in plain words, and its fix when the person can make one: a version too
 /// old for the model (#165), or a sign-in.
 pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
@@ -319,7 +326,7 @@ pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
 /// [`claude_code_failure`] for Claude Code in a folder chosen for it (`folder`), whose sign-in is
 /// its own.
 pub(crate) fn claude_code_failure_in(why: &str, folder: Option<&Path>) -> (String, Option<String>) {
-    if why.to_ascii_lowercase().contains(TOO_OLD_FOR_MODEL) {
+    if claude_too_old(why) {
         return (
             format!("Claude Code is too old for the model it was asked to use ({}).", why.chars().take(200).collect::<String>()),
             Some(
@@ -1774,6 +1781,19 @@ mod tests {
             AgentEvent::Error { message, remediation, .. } => {
                 assert_eq!(message, "Claude Code stopped: Failed to authenticate: OAuth session expired");
                 assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        // ... but updating the `claude` tool when it's too old for the model fixes Free Claude Code
+        // too, so that hint is kept even though the Anthropic sign-in guidance isn't.
+        let too_old = r#"{"type":"result","subtype":"success","is_error":true,"result":"Claude Code 2.1.81 does not support this model; version 2"}"#;
+        let mut fcc = StreamParser::new(adapter_for("free-claude-code"));
+        fcc.free_claude_code = true;
+        match &fcc.line(too_old)[0] {
+            AgentEvent::Error { message, remediation: Some(r), .. } => {
+                assert!(message.contains("too old"), "{message}");
+                assert!(r.contains("claude update"), "{r}");
+                assert!(!r.contains("auth login"), "{r}");
             }
             other => panic!("{other:?}"),
         }
