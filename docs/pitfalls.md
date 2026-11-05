@@ -529,6 +529,11 @@ run, while the round numbers carried over, so "Try again" bought six more checks
 worked reached check 40 and 49 (#736). A limit that must hold across runs is a count saved with the project, and
 it's reset only by a new request. Test it with several runs in a row, not one.
 
+**One field, two meanings.** `TurnDone`'s `input_tokens` included cached tokens from every coding agent but not
+from the built-in loop, which keeps them apart as Anthropic reports them. Once Ollama 0.40 reported its cache, a
+local build's `usage.json` said 5,323 input tokens for 75,014. When several producers fill one field, say on the
+field what it counts, and test each producer with the case where they differ (here, a cached prompt).
+
 **Docs that drift.** `STATUS.md` described a branch 25 commits old and the tool count was stale.
 Update STATUS, the roadmap and generated docs (`cargo xtask tools`, `cargo xtask schemas`) in the
 same PR as the change.

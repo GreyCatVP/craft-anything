@@ -281,8 +281,11 @@ been run live.
 - [ ] The model reads file paths from the project folder and commands from `app/` as one base:
       it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`. Say the
       folder in `build_command_run`'s result (or its description) so the two can't be mixed up
-- [ ] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
-      Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out
+- [x] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
+      Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out.
+      Cached tokens: Ollama 0.40 reports them apart (`cached_tokens`), and the built-in loop's
+      `TurnDone` left them out while coding agents count them. It counts them now; a live run on
+      Ollama 0.40.7 had recorded 5,323 input tokens of 75,014
       — claimed: SoldierPePe, branch bugfix/r5.4-usage-cached-tokens
 - [x] An assistant turn with no text sends an empty string, not `content: null`, which Ollama
       refused as `invalid message content type: <nil>` (#403, #536)

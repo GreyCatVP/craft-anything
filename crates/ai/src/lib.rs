@@ -266,6 +266,7 @@ pub enum AgentEvent {
     /// One assistant turn finished.
     TurnDone {
         backend: String,
+        /// Every prompt token, cached ones included, as agent apps report them.
         input_tokens: u64,
         output_tokens: u64,
         cost_usd: Option<f64>,
