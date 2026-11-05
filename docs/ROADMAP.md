@@ -486,7 +486,7 @@ Golden rule 3: the result is evidence. Each fix needs a Mac to test on.
 - [x] macOS: a denied Accessibility permission is reported as success with an empty tree (#240)
       — claimed: mavericzz, branch bugfix/r5.6-accessibility-denied; PR #887
 - [ ] macOS: `runtime_ui_read` ignores `screenshot` (#248): the Swift helper declares it but
-      never captures an image
+      never captures an image — claimed: Codex, branch bugfix/r5.6-macos-screenshot
 - [x] macOS: `runtime_ui_read` honours `accessibility: false` (#307): the Swift helper skips
       the tree and its permission check, returns no nodes without truncation, and the evidence
       records the flag and says the tree was skipped. Walkthroughs still require Accessibility
