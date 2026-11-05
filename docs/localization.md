@@ -46,6 +46,27 @@ The Korean catalog `ko.tsv` uses 클린룸 (Clean room), 심층 (Deep), 분석 /
 (Study / Build / Check / Ready), 근거 (Evidence) and 프로젝트 (Project); short labels are nouns and
 sentences use the formal 합니다 style.
 
+## Right-to-left text
+
+egui 0.36 joins Arabic letters but doesn't reorder bidirectional text: it places each word left
+to right, so an Arabic sentence showed its words in reverse order, mixed Arabic/English lines in
+a jumble, and the caret, selection and mouse in a text field all worked from that reversed
+layout. `ui-egui/src/bidi.rs` breaks text into lines itself (egui gives an Arabic word more
+glyphs than letters, so a galley's glyph counts can't say where rows break), reorders each line
+with the Unicode Bidirectional Algorithm (`unicode-bidi`), and aligns right-to-left paragraphs to
+the right. A paragraph's direction is its first strong letter's, as in browsers.
+
+Where it's used: every `ui.label`, wrapping and truncated label (a cut right-to-left line keeps
+its start and puts "…" on the left), text painted directly (sidebar project names, the workbench,
+the palette), and the prompt box, where `bidi` draws the text, caret and selection over egui's
+hidden ones and places the caret from mouse clicks and drags. Text with no right-to-left letters
+takes egui's usual path, unchanged.
+
+Limits: right-to-left labels aren't selectable (a selection would copy the visual order; messages
+have a copy button) and skip the glossary underlines; inside one Arabic word the caret and
+selection edges are approximate (a part of a word is measured on its own); other text fields
+(renaming, settings), buttons, menus and tooltips still draw right-to-left text left to right.
+
 ## Validation
 
 Run:

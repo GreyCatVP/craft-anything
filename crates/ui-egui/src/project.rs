@@ -664,11 +664,12 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
                     folded = true;
                 }
                 if let Some(b) = began {
-                    ui.label(RichText::new(crate::usage::duration_words(b.elapsed())).font(theme::mono(12.0)).color(t.text_faint));
+                    crate::bidi::text(ui, RichText::new(crate::usage::duration_words(b.elapsed())).font(theme::mono(12.0)).color(t.text_faint));
                     ui.add(crate::widgets::Spinner::new().size(12.0).color(t.accent));
                     ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
                 }
-                ui.label(
+                crate::bidi::text(
+                    ui,
                     RichText::new(trf("{done} of {all} done", &[("done", &done.to_string()), ("all", &steps.len().to_string())]))
                         .font(theme::mono(12.0))
                         .color(t.text_faint),
@@ -700,7 +701,7 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
                             PlanStatus::Doing => text.color(t.text).strong(),
                             PlanStatus::Todo => text.color(t.text_dim),
                         };
-                        ui.add(egui::Label::new(text).wrap());
+                        crate::bidi::label(ui, text);
                     });
                 }
             });
@@ -824,7 +825,7 @@ fn asset_line(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     ui.add_space(6.0);
     let budget = ws.manifest.asset_budget_usd;
     let amount = trf("{n} · ${spent} of ${budget}", &[("n", &n.to_string()), ("spent", &format!("{spent:.2}")), ("budget", &format!("{budget:.2}"))]);
-    ui.label(RichText::new(amount).font(theme::mono(12.5)).color(if spent >= budget { t.warning } else { t.text_dim }));
+    crate::bidi::text(ui, RichText::new(amount).font(theme::mono(12.5)).color(if spent >= budget { t.warning } else { t.text_dim }));
     let step = craft_anything_engines::assets::usd(app.asset_budget_step());
     if widgets::link(ui, &trf("Raise the budget by {amount}", &[("amount", &step)])).clicked() {
         app.raise_asset_budget();
@@ -914,7 +915,7 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
             ui.painter().rect_filled(rect, t.radius, t.accent_soft);
             icons::paint(ui, rect, make::project_icon(m), 24.0, t.accent_ink);
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(theme::heading(&m.name, theme::CARD)).truncate());
+                crate::bidi::truncated(ui, theme::heading(&m.name, theme::CARD));
                 let (label, fg, bg) = make::status_shown(app, ws, &t);
                 widgets::pill(ui, label, fg, bg);
             });
@@ -922,12 +923,12 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         ui.add_space(10.0);
         if !matches!(m.target, TargetRef::None) {
             widgets::caption(ui, "From");
-            ui.add(egui::Label::new(RichText::new(m.target.label()).color(t.text_dim)).truncate());
+            crate::bidi::truncated(ui, RichText::new(m.target.label()).color(t.text_dim));
             ui.add_space(6.0);
         }
         if !m.stack.is_empty() && !app.beginner() {
             widgets::caption(ui, "Built with");
-            ui.label(RichText::new(&m.stack).color(t.text_dim));
+            crate::bidi::text(ui, RichText::new(&m.stack).color(t.text_dim));
         }
     });
     ui.add_space(14.0);
@@ -949,7 +950,7 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
             app.pick(crate::Pick::Pictures);
         }
         let note = if n == 0 { tr("None yet. Screenshots help it look right.") } else { trf("{n} picture(s) to match.", &[("n", &n.to_string())]) };
-        ui.label(RichText::new(note).color(Tokens::get(ui.ctx()).text_dim).size(theme::SMALL));
+        crate::bidi::text(ui, RichText::new(note).color(Tokens::get(ui.ctx()).text_dim).size(theme::SMALL));
         ui.add_space(8.0);
     }
     ui.horizontal_wrapped(|ui| {
@@ -1023,15 +1024,15 @@ fn open_questions(app: &CraftApp, ui: &mut Ui) {
         for q in app.facts.open_questions.iter().take(SHOWN) {
             ui.horizontal_wrapped(|ui| {
                 icons::show(ui, "info", 14.0, t.text_dim);
-                ui.add(egui::Label::new(RichText::new(q).size(theme::SMALL).color(t.text)).wrap());
+                crate::bidi::label(ui, RichText::new(q).size(theme::SMALL).color(t.text));
             });
         }
         if app.facts.open_questions.len() > SHOWN {
             let more = trf("and {n} more", &[("n", &(app.facts.open_questions.len() - SHOWN).to_string())]);
-            ui.label(RichText::new(more).size(theme::SMALL).color(t.text_dim));
+            crate::bidi::text(ui, RichText::new(more).size(theme::SMALL).color(t.text_dim));
         }
         ui.add_space(4.0);
-        ui.label(RichText::new(tr("Answer any of them in a message below.")).size(theme::SMALL).color(t.text_dim));
+        crate::bidi::text(ui, RichText::new(tr("Answer any of them in a message below.")).size(theme::SMALL).color(t.text_dim));
     });
     ui.add_space(14.0);
 }
@@ -1095,7 +1096,7 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
             } else {
                 (theme::medium(theme::SMALL), t.text_faint)
             };
-            ui.painter().text(egui::pos2(x, row.center().y), egui::Align2::LEFT_CENTER, tr(s.label()), font, col);
+            crate::bidi::paint_line(ui, egui::pos2(x, row.center().y), egui::Align2::LEFT_CENTER, tr(s.label()), font, col);
             // State in words too, so it doesn't rely on colour.
             let state = if now {
                 tr("Now")
@@ -1126,7 +1127,7 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
                 stat_row(ui, cost.label, &cost.value).on_hover_text(tip());
                 // Said outright, not only on hover: on a subscription this isn't what they pay.
                 if let Some(note) = cost.note {
-                    ui.add(egui::Label::new(RichText::new(tr(note)).color(Tokens::get(ui.ctx()).text_faint).size(theme::CAPTION)).wrap());
+                    crate::bidi::label(ui, RichText::new(tr(note)).color(Tokens::get(ui.ctx()).text_faint).size(theme::CAPTION));
                 }
             }
             if u.saved.tokens() > 0 {
@@ -1153,7 +1154,7 @@ fn stat_row(ui: &mut Ui, label: &str, value: &str) -> egui::Response {
     ui.horizontal(|ui| {
         widgets::caption(ui, label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).font(theme::mono(13.0)).color(t.text));
+            crate::bidi::text(ui, RichText::new(value).font(theme::mono(13.0)).color(t.text));
         });
     })
     .response
@@ -1185,8 +1186,8 @@ fn feed(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
                 ui.painter().rect_filled(rect, t.radius, t.accent_soft);
                 icons::paint(ui, rect, w.icon, 22.0, t.accent_ink);
                 ui.vertical(|ui| {
-                    ui.label(theme::heading(tr(w.ready), theme::CARD));
-                    ui.label(RichText::new(tr("Try it out, then ask below for any changes.")).color(t.text_dim));
+                    crate::bidi::text(ui, theme::heading(tr(w.ready), theme::CARD));
+                    crate::bidi::text(ui, RichText::new(tr("Try it out, then ask below for any changes.")).color(t.text_dim));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| outcome_button(app, ui, ws, 44.0, 13.0));
             });
@@ -1305,17 +1306,19 @@ fn run_details(app: &mut CraftApp, ui: &mut Ui, status_row: bool) {
                             };
                             ui.horizontal(|ui| {
                                 ui.set_height(LINE);
-                                ui.label(RichText::new(crate::usage::duration_words(line.at)).font(theme::mono(theme::CAPTION)).color(t.text_faint));
-                                ui.label(RichText::new(line.kind.tag()).font(theme::mono(theme::CAPTION)).color(colour));
-                                ui.add(egui::Label::new(RichText::new(&line.text).font(theme::mono(theme::CAPTION)).color(words)).truncate())
-                                    .on_hover_text(&line.text);
+                                crate::bidi::text(
+                                    ui,
+                                    RichText::new(crate::usage::duration_words(line.at)).font(theme::mono(theme::CAPTION)).color(t.text_faint),
+                                );
+                                crate::bidi::text(ui, RichText::new(line.kind.tag()).font(theme::mono(theme::CAPTION)).color(colour));
+                                crate::bidi::truncated(ui, RichText::new(&line.text).font(theme::mono(theme::CAPTION)).color(words)).on_hover_text(&line.text);
                             });
                         }
                     },
                 );
             });
             ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("A command's output shows here when it finishes.")).color(t.text_faint).size(theme::CAPTION));
+                crate::bidi::text(ui, RichText::new(tr("A command's output shows here when it finishes.")).color(t.text_faint).size(theme::CAPTION));
                 open_log = widgets::open_log_button(ui, &log);
             });
         },
@@ -1383,10 +1386,10 @@ fn draw_items(
                         ui.set_width(ui.available_width());
                         ui.horizontal(|ui| {
                             icons::show(ui, "triangle-alert", 16.0, t.danger);
-                            ui.add(egui::Label::new(RichText::new(message).color(t.text)).wrap());
+                            crate::bidi::label(ui, RichText::new(message).color(t.text));
                         });
                         if let Some(r) = remediation {
-                            ui.add(egui::Label::new(RichText::new(r).color(t.text_dim)).wrap());
+                            crate::bidi::label(ui, RichText::new(r).color(t.text_dim));
                         }
                         if let Some(l) = log
                             && widgets::open_log_button(ui, l)
@@ -1441,14 +1444,15 @@ fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advance
                         Some(false) => ("triangle-alert", t.warning),
                     };
                     icons::show(ui, icon, 12.0, col);
-                    ui.label(RichText::new(tool.replace('_', " ")).font(theme::mono(12.5)).color(t.text_dim));
+                    crate::bidi::text(ui, RichText::new(tool.replace('_', " ")).font(theme::mono(12.5)).color(t.text_dim));
                 });
             }
             for n in notes {
-                ui.label(RichText::new(n).italics().color(t.text_faint).size(theme::CAPTION));
+                crate::bidi::text(ui, RichText::new(n).italics().color(t.text_faint).size(theme::CAPTION));
             }
             if failed > 0 {
-                ui.label(
+                crate::bidi::text(
+                    ui,
                     RichText::new(trf("{n} step(s) didn't work and were retried or skipped.", &[("n", &failed.to_string())]))
                         .color(t.text_faint)
                         .size(theme::CAPTION),
@@ -1499,9 +1503,9 @@ fn continue_card(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             icons::show(ui, "history", 18.0, t.accent);
-            ui.add(egui::Label::new(RichText::new(tr(title)).font(theme::semibold(theme::BODY))).wrap());
+            crate::bidi::label(ui, RichText::new(tr(title)).font(theme::semibold(theme::BODY)));
         });
-        ui.add(egui::Label::new(RichText::new(tr(body)).color(t.text_dim)).wrap());
+        crate::bidi::label(ui, RichText::new(tr(body)).color(t.text_dim));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             go = widgets::primary_icon(ui, Some("play"), "Continue", true).clicked();
@@ -1532,7 +1536,7 @@ fn ask_card(app: &mut CraftApp, ui: &mut Ui, r: &Request, answered: Option<&str>
         ui.horizontal(|ui| {
             icons::show(ui, if approval { "shield" } else { "circle-help" }, 18.0, border);
             let title = if approval { trf("May I {action}?", &[("action", &lower_first(&r.title))]) } else { r.title.clone() };
-            ui.add(egui::Label::new(RichText::new(title).font(theme::semibold(theme::BODY))).wrap());
+            crate::bidi::label(ui, RichText::new(title).font(theme::semibold(theme::BODY)));
         });
         if !r.detail.is_empty() {
             if approval {
@@ -1540,19 +1544,20 @@ fn ask_card(app: &mut CraftApp, ui: &mut Ui, r: &Request, answered: Option<&str>
                     .id_salt(("detail", &r.id))
                     .icon(widgets::disclosure_icon)
                     .show(ui, |ui| {
-                        ui.label(RichText::new(&r.detail).font(theme::mono(12.5)).color(t.text_dim));
+                        crate::bidi::text(ui, RichText::new(&r.detail).font(theme::mono(12.5)).color(t.text_dim));
                     });
             } else {
-                ui.add(egui::Label::new(RichText::new(&r.detail).color(t.text_dim)).wrap());
+                crate::bidi::label(ui, RichText::new(&r.detail).color(t.text_dim));
             }
         }
         ui.add_space(6.0);
         if let Some(a) = answered {
-            ui.label(RichText::new(trf("You answered: {a}", &[("a", a)])).color(t.text_faint));
+            crate::bidi::text(ui, RichText::new(trf("You answered: {a}", &[("a", a)])).color(t.text_faint));
             return;
         }
         if approval {
-            ui.label(
+            crate::bidi::text(
+                ui,
                 RichText::new(tr("This is outside what the builder may do on its own. Nothing happens until you say so."))
                     .color(t.text_faint)
                     .size(theme::CAPTION),
@@ -1625,12 +1630,12 @@ fn claims_list(ui: &mut Ui, c: &CheckResult, t: &Tokens) {
     if !c.claims.is_empty() {
         let held = c.claims.iter().filter(|x| x.passed).count();
         let line = trf("{held} of {n} requirements met", &[("held", &held.to_string()), ("n", &c.claims.len().to_string())]);
-        ui.label(RichText::new(line).color(t.text_dim).size(theme::SMALL));
+        crate::bidi::text(ui, RichText::new(line).color(t.text_dim).size(theme::SMALL));
     }
     let row = |ui: &mut Ui, icon: &str, colour: Color32, text: String| {
         ui.horizontal_wrapped(|ui| {
             icons::show(ui, icon, 14.0, colour);
-            ui.add(egui::Label::new(RichText::new(text).size(theme::SMALL).color(colour)).wrap());
+            crate::bidi::label(ui, RichText::new(text).size(theme::SMALL).color(colour));
         });
     };
     for claim in c.claims.iter().filter(|x| !x.passed) {
@@ -1659,11 +1664,11 @@ fn check_card(app: &mut CraftApp, ui: &mut Ui, ctx: &egui::Context, ws: &Workspa
                 Some(s) => trf("Check {n}: about {s}% like the original", &[("n", &c.round.to_string()), ("s", &format!("{s:.0}"))]),
                 None => trf("Check {n}", &[("n", &c.round.to_string())]),
             };
-            ui.label(RichText::new(title).font(theme::semibold(theme::BODY)));
+            crate::bidi::text(ui, RichText::new(title).font(theme::semibold(theme::BODY)));
         });
         // The per-width measurements are for Advanced mode; a failed check's reason always shows.
         if !app.beginner() || c.similarity.is_none() {
-            ui.add(egui::Label::new(RichText::new(&c.note).color(t.text_dim).size(theme::CAPTION)).wrap());
+            crate::bidi::label(ui, RichText::new(&c.note).color(t.text_dim).size(theme::CAPTION));
         }
         claims_list(ui, c, &t);
         // Several pages: each one's likeness; clicking one shows its pictures below.
@@ -1738,7 +1743,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
             } else {
                 trf("Waiting for other builds to finish: {n} in line.", &[("n", &n.to_string())])
             };
-            ui.label(RichText::new(line).color(t.text_dim).size(theme::SMALL));
+            crate::bidi::text(ui, RichText::new(line).color(t.text_dim).size(theme::SMALL));
         });
         ui.add_space(4.0);
     }
@@ -1763,7 +1768,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
                     } else {
                         tr("Waiting: the builder reads these at its next step. Up arrow to edit the last.")
                     };
-                    ui.label(RichText::new(line).color(t.text_dim).size(theme::SMALL));
+                    crate::bidi::text(ui, RichText::new(line).color(t.text_dim).size(theme::SMALL));
                 }
             });
             ui.add_space(4.0);
@@ -1866,7 +1871,7 @@ fn questions_switch(app: &mut CraftApp, ui: &mut Ui) {
         if let Some(i) = widgets::segmented(ui, &["Change it", "Just ask"], usize::from(app.state.just_ask), 24.0) {
             app.state.just_ask = i == 1;
         }
-        ui.label(RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL));
+        crate::bidi::text(ui, RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| questions_controls(app, ui, now, &root, &t));
     });
 }
@@ -1884,7 +1889,7 @@ fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engin
         } else {
             tr("The builder answers its own questions and says what it chose (\"I decided: …\"), so you can change it.")
         };
-        ui.label(RichText::new(tr("Builder's questions:")).color(t.text_dim).size(theme::SMALL)).on_hover_text(tip);
+        crate::bidi::text(ui, RichText::new(tr("Builder's questions:")).color(t.text_dim).size(theme::SMALL)).on_hover_text(tip);
     }
 }
 
