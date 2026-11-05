@@ -566,9 +566,29 @@ impl Laid {
         }
         let right = rect.left() + prefix(b);
         let upto = if after { k + 1 } else { k };
-        let inside = width(line.get(a..upto.min(line.len()).max(a)).unwrap_or_default());
+        let mut part: Vec<char> = line.get(a..upto.min(line.len()).max(a)).unwrap_or_default().to_vec();
+        // Measured alone, the part's last letter would take its final shape, not the joined one it
+        // has in the word, and the caret could step backwards; a zero-width joiner keeps it joined
+        // (its own width, zero or a missing-glyph box, is taken off).
+        let joiner = if !part.is_empty() && upto < b {
+            part.push('\u{200D}');
+            width(&['\u{200D}'])
+        } else {
+            0.0
+        };
+        let inside = width(&part) - joiner;
         Some((right - inside, y))
     }
+}
+
+/// A text field's lines: [`break_lines`], plus the empty line after a final newline (Shift+Enter),
+/// where the caret then sits.
+fn field_lines(ui: &Ui, job: &LayoutJob, wrap: f32) -> Vec<Range<usize>> {
+    let mut lines = break_lines(ui, job, wrap);
+    if job.text.ends_with('\n') {
+        lines.push(job.text.len()..job.text.len());
+    }
+    lines
 }
 
 /// A text field's text laid out in visual order, and where to paint it.
@@ -578,12 +598,7 @@ fn text_edit_layout(ui: &Ui, output: &egui::text_edit::TextEditOutput, text: &st
     let area = output.text_clip_rect;
     let wrap = area.width().max(1.0);
     let job = LayoutJob::simple(text.to_owned(), font, color, wrap);
-    let mut lines = break_lines(ui, &job, wrap);
-    // After a final newline (Shift+Enter) the caret sits on a new, empty line.
-    if text.ends_with('\n') {
-        lines.push(text.len()..text.len());
-    }
-    let laid = lay_lines(ui, &job, lines, false);
+    let laid = lay_lines(ui, &job, field_lines(ui, &job, wrap), false);
     let pos = egui::pos2(if laid.rtl { area.right() } else { area.left() }, output.galley_pos.y);
     (laid, pos)
 }
@@ -680,12 +695,26 @@ fn swap_arrow_keys(events: &mut [egui::Event]) {
     }
 }
 
-/// Before showing the focused text field `id` holding `text`: when its text reads right to left,
-/// Left moves the caret forward through the text and Right back (egui moves by the text's order,
-/// so Left went right on screen). Shift still selects. Lines that read left to right are left as
-/// they are.
+/// Whether the paragraph holding the caret (character index `caret`) reads right to left. An
+/// empty paragraph takes the text's first paragraph's direction, which its row is aligned to.
+fn caret_paragraph_is_rtl(text: &str, caret: usize) -> bool {
+    let at = text.char_indices().nth(caret).map_or(text.len(), |(i, _)| i);
+    let start = text.get(..at).and_then(|s| s.rfind('\n')).map_or(0, |i| i + 1);
+    let end = text.get(at..).and_then(|s| s.find('\n')).map_or(text.len(), |i| at + i);
+    let para = text.get(start..end).unwrap_or_default();
+    if para.chars().any(|c| c.is_alphabetic()) { is_rtl_paragraph(para) } else { is_rtl_paragraph(text) }
+}
+
+/// Before showing the focused text field `id` holding `text`: when the paragraph holding the
+/// caret reads right to left, Left moves the caret forward through the text and Right back (egui
+/// moves by the text's order, so Left went right on screen). Shift still selects. Paragraphs that
+/// read left to right are left as they are.
 pub fn arrow_keys_follow_direction(ui: &Ui, id: egui::Id, text: &str) {
-    if is_rtl_paragraph(text) && ui.memory(|m| m.has_focus(id)) {
+    if !has_rtl(text) || !ui.memory(|m| m.has_focus(id)) {
+        return;
+    }
+    let caret = egui::TextEdit::load_state(ui.ctx(), id).and_then(|s| s.cursor.char_range()).map_or(0, |r| r.primary.index.0);
+    if caret_paragraph_is_rtl(text, caret) {
         ui.input_mut(|i| swap_arrow_keys(&mut i.events));
     }
 }
@@ -973,11 +1002,7 @@ mod tests {
         let mut h = harness(|ui| {
             for text in ["لدي فكرة\n\nبرنامج", "لدي فكرة\n"] {
                 let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 300.0);
-                let mut lines = break_lines(ui, &job, 300.0);
-                if text.ends_with('\n') {
-                    lines.push(text.len()..text.len());
-                }
-                let laid = lay_lines(ui, &job, lines, false);
+                let laid = lay_lines(ui, &job, field_lines(ui, &job, 300.0), false);
                 let at = "لدي فكرة\n".len();
                 let first = laid.galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
                 let second = laid.galley.rows.get(1).map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
@@ -1043,5 +1068,78 @@ mod tests {
         h.run();
         let at = h.ctx.data(|d| d.get_temp::<Option<(usize, usize)>>(id.with("test-cursor"))).flatten();
         assert_eq!(at, Some((2, 1)), "Shift+Left should select the next letter");
+    }
+
+    /// The arrows follow the paragraph the caret is in: an English line before an Arabic one
+    /// keeps its arrows, the Arabic line swaps them; an empty line follows the first paragraph.
+    #[test]
+    fn arrow_direction_is_the_caret_paragraphs() {
+        let text = "Hello world\nلدي فكرة\n\nok";
+        assert!(!caret_paragraph_is_rtl(text, 3), "in the English line");
+        assert!(caret_paragraph_is_rtl(text, 14), "in the Arabic line");
+        assert!(!caret_paragraph_is_rtl(text, 21), "on the empty line: the first paragraph's direction");
+        assert!(!caret_paragraph_is_rtl(text, 23), "in the last English line");
+        assert!(caret_paragraph_is_rtl("لدي فكرة\n\nok", 9), "an empty line after Arabic first");
+    }
+
+    /// Pressing Left through a wrapped Arabic paragraph in a real text field moves the painted
+    /// caret left along each row and then onto the next row's right end, never right; Down moves
+    /// it to a lower row. Checked against the layout the field paints.
+    #[test]
+    fn left_walks_wrapped_arabic_as_painted() {
+        type Seen = Option<(usize, f32, f32)>;
+        let text = "لدي فكرة برنامج يقسم يومي إلى نوم ودراسة وبرمجة وترفيه ويغلق المتصفحات";
+        let id = egui::Id::new("wrapped-rtl-field");
+        let key = id.with("seen");
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(200.0, 200.0)).build_ui(move |ui| {
+            crate::theme::install_fonts(ui.ctx());
+            let mut s = text.to_owned();
+            ui.memory_mut(|m| m.request_focus(id));
+            arrow_keys_follow_direction(ui, id, &s);
+            let out = egui::TextEdit::multiline(&mut s).id(id).desired_width(150.0).show(ui);
+            let font = FontId::proportional(14.0);
+            let (laid, _) = text_edit_layout(ui, &out, text, font, Color32::WHITE);
+            let seen: Seen = out.cursor_range.and_then(|r| {
+                let ci = r.primary.index.0;
+                let at = text.char_indices().nth(ci).map_or(text.len(), |(i, _)| i);
+                laid.caret(ui, at).map(|(x, y)| (ci, x, y.min))
+            });
+            ui.data_mut(|d| d.insert_temp(key, (seen, laid.galley.rows.len())));
+        });
+        h.run();
+        let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+        state.cursor.set_char_range(Some(egui::text_selection::CCursorRange::one(egui::text::CCursor::new(0))));
+        egui::TextEdit::store_state(&h.ctx, id, state);
+        h.run();
+        let read = |h: &egui_kittest::Harness<'_>| h.ctx.data(|d| d.get_temp::<(Seen, usize)>(key)).unwrap_or((None, 0));
+        let (start, rows) = read(&h);
+        assert!(rows >= 3, "the text should wrap onto several rows, got {rows}");
+        let mut last = start.unwrap_or((0, f32::NAN, f32::NAN));
+        let mut row_changes = 0;
+        for _ in 0..text.chars().count() {
+            h.key_press(egui::Key::ArrowLeft);
+            h.run();
+            let Some(now) = read(&h).0 else { panic!("no caret after Left") };
+            assert_eq!(now.0, last.0 + 1, "Left should move one letter on in the text");
+            if (now.2 - last.2).abs() < 0.5 {
+                assert!(now.1 <= last.1 + 0.5, "on one row the caret moved right: {last:?} -> {now:?}");
+            } else {
+                assert!(now.2 > last.2, "the caret went up a row: {last:?} -> {now:?}");
+                row_changes += 1;
+            }
+            last = now;
+        }
+        assert!(row_changes >= 2, "the walk should cross row boundaries, crossed {row_changes}");
+
+        // Down from the start goes to a lower row.
+        let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+        state.cursor.set_char_range(Some(egui::text_selection::CCursorRange::one(egui::text::CCursor::new(0))));
+        egui::TextEdit::store_state(&h.ctx, id, state);
+        h.run();
+        let top = read(&h).0.map_or(f32::NAN, |s| s.2);
+        h.key_press(egui::Key::ArrowDown);
+        h.run();
+        let below = read(&h).0.map_or(f32::NAN, |s| s.2);
+        assert!(below > top, "Down should reach a lower row: {top} -> {below}");
     }
 }
