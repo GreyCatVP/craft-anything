@@ -1,7 +1,7 @@
 # UI localisation
 
 The desktop app offers **Čeština** (`cs`), **Deutsch** (`de`), **한국어** (`ko`), **Русский** (`ru`), **简体中文** (`zh-hans`)
-and **繁體中文** (`zh-hant`), alongside English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
+and **繁體中文** (`zh-hant`), alongside English, French, Japanese and Turkish, in **Settings → General → Language**. The choice is saved in the
 existing `language` setting. **System** uses the operating system's preferred
 supported language; if none matches, it uses English. An explicit choice takes
 precedence over the system language.
@@ -21,6 +21,17 @@ Product and technology names, tool ids and shortcuts keep their spelling. The ki
 a request ("a game", "a website") also knows the German words *Spiel*, *Webseite* and *Internetseite*,
 so a translated suggestion keeps its project kind.
 
+## Turkish
+
+**Türkçe** (`tr`) uses the formal-plural address ("seçin", "kontrol edin") throughout, which is the
+usual register for Turkish software interfaces; buttons and short labels are bare imperatives
+("Aç", "Kaydet"). `tr`, `tr-TR` and `tr-CY` select it, as does the system language when it is
+Turkish. `crates/ui-egui/src/i18n/tr.tsv` has the same keys as the other catalogs (a unit test
+compares them), written from the English source strings. Product and technology names, tool ids
+and shortcuts keep their spelling. The kind detection that reads a request ("a game", "a website")
+also knows the Turkish words *oyun*, *web sitesi* and *sitesi*, so a translated suggestion keeps
+its project kind.
+
 ## Scope and format
 
 `crates/ui-egui/src/i18n/cs.tsv`, `de.tsv`, `ko.tsv`, `ru.tsv`, `zh-hans.tsv` and `zh-hant.tsv` contain original
@@ -39,7 +50,7 @@ descriptions, logs and exported reports retain their original text. The CLI,
 MCP, tool IDs, stored project data and the separate browser viewer are unchanged.
 
 Keep placeholders such as `{name}` and `{n}` intact, along with command IDs,
-shortcuts, escapes and trailing `…`. Update every catalog (`cs`, `de`, `ko`, `ru`, `zh-hans`, `zh-hant`)
+shortcuts, escapes and trailing `…`. Update every catalog (`cs`, `de`, `ko`, `ru`, `tr`, `zh-hans`, `zh-hant`)
 when English source keys change; the tests require matching key sets. Common terms include 净室 / 淨室 (Clean room), 深度 (Deep),
 构建 / 建置 (Build), 证据 / 證據 (Evidence), and 项目 / 專案 (Project).
 The Korean catalog `ko.tsv` uses 클린룸 (Clean room), 심층 (Deep), 분석 / 만들기 / 검사 / 완성

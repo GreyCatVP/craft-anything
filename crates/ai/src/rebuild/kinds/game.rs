@@ -1,4 +1,4 @@
-//! Games: built with a game engine (or Rust), studied with the game's own folder, and told how
+﻿//! Games: built with a game engine (or Rust), studied with the game's own folder, and told how
 //! to play like the original (mechanics sheet, decompiling in Deep mode, generated assets).
 
 use super::*;
@@ -33,7 +33,7 @@ impl TargetKind for GameKind {
         // say ("Clone <its title> 1:1" never says "game").
         if game::Builder::from_stack(cx.stack).is_some() {
             Some(200)
-        } else if cx.says(&["game", "gameplay", "steam", "level", "player", "游戏", "遊戲", "玩法", " spiel", "-spiel"]) {
+        } else if cx.says(&["game", "gameplay", "steam", "oyun", "level", "player", "游戏", "遊戲", "玩法", " spiel", "-spiel"]) {
             Some(60)
         } else {
             None

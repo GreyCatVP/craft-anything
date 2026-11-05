@@ -73,6 +73,16 @@ fn german_requests_keep_their_project_kind() {
 }
 
 #[test]
+fn turkish_requests_keep_their_project_kind() {
+    for request in ["Basit bir yılan oyunu", "Aynı oyunu skor tablosuyla yap"] {
+        assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
+    }
+    for request in ["Fırınım için bir web sitesi", "Bu web sitesini yeniden oluştur"] {
+        assert_eq!(choose(request, &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "{request}");
+    }
+}
+
+#[test]
 fn chinese_requests_keep_their_project_kind() {
     for request in ["一个简单的贪吃蛇游戏", "簡單的貪食蛇遊戲", "复刻它的玩法"] {
         assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");

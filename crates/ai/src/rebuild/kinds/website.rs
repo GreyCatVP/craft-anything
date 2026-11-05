@@ -1,4 +1,4 @@
-//! Websites: captured in a private browser, checked by serving the build and comparing
+﻿//! Websites: captured in a private browser, checked by serving the build and comparing
 //! screenshots with the original's.
 
 use super::*;
@@ -144,7 +144,7 @@ impl TargetKind for WebsiteKind {
     fn detect(&self, cx: &DetectCx) -> Option<u32> {
         if matches!(cx.target, TargetRef::Website { .. }) {
             Some(100)
-        } else if cx.says(&[" website", " web page", " webpage", " landing page", " site ", " webseite", " internetseite", "网站", "網站", "网页", "網頁"])
+        } else if cx.says(&[" website", " web page", " webpage", " landing page", " web sitesi", " sitesi", " internet sitesi", " site ", " webseite", " internetseite", "网站", "網站", "网页", "網頁"])
         {
             Some(50)
         } else if matches!(cx.target, TargetRef::None) && stacks::get(cx.stack).is_some_and(|s| s.site) {
