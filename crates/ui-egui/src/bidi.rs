@@ -695,14 +695,15 @@ fn swap_arrow_keys(events: &mut [egui::Event]) {
     }
 }
 
-/// Whether the paragraph holding the caret (character index `caret`) reads right to left. An
-/// empty paragraph takes the text's first paragraph's direction, which its row is aligned to.
+/// Whether the paragraph holding the caret (character index `caret`) reads right to left: from
+/// its own text when it has any (a line of numbers reads left to right, as it's drawn); an empty
+/// paragraph takes the text's first paragraph's direction, which its row is aligned to.
 fn caret_paragraph_is_rtl(text: &str, caret: usize) -> bool {
     let at = text.char_indices().nth(caret).map_or(text.len(), |(i, _)| i);
     let start = text.get(..at).and_then(|s| s.rfind('\n')).map_or(0, |i| i + 1);
     let end = text.get(at..).and_then(|s| s.find('\n')).map_or(text.len(), |i| at + i);
     let para = text.get(start..end).unwrap_or_default();
-    if para.chars().any(|c| c.is_alphabetic()) { is_rtl_paragraph(para) } else { is_rtl_paragraph(text) }
+    if para.trim().is_empty() { is_rtl_paragraph(text) } else { is_rtl_paragraph(para) }
 }
 
 /// Before showing the focused text field `id` holding `text`: when the paragraph holding the
@@ -1080,6 +1081,9 @@ mod tests {
         assert!(!caret_paragraph_is_rtl(text, 21), "on the empty line: the first paragraph's direction");
         assert!(!caret_paragraph_is_rtl(text, 23), "in the last English line");
         assert!(caret_paragraph_is_rtl("لدي فكرة\n\nok", 9), "an empty line after Arabic first");
+        assert!(!caret_paragraph_is_rtl("مرحبا\n123", 8), "a line of numbers reads left to right, as it's drawn");
+        assert!(!caret_paragraph_is_rtl("مرحبا\n(1) - 2", 8), "numbers and punctuation only: left to right");
+        assert!(caret_paragraph_is_rtl("مرحبا\n123", 2), "the Arabic line above it still swaps");
     }
 
     /// Pressing Left through a wrapped Arabic paragraph in a real text field moves the painted
