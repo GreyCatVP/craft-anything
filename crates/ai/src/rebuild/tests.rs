@@ -2739,6 +2739,10 @@ fn a_named_backend_that_is_turned_off_does_not_build() {
 fn a_build_named_for_a_backend_that_is_turned_off_stops_before_any_work() {
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    // A refused start must not eat what the person handed over: `notes::clear` runs when a run does
+    // start, and it would take this with it if it ever moved above the check.
+    let notes_dir = notes::notes_dir(&ws.inbox_dir());
+    notes::hand_over(&notes_dir, 1, "make the header blue").unwrap();
     let mut s = craft_anything_engine::testing::session();
     s.settings.ai = toml::from_str(
         "[[backends]]\nname = \"Codex\"\nkind = \"agent_cli\"\nmodel = \"codex\"\nenabled = false\n\n\
@@ -2752,6 +2756,7 @@ fn a_build_named_for_a_backend_that_is_turned_off_stops_before_any_work() {
         Err(e) => e,
     };
     assert!(err.message.contains("Codex") && err.message.contains("turned off"), "{}", err.message);
+    assert!(notes_dir.join("1.json").is_file(), "a refused start must leave the person's note waiting");
 }
 
 /// #446: a project copied from another computer keeps the id of a Claude Code session that lives
