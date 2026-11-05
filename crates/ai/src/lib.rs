@@ -384,6 +384,11 @@ impl AiHub {
         AiHub { engine, settings_path: Some(settings_path), keys }
     }
 
+    /// This hub with an engine of its own for one run (see [`Engine::for_a_run`]).
+    pub(crate) fn for_a_run(&self) -> Self {
+        AiHub { engine: self.engine.for_a_run(), settings_path: self.settings_path.clone(), keys: self.keys.clone() }
+    }
+
     fn settings_path(&self) -> PathBuf {
         self.settings_path.clone().unwrap_or_else(Settings::path)
     }
