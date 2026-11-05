@@ -329,13 +329,17 @@ been run live.
       not a folder inside `app/` (a brief can't say `cargo init`: not every builder's commands
       start in `app/`). Live, with calls after a sentence run too, the model then made
       `app/Cargo.toml` and the build compiled (#751)
+- [ ] Told that its `cargo new app` made `app/app/`, the model kept editing `app/app/Cargo.toml`
+      and running `cargo build` in `app/`, and checks 2 and 3 still found the project one folder
+      down (live, GPU). See whether naming the move gets it out, or whether the run should move it
 - [x] The model reads file paths from the project folder and commands from `app/` as one base:
       it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`.
       `build_command_run`'s result now says where it ran (`ran_in`), a command that makes
       `app/app/` is told the project goes in `app/` itself, and one that starts with `cd app` where
-      there's none is told to leave it out. Live (Ollama, `qwen2.5-coder:14b`, CPU only) the first
-      command was still `cargo new app`, before any result could say so; a second run wrote
-      `cargo init app/` twice, but with a summary after the call, so neither ran (open line above)
+      there's none is told to leave it out. Live (Ollama, `qwen2.5-coder:14b`) the first command
+      was still `cargo new app`, before any result could say so. On a GPU (Ollama 0.40.7) the note
+      then reached the model; on the CPU a second run wrote the call with a summary after it, so
+      nothing ran (the open line on a call followed by a summary)
       — claimed: SoldierPePe, branch bugfix/r5.4-build-command-folder
 - [x] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
       Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out.
