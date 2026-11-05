@@ -324,10 +324,10 @@ pub(super) fn resumed_elsewhere(brief: &str, last_reply: &str, handoff: Option<&
 
 /// How many of the latest "Just ask" questions the builder is told, and how much of each: enough
 /// to follow the conversation. Some agents take the prompt on their command line, which Windows
-/// limits to 32,767 characters, so all of it has to stay well under that.
+/// limits to 32,767 UTF-16 units (an emoji is two), so all of it has to stay well under that.
 const JUST_ASKED_KEPT: usize = 5;
-const JUST_ASKED_QUESTION_CHARS: usize = 500;
-const JUST_ASKED_ANSWER_CHARS: usize = 2000;
+const JUST_ASKED_QUESTION_CHARS: usize = 300;
+const JUST_ASKED_ANSWER_CHARS: usize = 1500;
 
 /// `text`, cut to `max` characters and marked when it was.
 fn clipped(text: &str, max: usize) -> String {

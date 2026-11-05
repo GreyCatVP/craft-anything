@@ -1976,11 +1976,12 @@ fn just_ask_is_told_to_the_builder_shortly_and_cut_on_a_character() {
     asked.push(q(7, "é".repeat(3000)));
     let told = super::just_asked(&asked);
     assert!(!told.contains("question 2") && told.contains("question 3") && told.contains("question 7"), "the latest five: {told}");
-    assert!(told.contains(&format!("{}…", "é".repeat(2000))) && !told.contains(&"é".repeat(2001)), "a long answer is cut");
+    assert!(told.contains(&format!("{}…", "é".repeat(1500))) && !told.contains(&"é".repeat(1501)), "a long answer is cut");
     assert!(told.contains("A: short\n"), "a short one isn't marked as cut");
-    // The most a person can ask, five times over, still leaves room on a Windows command line.
-    let longest: Vec<_> = (0..5).map(|_| AskedQuestion::new("q".repeat(4000), "a".repeat(100_000), true, "Claude".into(), None, 0)).collect();
-    assert!(super::just_asked(&longest).chars().count() < 14_000);
+    // The most a person can ask, five times over, still leaves room on a Windows command line, which
+    // counts UTF-16 units: an emoji is two.
+    let longest: Vec<_> = (0..5).map(|_| AskedQuestion::new("😀".repeat(4000), "😀".repeat(100_000), true, "Claude".into(), None, 0)).collect();
+    assert!(super::just_asked(&longest).encode_utf16().count() < 20_000);
 }
 
 fn check_worker(ws: &Workspace, deep: bool) -> Worker {
