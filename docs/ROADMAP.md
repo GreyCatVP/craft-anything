@@ -329,6 +329,7 @@ been run live.
 - [ ] The model reads file paths from the project folder and commands from `app/` as one base:
       it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`. Say the
       folder in `build_command_run`'s result (or its description) so the two can't be mixed up
+      — claimed: SoldierPePe, branch bugfix/r5.4-build-command-folder
 - [x] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
       Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out.
       Cached tokens: Ollama 0.40 reports them apart (`cached_tokens`), and the built-in loop's
