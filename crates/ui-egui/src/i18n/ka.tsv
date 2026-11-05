@@ -2,13 +2,29 @@
 # UTF-8: English source<TAB>translation. Keep placeholders and escapes intact.
 OpenCode default	OpenCode-ის ნაგულისხმევი
 Model default	მოდელის ნაგულისხმევი
+About 60 GB, an Epic Games account, and Xcode.	დაახლოებით 60 GB, Epic Games-ის ანგარიში და Xcode.
+About Craft Anything	Craft Anything-ის შესახებ
 Add another	კიდევ ერთის დამატება
 Add it again, to choose another account's folder for it.	ხელახლა დაამატეთ, რომ მისთვის სხვა ანგარიშის საქაღალდე აირჩიოთ.
+Add Unreal's Linux C++ toolchain	Unreal-ის Linux C++ ხელსაწყოთა ნაკრების დამატება
 Another model	სხვა მოდელი
+Bring all to front	ყველას წინა პლანზე გადატანა
 Choose your project's folder…	თქვენი პროექტის საქაღალდის არჩევა…
 Claude Code folder (CLAUDE_CONFIG_DIR)	Claude Code-ის საქაღალდე (CLAUDE_CONFIG_DIR)
+Close window	ფანჯრის დახურვა
+Command palette	ბრძანებების პალიტრა
 Context window	კონტექსტის ფანჯარა
+Copy the message	შეტყობინების კოპირება
+Craft Anything on GitHub	Craft Anything GitHub-ზე
 Default	ნაგულისხმევი
+Drag to give the plan more or less room; double-click to reset	გადაათრიეთ, რომ გეგმას მეტი ან ნაკლები ადგილი დაუთმოთ; ორმაგი დაწკაპუნებით — ჩამოყრა
+File	ფაილი
+Fold a project's plan	პროექტის გეგმის ჩაკეცვა
+Fold the plan	გეგმის ჩაკეცვა
+Full screen	სრული ეკრანი
+Help	დახმარება
+Hide Craft Anything	Craft Anything-ის დამალვა
+Hide others	სხვების დამალვა
 Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	საკუთარი შესვლა, პარამეტრები და საუბრები: სხვა საქაღალდე სხვა ანგარიშია. ცარიელი: მისი ჩვეული საქაღალდე.
 Load model options	მოდელის პარამეტრების ჩატვირთვა
 No chat models are visible in {agent}. Check its setup, then reload.	{agent}-ში ჩატის მოდელები არ ჩანს. შეამოწმეთ მისი დაყენება, შემდეგ ხელახლა ჩატვირთეთ.
@@ -16,9 +32,15 @@ Nothing of this kind was found.	ამ ტიპის არაფერი მ
 Pick its folder, say what you want, then press Start.	აირჩიეთ მისი საქაღალდე, თქვით, რა გინდათ, შემდეგ დააჭირეთ „დაწყებას“.
 Pick your project's folder	აირჩიეთ თქვენი პროექტის საქაღალდე
 Pick your project's folder first.	ჯერ აირჩიეთ თქვენი პროექტის საქაღალდე.
+Quit Craft Anything	Craft Anything-იდან გასვლა
+Report a problem…	პრობლემის შეტყობინება…
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	ძრავის საქაღალდეში გაუშვით Engine/Build/BatchFiles/Linux/SetupToolchain.sh, რომ მასთან ერთად მოწოდებული Clang ხელსაწყოთა ნაკრები დააინსტალიროთ. თუ Unreal საწყისი კოდიდან ააწყვეთ, Setup.sh ამის ნაცვლად ნატიურ ხელსაწყოთა ნაკრებს ჩამოტვირთავს. სისტემის Clang შეიძლება ძრავის ვერსიას არ შეესაბამებოდეს.
+Services	სერვისები
 Set an AI's folder	AI-ის საქაღალდის მითითება
 Set model options	მოდელის პარამეტრების დაყენება
+Show all	ყველას ჩვენება
 That folder is empty. Pick the folder your project's files are in.	ეს საქაღალდე ცარიელია. აირჩიეთ საქაღალდე, სადაც თქვენი პროექტის ფაილებია.
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	Claude-ის სამაგიდო აპლიკაცია დაინსტალირებულია, მაგრამ ასაწყობად საჭიროა Claude Code — მისი ცალკე ბრძანების სტრიქონის ხელსაწყო. დააინსტალირეთ Claude Code, ერთხელ შედით მასში ტერმინალში და შემდეგ ხელახლა მოძებნეთ.
 The saved model is no longer visible. Choose another model or the {agent} default.	შენახული მოდელი აღარ ჩანს. აირჩიეთ სხვა მოდელი ან {agent}-ის ნაგულისხმევი.
 Thinking depth	ფიქრის სიღრმე
 OpenCode model	OpenCode-ის მოდელი
@@ -1169,6 +1191,8 @@ Unload a Frida script	Frida-ს სკრიპტის გამოტვი�
 Unreal IoStore	Unreal IoStore
 Unreal builds games with Apple's Xcode, free in the App Store.	Unreal თამაშებს Apple-ის Xcode-ით აწყობს, რომელიც App Store-ში უფასოა.
 Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal აქ არის, მაგრამ მას Visual Studio-ს C++ ხელსაწყოებიც სჭირდება.
+Unreal is here, but it also needs Xcode.	Unreal აქ არის, მაგრამ მას Xcode-იც სჭირდება.
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal აქ არის, მაგრამ მასთან ერთად მოწოდებული Clang C++ ხელსაწყოთა ნაკრები ვერ მოიძებნა.
 Unreal pak	Unreal pak
 Update a finding	მიგნების განახლება
 Update a hypothesis	ჰიპოთეზის განახლება
@@ -1183,6 +1207,7 @@ Use this	ამის გამოყენება
 Use {name}	{name}-ის გამოყენება
 Value flow	მნიშვნელობების ნაკადი
 Version	ვერსია
+View	ხედი
 Waiting	ელოდება
 Waiting for another build to finish: this one starts next.	სხვა აწყობის დასრულების მოლოდინი: ეს შემდეგი დაიწყება.
 Waiting for other builds to finish: {n} in line.	სხვა აწყობების დასრულების მოლოდინი: რიგში: {n}.
@@ -1257,6 +1282,7 @@ Who signed this Windows program	ვინ მოაწერა ხელი ა
 Who uses this Android class?	ვინ იყენებს ამ Android კლასს?
 Who uses this Java class?	ვინ იყენებს ამ Java კლასს?
 Why we ask	რატომ ვკითხულობთ
+Window	ფანჯარა
 Window / focus info	ფანჯრის / ფოკუსის ინფორმაცია
 Windows resources	Windows რესურსები
 Wireshark tools check	Wireshark ხელსაწყოების შემოწმება
@@ -1339,6 +1365,7 @@ title bar	სათაურის ზოლი
 under $0.01	$0.01-ზე ნაკლები
 yesterday	გუშინ
 your files there are the app, edited in place	იქ არსებული თქვენი ფაილები თავად აპია, ადგილზე რედაქტირებადი
+Zoom	მასშტაბი
 {:.1} GB	{:.1} GB
 {:.1}M	{:.1}M
 {backend}: {input_tokens} in / {output_tokens} out{cost}	{backend}: {input_tokens} შემავალი / {output_tokens} გამავალი{cost}
