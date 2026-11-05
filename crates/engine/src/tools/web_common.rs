@@ -86,7 +86,7 @@ pub fn runtime_of(product: &str, user_agent: &str) -> &'static str {
 /// The error returned when no browser is available and none was asked to launch.
 pub fn engine_missing(detail: impl std::fmt::Display) -> ToolError {
     ToolError::new(ErrorCode::EngineMissing, format!("no browser is available: {detail}")).with_remediation(
-        "Give a loopback CDP endpoint (start a browser with --remote-debugging-port), or install a browser from Settings → Engines so one can be launched.",
+        "Give a loopback CDP endpoint (start a browser with --remote-debugging-port), or install a Chromium-based browser so one can be launched (set its path in Settings → Engines if it isn't found).",
     )
 }
 

@@ -416,8 +416,11 @@ Owner: open · Status: in progress
 - [x] Find Chrome, Brave, Chromium and Edge installed as Flatpaks on Linux (system and per-user
       exports), and keep a Flatpak or Snap browser's private profile in the home folder its
       sandbox shares, since its /tmp is its own (#747). Unit-tested; not run on a real Flatpak
-- [ ] Find browsers under their other Linux names, and say why one isn't found: a set path that
-      isn't there, or a Flatpak's sandbox (#841) — claimed: justinjohn0306, branch bugfix/841-browser-not-found
+- [x] Find browsers under their other Linux names, and say why one isn't found: a set path that
+      isn't there, or a Flatpak's sandbox (#841). Unit-tested; not run on Linux or in a real Flatpak
+- [ ] **Decision:** let the Flatpak start browsers on the computer. It can't see them today, and
+      `flatpak-spawn --host` needs `--talk-name=org.freedesktop.Flatpak`, which lets the app run
+      anything outside its sandbox (#841)
 - [ ] More pins once their hashes are checked against the publisher: Chromium (no published
       checksums found yet), Rizin for Linux (the tar.xz unpacks to ~800 MB, so it needs streaming
       extraction) and macOS (a .pkg)
