@@ -1117,6 +1117,9 @@ fn an_ais_model_is_changed_in_settings() {
     h.get_by_label("Change…").click();
     assert!(wait(&mut h, |a| a.model_picker.as_ref().is_some_and(|(_, m)| m.as_deref() == Some(&["nomic-embed-text".to_string(), "qwen3:8b".into()][..]))));
     h.run_steps(2);
+    // An API backend shows its saved model, never Claude Code's "default" label.
+    h.get_by_value("nomic-embed-text");
+    assert!(h.query_by_value("Default (its own settings)").is_none());
     h.state_mut().set_model("Box", "qwen3:8b");
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Box" && b.model == "qwen3:8b")));
     h.run_steps(2);
