@@ -1234,6 +1234,10 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
+- [ ] An Arabic UI that reads right to left: a full `ar` catalog, Arabic sentences in their right
+      word order (egui 0.36 shapes each word but lays words out left to right), and the window
+      mirrored (sidebar on the right, rows from the right)
+      — claimed: SoldierPePe, branch feature/r2.9-arabic-rtl
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
