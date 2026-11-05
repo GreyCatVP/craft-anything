@@ -329,6 +329,8 @@ fn build_command_run(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     approve(ctx, "Bash", &json!({"command": p.command}))?.map_err(refused)?;
     let app = ws.app_dir();
     std::fs::create_dir_all(&app).map_err(|e| ToolError::io(app.display(), e))?;
+    let inner = app.join("app");
+    let had_inner = inner.is_dir();
     let (shell, flag) = if cfg!(windows) { ("cmd", "/C") } else { ("sh", "-c") };
     let cancel = ctx.cancel.clone();
     ctx.report(None, format!("Running {}", p.command.chars().take(120).collect::<String>()));
@@ -349,13 +351,23 @@ fn build_command_run(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
         }
         s.get(start..).unwrap_or_default().to_string()
     };
-    Ok(ToolOutput::Value(json!({
+    let mut v = json!({
         "command": p.command,
+        "ran_in": ws.app_place(),
         "exit_code": out.code,
         "succeeded": out.success,
         "stdout": tail(out.stdout_text()),
         "stderr": tail(out.stderr_text()),
-    })))
+    });
+    // A model that reads file paths and commands from one base starts with `cd app`, or makes its
+    // project with `cargo new app`, from inside app/.
+    let first = p.command.split(['&', ';']).next().unwrap_or_default().trim().replace('\\', "/");
+    if ["cd app", "cd app/", "cd ./app", "cd ./app/"].contains(&first.as_str()) && !inner.is_dir() {
+        v["note"] = json!(format!("Commands already run in {}: leave out `cd app`.", ws.app_place()));
+    } else if !had_inner && inner.is_dir() && app != ws.root {
+        v["note"] = json!("This made app/app/: commands already run in app/, so the app's project goes in app/ itself (app/Cargo.toml, app/package.json).");
+    }
+    Ok(ToolOutput::Value(v))
 }
 
 #[cfg(test)]
@@ -477,6 +489,24 @@ mod tests {
         // Dev servers never exit: refused before anything runs.
         let err = call(&e, "build_command_run", json!({"command": "npm run dev"})).unwrap_err();
         assert!(err.message.contains("dev servers"), "{}", err.message);
+    }
+
+    /// R5.4: a local model ran `cd app && cargo build` from inside app/, reading file paths and
+    /// commands from one base.
+    #[test]
+    fn a_command_says_where_it_ran() {
+        let (_d, _ws, e) = building();
+        let ok = call(&e, "build_command_run", json!({"command": "echo built"})).unwrap();
+        assert_eq!((ok["ran_in"].as_str(), ok["succeeded"].as_bool(), ok.get("note")), (Some("app/"), Some(true), None));
+        let lost = call(&e, "build_command_run", json!({"command": "cd app && echo built"})).unwrap();
+        assert_eq!(lost["succeeded"], false, "{lost}");
+        assert!(lost["note"].as_str().is_some_and(|n| n.contains("already run in app/")), "{lost}");
+        // Live, its first command was `cargo new app`, which made app/app/.
+        let nested = call(&e, "build_command_run", json!({"command": "mkdir app"})).unwrap();
+        assert!(nested["note"].as_str().is_some_and(|n| n.contains("This made app/app/")), "{nested}");
+        // Once there, it's a folder of the app's own: going into it is left alone.
+        let inner = call(&e, "build_command_run", json!({"command": "cd app && echo built"})).unwrap();
+        assert_eq!((inner["succeeded"].as_bool(), inner.get("note")), (Some(true), None));
     }
 
     #[test]

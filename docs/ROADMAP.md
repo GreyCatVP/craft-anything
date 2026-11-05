@@ -316,6 +316,9 @@ been run live.
       tool, with only words before or between them, now runs them all (`fenced_calls`, ids
       `react_N` as other text calls); words after the last fence, other code, an unclosed fence or
       a tool that wasn't offered keep it text (#753)
+- [ ] A call followed by a summary isn't run, and the model isn't told: in a second live run of
+      #417's case both turns put "### Summary:" after their one `json` fence, nothing ran, and the
+      build stopped after two turns with no files. Say in the next message that it wasn't run
 - [ ] A local builder spends its rounds on the project file and never writes the app: run 4 had a
       compiling `Cargo.toml` by check 3, its last, with `main.rs` still "Hello, world!". See whether
       more rounds get there, or whether a small model needs the window and the `--screenshot`
@@ -326,9 +329,13 @@ been run live.
       not a folder inside `app/` (a brief can't say `cargo init`: not every builder's commands
       start in `app/`). Live, with calls after a sentence run too, the model then made
       `app/Cargo.toml` and the build compiled (#751)
-- [ ] The model reads file paths from the project folder and commands from `app/` as one base:
-      it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`. Say the
-      folder in `build_command_run`'s result (or its description) so the two can't be mixed up
+- [x] The model reads file paths from the project folder and commands from `app/` as one base:
+      it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`.
+      `build_command_run`'s result now says where it ran (`ran_in`), a command that makes
+      `app/app/` is told the project goes in `app/` itself, and one that starts with `cd app` where
+      there's none is told to leave it out. Live (Ollama, `qwen2.5-coder:14b`, CPU only) the first
+      command was still `cargo new app`, before any result could say so; a second run wrote
+      `cargo init app/` twice, but with a summary after the call, so neither ran (open line above)
       — claimed: SoldierPePe, branch bugfix/r5.4-build-command-folder
 - [x] `usage.json` after a local build says about 4,200 input tokens and 6.5 s of work, while
       Ollama logged about six requests of 4,000-5,000 tokens each: find what it leaves out.
