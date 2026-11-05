@@ -413,6 +413,10 @@ pub struct UiState {
     pub purpose: Purpose,
     /// Chosen AI backend name; `None` = no AI.
     pub backend: Option<String>,
+    /// Whether the person picked an AI themselves (`None` included). A refresh only fills in a
+    /// default while nothing has been chosen, so an explicit "No AI" survives.
+    #[serde(default)]
+    pub backend_chosen: bool,
     pub explain_new: bool,
     pub chat: Vec<ChatItem>,
     pub input: String,
@@ -545,6 +549,7 @@ impl Default for UiState {
             first_run: FirstRunStep::Welcome,
             purpose: Purpose::OwnOrAuthorized,
             backend: None,
+            backend_chosen: false,
             explain_new: true,
             chat: Vec::new(),
             input: String::new(),

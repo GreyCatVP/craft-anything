@@ -170,7 +170,10 @@ impl CraftApp {
 
     /// Load the models an AI offers for the title bar's quick picker, once.
     pub fn load_quick_models(&mut self, name: &str) {
-        if self.quick_models.contains_key(name) || !self.quick_models_asking.insert(name.to_string()) {
+        if self.quick_models.contains_key(name)
+            || self.quick_models_failed.contains(name)
+            || !self.quick_models_asking.insert(name.to_string())
+        {
             return;
         }
         let (hub, name) = (self.hub.clone(), name.to_string());

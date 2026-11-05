@@ -351,7 +351,15 @@ fn pretty_model(id: &str) -> String {
 fn quick_model_picker(app: &mut CraftApp, ui: &mut Ui) {
     let Some(name) = app.state.backend.clone() else { return };
     let Some(config) = app.backends.iter().find(|b| b.name == name) else { return };
-    let current = config.model.clone();
+    // Ajan uygulamalarinda `model` uygulamanin kendisidir; secilen model `cli_model`de durur.
+    let current = match config.kind {
+        craft_anything_ai::BackendKind::AgentCli => app
+            .backend_options
+            .get(&name)
+            .and_then(|o| o.cli_model.clone())
+            .unwrap_or_else(|| config.model.clone()),
+        _ => config.model.clone(),
+    };
 
     app.load_quick_models(&name);
     let models = app.quick_models.get(&name).cloned().unwrap_or_default();
@@ -418,7 +426,9 @@ fn quick_model_picker(app: &mut CraftApp, ui: &mut Ui) {
 
     app.model_filter = filter;
     if opened {
-        // Yeniden açıldığında boş bir arama kutusu ve imleç olsun.
+        // Yeniden açıldığında boş bir arama kutusu ve imleç olsun; bir kez başarısız olan
+        // model listesi de burada bir kez daha denenir.
+        app.quick_models_failed.remove(&name);
         app.model_filter.clear();
         app.model_focus = true;
     }

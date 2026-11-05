@@ -34,7 +34,7 @@ its project kind.
 
 ## Scope and format
 
-`crates/ui-egui/src/i18n/cs.tsv`, `de.tsv`, `ko.tsv`, `ru.tsv`, `zh-hans.tsv` and `zh-hant.tsv` contain original
+`crates/ui-egui/src/i18n/cs.tsv`, `de.tsv`, `tr.tsv`, `ko.tsv`, `ru.tsv`, `zh-hans.tsv` and `zh-hant.tsv` contain original
 translations under the repository's MIT OR Apache-2.0 licence. Each UTF-8 line
 has two columns: `English source<TAB>translation`. Comments begin with `#`;
 `\n` represents a newline. The language registry in `i18n.rs` embeds the catalogs.

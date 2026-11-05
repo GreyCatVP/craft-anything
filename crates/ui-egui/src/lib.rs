@@ -445,6 +445,8 @@ pub struct CraftApp {
     /// Quick model lists for the title bar's model picker, by AI name, and the ones being asked for.
     pub quick_models: std::collections::BTreeMap<String, Vec<String>>,
     pub quick_models_asking: std::collections::BTreeSet<String>,
+    /// Backends whose model list failed; they are retried when the picker is opened again.
+    pub quick_models_failed: std::collections::BTreeSet<String>,
     /// Title bar's model list: what's typed in its search box, and whether to focus it next frame.
     pub model_filter: String,
     pub model_focus: bool,
@@ -574,6 +576,7 @@ impl CraftApp {
             model_picker: None,
             quick_models: Default::default(),
             quick_models_asking: Default::default(),
+            quick_models_failed: Default::default(),
             model_filter: String::new(),
             model_focus: false,
             agent_model_picker: None,
@@ -1233,6 +1236,7 @@ impl CraftApp {
 
     pub fn choose_backend(&mut self, name: Option<String>) {
         self.backend_choices = self.backend_choices.wrapping_add(1);
+        self.state.backend_chosen = true;
         self.select_backend(name);
     }
 
@@ -1480,12 +1484,18 @@ impl CraftApp {
                     self.state.backend = None;
                 }
                 // Tek bir AI yapilandirilmissa onu kendiliginden sec: "AI: Hicbiri" ile
-                // baslamak, ayarlari dogru olan kisiyi yaniltiyor.
-                if self.state.backend.is_none()
+                // baslamak, ayarlari dogru olan kisiyi yaniltiyor. Kisi kendi secimini
+                // yaptiysa ("Yapay Zeka Yok" dahil) dokunma.
+                if !self.state.backend_chosen
+                    && self.state.backend.is_none()
                     && let Some(first) = b.iter().find(|c| c.enabled)
                 {
                     self.state.backend = Some(first.name.clone());
                 }
+                // Yapilandirma degismis olabilir: model listelerini yeniden sor.
+                self.quick_models.clear();
+                self.quick_models_asking.clear();
+                self.quick_models_failed.clear();
                 self.backends = b;
                 self.builder = builder;
                 self.extractor = extractor;
@@ -1508,11 +1518,14 @@ impl CraftApp {
                 self.quick_models_asking.remove(&name);
                 match result {
                     Ok(models) => {
+                        self.quick_models_failed.remove(&name);
                         self.quick_models.insert(name, models);
                     }
                     Err(e) => {
-                        // Boş liste yaz: aynı istek her karede yeniden denenmesin.
-                        self.quick_models.insert(name, Vec::new());
+                        // Bossa: her karede yeniden denenmesin; ama secici yeniden acildiginda
+                        // (gecici bir hata gectiyse) bir kez daha sans verilsin.
+                        self.quick_models.remove(&name);
+                        self.quick_models_failed.insert(name);
                         self.toast(e.for_people(), true);
                     }
                 }
@@ -1552,6 +1565,12 @@ impl CraftApp {
                             backend.model = model;
                         }
                         self.backend_options.insert(name.clone(), options);
+                    }
+                    // Konusma basladiginda model sabitlenir: model degistiyse yeniden baslat.
+                    if self.state.backend.as_deref() == Some(name.as_str())
+                        && let Some(mut c) = self.conversation.take()
+                    {
+                        c.stop();
                     }
                     self.model_tuning.remove(&name);
                 }

@@ -80,6 +80,9 @@ fn turkish_requests_keep_their_project_kind() {
     for request in ["Fırınım için bir web sitesi", "Bu web sitesini yeniden oluştur"] {
         assert_eq!(choose(request, &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "{request}");
     }
+    // Benzer sözcükler yanlış tür seçtirmemeli: "oyuncak" bir oyun değil, "apartman sitesi" bir site değil.
+    assert_ne!(choose("Basit bir oyuncak yap", &TargetRef::None).0, "game", "oyuncak");
+    assert_ne!(choose("Apartman sitesi için bir form yap", &TargetRef::None).0, "website", "apartman sitesi");
 }
 
 #[test]

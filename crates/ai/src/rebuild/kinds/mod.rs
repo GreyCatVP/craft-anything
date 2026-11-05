@@ -48,6 +48,12 @@ impl<'a> DetectCx<'a> {
     pub fn says(&self, phrases: &[&str]) -> bool {
         phrases.iter().any(|p| self.request.contains(p))
     }
+
+    /// Any of these whole words appears (punctuation already stripped). Use it where a substring
+    /// would catch a different word — "oyun" inside "oyuncak", a toy.
+    pub fn says_word(&self, words: &[&str]) -> bool {
+        words.iter().any(|w| self.words.contains(&format!(" {w} ")))
+    }
 }
 
 /// What the brief is written from.

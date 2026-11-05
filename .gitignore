@@ -17,4 +17,5 @@ corpus/
 *.key
 .claude/settings.local.json
 
-# yerel calisma dosyalari (derleme notlari, ekran goruntuleri) work/
+# yerel calisma dosyalari (derleme notlari, ekran goruntuleri)
+work/
