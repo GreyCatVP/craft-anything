@@ -49,10 +49,24 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("qwen-code", "qwen", "Qwen Code"),
     ("goose", "goose", "Goose"),
     ("maki", "maki", "Maki"),
+    // Free Claude Code (`fcc-claude`) is a wrapper around Claude Code that routes builds to other
+    // providers through its own proxy, instead of Anthropic OAuth. It runs the same `claude`
+    // binary headlessly, so the Claude adapter drives it unchanged.
+    ("free-claude-code", "fcc-claude", "Claude Code via Free Claude Code"),
 ];
 
 pub fn program_for(agent: &str) -> String {
     KNOWN.iter().find(|(id, _, _)| *id == agent).map(|(_, p, _)| p.to_string()).unwrap_or_else(|| agent.to_string())
+}
+
+/// Free Claude Code's wrapper around Claude Code.
+pub const FREE_CLAUDE_CODE_PROGRAM: &str = "fcc-claude";
+
+/// Whether `program` is Free Claude Code's wrapper around Claude Code (`fcc-claude`), which runs
+/// the same headless `claude` binary but authenticates through its own proxy with a token, not
+/// Anthropic OAuth.
+pub fn is_free_claude_code(program: &str) -> bool {
+    std::path::Path::new(program).file_name().and_then(|f| f.to_str()).is_some_and(|f| f == FREE_CLAUDE_CODE_PROGRAM)
 }
 
 /// The program a backend runs: the one chosen for it, else the agent's usual name. A chosen path
@@ -1718,6 +1732,24 @@ mod tests {
         // Only agents that can be held to reading are asked.
         assert!(adapter_for("claude-code").answers_questions());
         assert!(!adapter_for("codex").answers_questions() && !adapter_for("gemini-cli").answers_questions() && !adapter_for("aider").answers_questions());
+    }
+
+    #[test]
+    fn free_claude_code_is_known_and_skips_the_anthropic_sign_in_gate() {
+        // The agent id is known, resolves to its wrapper program, and runs the Claude adapter.
+        assert_eq!(program_for("free-claude-code"), "fcc-claude");
+        let adapter = adapter_for("free-claude-code");
+        assert!(adapter.ids().contains(&"free-claude-code"));
+        // It drives the same headless Claude CLI, so it answers questions and resumes sessions.
+        assert!(adapter.prompt_on_stdin() && adapter.answers_questions() && adapter.resumes());
+        // The wrapper is recognised by name, not by a path that merely mentions it.
+        assert!(is_free_claude_code("fcc-claude"));
+        assert!(is_free_claude_code("/usr/local/bin/fcc-claude"));
+        assert!(!is_free_claude_code("claude"));
+        assert!(!is_free_claude_code("/bin/claude"));
+        // No Anthropic auth-status probe runs for it: `None` means "not checked", so a build
+        // proceeds on FCC's own token setup.
+        assert_eq!(adapter.signed_in("fcc-claude"), None);
     }
 
     #[test]

@@ -338,7 +338,7 @@ impl ClaudeCode {
 
 impl AgentAdapter for ClaudeCode {
     fn ids(&self) -> &'static [&'static str] {
-        &["claude-code", "claude"]
+        &["claude-code", "claude", "free-claude-code"]
     }
 
     fn answers_questions(&self) -> bool {
@@ -517,6 +517,12 @@ impl AgentAdapter for ClaudeCode {
     }
 
     fn signed_in(&self, program: &str) -> Option<bool> {
+        // Free Claude Code authenticates through its own proxy with a token, not Anthropic OAuth,
+        // so the `claude auth status` probe doesn't apply here. `None` ("not checked") lets the
+        // run proceed, as with any provider-backed agent.
+        if crate::cli_agents::is_free_claude_code(program) {
+            return None;
+        }
         let out = self.process(program).args(["auth", "status", "--json"]).timeout(Duration::from_secs(15)).stdout_cap(64 * 1024).run().ok()?;
         let v: Value = serde_json::from_str(out.stdout_text().trim()).ok()?;
         v.get("loggedIn").and_then(Value::as_bool)
