@@ -322,6 +322,29 @@ pub(super) fn resumed_elsewhere(brief: &str, last_reply: &str, handoff: Option<&
     s
 }
 
+/// How many of the latest "Just ask" questions the builder is told, and how much of each answer:
+/// enough to follow the conversation without filling its context.
+const JUST_ASKED_KEPT: usize = 5;
+const JUST_ASKED_ANSWER_CHARS: usize = 2000;
+
+/// What goes before the person's message so the builder knows what they talked about in "Just ask";
+/// nothing when they asked nothing.
+pub(super) fn just_asked(asked: &[craft_anything_engine::questions::AskedQuestion]) -> String {
+    if asked.is_empty() {
+        return String::new();
+    }
+    let latest = asked.iter().skip(asked.len().saturating_sub(JUST_ASKED_KEPT));
+    let talk = latest.map(|q| {
+        let answer: String = q.answer.chars().take(JUST_ASKED_ANSWER_CHARS).collect();
+        let cut = if answer.len() < q.answer.len() { "…" } else { "" };
+        format!("Q: {}\nA: {answer}{cut}", q.question)
+    });
+    let talk = talk.collect::<Vec<_>>().join("\n\n");
+    format!(
+        "Since your last message the person asked these questions in a separate \"Just ask\" conversation, which isn't in your history and changed nothing. What they say next may follow on from it.\n\n{talk}\n\n---\n\n"
+    )
+}
+
 pub(super) fn follow_up(message: &str, kind: &dyn TargetKind) -> String {
     let build = kind.rebuild_words();
     format!(

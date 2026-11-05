@@ -1405,6 +1405,34 @@ mod picking_up_a_build {
     }
 
     #[test]
+    fn a_message_after_just_ask_tells_the_builder_what_was_asked_once() {
+        use craft_anything_engine::questions::{self, AskedQuestion};
+        let b = bench();
+        let ws = worked_on(&b);
+        let ask = |q: &str| {
+            questions::add(&ws, AskedQuestion { deep: false, ..AskedQuestion::new(q.into(), "It's in src.".into(), true, "Stand-in".into(), None, 0) }).unwrap()
+        };
+        let say = |m: &str| {
+            try_with(&b, &ws, RunOptions { message: Some(m.into()), ..RunOptions::default() });
+            std::fs::read_to_string(&b.prompts).unwrap_or_default()
+        };
+        ask("where is the score kept");
+        let told = say("make it bigger");
+        assert!(told.contains("Q: where is the score kept\nA: It's in src.") && told.contains("make it bigger"), "{told}");
+        let again = say("and blue");
+        let later = again.strip_prefix(told.as_str()).unwrap_or_default();
+        assert!(later.contains("and blue") && !later.contains("where is the score kept"), "told once: {later}");
+        // Try again has no new message for it to go with, so it isn't used up.
+        ask("how does saving work");
+        let _ = try_it(&b, &ws);
+        let before = std::fs::read_to_string(&b.prompts).unwrap_or_default();
+        assert!(!before.contains("how does saving work"), "{before}");
+        let told = say("now add saving");
+        let later = told.strip_prefix(before.as_str()).unwrap_or_default();
+        assert!(later.contains("how does saving work") && later.contains("now add saving"), "{later}");
+    }
+
+    #[test]
     fn try_again_after_the_builder_stopped_carries_on_instead_of_starting_over() {
         let b = bench();
         let ws = worked_on(&b);
@@ -1904,6 +1932,19 @@ mod picking_up_a_build {
         assert!(!written.message.contains("has no files"), "{written:?}");
         assert_eq!(written.message, "The build stopped after two builder turns changed no files in app/.");
     }
+}
+
+#[test]
+fn just_ask_is_told_to_the_builder_shortly_and_cut_on_a_character() {
+    use craft_anything_engine::questions::AskedQuestion;
+    assert_eq!(super::just_asked(&[]), "", "nothing asked, nothing added");
+    let q = |n: usize, answer: String| AskedQuestion::new(format!("question {n}"), answer, true, "Claude".into(), None, 0);
+    let mut asked: Vec<_> = (0..7).map(|n| q(n, "short".into())).collect();
+    asked.push(q(7, "é".repeat(3000)));
+    let told = super::just_asked(&asked);
+    assert!(!told.contains("question 2") && told.contains("question 3") && told.contains("question 7"), "the latest five: {told}");
+    assert!(told.contains(&format!("{}…", "é".repeat(2000))) && !told.contains(&"é".repeat(2001)), "a long answer is cut");
+    assert!(told.contains("A: short\n"), "a short one isn't marked as cut");
 }
 
 fn check_worker(ws: &Workspace, deep: bool) -> Worker {

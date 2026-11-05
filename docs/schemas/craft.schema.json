@@ -95,6 +95,15 @@
         }
       ]
     },
+    "questions_told_ms": {
+      "description": "When the newest \"Just ask\" question the builder has been told about was asked, so each is\ntold once (#857).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0
+    },
     "request": {
       "description": "What the person asked for, in their words.",
       "type": "string"
