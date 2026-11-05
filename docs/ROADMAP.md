@@ -319,7 +319,7 @@ Owner: open · Status: todo
       settings and prints "Using Claude Code (…)": `ensure_agent` (`rebuild_cmd.rs`) runs whenever no
       agent app is set up, though this run won't use one. Run it only when the build needs one
       — claimed: AlexJoaquimPereira, branch `bugfix/r5.5-no-agent-with-api-backend`
-- [ ] `--backend <a name that is turned off>` still builds with it: `builder_backend`'s named
+- [x] `--backend <a name that is turned off>` no longer builds with it: `builder_backend`'s named
       branch doesn't check `enabled`, while Settings treats an AI that is off as unusable
       — claimed: kuseidos, branch `bugfix/r5.5-named-backend-that-is-turned-off`
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot

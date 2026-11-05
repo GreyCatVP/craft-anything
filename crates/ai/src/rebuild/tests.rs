@@ -2714,6 +2714,24 @@ fn a_project_is_built_by_the_ai_it_was_started_with_while_that_one_is_on() {
     assert_eq!(builder_backend(&cfg, super::project_builder(&cfg, &ws)).unwrap().config.name, "Claude Code");
 }
 
+/// R5.5: a backend the person turned off is not usable, so naming it builds nothing and says why,
+/// instead of building with an AI Settings says can't build.
+#[test]
+fn a_named_backend_that_is_turned_off_does_not_build() {
+    use crate::{AiConfig, BackendConfig, BackendEntry, BackendKind};
+    let mut cfg = AiConfig::default();
+    for (name, enabled) in [("Claude Code", true), ("Codex", false)] {
+        let c = BackendConfig { name: name.into(), kind: BackendKind::AgentCli, model: String::new(), base_url: None, ssh_host: None, enabled };
+        cfg.upsert(BackendEntry { config: c, options: Default::default() });
+    }
+    let err = builder_backend(&cfg, Some("Codex")).unwrap_err();
+    assert!(err.message.contains("Codex"), "{}", err.message);
+    assert!(err.message.contains("turned off"), "{}", err.message);
+    // On, and named: it builds. Not named: the default, which only ever picks one that is on.
+    assert_eq!(builder_backend(&cfg, Some("Claude Code")).unwrap().config.name, "Claude Code");
+    assert_eq!(builder_backend(&cfg, None).unwrap().config.name, "Claude Code");
+}
+
 /// #446: a project copied from another computer keeps the id of a Claude Code session that lives
 /// only there. The builder (a stand-in that answers like Claude Code 2.1) can't resume it, so the
 /// turn starts a new session from the brief and what's in app/, and keeps the new id.
