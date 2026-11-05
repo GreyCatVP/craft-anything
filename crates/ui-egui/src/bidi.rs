@@ -40,9 +40,15 @@ fn joins_word(c: char) -> bool {
     matches!(c as u32, 0x0300..=0x036F | 0x200C | 0x200D)
 }
 
-/// True if `text` has any right-to-left letter (only then is the bidi path needed).
+/// Explicit marks that make text right to left without a right-to-left letter: the
+/// right-to-left mark, embedding, override and isolate.
+fn is_rtl_mark(c: char) -> bool {
+    matches!(c, '\u{200F}' | '\u{202B}' | '\u{202E}' | '\u{2067}')
+}
+
+/// True if `text` has any right-to-left letter or mark (only then is the bidi path needed).
 pub fn has_rtl(text: &str) -> bool {
-    text.chars().any(is_rtl_letter)
+    text.chars().any(|c| is_rtl_letter(c) || is_rtl_mark(c))
 }
 
 /// True if the first paragraph of `text` reads right to left: its first strong character is RTL,
@@ -51,6 +57,8 @@ pub fn is_rtl_paragraph(text: &str) -> bool {
     BidiInfo::new(text, None).paragraphs.first().is_some_and(|p| p.level.is_rtl())
 }
 
+/// The bracket or quote that faces the other way (`(` and `)`, `«` and `»`…), for brackets drawn
+/// in a right-to-left run; any other character as it is.
 fn mirror(c: char) -> char {
     match c {
         '(' => ')',
@@ -115,6 +123,7 @@ fn visual_order(text: &str, bidi: &BidiInfo<'_>, line: Range<usize>) -> Vec<Visu
     out
 }
 
+/// The character starting at byte `at` of `text`, if there is one.
 fn char_at(text: &str, at: usize) -> Option<char> {
     text.get(at..).and_then(|t| t.chars().next())
 }
@@ -220,6 +229,14 @@ pub struct Laid {
     starts: Vec<usize>,
     /// Per row: the characters drawn on it, in drawing order (the galley's row text).
     chars: Vec<Vec<char>>,
+    /// Per row: whether its paragraph reads right to left (the row is then aligned right).
+    row_rtl: Vec<bool>,
+    /// Per row: the space before its text (what aligns a right-to-left row to the right).
+    leads: Vec<f32>,
+    /// Per row: the width of its text.
+    widths: Vec<f32>,
+    /// The width rows are aligned in: the wrap width, or the widest row.
+    width: f32,
     /// The original text.
     text: String,
 }
@@ -247,17 +264,24 @@ fn lay_lines_in(ui: &Ui, job: &LayoutJob, lines: Vec<Range<usize>>, ellipsis: bo
     }
     let format_at = |at: usize| section_of.get(at).copied().flatten().and_then(|i| job.sections.get(i)).map_or(&fallback, |s| &s.format);
 
-    let mut out = LayoutJob { first_row_min_height: job.first_row_min_height, halign: if rtl { Align::RIGHT } else { Align::LEFT }, ..LayoutJob::default() };
+    // Each paragraph is aligned to its own side (an English paragraph left, an Arabic one right):
+    // rows are laid out aligned left, and a right-to-left row gets the space before it.
+    let mut out = LayoutJob { first_row_min_height: job.first_row_min_height, halign: Align::LEFT, ..LayoutJob::default() };
     out.wrap.max_width = f32::INFINITY;
     let mut rows = Vec::with_capacity(lines.len());
     let mut starts = Vec::with_capacity(lines.len());
     let mut chars = Vec::with_capacity(lines.len());
+    let mut row_rtl = Vec::with_capacity(lines.len());
+    let mut row_section: Vec<Option<usize>> = Vec::with_capacity(lines.len());
     let count = lines.len();
     for (i, line) in lines.into_iter().enumerate() {
         if i > 0 {
             let format = out.sections.last().map_or_else(TextFormat::default, |s| s.format.clone());
             push(&mut out, '\n', &format);
         }
+        // Each row's text starts a section of its own, which can carry the space before it.
+        let first_section = out.sections.len();
+        let first_byte = out.text.len();
         let order = visual_order(text, &bidi, line.clone());
         let mut drawn = Vec::with_capacity(order.len() + 1);
         // A cut line ends with "…" where its text goes on: on the left when it reads right to left.
@@ -277,6 +301,10 @@ fn lay_lines_in(ui: &Ui, job: &LayoutJob, lines: Vec<Range<usize>>, ellipsis: bo
             push(&mut out, '…', format_at(line.end.saturating_sub(1)));
             drawn.push('…');
         }
+        // An empty row (an empty line) takes the first paragraph's side, as the caret does.
+        let para_rtl = bidi.paragraphs.iter().find(|p| p.range.contains(&line.start)).is_some_and(|p| p.level.is_rtl());
+        row_rtl.push(if drawn.is_empty() { rtl } else { para_rtl });
+        row_section.push(split_at(&mut out, first_section, first_byte));
         rows.push(order);
         starts.push(line.start);
         chars.push(drawn);
@@ -285,7 +313,41 @@ fn lay_lines_in(ui: &Ui, job: &LayoutJob, lines: Vec<Range<usize>>, ellipsis: bo
         out.sections.clear();
         out.append("", 0.0, job.sections.first().map(|s| s.format.clone()).unwrap_or_default());
     }
-    Laid { galley: ui.fonts_mut(|f| f.layout_job(out)), rtl, rows, starts, chars, text: text.to_owned() }
+    let plain = ui.fonts_mut(|f| f.layout_job(out.clone()));
+    let widths: Vec<f32> = (0..rows.len()).map(|r| plain.rows.get(r).map_or(0.0, |row| row.rect().width())).collect();
+    let widest = widths.iter().copied().fold(0.0_f32, f32::max);
+    let width = if job.wrap.max_width.is_finite() { job.wrap.max_width.max(widest) } else { widest };
+    let leads: Vec<f32> = widths.iter().zip(&row_rtl).map(|(&w, &r)| if r { (width - w).max(0.0) } else { 0.0 }).collect();
+    let galley = if leads.iter().all(|&l| l <= 0.0) {
+        plain
+    } else {
+        for (section, &lead) in row_section.iter().zip(&leads) {
+            if let Some(sec) = section.and_then(|i| out.sections.get_mut(i)) {
+                sec.leading_space = lead;
+            }
+        }
+        ui.fonts_mut(|f| f.layout_job(out))
+    };
+    Laid { galley, rtl, rows, starts, chars, row_rtl, leads, widths, width, text: text.to_owned() }
+}
+
+/// Makes the text `out` gained from byte `first_byte` on (a row's text) start a section of its own
+/// (the first one from `first_section` on), so the row can carry the space before it. Returns
+/// that section, or `None` for a row with no text.
+fn split_at(out: &mut LayoutJob, first_section: usize, first_byte: usize) -> Option<usize> {
+    if out.text.len() <= first_byte {
+        return None;
+    }
+    // The row's first character may have joined the previous row's last section.
+    let joined = first_section.checked_sub(1).filter(|&i| out.sections.get(i).is_some_and(|s| s.byte_range.end.0 > first_byte));
+    if let Some(i) = joined {
+        let sec = out.sections.get_mut(i)?;
+        let tail = LayoutSection { leading_space: 0.0, byte_range: ByteIndex(first_byte)..sec.byte_range.end, format: sec.format.clone() };
+        sec.byte_range.end = ByteIndex(first_byte);
+        out.sections.insert(i + 1, tail);
+        return Some(i + 1);
+    }
+    Some(first_section)
 }
 
 /// Lays `job` out with its lines in visual order, wrapped at `job.wrap.max_width`. Text without
@@ -347,10 +409,13 @@ pub fn show(ui: &mut Ui, galley: Arc<Galley>, rtl: bool, logical: &str) -> Respo
     response
 }
 
+/// `text` as a layout job in `ui`'s style, as a label would lay it out.
 fn job_of(ui: &Ui, text: WidgetText) -> LayoutJob {
     Arc::unwrap_or_clone(text.into_layout_job(ui.style(), FontSelection::Default, ui.text_valign()))
 }
 
+/// Shows right-to-left `text` as a label: wrapped to the available width when `wrap`, with the
+/// paragraphs' base direction `base` (`None`: from their first strong letter).
 fn rtl_label(ui: &mut Ui, text: WidgetText, wrap: bool, base: Option<Level>) -> Response {
     let logical = text.text().to_owned();
     let mut job = job_of(ui, text);
@@ -417,14 +482,7 @@ pub fn line_galley(ui: &Ui, text: &str, font: FontId, color: Color32, max_width:
         job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
         return ui.fonts_mut(|f| f.layout_job(job));
     }
-    let mut laid = layout_truncated(ui, &job, max_width);
-    // Painted at a point, so keep it left-aligned there; the text itself is in visual order.
-    if laid.galley.job.halign != Align::LEFT {
-        let mut j = Arc::unwrap_or_clone(laid.galley.job.clone());
-        j.halign = Align::LEFT;
-        laid.galley = ui.fonts_mut(|f| f.layout_job(j));
-    }
-    laid.galley
+    layout_truncated(ui, &job, max_width).galley
 }
 
 /// A galley of right-to-left `text` in visual order for a label built by hand: wrapped to the
@@ -460,13 +518,24 @@ pub fn paint_line(ui: &Ui, pos: egui::Pos2, anchor: egui::Align2, text: impl ToS
 }
 
 impl Laid {
+    /// Where row `r`'s text is, relative to the galley's position (an empty row: a zero-width
+    /// rectangle on its paragraph's side).
+    fn row_span(&self, r: usize) -> Option<egui::Rect> {
+        let placed = self.galley.rows.get(r)?;
+        let rect = placed.rect();
+        let left = placed.pos.x + self.leads.get(r).copied().unwrap_or(0.0);
+        let width = self.widths.get(r).copied().unwrap_or(0.0);
+        let left = if width <= 0.0 && self.row_rtl.get(r).copied().unwrap_or(self.rtl) { placed.pos.x + self.width } else { left };
+        Some(egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(left + width, rect.bottom())))
+    }
+
     /// Where to draw the caret before the character at byte `at` of the original text, relative
     /// to the galley's position: an x and the row's vertical range.
     fn caret(&self, ui: &Ui, at: usize) -> Option<(f32, egui::Rangef)> {
         // An empty row (an empty line, or the line after a final newline) starting here: its side.
         let empty = self.rows.iter().zip(&self.starts).position(|(row, &start)| row.is_empty() && start == at);
-        if let Some(rect) = empty.and_then(|r| self.galley.rows.get(r)).map(|row| row.rect()) {
-            return Some((if self.rtl { rect.right() } else { rect.left() }, egui::Rangef::new(rect.top(), rect.bottom())));
+        if let Some(rect) = empty.and_then(|r| self.row_span(r)) {
+            return Some((rect.left(), egui::Rangef::new(rect.top(), rect.bottom())));
         }
         // The drawn character the caret is before, else the last one before it (the caret then
         // goes after it: the end of a line or of the text).
@@ -538,8 +607,7 @@ impl Laid {
 
     /// The x of drawn character `k` of row `r`: its edge before it (in reading order) or after it.
     fn edge(&self, ui: &Ui, r: usize, k: usize, rtl: bool, after: bool) -> Option<(f32, egui::Rangef)> {
-        let placed = self.galley.rows.get(r)?;
-        let rect = placed.rect();
+        let rect = self.row_span(r)?;
         let line: &[char] = self.chars.get(r).map_or(&[], Vec::as_slice);
         let font = self.galley.job.sections.first().map_or_else(FontId::default, |s| s.format.font_id.clone());
         let width = |chars: &[char]| ui.fonts_mut(|f| f.layout_no_wrap(chars.iter().collect(), font.clone(), Color32::WHITE)).size().x;
@@ -589,16 +657,28 @@ fn field_lines(ui: &Ui, job: &LayoutJob, wrap: f32) -> Vec<Range<usize>> {
     lines
 }
 
+/// The part of a text field its text may use: from where egui starts the text to the field's
+/// right edge less the same margin. Not `text_clip_rect`, which egui sizes to its own text (98
+/// points of a 616-point box), so right-to-left text anchored there sat on the left; and not
+/// egui's wrap width, which can reach past the box (text then appeared only after ~40 letters).
+fn text_area(output: &egui::text_edit::TextEditOutput) -> egui::Rect {
+    let field = output.response.response.rect;
+    let clip = output.text_clip_rect;
+    let margin = (clip.left() - field.left()).max(0.0);
+    let right = (field.right() - margin).max(clip.right());
+    egui::Rect::from_min_max(clip.min, egui::pos2(right, clip.max.y))
+}
+
 /// A text field's text laid out in visual order, and where to paint it.
 fn text_edit_layout(ui: &Ui, output: &egui::text_edit::TextEditOutput, text: &str, font: FontId, color: Color32) -> (Laid, egui::Pos2) {
-    // The visible text area. egui's own wrap width can be wider than it, and right-aligned text
-    // anchored there was drawn off the right side, appearing only once it was long enough.
-    let area = output.text_clip_rect;
+    let area = text_area(output);
     let wrap = area.width().max(1.0);
     let job = LayoutJob::simple(text.to_owned(), font, color, wrap);
     let laid = lay_lines(ui, &job, field_lines(ui, &job, wrap), false);
-    let pos = egui::pos2(if laid.rtl { area.right() } else { area.left() }, output.galley_pos.y);
-    (laid, pos)
+    // Rows fill the area (each aligned to its paragraph's side). A word wider than the area makes
+    // them wider: right-to-left text then stays on the area's right edge and spills to the left.
+    let x = if laid.rtl { area.right() - laid.width } else { area.left() };
+    (laid, egui::pos2(x, output.galley_pos.y))
 }
 
 /// Draws a text field's right-to-left text in visual order over the field, with its caret, when
@@ -607,7 +687,7 @@ pub fn paint_text_edit(ui: &Ui, output: &egui::text_edit::TextEditOutput, text: 
     if !has_rtl(text) {
         return;
     }
-    let area = output.text_clip_rect;
+    let area = text_area(output);
     let (laid, pos) = text_edit_layout(ui, output, text, font, color);
     let painter = ui.painter_at(area.expand(2.0));
     let byte = |ci: usize| text.char_indices().nth(ci).map_or(text.len(), |(i, _)| i);
@@ -775,6 +855,7 @@ mod tests {
         assert!(!is_rtl_paragraph("Rust مرحبا"));
     }
 
+    /// A 400×300 test window with the app's fonts that runs `f` each frame.
     fn harness(f: impl FnMut(&mut Ui) + 'static) -> egui_kittest::Harness<'static> {
         let mut f = f;
         egui_kittest::Harness::builder().with_size(egui::vec2(400.0, 300.0)).build_ui(move |ui| {
@@ -794,8 +875,10 @@ mod tests {
             job.wrap.max_width = 180.0;
             let (galley, rtl) = layout(ui, job);
             assert!(rtl);
-            assert_eq!(galley.job.halign, Align::RIGHT);
             assert!(galley.rows.len() > 2, "{} rows", galley.rows.len());
+            for row in &galley.rows {
+                assert!((row.rect().right() - 180.0).abs() < 1.0, "row {:?} isn't aligned right: {:?}", row.text(), row.rect());
+            }
             let mut shown: Vec<char> = galley.text().chars().filter(|c| !c.is_whitespace()).collect();
             let mut given: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
             shown.sort_unstable();
@@ -835,7 +918,7 @@ mod tests {
             let text = "لدي فكرة برنامج";
             let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 300.0);
             let laid = lay_lines(ui, &job, break_lines(ui, &job, 300.0), false);
-            let row = laid.galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
+            let row = laid.row_span(0).unwrap_or(egui::Rect::NOTHING);
             let end = laid.caret(ui, text.len()).map(|c| c.0).unwrap_or(f32::NAN);
             let start = laid.caret(ui, 0).map(|c| c.0).unwrap_or(f32::NAN);
             assert!((end - row.left()).abs() < 2.0, "end caret {end}, row {row:?}");
@@ -854,9 +937,16 @@ mod tests {
                 let output = egui::TextEdit::multiline(&mut s).desired_width(f32::INFINITY).show(ui);
                 let (laid, pos) = text_edit_layout(ui, &output, text, FontId::proportional(14.0), Color32::WHITE);
                 let drawn = laid.galley.rect.translate(pos.to_vec2());
-                let area = output.text_clip_rect.expand(1.0);
-                assert!(area.contains_rect(drawn), "{text:?} drawn at {drawn:?}, box text area {area:?}");
-                assert!((drawn.right() - output.text_clip_rect.right()).abs() < 1.0, "{text:?} not on the right: {drawn:?}");
+                let field = output.response.response.rect;
+                let area = text_area(&output);
+                // egui's first frame can size the box narrower than one letter; a text wider than
+                // its box spills to the left, and only a box it fits in must contain it.
+                if laid.width <= area.width() + 0.5 {
+                    assert!(area.expand(1.0).contains_rect(drawn), "{text:?} drawn at {drawn:?}, box text area {area:?}");
+                }
+                // On the right of the box itself (less its margin), not of egui's text-sized area.
+                assert!((drawn.right() - area.right()).abs() < 1.0, "{text:?} not on the right: {drawn:?} in {area:?}");
+                assert!(field.right() - area.right() < 10.0, "{text:?}: text area {area:?} stops short of the box {field:?}");
             }
         });
         h.step();
@@ -869,7 +959,7 @@ mod tests {
             let text = "لدي فكرة برنامج";
             let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 300.0);
             let laid = lay_lines(ui, &job, break_lines(ui, &job, 300.0), false);
-            let row = laid.galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
+            let row = laid.row_span(0).unwrap_or(egui::Rect::NOTHING);
             // Everything: one rectangle over the whole row.
             let all = laid.selection(ui, 0, text.len());
             assert_eq!(all.len(), 1, "{all:?}");
@@ -891,7 +981,7 @@ mod tests {
             let text = "لدي فكرة برنامج";
             let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 300.0);
             let laid = lay_lines(ui, &job, break_lines(ui, &job, 300.0), false);
-            let row = laid.galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
+            let row = laid.row_span(0).unwrap_or(egui::Rect::NOTHING);
             assert_eq!(laid.index_at(ui, egui::pos2(row.left() - 5.0, row.center().y)), text.len());
             assert_eq!(laid.index_at(ui, egui::pos2(row.right() + 5.0, row.center().y)), 0);
             // Between the first word (on the right) and the second.
@@ -938,7 +1028,7 @@ mod tests {
             for text in texts {
                 let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 1000.0);
                 let laid = lay_lines(ui, &job, break_lines(ui, &job, 1000.0), false);
-                let row = laid.galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
+                let row = laid.row_span(0).unwrap_or(egui::Rect::NOTHING);
                 let mut wrong = Vec::new();
                 for (at, _) in text.char_indices().chain(std::iter::once((text.len(), ' '))) {
                     let Some((x, _)) = laid.caret(ui, at) else {
@@ -1003,8 +1093,8 @@ mod tests {
                 let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 300.0);
                 let laid = lay_lines(ui, &job, field_lines(ui, &job, 300.0), false);
                 let at = "لدي فكرة\n".len();
-                let first = laid.galley.rows.first().map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
-                let second = laid.galley.rows.get(1).map(|r| r.rect()).unwrap_or(egui::Rect::NOTHING);
+                let first = laid.row_span(0).unwrap_or(egui::Rect::NOTHING);
+                let second = laid.row_span(1).unwrap_or(egui::Rect::NOTHING);
                 let (x, y) = laid.caret(ui, at).unwrap_or((f32::NAN, egui::Rangef::NOTHING));
                 assert!(y.min >= first.bottom() - 0.5 && (y.min - second.top()).abs() < 0.5, "{text:?}: caret rows {y:?}, line 2 {second:?}");
                 assert!((x - second.right()).abs() < 0.5, "{text:?}: caret x {x}, line 2 {second:?}");
@@ -1145,5 +1235,33 @@ mod tests {
         h.run();
         let below = read(&h).0.map_or(f32::NAN, |s| s.2);
         assert!(below > top, "Down should reach a lower row: {top} -> {below}");
+    }
+
+    /// Each paragraph is aligned to its own side: an English paragraph left, an Arabic one right,
+    /// whichever comes first; the caret at the end of the English one is on the left.
+    #[test]
+    fn each_paragraph_takes_its_own_side() {
+        let mut h = harness(|ui| {
+            for text in ["Hello world\nمرحبا بالعالم", "مرحبا بالعالم\nHello world"] {
+                let job = LayoutJob::simple(text.to_owned(), FontId::proportional(14.0), Color32::WHITE, 300.0);
+                let laid = lay_lines(ui, &job, break_lines(ui, &job, 300.0), false);
+                let english = laid.row_span(if text.starts_with('H') { 0 } else { 1 }).unwrap_or(egui::Rect::NOTHING);
+                let arabic = laid.row_span(if text.starts_with('H') { 1 } else { 0 }).unwrap_or(egui::Rect::NOTHING);
+                assert!(english.left().abs() < 1.0, "{text:?}: English row at {english:?}");
+                assert!((arabic.right() - 300.0).abs() < 1.0, "{text:?}: Arabic row at {arabic:?}");
+                let end_of_english = if text.starts_with('H') { "Hello world".len() } else { text.len() };
+                let x = laid.caret(ui, end_of_english).map_or(f32::NAN, |c| c.0);
+                assert!((x - english.right()).abs() < 1.0, "{text:?}: caret {x} vs {english:?}");
+            }
+        });
+        h.step();
+    }
+
+    /// A right-to-left mark alone makes text take the right-to-left path.
+    #[test]
+    fn a_right_to_left_mark_counts_as_right_to_left() {
+        assert!(has_rtl("\u{200F}abc"));
+        assert!(is_rtl_paragraph("\u{200F}abc"));
+        assert!(!has_rtl("abc\u{200E}"));
     }
 }

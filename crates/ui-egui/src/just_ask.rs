@@ -153,7 +153,10 @@ pub fn card(ui: &mut Ui, a: &mut Asked, glossary: bool) {
                 egui::Label::new(question).wrap()
             };
             let line = line.sense(egui::Sense::click()).selectable(false);
-            toggle |= ui.add(line).on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
+            let response = ui.add(line).on_hover_cursor(egui::CursorIcon::PointingHand);
+            // A right-to-left question's galley is in visual order: screen readers get its own order.
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), a.question.as_str()));
+            toggle |= response.clicked();
         });
         if toggle {
             a.collapsed = !a.collapsed;
