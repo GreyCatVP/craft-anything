@@ -86,8 +86,14 @@ impl Worker {
                     }
                     notes.push_str(&inventory(&f));
                 }
-                let is_js = path.extension().is_some_and(|e| e == "asar") || path.join("resources/app.asar").exists() || path.join("package.json").exists();
-                if is_js && let Ok(out) = self.call("js_app_map", json!({"input_path": path.display().to_string(), "limit": 50})) {
+                // A program's app.asar or package.json sits beside it, so look in its folder too.
+                let js_root = if program.is_file() { program.parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf) } else { None };
+                let packaged = |root: &Path| root.join("resources/app.asar").exists() || root.join("package.json").exists();
+                let js_input =
+                    if path.extension().is_some_and(|e| e == "asar") || packaged(&path) { Some(path.clone()) } else { js_root.filter(|r| packaged(r)) };
+                if let Some(input) = js_input
+                    && let Ok(out) = self.call("js_app_map", json!({"input_path": input.display().to_string(), "limit": 50}))
+                {
                     notes.push_str("\n## JavaScript application\n\n");
                     notes.push_str(&describe(&out));
                 }

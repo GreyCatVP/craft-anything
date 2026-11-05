@@ -1225,6 +1225,22 @@ fn clean_room_studies_nothing_inside_and_deep_mode_looks() {
     }
 }
 
+#[test]
+fn deep_mode_maps_the_javascript_beside_an_exe_target() {
+    let d = tempfile::tempdir().unwrap();
+    let app = d.path().join("App");
+    std::fs::create_dir_all(app.join("resources")).unwrap();
+    std::fs::write(app.join("App.exe"), b"MZ").unwrap();
+    std::fs::write(app.join("resources/app.asar"), craft_anything_testkit::electron::notes_app_asar()).unwrap();
+    for (name, target) in [("folder", app.clone()), ("exe", app.join("App.exe"))] {
+        let mut ws = Workspace::create(&d.path().join("projects"), name, "Recreate this app", TargetRef::Local { path: target }).unwrap();
+        let mut w = check_worker(&ws, true);
+        w.study(&mut ws, kind("game").as_ref()).unwrap();
+        let notes = std::fs::read_to_string(ws.capture_dir().join("README.md")).unwrap();
+        assert!(notes.contains("## JavaScript application"), "{name}: {notes}");
+    }
+}
+
 #[cfg(unix)]
 mod picking_up_a_build {
     use super::*;
