@@ -68,6 +68,9 @@ fn first_run_ai_step_can_add_a_server_by_its_address() {
     h.get_by_label("I'm new to this").click();
     h.run_steps(3);
     assert_eq!(h.state().state.first_run, FirstRunStep::Brain);
+    assert!(h.query_by_label("Server address").is_none(), "the form waits on its own tab");
+    h.get_by_label("Custom endpoint").click();
+    h.run_steps(3);
     let _ = h.get_by_label("Server address");
     let _ = h.get_by_label("AI name");
     // The demo already has an AI, so "we didn't find one" isn't said.
@@ -562,7 +565,7 @@ fn pictures_of_the_original_go_with_the_draft_then_into_the_project() {
 
     let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, true)));
     h.run_steps(3);
-    // "Nothing — start fresh" is picked: the request box offers pictures (not for websites).
+    // "Start fresh" is picked: the request box offers pictures (not for websites).
     h.get_by_label("Add pictures of the original (optional: screenshots help it look right)");
     h.state_mut().add_pictures(vec![pic.clone(), notes, pic.clone()]);
     // Their sizes are checked on a worker first (#720).
@@ -803,7 +806,7 @@ fn website_choice_stays_picked_while_the_address_is_empty() {
         // A website is looked at as a visitor sees it, or read in Deep mode: asked.
         h.get_by_label("How closely may Craft Anything look at it?");
     }
-    h.get_by_label("Nothing — start fresh").click();
+    h.get_by_label("Start fresh").click();
     h.run_steps(3);
     assert!(!h.state().state.make.editing_url);
     assert!(h.query_by_label("How closely may Craft Anything look at it?").is_none(), "nothing to look at");
@@ -1161,9 +1164,13 @@ fn an_ai_server_is_added_by_its_address() {
         a
     });
     h.run_steps(2);
-    h.get_by_label("Add an AI by its address");
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Custom);
+    h.run_steps(2);
+    h.get_by_label("Custom LLM endpoint");
     h.state_mut().server_form = craft_anything_ui_egui::ServerForm { name: "Studio box".into(), address: url.clone(), ..Default::default() };
     h.run_steps(1);
+    h.get_by_label("Add").scroll_to_me();
+    h.run_steps(3);
     h.get_by_label("Add").click();
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Studio box" && b.model == "qwen3:8b")), "added with a model that can chat");
     assert!(h.state().server_form.name.is_empty(), "the form empties once it's added");
@@ -1325,6 +1332,8 @@ fn claude_codes_account_folder_is_set_in_settings() {
     // Added already, so it's offered again under the next free name, on the coding agents' tab.
     h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Harnesses);
     h.run_steps(2);
+    h.get_by_label("Add another").scroll_to_me();
+    h.run_steps(3);
     h.get_by_label("Add another").click();
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
 }
@@ -1433,7 +1442,7 @@ fn a_check_shows_the_claims_that_dont_hold_and_the_rest_on_request() {
     });
     h.run_steps(3);
     h.get_by_label("2 of 3 requirements met");
-    h.get_by_label("/about doesn't scroll sideways at 390 px — it's 412 px wide");
+    h.get_by_label("/about doesn't scroll sideways at 390 px: it's 412 px wide");
     assert!(h.query_by_label("The start page loads every file it asks for").is_none(), "the ones that hold wait behind a click");
     h.get_by_label("Show the ones that are met").click();
     h.run_steps(3);
@@ -2693,4 +2702,327 @@ fn a_long_status_note_in_the_work_rows_stays_in_the_window() {
         eprintln!("HEADER {r:?}");
         assert!(r.min.x >= 0.0 && r.max.x <= 1280.0, "the header leaves the window: {r:?}");
     }
+}
+
+fn ai_settings() -> egui_kittest::Harness<'static, CraftApp> {
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a.state.backend = Some("Claude".into());
+        a
+    });
+    h.run_steps(3);
+    h
+}
+
+/// The "In use" chip is as tall as the buttons beside it, and sits level with them.
+#[test]
+fn an_ais_status_chip_is_as_tall_as_its_buttons() {
+    let h = ai_settings();
+    let chip = h.get_by_label("In use").rect();
+    let test = h.get_all_by_label("Build with this").next().expect("a button in the chip's row").rect();
+    assert_eq!(chip.height(), test.height(), "chip {chip:?} vs button {test:?}");
+    assert_eq!(chip.top(), test.top(), "chip {chip:?} vs button {test:?}");
+}
+
+/// Remove sits on an AI's name row, above its buttons, so it never wraps onto a line of its own;
+/// the fal.ai key field is as tall as its Save button.
+#[test]
+fn remove_sits_by_the_name_and_the_key_field_matches_save() {
+    let h = ai_settings();
+    let (remove, first) = (h.get_by_label("Remove Claude").rect(), h.get_by_label("In use").rect());
+    assert!(remove.bottom() <= first.top(), "Remove {remove:?} is above the buttons {first:?}");
+    let (field, save) = (h.get_by_label("fal.ai key").rect(), h.get_by_label("Save").rect());
+    assert!((field.top() - save.top()).abs() < 0.5 && (field.bottom() - save.bottom()).abs() < 0.5, "field {field:?} vs Save {save:?}");
+}
+
+/// The row says what kind of AI it is in words.
+#[test]
+fn an_ais_row_names_its_kind() {
+    let h = ai_settings();
+    let _ = h.get_by_label_contains("Anthropic API");
+}
+
+/// On the Custom endpoint tab, Test and Add are the same height, and the status line keeps its
+/// place whether or not it has anything to say.
+#[test]
+fn the_custom_form_keeps_its_buttons_level_and_its_status_line_put() {
+    let mut h = ai_settings();
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Custom);
+    h.run_steps(3);
+    let (add, test) = (h.get_by_label("Add").rect(), h.get_all_by_label("Test").last().expect("the form Test button").rect());
+    assert_eq!(add.height(), test.height(), "Add {add:?} vs Test {test:?}");
+    assert_eq!(add.top(), test.top());
+    // Every control in the form has one left edge and one right edge, and Add ends there too.
+    let edges = |h: &Harness<'static, CraftApp>| {
+        ["Service", "AI name", "Server address", "API key", "Model"].map(|l| {
+            let r = h.get_by_label(l).rect();
+            (l, r.left(), r.right())
+        })
+    };
+    let fields = edges(&h);
+    for (l, left, right) in fields {
+        assert!((left - fields[0].1).abs() < 0.5, "{l} starts at {left}, Service at {}", fields[0].1);
+        assert!((right - fields[0].2).abs() < 0.5, "{l} ends at {right}, Service at {}", fields[0].2);
+    }
+    assert!((add.right() - fields[0].2).abs() < 0.5, "Add ends at {}, the fields at {}", add.right(), fields[0].2);
+    let _ = h.get_by_label("Service");
+    h.state_mut().server_form.address = "http://127.0.0.1:9/v1".into();
+    h.run_steps(3);
+    let after = h.get_by_label("Add").rect();
+    assert_eq!(add.top(), after.top(), "typing an address moved the buttons");
+}
+
+/// Another service in the form drops the last one's model list and pick, so Add can't save a model
+/// from one server with another's address.
+#[test]
+fn a_new_service_in_the_custom_form_drops_the_old_models() {
+    let mut h = ai_settings();
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Custom);
+    h.state_mut().server_form.choice.models = vec!["qwen3:8b".into()];
+    h.state_mut().server_form.choice.picked = "qwen3:8b".into();
+    h.run_steps(3);
+    h.get_by_label("Service").click();
+    h.run_steps(2);
+    h.get_by_label("OpenRouter").click();
+    h.run_steps(2);
+    let form = &h.state().server_form;
+    assert_eq!(craft_anything_ai::providers::services()[form.service].name, "OpenRouter");
+    assert!(form.choice.models.iter().all(|m| m != "qwen3:8b") && form.choice.picked != "qwen3:8b", "{:?}", form.choice);
+}
+
+/// A key typed for one service is dropped when another is picked, so it is never sent to the new one.
+#[test]
+fn a_new_service_in_the_custom_form_drops_the_typed_key() {
+    let mut h = ai_settings();
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Custom);
+    h.state_mut().server_form.key = "sk-test-0000".into();
+    h.run_steps(3);
+    h.get_by_label("Service").click();
+    h.run_steps(2);
+    h.get_by_label("OpenRouter").click();
+    h.run_steps(2);
+    assert!(h.state().server_form.key.is_empty());
+}
+
+/// Test needs a web address, not a name: an unnamed server can be tried before it is added.
+#[test]
+fn an_unnamed_server_in_the_custom_form_can_be_tested() {
+    let mut h = ai_settings();
+    h.state_mut().state.detect_tab = Some(craft_anything_ui_egui::detect_tabs::DetectTab::Custom);
+    h.state_mut().server_form.address = "not an address".into();
+    h.run_steps(3);
+    h.get_all_by_label("Test").last().expect("the form Test button").click_accesskit();
+    h.run_steps(2);
+    assert!(h.state().server_form.test.is_none(), "no web address, no test");
+    h.state_mut().server_form.address = "http://127.0.0.1:9/v1".into();
+    h.run_steps(2);
+    h.get_all_by_label("Test").last().expect("the form Test button").click_accesskit();
+    h.run_steps(2);
+    assert!(h.state().server_form.test.is_some(), "a test started with no name");
+}
+
+/// First run's key card: the key field starts under the AI's name, not centred in the card, and
+/// ends where Connect does.
+#[test]
+fn first_run_key_field_lines_up_with_its_card() {
+    let mut h = harness_sized(egui::vec2(1100.0, 780.0), || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, false));
+        a.state.first_run = FirstRunStep::Brain;
+        a.detected = Some(demo::detected());
+        a.state.backend = Some("Claude Code".into());
+        a.backends.clear();
+        a
+    });
+    h.run_steps(3);
+    let (field, name, connect) = (h.get_by_label("OpenRouter key").rect(), h.get_by_label("OpenRouter").rect(), h.get_by_label("Connect").rect());
+    assert!((field.left() - name.left()).abs() < 1.0, "the field {field:?} starts under the name {name:?}");
+    assert!((field.right() - connect.right()).abs() < 1.0, "the field {field:?} ends where Connect {connect:?} does");
+}
+
+/// A key card lists the models its key offers once a key is pasted, and Connect uses the one chosen.
+#[test]
+fn a_key_card_picks_a_model() {
+    let url = model_server();
+    let card = craft_anything_ai::Detected {
+        suggestion: craft_anything_ai::BackendConfig {
+            name: "Keyed".into(),
+            kind: craft_anything_ai::BackendKind::OpenaiCompatible,
+            model: "nomic-embed-text".into(),
+            base_url: Some(url),
+            ssh_host: None,
+            enabled: true,
+        },
+        reason: "Paste your key".into(),
+        needs_key: true,
+    };
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a.detected = Some(vec![card]);
+        a
+    });
+    h.run_steps(3);
+    assert!(h.query_by_label("2 models found").is_none(), "nothing to list without a key");
+    h.state_mut().key_inputs.insert("Keyed".into(), "sk-test-12345678".into());
+    let start = Instant::now();
+    while h.query_by_label("2 models found").is_none() && start.elapsed() < Duration::from_secs(10) {
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = h.get_by_label("2 models found");
+    let (combo, connect) = (h.get_by_label("Model").rect(), h.get_by_label("Add").rect());
+    assert!((combo.center().y - connect.center().y).abs() < 1.0, "the picker {combo:?} and the button {connect:?} share a centre");
+    h.get_by_label("Model").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Model").click();
+    h.run_steps(2);
+    h.get_by_label("qwen3:8b").click();
+    h.run_steps(2);
+    h.get_by_label("Add").click();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Keyed" && b.model == "qwen3:8b")), "Connect uses the chosen model");
+}
+
+/// A row's buttons wrap, and every line of them starts where the first one does.
+#[test]
+fn an_ais_buttons_wrap_to_the_column_they_start_in() {
+    let mut h = harness_sized(egui::vec2(900.0, 900.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a.state.backend = Some("Claude".into());
+        a
+    });
+    h.run_steps(3);
+    let chip = h.get_by_label("In use").rect();
+    let mut tops: Vec<(f32, f32)> = Vec::new();
+    for l in ["In use", "Build with this", "Extract with this", "Turn off", "Test", "Remove Claude"] {
+        if let Some(n) = h.query_by_label(l) {
+            let r = n.rect();
+            if r.top() >= chip.top() - 1.0 && r.top() < chip.top() + 200.0 {
+                tops.push((r.top(), r.left()));
+            }
+        }
+    }
+    tops.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let mut lines: Vec<(f32, f32)> = Vec::new();
+    for (top, left) in tops {
+        if !lines.iter().any(|(t, _)| (t - top).abs() < 4.0) {
+            lines.push((top, left));
+        }
+    }
+    eprintln!("LINES {lines:?} chip {chip:?}");
+    assert!(lines.len() >= 2, "the row didn't wrap, so this checks nothing: {lines:?}");
+    for (top, left) in &lines {
+        assert!((left - chip.left()).abs() < 0.5, "the line at {top} starts at {left}, the first at {}", chip.left());
+    }
+}
+
+/// Settings: the title and Detect share a centre, and the tabs sit on a row below, together.
+#[test]
+fn the_detect_header_and_its_tabs_are_on_separate_rows() {
+    let h = ai_settings();
+    let title = h.get_by_label("Found on this computer").rect();
+    let detect = h.get_by_label("Detect").rect();
+    assert!((title.center().y - detect.center().y).abs() < 1.0, "title {title:?} vs Detect {detect:?}");
+    let tabs: Vec<egui::Rect> = ["Providers (", "Harnesses (", "Custom endpoint"]
+        .iter()
+        .map(|l| {
+            h.get_all_by_label_contains(l)
+                .filter(|n| n.rect().top() >= detect.bottom() - 0.5)
+                .map(|n| n.rect())
+                .next()
+                .unwrap_or_else(|| panic!("no tab {l} below the title row"))
+        })
+        .collect();
+    for r in &tabs {
+        assert!(r.top() >= detect.bottom() - 0.5, "tab {r:?} is on the title's row (Detect {detect:?})");
+        assert!((r.center().y - tabs[0].center().y).abs() < 0.5, "the tabs wrapped: {tabs:?}");
+    }
+}
+
+/// The form's caption sits at the form's left edge on the first run too, not centred over it.
+#[test]
+fn the_first_run_form_caption_is_left_aligned() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    h.run_steps(3);
+    h.get_by_label("I'm new to this").click();
+    h.run_steps(3);
+    h.get_by_label("Custom endpoint").click();
+    h.run_steps(3);
+    let caption = h.get_by_label("Custom LLM endpoint").rect();
+    let field = h.get_by_label("Server address").rect();
+    let service = h.get_by_label("Service").rect();
+    assert!(caption.left() < service.left() - 40.0, "caption {caption:?} vs fields {service:?}");
+    assert!((service.left() - field.left()).abs() < 0.5 && (service.right() - field.right()).abs() < 0.5);
+}
+
+/// A stand-in ComfyUI server: its version and card, and two checkpoints. Its address.
+fn comfy_server() -> String {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        for mut s in listener.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let head = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = if head.starts_with("GET /system_stats") {
+                r#"{"system":{"comfyui_version":"0.3.10"},"devices":[{"name":"cuda:0 NVIDIA GeForce RTX 3060 : cudaMallocAsync"}]}"#
+            } else {
+                r#"{"CheckpointLoaderSimple":{"input":{"required":{"ckpt_name":[["flux.safetensors","sdxl.safetensors"],{}]}}}}"#
+            };
+            let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+    url
+}
+
+/// Choosing ComfyUI for pictures shows its address, checkpoint and workflow, lined up with each
+/// other, lists the server's checkpoints by itself, and Test says what the server is.
+#[test]
+fn picking_comfyui_shows_its_settings_lined_up_and_tests_the_server() {
+    let url = comfy_server();
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Builds;
+        a
+    });
+    h.run_steps(3);
+    assert!(h.query_by_label("ComfyUI address").is_none(), "only when ComfyUI is the picture model");
+    h.state_mut().settings.assets.image_model = Some("comfyui".into());
+    h.state_mut().settings.assets.comfyui.address = url;
+    h.run_steps(3);
+    h.get_by_label("ComfyUI address").scroll_to_me();
+    h.run_steps(3);
+    let start = Instant::now();
+    while h.query_by_label("2 checkpoints found").is_none() && start.elapsed() < Duration::from_secs(10) {
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = h.get_by_label("2 checkpoints found");
+    h.get_by_label("Model").scroll_to_me();
+    h.run_steps(3);
+    let edges = ["ComfyUI address", "Model", "ComfyUI workflow"].map(|l| {
+        let r = h.get_by_label(l).rect();
+        (l, r.left(), r.right())
+    });
+    for (l, left, right) in edges {
+        assert!((left - edges[0].1).abs() < 0.5, "{l} starts at {left}, the address at {}", edges[0].1);
+        assert!((right - edges[0].2).abs() < 0.5, "{l} ends at {right}, the address at {}", edges[0].2);
+    }
+    assert_eq!(h.state().settings.assets.comfyui.checkpoint, "flux.safetensors", "the first checkpoint is chosen and kept");
+    let _ = h.get_by_label("No key needed; pictures are made on your server.");
+    h.get_by_label("Test").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Test").click();
+    let start = Instant::now();
+    while h.query_by_label("ComfyUI 0.3.10 · NVIDIA GeForce RTX 3060 · 2 checkpoints").is_none() && start.elapsed() < Duration::from_secs(10) {
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = h.get_by_label("ComfyUI 0.3.10 · NVIDIA GeForce RTX 3060 · 2 checkpoints");
 }
