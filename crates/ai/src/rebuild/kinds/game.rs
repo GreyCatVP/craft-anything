@@ -17,7 +17,9 @@ fn says_at_word_start(request: &str, phrase: &str) -> bool {
 /// A number of players as its own word: "2-player", "(four player)", but not "MPEG-2 player",
 /// "mp2 player" or "12 player".
 fn says_player_count(request: &str) -> bool {
-    ["2", "3", "4", "two", "three", "four"].iter().any(|n| ["-player", " player"].iter().any(|player| says_at_word_start(request, &format!("{n}{player}"))))
+    // Any run of spaces or line breaks counts as one space: "2  player".
+    let request = request.split_whitespace().collect::<Vec<_>>().join(" ");
+    ["2", "3", "4", "two", "three", "four"].iter().any(|n| ["-player", " player"].iter().any(|player| says_at_word_start(&request, &format!("{n}{player}"))))
 }
 
 pub struct GameKind;

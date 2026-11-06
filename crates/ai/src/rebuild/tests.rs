@@ -86,6 +86,8 @@ fn the_word_player_alone_is_not_a_game() {
         "a 2-player chess board",
         "a two player chess board",
         "Build a (2-player) chess board",
+        "a 2  player chess board",
+        "a two\nplayer chess board",
         "a four-player party",
         "4 player dungeon crawl",
         "A game with one player",
