@@ -351,6 +351,11 @@ edit, right before committing.
 
 ## Design
 
+**Native macOS controls restored as a second title bar.** Enabling decorations alone put the
+system's title above an app bar that repeated the name. For one unified bar, keep decorations
+and native buttons, extend content into the title bar, and hide its system title and background.
+Reserve the native buttons' measured width and height in app coordinates, including UI zoom.
+
 **An early error without a terminal event.** Model validation returned after reporting an error,
 but headless chat waits for `TurnDone`, not just an idle worker. Preflight failures and cancellation
 must finish the event sequence too; regression tests check both the error/status and the terminal event.

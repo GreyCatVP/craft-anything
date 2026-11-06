@@ -1,6 +1,6 @@
-//! The custom title bar (the native frame is off): app mark, what's open, Clean room / Deep, AI
-//! backend, Simple · Advanced, settings and the window buttons. Empty parts drag the window; the
-//! window edges resize it.
+//! The app bar: app mark, what's open, Clean room / Deep, AI backend, Simple · Advanced and
+//! settings. On macOS, native traffic lights share this bar; other desktops use our window
+//! buttons and resize edges.
 
 use crate::i18n::tr;
 use crate::state::Screen;
@@ -10,10 +10,36 @@ use craft_anything_engine::Mode;
 use egui::viewport::ResizeDirection;
 use egui::{RichText, Ui, Vec2};
 
-/// Height of the custom title bar.
+/// Height of the unified app and title bar.
 pub const HEIGHT: f32 = 40.0;
 /// How close to the window edge the pointer must be to resize.
 const EDGE: f32 = 5.0;
+
+/// Leave room for the system's traffic lights, including their native margins.
+#[cfg(target_os = "macos")]
+pub(crate) fn update_native_controls(ctx: &egui::Context, frame: &eframe::Frame) {
+    use raw_window_handle::HasWindowHandle;
+
+    if let Ok(handle) = frame.window_handle()
+        && let Some(metrics) = eframe::WindowChromeMetrics::from_window_handle(&handle.as_raw())
+    {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("native-window-controls-size"), metrics.traffic_lights_size));
+    }
+}
+
+fn native_controls_size(ctx: &egui::Context) -> Vec2 {
+    if !cfg!(target_os = "macos") || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
+        return Vec2::ZERO;
+    }
+    // Reserve a standard traffic-light group until the native window metrics are available.
+    const FALLBACK_SIZE: Vec2 = egui::vec2(80.0, 32.0);
+    ctx.data(|data| data.get_temp::<Vec2>(egui::Id::new("native-window-controls-size"))).unwrap_or(FALLBACK_SIZE) / ctx.zoom_factor()
+}
+
+/// Keep the bar tall enough for the system controls when the app's UI is zoomed out.
+pub fn height(ctx: &egui::Context) -> f32 {
+    HEIGHT.max(native_controls_size(ctx).y)
+}
 
 fn maximized(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.viewport().maximized.unwrap_or(false) || i.viewport().fullscreen.unwrap_or(false))
@@ -21,7 +47,7 @@ fn maximized(ctx: &egui::Context) -> bool {
 
 /// The window edge (or corner) under the pointer, when the window can be resized from there.
 pub fn edge_at(ctx: &egui::Context) -> Option<ResizeDirection> {
-    if maximized(ctx) {
+    if cfg!(target_os = "macos") || maximized(ctx) {
         return None;
     }
     let pos = ctx.input(|i| i.pointer.hover_pos())?;
@@ -40,9 +66,9 @@ pub fn edge_at(ctx: &egui::Context) -> Option<ResizeDirection> {
     })
 }
 
-/// A 1 px edge around the window (the native frame is off), so it doesn't melt into the desktop.
+/// A 1 px edge on desktops without a native frame, so the window stays distinct from the desktop.
 pub fn window_edge(ctx: &egui::Context) {
-    if maximized(ctx) {
+    if cfg!(target_os = "macos") || maximized(ctx) {
         return;
     }
     let t = Tokens::get(ctx);
@@ -54,7 +80,7 @@ pub fn window_edge(ctx: &egui::Context) {
     );
 }
 
-/// Resizing from the window edges (the native frame is off, so we provide it).
+/// Resizing from the window edges on desktops without a native frame.
 pub fn resize_edges(ctx: &egui::Context) {
     let Some(dir) = edge_at(ctx) else { return };
     ctx.set_cursor_icon(match dir {
@@ -75,7 +101,7 @@ pub fn resize_edges(ctx: &egui::Context) {
 /// A thin vertical rule between title bar cells.
 fn rule(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let (r, _) = ui.allocate_exact_size(Vec2::new(1.0, HEIGHT), egui::Sense::hover());
+    let (r, _) = ui.allocate_exact_size(Vec2::new(1.0, height(ui.ctx())), egui::Sense::hover());
     ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, t.separator));
 }
 
@@ -98,13 +124,14 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let ctx = ui.ctx().clone();
     let bar = ui.max_rect();
-    // Empty parts of the bar move the window and double-click maximises. This is registered
-    // before the controls, so they get their own clicks.
-    let drag = ui.interact(bar, ui.id().with("titlebar-drag"), egui::Sense::click_and_drag());
+    let native_width = native_controls_size(&ctx).x;
+    // Empty parts drag the window. Keep the native traffic-light area free of app interactions.
+    let drag_rect = egui::Rect::from_min_max(bar.min + egui::vec2(native_width, 0.0), bar.max);
+    let drag = ui.interact(drag_rect, ui.id().with("titlebar-drag"), egui::Sense::click_and_drag());
     if edge_at(&ctx).is_none() && drag.drag_started_by(egui::PointerButton::Primary) {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
-    if drag.double_clicked() {
+    if !cfg!(target_os = "macos") && drag.double_clicked() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized(&ctx)));
     }
     ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, egui::Stroke::new(1.0, t.separator));
@@ -116,7 +143,7 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
     }
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        ui.add_space(12.0);
+        ui.add_space(native_width + 12.0);
         if ui.add(crate::app_icon(22.0).sense(egui::Sense::click())).on_hover_text(tr("Home")).clicked() {
             app.state.screen = Screen::Home;
         }
@@ -139,19 +166,21 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            if window_button(ui, "x", "Close", true).clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            if !cfg!(target_os = "macos") {
+                if window_button(ui, "x", "Close", true).clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                let max = maximized(&ctx);
+                if window_button(ui, if max { "layers" } else { "square" }, if max { "Restore" } else { "Maximise" }, false).clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                }
+                if window_button(ui, "minus", "Minimise", false).clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                rule(ui);
             }
-            let max = maximized(&ctx);
-            if window_button(ui, if max { "layers" } else { "square" }, if max { "Restore" } else { "Maximise" }, false).clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
-            }
-            if window_button(ui, "minus", "Minimise", false).clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-            rule(ui);
             ui.spacing_mut().item_spacing.x = 10.0;
-            ui.add_space(4.0);
+            ui.add_space(if cfg!(target_os = "macos") { 12.0 } else { 4.0 });
             if let Some((title, fraction, message)) = download {
                 if download_pill(ui, &title, fraction).on_hover_text(message).clicked() {
                     app.state.modal = Some(match app.engine_flow.job {

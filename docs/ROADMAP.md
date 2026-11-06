@@ -688,9 +688,14 @@ Gaps found while using the app for real projects.
       open, so the command doesn't return until it closes (#207). Every fix found needs `unsafe` or
       an unstable API: an exception to rule 9, or a limit we document. Meanwhile a reproducing test
       marked `#[ignore]` and a line in the CLI docs are welcome
-- [ ] macOS: the window draws Windows-style controls at the top right, since the app turns off the
-      system's title bar (`with_decorations(false)`), and its icon is bigger than the system's (#20)
+- [x] macOS: native close, minimise and zoom controls share one bar with the app's logo, title
+      and tools, without a second title bar or duplicate window buttons (#20). The app reserves
+      the system controls' measured space, including when UI zoom changes
       — claimed: Codex, branch bugfix/r2.9-macos-native-controls
+- [ ] macOS: recheck the oversized Dock icon report (#20); the app already preserves the
+      bundle's padded icon (#102), but this part of the report still needs live verification
+- [ ] Clear the four existing UI rustdoc warnings: private links in `slash.rs` and
+      `after_first_frames`, the angle-bracket placeholder in `engine_ui.rs`, and a bare URL in `make.rs`
 - [ ] Show a command's output while it runs: Claude Code reports a tool's result only when it
       ends, so a long `cargo build` is one quiet line until then. Watching the agent's child
       processes from outside could say what's running and for how long
