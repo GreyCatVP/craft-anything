@@ -90,6 +90,8 @@ fn the_word_player_alone_is_not_a_game() {
         "4 player dungeon crawl",
         "A game with one player",
         "A level editor",
+        "Build a (level editor)",
+        "Make this:\nlevel editor",
     ] {
         assert_eq!(choose(request, &TargetRef::None).0, "game", "{request}");
     }
