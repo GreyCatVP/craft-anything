@@ -68,7 +68,14 @@ fn the_word_player_alone_is_not_a_game() {
         assert_eq!(choose(request, &TargetRef::None).0, "app", "{request}");
     }
     assert_eq!(choose("Um player de vídeo desktop, use Electron", &TargetRef::None), ("app", "Electron"));
-    for request in ["A multiplayer shooter", "A single-player adventure", "a 2-player chess board", "A game with one player"] {
+    for request in [
+        "A multiplayer shooter",
+        "A single-player adventure",
+        "A single player adventure",
+        "a 2-player chess board",
+        "a two player chess board",
+        "A game with one player",
+    ] {
         assert_eq!(choose(request, &TargetRef::None).0, "game", "{request}");
     }
 }
