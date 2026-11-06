@@ -8,6 +8,17 @@ use craft_anything_engines::game;
 const ASSETS_NOW_OFF: &str =
     "Generated assets are now off for this project: don't make more with assets_image_generate or assets_model_generate. Keep the ones already in app/.";
 
+/// A number of players as its own word: "2-player", "(four player)", but not "MPEG-2 player",
+/// "mp2 player" or "12 player".
+fn says_player_count(request: &str) -> bool {
+    ["2", "3", "4", "two", "three", "four"].iter().any(|n| {
+        ["-player", " player"].iter().any(|player| {
+            let phrase = format!("{n}{player}");
+            request.match_indices(&phrase).any(|(at, _)| request.get(..at).and_then(|s| s.chars().next_back()).is_none_or(|c| !c.is_alphanumeric() && c != '-'))
+        })
+    })
+}
+
 pub struct GameKind;
 
 impl GameKind {
@@ -34,28 +45,26 @@ impl TargetKind for GameKind {
         if game::Builder::from_stack(cx.stack).is_some() {
             Some(200)
         // Not plain "player": a video or music player is an app (#953).
-        } else if cx.says(&[
-            "game",
-            "gameplay",
-            "steam",
-            "level",
-            "multiplayer",
-            "multi-player",
-            "multi player",
-            "singleplayer",
-            "single-player",
-            "single player",
-            "two-player",
-            "two player",
-            // The leading space keeps "MPEG-2 player" out.
-            " 2-player",
-            " 2 player",
-            "游戏",
-            "遊戲",
-            "玩法",
-            " spiel",
-            "-spiel",
-        ]) {
+        } else if says_player_count(&cx.request)
+            || cx.says(&[
+                "game",
+                "gameplay",
+                "steam",
+                // The leading space keeps "low-level" and "multilevel" out.
+                " level",
+                "multiplayer",
+                "multi-player",
+                "multi player",
+                "singleplayer",
+                "single-player",
+                "single player",
+                "游戏",
+                "遊戲",
+                "玩法",
+                " spiel",
+                "-spiel",
+            ])
+        {
             Some(60)
         } else {
             None

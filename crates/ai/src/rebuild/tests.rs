@@ -72,6 +72,9 @@ fn the_word_player_alone_is_not_a_game() {
         "an mpeg-2-player",
         "an mp2 player",
         "an mp4 player",
+        "a 12 player scoreboard",
+        "a low-level disk tool",
+        "a multilevel menu",
     ] {
         assert_eq!(choose(request, &TargetRef::None).0, "app", "{request}");
     }
@@ -82,7 +85,11 @@ fn the_word_player_alone_is_not_a_game() {
         "A single player adventure",
         "a 2-player chess board",
         "a two player chess board",
+        "Build a (2-player) chess board",
+        "a four-player party",
+        "4 player dungeon crawl",
         "A game with one player",
+        "A level editor",
     ] {
         assert_eq!(choose(request, &TargetRef::None).0, "game", "{request}");
     }
