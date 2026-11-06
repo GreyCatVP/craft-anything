@@ -1,0 +1,1449 @@
+# pt-br: tradução da interface para português do Brasil (informal, direto).
+# Formato: string em inglês<TAB>tradução. Placeholders {nome} e reticências … são mantidos.
+# Catálogo completo do aplicativo.
+
+OpenCode default	Padrão do OpenCode
+Model default	Modelo padrão
+Thinking depth	Profundidade de raciocínio
+OpenCode model	Modelo OpenCode
+Remote program	Programa remoto
+Reload models	Recarregar modelos
+Apply	Aplicar
+OpenCode has no visible chat models. Connect a provider in OpenCode, then reload.	O OpenCode não tem modelos de chat visíveis. Conecte um provedor no OpenCode, em seguida, recarregue.
+The saved model is no longer visible. Choose another model or the OpenCode default.	O modelo salvo não está mais visível. Escolha outro modelo ou o padrão OpenCode.
+The saved thinking depth is unavailable for this model. Choose its default or an offered depth.	O pensamento salvo não está disponível para este modelo. Escolha seu padrão ou uma profundidade oferecida.
+List an agent's models	Listar os modelos de um agente
+Choose an agent's model and thinking	Escolha um modelo e pensamento do agente
+ GB	GB
+ and {n} more	e {n} mais
+ {ascii}	{ascii}
+ · ${c:.2}	· ${c:.2}
+ · ssh {h}	· ssh {h}
+(1 picture attached)	(1 imagem anexada)
+({n} pictures attached)	({n} imagens anexadas)
+.NET application graph	Aplicativo .NET em grafo
+.NET apps	Aplicativos .NET
+.NET assembly overview	Visão geral do assembly .NET
+.NET native calls	Chamadas nativas .NET
+.NET types and methods	Tipos e métodos .NET
+/btw {}	/por acaso {} /no_think
+0x… or number	0x… ou número
+A .NET program (C#, F# or VB)	Um programa .NET (C#, F# ou VB)
+A DOS program	O DOS program
+A Java program	A programação Java
+A Linux (or Unix) program	O programa Linux (ou Unix) /no_think
+A Mac or iPhone program	O programa da Mac ou do iPhone
+A SQLite database (how an app stores its data)	A base de dados SQLite (como um aplicativo armazena seus dados)
+A WebAssembly module (code that runs in a browser)	O módulo WebAssembly (código que executa em um navegador)
+A Windows program	O programa do Windows
+A ZIP archive	O arquivo ZIP
+A bundle of ready-made code that many programs share.	Um conjunto de código pronto que muitos programas compartilham.
+A coding agent such as Claude Code builds it, and an AI answers your questions in plain words. Change this any time in Settings → AI.	Um agente de programação como o Claude Code o constrói, e uma IA responde às suas perguntas em palavras simples. Altere isso a qualquer momento em Configurações → IA.
+A command's output shows here when it finishes.	A saída do comando aparece aqui quando ele termina.
+A copy to try something else from here.	Uma cópia para tentar outra coisa a partir daqui.
+A file of machine code that a computer can run directly, like an .exe or an app.	Um arquivo de código de máquina que um computador pode executar diretamente, como um .exe ou uma aplicação.
+A file that a computer can run as a program.	Arquivo que um computador pode executar como programa.
+A file that links packed web code back to the original, readable source files.	O arquivo que vincula o código da web compactado de volta aos arquivos de origem legíveis.
+A file we don't recognise yet	Arquivo que ainda não reconhecemos
+A first look at a file you're unsure about, without running it.	A primeira olhada em um arquivo que você tem dúvidas, sem executá-lo.
+A folder	A pasta /no_think
+A folder has no bytes of its own	Uma pasta não tem bytes próprios
+A free reverse-engineering tool from the NSA. Deep mode uses it for extra detail; Clean room mode never does.	Uma ferramenta de reverse-engineering gratuita da NSA. O modo profundo usa-a para detalhes adicionais; o modo clean room nunca faz isso.
+A frozen copy (recommended)	Uma cópia congelada (recomendada)
+A frozen copy takes {size}. That's a lot of space: a light copy takes {light}.	Uma cópia congelada ocupa {size}. Isso é muita espaço: uma cópia leve ocupa {light}.
+A frozen copy takes {size}; a light copy takes {light}.	Uma cópia congelada ocupa {size}; uma cópia leve ocupa {light}.
+A game	Um jogo
+A game's files	Arquivos de um jogo
+A light copy	Uma cópia clara
+A locked room for running a program so it can't touch the rest of your computer.	Um quarto trancado para executar um programa, para que ele não possa tocar o resto do seu computador.
+A map of which functions call which other functions.	Um mapa de quais funções chamam quais outras funções.
+A name the program's author gave to a function or variable that survived in the file.	O nome que o autor do programa deu a uma função ou variável que sobreviveu no arquivo.
+A named piece of a program that does one job, like "add two numbers" or "save the file".	Um trecho nomeado de um programa que realiza uma tarefa específica, como "somar dois números" ou "salvar o arquivo".
+A number that says where something is in a program's memory, like a house number.	Um número que indica onde algo está na memória de um programa, como um número de casa.
+A piece of text stored inside a program, like a message, a web address or a file name.	Um trecho de texto armazenado dentro de um programa, como uma mensagem, um endereço da web ou um nome de arquivo.
+A program, an app bundle, an APK, a JavaScript bundle, a folder… or drop it on the window.	Um programa, um aplicativo, um APK, um bundle JavaScript, uma pasta... ou solte-o na janela.
+A recording of network traffic	Gravação de tráfego de rede
+A region of a program as it sits in memory while running.	Uma região de um programa enquanto está em execução na memória.
+A region of a program file with one purpose: code, text, pictures, settings.	Uma região de um arquivo de programa com um único propósito: código, texto, imagens, configurações.
+A rule of thumb. Usually right, sometimes wrong, so we label the result as a best guess.	Uma regra de ouro. Normalmente certa, às vezes errada, então rotulamos o resultado como uma estimativa melhor.
+A saved, checkable record of something we found, with how sure we are and where we found it.	Um registro salvo e verificável de algo que encontramos, com o quanto estamos certos e onde encontramos.
+A script or web page	Um script ou página da web
+A set of commands a program offers to other programs.	Um conjunto de comandos que um programa oferece a outros programas.
+A simple snake game	Um simples jogo da cobra
+A small download (under 200 MB). Free, no account needed.	Um pequeno download (menos de 200 MB). Grátis, sem necessidade de conta.
+A small file that lists what an app is called, what it needs and what it's allowed to do.	Um pequeno arquivo que lista o nome de uma aplicação, o que ela precisa e o que ela é autorizada a fazer.
+A smart contract (EVM bytecode)	Um contrato inteligente (código em bytecode EVM)
+A way of writing bytes as two-character codes (00 to FF). The rawest view of a file.	Uma forma de escrever bytes como códigos de dois caracteres (00 a FF). A visão mais bruta de um arquivo.
+A way to build desktop apps out of web pages. The app is basically a website with its own browser.	Uma forma de criar aplicativos de desktop a partir de páginas da web. O aplicativo é basicamente um site com seu próprio navegador.
+A website	Um site
+A website for my bakery	Um site para minha padeira
+AI	IA
+AI cost	Custo da IA
+AI cost (estimate)	Custo da IA (estimativa)
+AI cost (part estimate)	Custo da IA (estimativa parcial)
+AI model file	Arquivo do modelo AI
+AI name	Nome do AI
+AI use this session	Uso de IA nesta sessão
+API boundary	Limites da API
+API key	Chave da API
+API key (stored in your system keychain)	Chave de API (guardada no cofre do sistema)
+API key, if it needs one	Chave da API, se for necessário
+About 10 GB. Free for personal use with a Unity account.	Aproximadamente 10 GB. Grátis para uso pessoal com uma conta da Unity.
+About 60 GB, an Epic Games account, and Visual Studio's C++ tools.	Aproximadamente 60 GB, uma conta da Epic Games e as ferramentas C++ do Visual Studio.
+Add	Adicione /no_think
+Add Visual Studio's C++ tools	Adicione as ferramentas C++ do Visual Studio
+Add a brain	Adicione um cérebro
+Add a fal.ai key	Adicione uma chave fal.ai
+Add a folder…	Adicione uma pasta…
+Add a plugin	Adicionar um plugin
+Add an AI brain and I'll read this evidence for you, answer follow-up questions and point at the proof.	Adicione um cérebro de IA e eu lerei essa evidência para você, responderá a perguntas de seguimento e apontará a prova.
+Add an AI by its address	Adicione um AI pelo seu endereço
+Add another	Adicione outro
+Add it again, to choose another account's folder for it.	Adicione de novo para escolher a pasta de outra conta.
+Add more info. The builder reads it at its next step.	Adicione mais informação. O construtor lê no próximo passo.
+Add pictures	Adicionar imagens
+Add pictures of the original	Adicione fotos do original
+Add pictures of the original (optional: screenshots help it look right)	Adicione fotos do original (opcional: telas de captura ajudam a ficar certo)
+Add to a running build	Adicionar a um build em andamento
+Added	Adicionado
+Added {n} picture(s). The builder uses them from your next change.	Adicionado {n} imagem(s). O construtor usa-as na sua próxima alteração.
+Address to file offset	Endereço para deslocamento do arquivo
+Adds its decompiler to Deep mode. Craft Anything can download and set it up for you.	Adiciona seu decompilador ao modo Profundo. Craft Anything pode baixar e configurar para você.
+Advanced	Avançado
+After installing one, look for it again.	Depois de instalar, procure de novo.
+Agent	Agente
+Allow generated assets	Permitir ativos gerados
+Allow once	Permita uma vez
+Allowed for this project	Permitido neste projeto
+Allowed for this project.	Permitido para este projeto.
+Allowed in	Permitido em
+Allowed once	Permitido uma vez
+Allowed once.	Permitido uma vez.
+Also list projects from	Também liste projetos de /no_think
+Always for this project	Sempre por esse projeto
+An Android app	Um aplicativo Android
+An Android app package: the file you install on a phone.	Um pacote de aplicativo Android: o arquivo que você instala em um telefone.
+An Apple settings file (plist)	Arquivo de configurações da Apple (plist)
+An app	Um aplicativo
+An app or a file	Um aplicativo ou um arquivo
+Analyse a JavaScript app	Analise uma aplicação JavaScript
+Analyse a page's JavaScript	Analise o JavaScript da página
+Android app code (DEX)	Código de aplicativo Android (DEX)
+Android app components	Componentes do aplicativo Android
+Android app package	Pacote do aplicativo Android
+Android apps	Aplicativos Android
+Android class	Classe Android
+Android method bytecode	Bytecode do método Android
+Android resources	Recursos Android
+Annotate function	Função Anotar
+Another build is working, so this one waits its turn.	Outra build está trabalhando, então esta espera a vez.
+Answer a project's question	Responda à pergunta do projeto
+Answer any of them in a message below.	Responda qualquer uma delas numa mensagem abaixo.
+Answered by {name}	Respondido por {name}
+App	Aplicativo
+App details on device	Detalhes do aplicativo no dispositivo
+Apple apps	Aplicativos da Apple
+Apply model options	Aplicar opções do modelo
+Approve an agent action	Aprovar uma ação do agente
+Apps and games: keep refining until they look this alike to your pictures. Off, the likeness is only reported.	Apps e jogos: continue aperfeiçoando até que eles pareçam com suas fotos. Desligado, a semelhança é apenas relatada.
+Architectures	Arquiteturas
+Archive	Arquivo
+Archives	Arquivos
+Ask a question	Faça uma pergunta
+Ask about a build	Faça uma pergunta sobre uma build
+Ask about the build	Perguntar sobre a build
+Ask about the build, e.g. "where are the latest files?" Nothing changes and no build starts.	Pergunte sobre a build, por exemplo: "onde estão os arquivos mais recentes?" Nada muda e nenhuma build começa.
+Ask about this game	Pergunte sobre este jogo
+Ask anything, e.g. "What does this program do?"	Pergunte qualquer coisa, ex.: "O que este programa faz?"
+Ask before running anything	Pergunte antes de executar algo
+Ask each time	Pergunte a cada vez
+Ask first	Pergunte primeiro
+Ask for a change	Peça por uma mudança
+Ask for a change, e.g. "bigger buttons" or "add a dark mode"	Peça por uma mudança, por exemplo: "botões maiores" ou "adicione um modo escuro
+Ask for a change, e.g. "make it faster" or "add a high-score table"	Peça por uma alteração, por exemplo: "tornar mais rápido" ou "adicionar uma tabela de pontuação mais alta
+Ask for a change, e.g. "make the header blue" or "add a contact form"	Peça por uma alteração, por exemplo: "faça o cabeçalho azul" ou "adicione um formulário de contato
+Ask in your own words. Every answer shows how sure we are, and the proof.	Pergunte com suas próprias palavras. Cada resposta mostra quão certos estamos e a prova.
+Ask me	Me pergunte
+Ask the agent about this	Pergunte ao agente sobre isso
+Ask the agent about this target. It cites evidence for every claim.	Pergunte ao agente sobre este alvo. Ele cita a evidência de cada afirmação.
+Ask the agent…	Pergunte ao agente…
+Ask the person	Pergunte à pessoa
+Ask: "How does the % key work?"	Pergunte: "Como funciona a tecla %?
+Ask: "Is it safe to run?"	Pergunte: "É seguro rodar?
+Ask: "What does it send over the internet?"	Pergunte: "O que ele envia pela internet?
+Asking for its models…	Buscando os modelos dele…
+Asset catalog	Catálogo de ativos
+At most this many rounds of fixes after the first build.	No máximo, este número de rodadas de correções após a primeira build.
+Attach pictures	Anexar imagens
+Attach pictures (or drop or paste them here)	Anexe fotos (ou solte ou cole-as aqui)
+Auto mode	Modo automático
+Automatic	Automático
+Automatic ({name})	Automático ({name})
+Back	Voltar
+Best guess	Melhor palpite
+Best guess: a reasonable reading, but not proven.	Melhor suposição: uma leitura razoável, mas não comprovada.
+Binary layout	Layout binário
+Blocked	Bloqueado
+Bookmark	Marcador
+Budget for a new project	Orçamento para um novo projeto
+Bug report	Relato de erro
+Build	Construir
+Build a rebuild ledger	Construa um ledor de reconstituição
+Build a stand-in backend	Construa um backend de substituição
+Build with	Construir com
+Build with this	Construa com este
+Build with {name}	Construído com {name}
+Build with {name} instead	Construa com {name} em vez disso
+Build without it	Construa sem ele
+Builder's questions:	Perguntas do construtor:
+Building	Edifício
+Building needs a coding agent on this computer (Claude Code, Codex or Gemini CLI: install one and sign in to it once in its own window), or an AI with an API key. Craft Anything never sees your account.	A construção precisa de um agente de codificação neste computador (Claude Code, Codex ou Gemini CLI: instale um e faça login nele em sua própria janela), ou um IA com uma chave de API. Craft Anything nunca vê sua conta.
+Building needs a coding agent such as Claude Code, or an AI with an API key.	Construir exige um agente de código como o Claude Code, ou uma IA com chave de API.
+Builds	Construções
+Builds and answers may use it again.	Construções e respostas podem usá-lo novamente.
+Builds at once	Construções imediatas
+Builds keep going without stopping to ask you before an action. The builder still never deletes outside its project, changes system settings or publishes anything, and stays within each project's asset budget.	As construções continuam sem parar para pedir sua confirmação antes de uma ação. O construtor ainda nunca apaga fora do seu projeto, modifica configurações do sistema ou publica qualquer coisa, e permanece dentro do orçamento de ativos de cada projeto.
+Builds use this one. Click to choose automatically again.	As builds usam este. Clique para voltar a escolher automaticamente.
+Built by	Construído por
+Built with	Construído com
+Built with {stack}, as you asked, so no game engine is needed.	Construído com {stack}, conforme solicitado, então não é necessário um motor de jogo.
+Call graph	Gráfico de chamadas
+Call path	Caminho de chamada
+Call the build done	Dar a build como concluída
+Called done. A new message carries on from here.	Concluída. Uma nova mensagem continua daqui.
+Cancel	Cancelar
+Cancel: don't use this folder	Cancelar: não use esta pasta
+Capture a website for rebuilding	Capture o site para reconstrução
+Capture inventories	Capturar inventários
+Capture menus, dialogs and tabs	Capture menus, dialogs e tabs
+Change	Mudar
+Change a setting	Mude uma configuração
+Change an AI's model	Trocar o modelo de uma IA
+Change how hard an AI thinks	Trocar o esforço de raciocínio de uma IA
+Change it	Mude isso
+Check	Cheque
+Check .NET native calls	Verificar chamadas nativas .NET
+Check a rebuild claim	Verifique uma reivindicação de reconstrução
+Check a scripted web session	Verifique uma sessão da web com script
+Check an answer	Verifique a resposta
+Check decompiled C#	Check decompilado C#
+Check my build	Confira meu build
+Check the JEB connection	Verifique a conexão JEB
+Check the asset keys	Verifique as chaves dos ativos
+Check the setup	Verifique a configuração
+Check {n}	Verifique {n}
+Check {n}: about {s}% like the original	Verifique {n}: cerca de {s}% igual ao original
+Checked against Godot's official checksums before it's used.	Verificado contra os checksums oficiais do Godot antes de ser usado.
+Checking	Verificando
+Choose a file	Escolha um arquivo
+Choose a folder…	Escolha uma pasta…
+Choose a function, string or section to see it here.	Escolha uma função, string ou seção para vê-la aqui.
+Choose an AI's job	Escolher a função de uma IA
+Choose the folder Ghidra is installed in.	Escolha a pasta onde o Ghidra está instalado.
+Choose what the builder's questions get	Escolha o que as perguntas do construtor recebem
+Choose what to recreate, say what you want, then press Start.	Escolha o que recriar, diga o que quer e pressione Iniciar.
+Claude Code folder (CLAUDE_CONFIG_DIR)	Pasta do Claude Code (CLAUDE_CONFIG_DIR)
+Clean room	Sala limpa
+Clean room / Deep	Quarto limpo / Profundo
+Clean room never reads the original's code, files or page source. Deep mode reads them with every tool Craft Anything has.	Quarto limpo nunca lê o código, arquivos ou código-fonte da página original. Modo profundo lê tudo isso com todos os recursos que o Craft Anything possui.
+Clean room never reads the original's code, files or page source: it works from what you can see. Deep reads them with every tool, and with Ghidra when it's installed. Every finding records which was used.	A sala limpa nunca lê o código, arquivos ou código-fonte da página original: ela funciona com o que você pode ver. A leitura profunda lê tudo com cada ferramenta, e com Ghidra quando ele estiver instalado. Cada achado registra qual foi utilizado.
+Clean room on	Quarto limpo em
+Clean room or Deep	Sala limpa ou Profundo
+Clean room: nothing inside the original is read. We work from what you can see: pictures, the page as a visitor sees it, and watching it run.	Quarto limpo: nada dentro do original é lido. Trabalhamos com o que você pode ver: fotos, a página como um visitante a vê e observando-a em execução.
+Clear finished	Limpado e claro
+Close	Próximo
+Close a Frida session	Feche uma sessão de Frida
+Close a GDB session	Feche a sessão GDB
+Close a Rizin debug session	Feche a sessão de depuração da Rizin
+Close a pinned build	Fechar uma build fixada
+Close it	Fechar
+Close it first.	Feche primeiro.
+Close the website	Feche o site
+Code reconstructed from a program that looks like the C language. Close to what the program does, but not its original source.	Código reconstruído a partir de um programa que parece ser da linguagem C. Próximo do que o programa faz, mas não é sua fonte original.
+Code signature	Assinatura de código
+Coding agent app	Aplicativo do agente de código
+Command palette (Ctrl/⌘ K)	Palette de comandos (Ctrl/⌘ K)
+Commands:	Comandos:
+Compare WebAssembly interfaces	Compare interfaces de WebAssembly
+Compare module exports	Comparem as exportações do módulo
+Compare two .NET builds	Compareça duas builds do .NET
+Compare two app versions	Compareça duas versões de aplicativo
+Compare two artifacts	Compare dois artefatos
+Compare two evidence bundles	Compareça dois conjuntos de evidências
+Compare two functions	Compareça duas funções
+Compare two page captures	Compareça duas capturas de página
+Compare two runs	Compareça duas corridas
+Compare two screenshots	Compare duas capturas de tela
+Comparing and rebuilding	Comparar e reconstruir
+Compiled Python file	Arquivo Python compilado
+Connect	Conectar
+Connect agent apps	Conecte aplicativos de atendente
+Connect to a browser	Conecte-se a um navegador
+Connect {name}	Conecte {name}
+Connected devices	Dispositivos conectados
+Connected phone	Telefone conectado
+Context window	Janela de contexto
+Continue	Continuar
+Contradicted	Contrariado
+Control-flow graph: a map of every path a function can take, like a flowchart.	Gráfico de fluxo de controle: um mapa de todas as rotas que uma função pode tomar, como um fluxograma.
+Copies share the files it saves beside itself.	As cópias compartilham os arquivos que ele salva ao lado.
+Copy a file off the phone	Faça uma cópia de um arquivo do telefone
+Copy a file to the phone	Copie um arquivo para o telefone
+Copy an app off the phone	Faça uma cópia de um app do celular
+Copy the command	Copie o comando /no_think
+Copy the evidence id	Copiar o id da evidência
+Couldn't add the pictures:	Não foi possível adicionar as imagens:
+Couldn't answer:	Não foi possível responder:
+Couldn't attach the pictures:	Não foi possível anexar as imagens:
+Couldn't look through that folder.	Não foi possível examinar essa pasta.
+Couldn't open it.	Não foi possível abrir.
+Couldn't open the folder.	Não foi possível abrir a pasta.
+Couldn't open {}: {}	Não foi possível abrir {}: {}
+Couldn't start a worker thread: {e}	Não foi possível iniciar uma thread de trabalho: {e}
+Couldn't start it.	Não foi possível iniciar.
+Coverage unknown	Cobertura desconhecida
+Craft Anything	Craft Anything
+Craft Anything can't build with {engine}, so Unity is the closest match.	Craft Anything não pode construir com {engine}, então Unity é a opção mais próxima.
+Craft Anything or the computer closed while it was working. Everything so far is kept; Continue picks up where it stopped.	Conserte qualquer coisa ou o computador foi fechado enquanto estava trabalhando. Tudo até agora foi mantido; Continue onde parou.
+Craft Anything reads its code and files with every tool it has. For your private use.	Craft Anything lê seu código e arquivos com todas as ferramentas que possui. Para uso privado.
+Craft Anything reads the original's code, files and page source with every tool it has, and with Ghidra when it's installed.	Craft Anything lê o código, arquivos e código-fonte da página original com todos os seus recursos, e com o Ghidra quando ele estiver instalado.
+Craft Anything report.md	Relatório Craft Anything.md
+Craft Anything's records, checks and anything it built in app/ are deleted. Your own files in the folder stay as they are.	Os registros, cheques e qualquer coisa que você criou na aplicação são excluídos. Seus próprios arquivos na pasta permanecem como estão.
+Crash dump	Dump de crash
+Create the project	Criar o projeto
+Critical	Crítico
+Cross-reference: a place in the program that uses or calls the thing you're looking at.	Cross-reference: um local no programa que usa ou chama a coisa que você está procurando.
+Cross-references	Referências cruzadas
+Cross-references: the places in the program that use or call the thing you're looking at.	Referências cruzadas: os locais no programa que utilizam ou chamam a coisa que você está procurando.
+Current document	Documento atual
+Cursor address	Endereço do cursor
+Cursor function	Função do cursor
+Custom	Personalizado
+Cutter command	Comando de corte
+DOS load image	DA carga de imagem
+Databases	Bancos de dados
+Decide yourself	Decida por si mesmo
+Decode a radio recording	Decodificar uma gravação de rádio
+Decompile	Descompilar
+Decompile Java with Vineflower	Descompilar Java com Vineflower
+Decompile many	Descompilar muitos
+Decompile with JEB	Descompilar com JEB
+Deep	Profundo
+Deep mode now decompiles with Ghidra. The first look at a large program can take several minutes.	O modo profundo agora decompila com Ghidra. A primeira análise de um programa grande pode levar vários minutos.
+Deep mode on	Modo profundo ligado
+Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Profundo: lemos seu código, arquivos e código-fonte da página com todos os ferramentas que temos, e com o Ghidra quando ele estiver instalado. Clique para alternar.
+Default	Padrão
+Delete a project	Excluir um projeto
+Delete it	Exclua-o
+Delete the project	Excluir o projeto
+Delete {name}?	Excluir {name}?
+Deleted.	Excluído.
+Deleted. Your own files are still in the folder.	Excluído. Seus próprios arquivos ainda estão na pasta.
+Delete…	Excluir…
+Deliberately scrambled to make it hard to read, without changing what it does.	Intencionalmente desorganizado para torná-lo difícil de ler, sem alterar o que ele faz.
+Demangle Swift symbols	Desmanchar símbolos do Swift
+Details	Detalhes
+Details about the selected item appear here.	Detalhes sobre o item selecionado aparecem aqui.
+Detect	Detectar
+Device details	Detalhes do dispositivo
+Device features	Funcionalidades do dispositivo
+Device folder	Pasta do dispositivo
+Device log	Log do dispositivo
+Disassemble sBPF code	Desmonte o código sBPF
+Disassembly	Desmontagem
+Disconnect agent apps	Desconectar aplicativos de agente
+Dismiss	Desligar
+Dispatch metadata	Metadados da entrega
+Display info	Exibir informações
+Do you have permission?	Você tem permissão?
+Does it talk to the internet?	Isso fala com a internet?
+Does it track me?	Isso me acompanha?
+Don't allow	Não permita
+Don't ask again (you can change this in Settings)	Não pergunte novamente (você pode alterar isso nas Configurações)
+Done	Concluído
+Download	Baixar
+Download Unity Hub	Baixar Unity Hub
+Download and use Ghidra	Baixe e use Ghidra
+Download it from unity.com and install it.	Baixe-o do unity.com e instale-o.
+Download it from unrealengine.com and install it.	Baixe-o de unrealengine.com e instale-o.
+Download the Epic Games Launcher	Baixe o launcher da Epic Games
+Downloads keep going in the background.	Os downloads continuam em segundo plano.
+Drive an app's screen	Dirija um tela de um aplicativo
+Drop a calculator app (or any small program) on the window.	Coloque um aplicativo de calculadora (ou qualquer programa pequeno) na janela.
+Drop a file or app anywhere in this window.	Arraste um arquivo ou aplicativo para qualquer lugar nesta janela.
+Drop the file on the window. We only read it; nothing runs.	Arraste o arquivo para a janela. Nós só o lemos; nada executa.
+Drop to attach	Solte para anexar
+Drop to open it	Abra para abrir
+Duplicate	Duplicar
+Duplicate a project	Duplicar um projeto
+Duplicate the project	Duplicar o projeto
+Each answer says how sure we are: Seen it, Worked it out or Best guess.	Cada resposta diz o quanto estamos certos: Vi, Calculei ou Melhor suposição.
+Edit a project file	Edite um arquivo de projeto
+Edit them in place	Edite-os no local
+Effort:	Esforço:
+Electron and JavaScript	Electron e JavaScript
+Electron fuses	Fusíveis do Electron
+Engines	Motores
+Engines and settings	Motores e configurações
+Enter a full web address, like example.com or https://example.com/page.	Digite um endereço completo da web, como example.com ou https://example.com/pagina.
+Enter to send · Shift+Enter for a new line	Enter para enviar · Shift+Enter para nova linha
+Epic's own installer. It only opens if Epic's signature checks out.	Instalador próprio do Epic. Ele abre apenas se a assinatura do Epic for válida.
+Essentials	Essenciais
+Every build of this project.	Todo build desse projeto.
+Every finding is saved here with how sure we are.	Todo achado é salvo aqui com o quanto estamos certos.
+Every tool as well: a workbench with functions, bytes, references and evidence.	Todas as ferramentas: bancada com funções, bytes, referências e evidência.
+Everything found so far, as a Markdown file.	Tudo o que foi encontrado até agora, num arquivo Markdown.
+Everything so far is kept. Continue picks up where it stopped.	Tudo até agora foi mantido. Continue onde parou.
+Evidence	Evidência
+Evidence ledger	Ledo de evidências
+Evidence so far	Evidências até o momento
+Explain a function	Explicar uma função
+Explain like I'm new	Explica como se eu fosse novo
+Export a report	Exportar um relatório
+Export a report (Markdown)	Exportar um relatório (Markdown)
+Export captured scripts	Exportar scripts capturados
+Export evidence	Evidência de exportação
+Export report	Relatório de exportação
+Extended	Extensão
+Extract an archive	Extraia um arquivo
+Extract firmware	Extraia o firmware
+Extract with this	Extrato com este
+Extracts	Extratos
+File formats	Formatos de arquivo
+Files packed inside a file	Arquivos compactados dentro de um arquivo
+Filter	Filtro
+Filter by name	Filtrar por nome
+Filter the files	Filtre os arquivos
+Filter…	Filtrar…
+Find Android classes	Encontre classes Android
+Find Java classes	Encontre classes Java
+Find a call path	Encontre um caminho de chamada
+Find a game's files	Encontrar os arquivos de um jogo
+Find an app	Encontre um app
+Find in-page MCP tools	Encontre ferramentas MCP na página
+Find it automatically	Encontre automaticamente
+Find out how any software works, then craft your own.	Descubra como qualquer software funciona e construa o seu.
+Find the original source line	Encontre a linha original da fonte
+Firmware regions	Regiões de firmware
+Fold the sidebar	Dobre a barra lateral
+Folders of projects, and projects started in a folder you picked. Removing one only takes it off the list.	Pastas de projetos e projetos iniciados em uma pasta que você escolheu. Remover um apenas o tira da lista.
+Follow the installer that opened. Come back here when it's done.	Siga o instalador que abriu. Volte aqui quando terminar.
+Follow the steps on rustup.rs, then come back here.	Siga os passos em rustup.rs, depois retorne aqui.
+For everything you make, like the switch in the title bar.	Para tudo o que você faz, como o botão na barra de título.
+For example: a website for my bakery	Por exemplo: um site para minha padearia
+For example: recreate this website	Por exemplo: recriar este site
+For example: the same app, but simpler	Por exemplo: o mesmo app, mas mais simples
+For example: the same game, with a high-score table	Por exemplo: o mesmo jogo, com uma tabela de pontuação alta
+Force-stop an app	Forçar o encerramento de um app
+Forget the key	Esquecer a chave
+Found on this computer	Encontrado neste computador
+Found {} AI option(s) on this computer	Encontrado(s) {} opção(s) de IA neste computador
+Frida devices	Dispositivos Frida
+Frida instrumentation	Instrumentação de Frida
+Frida processes	Frida processa
+Frida session status	Status da sessão de Frida
+From	De
+Frozen copy	Cópia congelada
+Function address	Endereço da função
+Function assembly	Montagem de função
+Function dossier	Dossiê de função
+Function info	Informação da função
+Function instructions	Instruções de função
+Function references	Referências a funções
+Functions	Funções
+GDB command	Comando GDB /no_think
+GDB session status	Status da sessão GDB
+Game assets	Recursos de jogo
+Game engines	Motores de jogo
+Game files	Arquivos de jogo
+General	Geral
+Generate a 3D model	Gerar um modelo 3D
+Generate a picture	Gerar uma imagem
+Generate custom pictures and models	Gerar imagens personalizadas e modelos
+Generated art (games)	Arte gerada (jogos)
+Generated assets	Ativos gerados
+Generated pictures and 3D models are made with fal.ai.	Imagens e modelos 3D gerados usam o fal.ai.
+Get Ghidra	Baixe Ghidra
+Get Ghidra for Deep mode	Baixe o Ghidra para modo Profundo
+Get Unity Hub	Baixe o Unity Hub
+Get a key at {name}	Obtenha uma chave em {name}
+Get the Epic Games Launcher	Baixe o launcher da Epic Games
+Get {name}	Obtenha {name}
+Getting Ghidra	Obtendo o Ghidra
+Getting Godot	Obtendo o Godot
+Getting Unity Hub	Obtendo o Unity Hub
+Getting the Epic Games Launcher	Obtendo o Epic Games Launcher
+Ghidra folder	Pastas Ghidra
+Ghidra is ready	Ghidra está pronta
+Ghidra is ready. Deep mode uses it from now on.	O Ghidra está pronto. O modo Profundo usa ele a partir de agora.
+Ghidra isn't installed, so the built-in decompiler stands in. Get it in Settings → Engines.	Ghidra não está instalado, então o decompilador integrado será usado. Obtenha-o em Configurações → Motores.
+Ghidra isn't on this computer yet, so the built-in decompiler stands in.	O Ghidra ainda não está neste computador, então o descompilador embutido faz o papel.
+Ghidra will use half of this computer's memory (up to {gb} GB).	A Ghidra vai usar metade da memória deste computador (até {gb} GB).
+Ghidra will use up to {gb} GB of memory.	A Ghidra utilizará até {gb} GB de memória.
+Ghidra, a free reverse-engineering tool from the NSA, gives Deep mode richer decompiled code and types.	Ghidra, a ferramenta de reverse-engineering gratuita da NSA, oferece código desmontado e tipos mais ricos no modo Profundo.
+Go home	Volta pra casa
+Go program details	Detalhes do programa Go
+Go to address	Vá para o endereço
+Go to offset (0x…)	Ir para o deslocamento (0x…)
+Go to the project	Ir para o projeto
+Good enough	Bom o suficiente
+Got it	Entendi
+Graph	Gráfico
+Half of this computer's memory, up to {gb} GB.	Metade da memória deste computador, até {gb} GB.
+Here's a first look:	Uma primeira olhada:
+Here's what I found on that page:	Isto é o que encontrei naquela página:
+Hide pinned builds	Esconder builds fixas
+Hide the answer	Esconde a resposta
+Hide the console	Esconder a consola
+High	Alto
+Home	Início
+How alike a rebuild must look to the original before refining stops.	Quão parecido um rebuild deve ser com o original antes que a refinamento pare.
+How closely may Craft Anything look at it?	Quão a fundo o Craft Anything pode olhar?
+How complete is the rebuild	Quão completa é a reconstrução
+How do I open an app?	Como abro um aplicativo?
+How do the window and the page talk to each other?	Como a janela e a página se comunicam?
+How does the % key work?	Como a tecla % funciona?
+How is this app built?	Como esse app foi construído?
+How is this app put together?	Como esse app é montado?
+How many projects may build at the same time. More wait their turn.	Quantos projetos podem ser construídos ao mesmo tempo. Mais aguardam sua vez.
+How should the builder use them?	Como o construtor deve usá-los?
+I have Ghidra	Eu tenho Ghidra
+I have permission	Eu tenho permissão
+I want to make things work together	Quero que as coisas funcionem juntas
+I'm checking whether it's safe	Estou verificando se é seguro
+I'm keeping old software alive	Estou mantendo o software antigo vivo
+I'm learning how things work	Estou aprendendo como as coisas funcionam
+I'm new to this	Sou novo nisso
+ILSpy decompile	ILSpy descompila
+Ideas:	Ideias:
+Identify a Flutter build	Identifique um build do Flutter
+Import a source folder	Importar pasta de origem
+Import evidence	Importar evidências
+Imports / Exports	Importações / Exportações
+In Deep mode this one takes a game's own files out after the study. Click to stop.	No modo Profundo, isto tira os arquivos do próprio jogo depois do estudo. Clique para parar.
+In Unity Hub: sign in (or make a free account) and accept the free Personal licence. Then open Installs, press Install Editor and choose the recommended version. About 10 GB.	No Unity Hub: faça login (ou crie uma conta gratuita) e aceite a licença pessoal gratuita. Em seguida, abra Installs, clique em Instalar Editor e escolha a versão recomendada. Cerca de 10 GB.
+In the launcher: sign in, open Unreal Engine, then Library, and press + next to Engine Versions to install one. About 60 GB.	No launcher: faça login, abra o Unreal Engine, depois Biblioteca, e clique em + ao lado de Versões do Engine para instalar uma. Aproximadamente 60 GB.
+In use	Em uso
+Inside	Dentro
+Inspect a Dart AOT snapshot	Inspeione um snapshot do Dart AOT
+Inspect a network recording	Inspeção de gravação de rede
+Inspect a web page	Inspeione uma página da web
+Inspect an Electron page	Inspeione uma página do Electron
+Inspect data	Inspeção de dados
+Inspect instruction	Inspeção de instruções
+Inspector	Inspetor
+Install Rust	Instale o Rust
+Install Unity Hub	Instale o Unity Hub
+Install Visual Studio Community (free) and tick "Game development with C++".	Instale o Visual Studio Community (grátis) e marque "Desenvolvimento de jogos com C++".
+Install Xcode	Instale o Xcode
+Install an app	Instale um app
+Install an engine	Instale um motor
+Install the launcher	Instale o launcher
+Installed	Instalado
+Installed apps	Apps instalados
+Inter-process communication: how two parts of an app (or two apps) send messages to each other.	Comunicação inter-processos: como duas partes de um aplicativo (ou dois aplicativos) enviam mensagens um para o outro.
+Interface Builder documents	Documentos do Interface Builder
+Interrupted	Interrompido
+Inventory an archive or app bundle	Inventariar um arquivo ou bundle de aplicativo
+Investigating	Investigando
+Investigation so far	Investigação até o momento
+Is Apktool available?	Apktool está disponível?
+Is adb available?	Adb está disponível?
+Is an asset key set up?	A chave do ativo foi configurada?
+Is anything in here a program?	Tem algo aqui que é um programa?
+Is anything sensitive saved in plain text?	Algo sensível é salvo em texto puro?
+Is it safe to look inside programs?	É seguro olhar dentro dos programas?
+Is it safe to run?	É seguro correr?
+Is there any readable text inside?	Há algum texto legível dentro?
+Is this file safe to open?	Este arquivo é seguro para abrir?
+It closed straight away.	Fechou na hora.
+It closed straight away. It said:	Fechou na hora. Ele disse:
+It's already open.	Já está aberto.
+It's already open. Right-click it to open another copy.	Já está aberto. Clique com o botão direito para abrir outra cópia.
+It's done	Pronto.
+It's mine, or I'm allowed to look	É meu, ou eu posso olhar
+Its copy is deleted, with anything it saved there. The project itself stays as it is.	A cópia dele é apagada, com tudo o que salvou ali. O projeto em si continua como está.
+Its folder is deleted with everything in it: what was built, the checks and the conversation.	Sua pasta é excluída junto com tudo o que estava nela: o que foi construído, as verificações e a conversa.
+Its own code	Seu próprio código
+Its own sign-in, settings and conversations: another folder is another account. Empty: its usual folder.	Seu próprio login, configurações e conversas: outra pasta é outra conta. Vazio: sua pasta usual.
+Java archive overview	Visão geral do arquivo Java
+Java class	Classe Java
+Java method bytecode and pseudo-Java	Java método bytecode e pseudo-Java
+Java program code (one class)	Código de programa Java (uma classe)
+Java programs	Programas Java
+Jobs	Tarefas
+Jobs ({n})	Empregos ({n})
+Just a question: nothing was changed. Answered by	Só uma pergunta: nada foi alterado. Respondido por
+Just ask	Só pergunte
+Just look inside	Só olhe dentro
+Work on my project	Trabalho no meu projeto
+Work on a project you already have	Trabalhar num projeto que você já tem
+Pick its folder, say what you want, then press Start.	Escolha a pasta dele, diga o que quer e pressione Iniciar.
+Where is your project?	Onde está seu projeto?
+Choose your project's folder…	Escolha a pasta do seu projeto…
+For example: add a dark mode	Por exemplo: adicione um modo escuro
+Pick your project's folder first.	Escolha primeiro a pasta do seu projeto.
+Pick your project's folder	Escolha a pasta do seu projeto
+That folder is empty. Pick the folder your project's files are in.	Essa pasta está vazia. Escolha a pasta onde estão os arquivos do projeto.
+Keep going without asking	Continue sem perguntar
+Keep it	Mantenha isso
+Keep it in the sidebar to open any time, whatever later builds change.	Mantenha na barra lateral para abrir a qualquer momento, o que as builds seguintes mudarem.
+Keep the build as it is and stop offering to carry on.	Manter a build como está e parar de oferecer continuar.
+Keep this version in the sidebar to open any time.	Mantenha esta versão na barra lateral para abrir a qualquer momento.
+Keeps this version exactly as it is now. Later builds can't change or break it, and anything it saves stays with the copy.	Mantenha esta versão exatamente como está agora. Versões futuras não podem alterar ou quebrar essa versão, e qualquer coisa que ela salvar ficará com a cópia.
+Key saved	Chave salva
+Keyed archive	Arquivo chaveado
+Kind	Tipo
+Language	Língua
+Launch an app	Lançar um app
+Leave a few GB for the rest of your computer.	Deixe alguns GB para o resto do computador.
+Leave a path empty to use the managed install. We never need environment variables.	Deixe o caminho vazio para usar a instalação gerenciada. Nunca precisamos de variáveis de ambiente.
+Leave empty to use the one Craft Anything sets up.	Deixe em branco para usar o que o Craft Anything configurar.
+Let a project generate assets	Deixe que o projeto gere ativos
+Let's go	Vamos lá
+Lets the builder make realistic 3D models and textures for games, {model} a model, with a {budget} budget per project.	Deixe que o construtor faça modelos 3D realistas e texturas para jogos, {model} um modelo, com um {budget} orçamento por projeto.
+Library resolution	Resolução da biblioteca
+Light copy: shares big files with the project	Cópia leve: compartilha arquivos grandes com o projeto
+Likeness	Semelhança
+Line up code and behaviour	Alinhe código e comportamento
+Line up source with the bundle	Alinhe a fonte com o pacote
+List Electron pages	Listar páginas Eletrônica
+List JEB units	Liste as unidades JEB
+List JS runtime targets	Listar alvos de tempo de execução JS
+List a Unity assets file	Liste um arquivo de assets do Unity
+List a Unity bundle	Liste um bundle da Unity
+List a game's archives	Liste os arquivos do jogo
+List a node's event listeners	Liste os ouvintes de eventos de um nó
+List an AI's models	Listar os modelos de uma IA
+List an Unreal IoStore container	Listar um contêiner IoStore não realista
+List an Unreal pak	Liste um pak do Unreal
+List bookmarks	Listar marcadores
+List browser pages	Listar páginas do navegador
+List documents	Listar documentos
+List engines	Listar motores
+List functions	Listar funções
+List names	Liste nomes
+List open targets	Listar alvos abertos
+List pinned builds	Listar builds fixas
+List plugins	Listar plugins
+List project files	Listar arquivos do projeto
+List projects	Listar projetos
+List questions about a build	Liste perguntas sobre uma build
+List radio decoders	Listar decodificadores de rádio
+List segments	Listar segmentos
+List shared Cutter sessions	Listar sessões compartilhadas Cutter
+List strings	Listar strings
+Live: the project's latest build	Ao vivo: a build mais recente do projeto
+Load a picture	Carregar uma imagem
+Load a screenshot	Carregue uma captura de tela
+Load model options	Carregar opções de modelo
+Loading…	Carregando…
+Look again	Procurar de novo
+Look at a game	Examinar um jogo
+Look at a website	Examinar um site
+Look at the game	Olhe para o jogo
+Look for AI on this computer	Procure por IA neste computador
+Look for game engines	Procure por engines de jogos
+Look for projects again	Procure por projetos novamente
+Looked at everything	Examinou tudo
+Looked at part of it	Examinou parte
+Looked at {a} of {b}	Olhado {a} de {b}
+Looking for AI on this computer…	Procurando IA neste computador…
+Looking for game engines on this computer…	Procurando motores de jogo neste computador…
+Looking inside needs Deep mode	Olhar para dentro exige modo profundo
+Looking inside software you own or are allowed to examine is normal and often protected (learning, compatibility, security). Saying why helps you keep to it; it stays on this computer.	Olhar dentro de software que você possui ou é autorizado a examinar é normal e frequentemente protegido (aprendizado, compatibilidade, segurança). Dizer o porquê ajuda você a manter-se dentro dos limites; ele permanece nesse computador.
+Looking on this computer…	Procurando neste computador…
+Low	Baixo
+Mach-O structure	Estrutura Mach-O
+Made a copy: {name}	Foi feita uma cópia: {name}
+Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Feito com fal.ai e pago com sua conta: {model} um modelo 3D, {picture} uma imagem. Desligado, o jogo é construído sem eles.
+Made with {engine}	Feito com {engine}
+Made without looking inside the original.	Feito sem olhar dentro do original.
+Make a game that plays like this	Faça um jogo que funcione assim
+Make a simpler version of this game	Faça uma versão mais simples desse jogo
+Make my own version	Faça a minha própria versão
+Make my own version of this app	Faça a minha própria versão desse app
+Making my own thing talk to something else.	Fazer o meu próprio coisa falar com algo else.
+Many source files packed into one big file so an app or web page loads faster.	Muitos arquivos de origem empacotados em um único arquivo grande para que uma aplicação ou página da web carregue mais rápido.
+Map a HarmonyOS app	Mapear um app HarmonyOS
+Map a page's module graph	Mapear o gráfico de módulos de uma página
+Map an Android app	Mapear um aplicativo Android
+Map an Apple app	Mapear um aplicativo da Apple
+Match functions between two builds	Compare funções entre duas builds
+Match my pictures	Combine minhas fotos
+Match static code to what ran	Correlacione código estático com o que foi executado
+Maximise	Maximize
+May I run "{title}"?	Posso rodar "{title}"?
+Measure which code ran	Qual código foi executado
+Medium	Médio
+Memory for Ghidra	Memória para Ghidra
+Minimise	Minimizar
+Mode	Modo /no_think
+Model	Modelo
+Model options	Opções de modelo
+Model: {model}	Modelo: {model}
+Modules	Módulos
+More detail	Mais detalhe
+More makes a big program's first look faster.	Mais deixa a primeira olhada num programa grande mais rápida.
+More memory makes Ghidra's first look at a big program faster; leave some for the rest of the computer. Used from the next time Ghidra starts.	Mais memória faz com que o primeiro olhar do Ghidra em um programa grande seja mais rápido; reserve algum espaço para o restante do computador. Será usada na próxima vez que o Ghidra iniciar.
+Name (optional)	Nome (opcional)
+Name an address	Nomeie um endereço
+Name at address	Nome no endereço
+Name many addresses	Nomeie muitos endereços
+Names the program's author gave to functions or variables that survived in the file.	Nomes que o autor do programa deu a funções ou variáveis que sobreviveram no arquivo.
+Needs a fal.ai key. Until then the game is built without them.	Precisa de uma chave do fal.ai. Até lá o jogo é construído sem eles.
+Needs you	Precisa de você
+Network	Rede
+New	Novo
+New project	Novo projeto
+New projects go in	Novos projetos entram
+Next address	Próximo endereço
+No AI (built-in engines only)	Sem IA (só motores embutidos)
+No AI brain is set up, so answers come straight from the built-in engines. Add one any time for plain-words explanations.	Nenhum cérebro de IA está configurado, então as respostas vêm diretamente dos motores embutidos. Adicione um a qualquer momento para explicações em linguagem simples.
+No AI for now	Sem IA por enquanto
+No AI is set up yet. The built-in engines still work; an AI adds plain-words answers.	Nenhuma IA configurada ainda. Os motores embutidos continuam funcionando; uma IA acrescenta respostas em palavras simples.
+No Unreal or Unity archives were found. Pick the folder the game is installed in.	Nenhum arquivo foi encontrado nos arquivos Unreal ou Unity. Escolha a pasta onde o jogo está instalado.
+No coding agent was found on this computer yet.	Nenhum agente de código encontrado neste computador ainda.
+No evidence yet	Nenhuma evidência até agora
+No game files here	Não há arquivos do jogo aqui
+No jobs yet. Long tasks show their progress here, and you can cancel them.	Nenhuma tarefa ainda. Tarefas longas mostram o progresso aqui, e você pode cancelá-las.
+No matches	Nenhum resultado
+No open questions	Em português do Brasil: Perguntas abertas
+No plugins yet.	Nenhum plugin ainda.
+No result yet	Ainda não há resultados
+No targets	Sem alvos
+No tool named {tool}	Nenhum tool nomeado {tool}
+None	Nenhum
+None yet. Screenshots help it look right.	Nenhuma ainda. Capturas de tela ajudam a ficar certo.
+Not allowed	Não permitido
+Not allowed.	Não autorizado.
+Not available yet	Ainda não disponível
+Not installed	Não instalado
+Not now	Agora não
+Nothing allowed yet.	Nada permitido ainda.
+Nothing can build yet: install Claude Code (and sign in to it once), or add an AI with an API key below.	Nada pode ser construído ainda: instale o Claude Code (e faça login nele uma vez), ou adicione um AI com uma chave de API abaixo.
+Nothing found	Nada encontrado
+Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below.	Nada encontrado até o momento. Buscamos chaves de API, servidores locais de modelos (Ollama, LM Studio) e aplicativos de agentes que você já tem. Um em outra porta ou computador pode ser adicionado pelo endereço abaixo.
+Nothing inside it is read.	Nada dentro dele é lido.
+Nothing inside it is read; Craft Anything works from what you can see. Your version gets its own art.	Nada dentro dele é lido; Craft Anything funciona com o que você pode ver. Sua versão ganha sua própria arte.
+Nothing inside the original is read: not its code, files or page source. Craft Anything works from what you can see: pictures, the page as a visitor sees it, and watching it run.	Nada dentro do original é lido: nem seu código, arquivos ou código da página. Craft Anything funciona com o que você pode ver: imagens, a página como um visitante a vê e observando-a em execução.
+Nothing made yet. What you make shows up here.	Nada feito ainda. O que você fizer aparece aqui.
+Nothing matches the filter.	Nada corresponde ao filtro.
+Nothing matches.	Nada corresponde.
+Nothing new for {time}. Long steps can be quiet; if it stays like this, press Pause.	Nada de novo para {time}. Passos longos podem ser quietos; se continuar assim, pressione Pausa.
+Nothing open	Nada aberto
+Nothing open yet	Nada aberto ainda
+Nothing selected	Nada selecionado
+Nothing to show	Nada a mostrar
+Nothing uses it until it's on again; it keeps its key.	Nada o usa até que ele volte a funcionar; ele mantém sua chave.
+Nothing — start fresh	Nada — comece do zero
+Now	Agora
+Objective-C classes	Classes Objective-C
+Objective-C protocols	Protocolos Objective-C
+Observe a JS runtime	Observe a runtime do JavaScript
+Off	Desligado
+Ollama or LM Studio on another computer, or any service that speaks the OpenAI API.	Ollama ou LM Studio em outro computador, ou qualquer serviço que fale a API da OpenAI.
+On	Ligado / Desligado
+One line, in plain words. It stays on this computer and is never sent anywhere.	Uma linha, em palavras simples. Fica neste computador e nunca é enviada para nenhum lugar.
+One-shot instrumentation	Instrumentação de uso único
+Only for Ghidra. Empty = managed.	Apenas para Ghidra. Vazio = gerenciado.
+Only its name changes; its folder stays where it is.	Só o nome muda; a pasta continua onde está.
+Only take pictures out of games you made, or whose owner allows it. A game's art is usually protected by copyright and by the game's licence.	Faça fotos apenas de jogos que você criou ou cujo proprietário permite. A arte de um jogo geralmente está protegida por direitos autorais e pela licença do jogo.
+Only the pin goes; the project and its app stay as they are.	Só o alfinete sai; o projeto e o app continuam como estão.
+Open	Abrir
+Open "Show me the proof" to see the exact code we found, and how sure we are.	Abra "Mostra a prova" para ver o código exato que encontramos e quão certos estamos.
+Open Ghidra's release page	Abra a página de lançamento do Ghidra
+Open Unity Hub	Abra o Unity Hub
+Open a calculator app and find the code behind one button.	Abra um aplicativo de calculadora e encontre o código atrás de um botão.
+Open a file in JEB	Abra um arquivo no JEB
+Open a file or drop one here.	Abra um arquivo ou solte um aqui.
+Open a file…	Abrir um arquivo…
+Open a folder or app bundle	Abrir uma pasta ou pacote de app
+Open a folder or app bundle…	Abra uma pasta ou bundle de aplicativo…
+Open a folder…	Abra uma pasta…
+Open a pinned build	Abrir uma build fixada
+Open a project's folder	Abra a pasta do projeto
+Open a website	Abra um site
+Open an app or file	Abrir um app ou arquivo
+Open an engine's app	Abra o app do motor
+Open another copy	Abrir outra cópia
+Open another target	Abra outro alvo
+Open files, folders or apps; you can have several open at once.	Abra arquivos, pastas ou aplicativos; você pode ter vários abertos ao mesmo tempo.
+Open folder	Abrir pasta
+Open in the workbench	Abra no banco de trabalho
+Open it	Abra-o
+Open log	Log aberto
+Open one of the files inside it to see its bytes.	Abra um dos arquivos dentro dele para ver seus bytes.
+Open questions	Perguntas abertas
+Open something	Abra algo
+Open something first: drop a file or app here, or choose "Just look inside" on New project. Then I can look inside it.	Abra algo primeiro: solte um arquivo ou aplicativo aqui, ou escolha "Apenas olhar dentro" no novo projeto. Depois eu posso olhar dentro dele.
+Open something to start	Abra algo para iniciar
+Open the Epic Games Launcher	Abra o launcher da Epic Games
+Open the app	Abra o app
+Open the app you're curious about.	Abra o aplicativo que você está curioso.
+Open the download page	Abra a página de download
+Open the folder	Abrir a pasta
+Open the installer app	Abrir o instalador
+Open the website	Abra o site
+Open {name}	Abrir {name}
+Opened {name}	Aberto {name}
+Opened {}	Aberto {}
+Open…	Aberto…
+Or type your answer…	Ou digite sua resposta…
+Other pages of a website studied and compared besides the one you gave.	Outras páginas de um site estudadas e comparadas além da que você forneceu.
+Overview	Visão geral
+Packet capture overview	Visão geral de captura de pacotes
+Packet fields	Campos do pacote
+Page through evidence	Passe pela evidência
+Part of the app got stuck, so it was stopped and the rest carried on. Your work is kept.	Parte do aplicativo ficou travada, então ele foi parado e o restante continuou. Seu trabalho foi mantido.
+Part of the app is stuck. Restarting clears it, and your work is kept.	Parte do aplicativo está travada. Reiniciar limpa isso e seu trabalho é mantido.
+Part of this screen hit a bug and was skipped. Your work is safe.	Parte desta tela deu erro e foi pulada. Seu trabalho está seguro.
+Paste pictures	Colar imagens
+Paste your API key (kept in your system keychain)	Cole sua chave de API (guardada no cofre do sistema)
+Paste your {name} key	Cole aqui sua chave {name}
+Path	Caminho
+Pause	Pausa
+Pausing…	Pausando…
+Pause the build first, then delete the project.	Pause a build primeiro, depois exclua o projeto.
+Pause the build first.	Pause a build primeiro.
+Paused	Pausado
+Paused.	Pausado.
+Pick a folder with projects in it	Escolha uma pasta com projetos
+Pick a game's folder	Escolha a pasta do jogo
+Pick another game	Escolha outro jogo
+Pick something on the left	Escolha algo à esquerda
+Pick the app or game folder	Escolha a pasta do app ou do jogo
+Pick the app, game or file to rebuild	Escolha o app, o jogo ou o arquivo a reconstruir
+Pick the folder for this project	Escolha a pasta deste projeto
+Pick the game's folder	Escolha a pasta do jogo
+Picture a program's window	Imaginando a janela de um programa
+Picture model	Modelo de imagem
+Pictures	Imagens
+Pictures can't be saved from IoStore containers yet; you can see what's inside.	Ainda não dá para salvar imagens de contêineres IoStore; você pode ver o que há dentro.
+Pictures of the original	Imagens do original
+Pieces of text stored inside a program, like messages, web addresses or file names.	Pedacos de texto armazenados dentro de um programa, como mensagens, endereços da web ou nomes de arquivos.
+Pin a build	Fixar uma build
+Pin a project's build	Fixar a build de um projeto
+Pin it	Pinar
+Pin name	Nome do pino
+Pin removed.	Alfinete removido.
+Pin this build	Fixar esta build
+Pinned	Fixado
+Pinned builds	Builds fixas
+Pinned: {name}. Open it from the sidebar any time.	Fixado: {name}. Abra-o da barra lateral a qualquer momento.
+Plain words, big buttons, and I'll explain everything.	Palavras simples, botões grandes e eu explico tudo.
+Plain words, short sentences, and every technical word explained.	Palavras simples, frases curtas e cada termo técnico explicado.
+Plan	Plano
+Plan connecting agent apps	Plano de conexão de aplicativos de agentes
+Play a project's result	Jogue o resultado de um projeto
+Play the game	Jogue o jogo
+Plugin added. Read its tools to start using them.	Plugin adicionado. Leia suas ferramentas para começar a usá-las.
+Plugin arguments	Argumentos do plugin
+Plugin command or address	Comando do plugin ou endereço /no_think
+Plugin id	ID do plugin
+Plugin removed.	Plugin removido.
+Plugins add tools Craft Anything offers as its own: MCP servers (a command or an address; read their tools after adding) or WebAssembly components (a .wasm file, which can't touch your files or the network).	Plugins adicionam ferramentas que o Craft Anything oferece como próprias: servidores MCP (um comando ou um endereço; leia suas ferramentas após adicioná-los) ou componentes WebAssembly (um arquivo .wasm, que não pode tocar seus arquivos ou a rede).
+Plugins added here always ask before each call.	Plugins adicionados aqui sempre perguntam antes de cada chamada.
+Plugins read. Their new tools are offered from the next start.	Plugins lidos. As ferramentas novas são oferecidas a partir do próximo início.
+Preserving software that's no longer supported.	Preservar software que já não é mais suportado.
+Preview a project's website	Visualizar o site de um projeto
+Preview the website	Pré-visualizar o site
+Previous address	Endereço anterior
+Program: found automatically	Programa: encontrado automaticamente
+Program: {path}	Programa: {path}
+Programs (native code)	Programas (código nativo)
+Progress	Progresso
+Project details	Detalhes do projeto
+Project name	Nome do projeto
+Projects	Projetos
+Projects and builds	Projetos e builds
+Property list	Lista de propriedades
+Purpose	Objetivo
+Raise the asset budget	Aumentar o orçamento de recursos
+Raise the budget by {amount}	Aumente o orçamento em {amount}
+Raw machine code	Código de máquina bruto
+Read AI settings	Configure as configurações da IA
+Read a Unity game's IL2CPP metadata	Leia os metadados IL2CPP de um jogo Unity
+Read a game's files	Ler os arquivos de um jogo
+Read a project file	Leia um arquivo de projeto
+Read a setting	Leia um ajuste
+Read an app's screen	Leia a tela de um aplicativo
+Read bytes	Leia bytes
+Read comment	Comente
+Read inline comment	Comente em linha
+Read its tools	Use suas ferramentas
+Read pinned builds	Ler builds fixadas
+Read projects	Visualize projetos
+Read the journal	Leia o jornal
+Read the plugin's tools	Ler as ferramentas do plugin
+Read the project	Leia o projeto
+Ready	Pronto
+Reasoning	Raciocínio
+Rebuild status	Status de reconstrução
+Record a finding	Registre uma descoberta
+Record a hypothesis	Registre uma hipótese
+Record an open question	Grave uma pergunta aberta
+Recover readable sources	Recuperar fontes legíveis
+Recreate it with darker colours	Recrie com cores mais escuras
+Recreate just its main feature	Recrie apenas sua principal característica
+Recreate this website	Recrie este site
+Recreated games are built with the original's own engine when it's here (Unity, Unreal or Godot), else Unity, and Rust as the last resort.	Jogos recriados são construídos com o próprio motor do original quando ele estiver disponível (Unity, Unreal ou Godot), caso contrário, usa-se Unity, e Rust como último recurso.
+References to a name	Referências a um nome
+Refining rounds	Rodadas de refino
+Refresh plugins	Atualizar plugins
+Regions of a program file, each with one purpose: code, text, pictures, settings.	Regiões de um arquivo de programa, cada uma com um propósito: código, texto, imagens, configurações.
+Reload	Recarregar
+Remember permission	Lembre-se de pedir permissão
+Remove	Remova /no_think
+Remove a pin	Remover um alfinete
+Remove a pinned build	Remova a build fixa
+Remove a plugin	Remover um plugin
+Remove an AI	Remover uma IA
+Remove an app	Remova um app
+Remove an asset key	Remova a chave do ativo
+Remove bookmark	Remover marcador de livro
+Remove it	Remova-o
+Remove it and its key	Remova-o e sua chave
+Remove {name}	Remova {name}
+Remove {name}?	Remover {name}?
+Remove…	Remover…
+Rename	Renomear
+Rename a pinned build	Renomear um build fixo
+Rename a project	Renomear um projeto
+Rename the pin	Renomear o alfinete
+Rename the project	Renomear o projeto
+Rename…	Renomear…
+Resolve a call	Resolve a chamada
+Resolved	Resolvido
+Resources	Recursos
+Restart	Reiniciar
+Restore	Restaurar
+Result	Resultado
+Resume a Frida session	Resuma a sessão Frida
+Rizin command	Comando Rizin
+Rizin debug command	Comando de depuração do Rizin
+Rizin debug session status	Status da sessão de depuração do Rizin
+Rough guide:	Guia rápido:
+Run	Corra /sem_pensar
+Run a Frida script	Execute um script Frida
+Run a build command	Execute um comando de build
+Run a scripted Electron session	Execute uma sessão do Electron com script
+Run a scripted web session	Execute uma sessão web scriptada
+Run a tool from the command palette (Ctrl/⌘ K), or pick a finding in the Evidence panel.	Execute uma ferramenta da paleta de comandos (Ctrl/⌘ K), ou selecione uma descoberta no painel de Evidências.
+Run and watch a program	Corra e veja um programa
+Run to study	Corra para estudar
+Running	Corrida
+Running processes	Processos em execução
+Running programs	Programas em execução
+Running {id}	Corrida {id}
+Runs its tools without asking	Executa as ferramentas sem perguntar
+Runs the first-run steps next time.	Executa os primeiros passos da próxima vez.
+Rust program details	Detalhes do programa Rust
+SQLite database contents	Conteúdo da base de dados SQLite
+Safety	Segurança
+Save	Salvar
+Save a picture	Salvar uma imagem
+Save a report	Salve um relatório
+Save an asset key	Salve uma chave de ativo
+Save picture	Salvar imagem
+Save settings	Salvar configurações
+Save the key	Salvar a chave
+Save the picture	Salvar a imagem
+Save the report	Salvar o relatório
+Saved	Salvo
+Saved in	Salvo em
+Saves space: copies the program and code, and shares dependencies and media with the project. A shared file rewritten in place changes here too.	Salva espaço: copia o programa e o código e compartilha dependências e mídia com o projeto. Um arquivo compartilhado reescrito no lugar também é alterado aqui.
+Say what you want	Diga o que quiser
+Say what you want first.	Diga o que você quer primeiro.
+Say what you want to make, or drop an app or file on the window to look inside it. Everything runs in Clean room mode unless you switch on Deep.	Diga o que quer fazer, ou arraste um app ou arquivo para a janela para visualizá-lo. Tudo funciona em modo Clean room a menos que ative o modo Deep.
+Screenshot	Captura de tela
+Screenshot a page	Captura de tela de uma página
+Screenshots of how it should look. The builder opens each one and matches it.	Capturas de tela de como deve ficar. O construtor abre cada uma e imita.
+Search for bytes	Busque por bytes
+Search functions	Buscar funções
+Search strings	Buscas de pesquisa
+Sections	Seções
+Security research on software I'm allowed to examine.	Pesquisa de segurança sobre software que eu sou autorizado a examinar.
+See how a page is built: its layout, styles, scripts and the requests it makes.	Veja como uma página é construída: seu layout, estilos, scripts e as solicitações que ela faz.
+See how a program works: what it does, what it talks to, what's inside.	Veja como um programa funciona: o que ele faz, com o que ele conversa, o que tem dentro.
+See what a game packs and save its pictures as PNG files. Only for games you made, or whose owner lets you.	Veja o que um jogo oferece e salve suas imagens como arquivos PNG. Apenas para jogos que você criou ou cujo dono permitir.
+See what a game packs, and save its pictures as PNG files.	Veja o que um jogo oferece e salve suas imagens como arquivos PNG.
+See what a stand-in was asked	Veja o que um substituto foi perguntado
+See which servers an app talks to, and what it says.	Veja quais servidores uma aplicação conversa e o que diz.
+Seen it	Vi isso
+Seen it: read directly from the file, page or capture.	Vi: lido diretamente do arquivo, página ou captura.
+Selected	Selecionado
+Selection	Seleção
+Send	Enviar
+Send (Enter)	Enviar (Enter)
+Send now	Envie agora
+Server address	Endereço do servidor
+Session status	Status da sessão
+Set a project's asset budget	Definir o orçamento de ativos de um projeto
+Set an AI's folder	Definir a pasta de uma IA
+Set an AI's program	Definir o programa de uma IA
+Set model options	Definir opções de modelo
+Set one up	Coloque um à disposição
+Set up a brain…	Configurar um cérebro…
+Set up a builder	Configurar um construtor
+Settings	Configurações
+Show a build's activity	Mostrar a atividade da build
+Show a project	Mostrar um projeto
+Show folder	Mostrar pasta
+Show me everything	Mostre tudo
+Show me the proof	Mostre a prova
+Show model options	Mostrar opções de modelo
+Show pinned builds	Mostrar builds fixadas
+Show settings	Configurações do show
+Show the answer	Mostra a resposta
+Show the console	Mostre a console
+Show the folder	Mostrar a pasta
+Show the ones that are met	Mostrar as que foram cumpridas
+Show the sidebar	Mostre a barra lateral
+Show the welcome again	Mostre a mensagem de boas-vindas novamente
+Showing	Mostrando
+Sign in and add the Unity Editor	Faça login e adicione o Unity Editor
+Sign in and install Unreal Engine	Faça login e instale o Unreal Engine
+Simple	Simples
+Simple: say what you want and it's handled for you. Advanced: every tool, the evidence and the logs.	Simple: diga o que quiser e é resolvido por você. Avançado: todos os recursos, a evidência e os logs.
+Since Craft Anything opened.	Desde que Craft Anything abriu.
+Size	Tamanho
+Skip setup	Pular configuração
+Smart contract interface	Interface de contrato inteligente
+Software I made, bought, or have permission to examine.	Software que eu fiz, comprei ou tenho permissão para examinar.
+Solana program (sBPF)	Programa Solana (sBPF)
+Some plugins couldn't be read:	Alguns plugins não puderam ser lidos:
+Something a program borrows from the operating system or a library, like "open a file".	Algo que um programa empresta do sistema operacional ou de uma biblioteca, como "abrir um arquivo".
+Something a program or library offers for other programs to use.	Algo que um programa ou biblioteca oferece para outros programas utilizarem.
+Source	Fonte
+Standard	Padrão
+Start	Iniciar
+Start a Frida session	Inicie uma sessão Frida
+Start a GDB session	Inicie uma sessão GDB
+Start a Rizin debug session	Inicie uma sessão de depuração do Rizin
+Start a rebuild	Iniciar uma reconstrução
+Start a stand-in backend	Inicie um backend temporário
+Start an activity	Inicie uma atividade
+Start building	Comece a construir
+Start from them	Comece com eles
+Start it	Iniciar
+Start with Simple mode; you can set up AI later in Settings.	Comece no modo Simples; a IA você configura depois em Configurações.
+Starting…	Iniciando…
+Starting… it opens in its own window.	Iniciando… abre na própria janela.
+Still working. Bigger jobs can take a few minutes.	Ainda trabalhando. Tarefas maiores podem levar alguns minutos.
+Stop	Pare
+Stop a pinned build	Parar uma build fixa
+Stop a rebuild	Para parar a reconstrução
+Stop a stand-in backend	Para um backend temporário
+Stop generated assets	Pare de gerar ativos
+Stopped here	Parou aqui
+Stops the current step and sends your notes straight away.	Para a etapa atual e envia suas notas na hora.
+Studio	Estúdio
+Studio (dark)	Estúdio (escuro)
+Studio Light	Estúdio Light
+Study	Estudo
+Study apps by running them	Estude aplicativos executando-os
+Studying	Estudando
+Studying software to understand it.	Estudar software para entendê-lo.
+Summarise what changed	Resuma o que mudou
+Swift types	Tipos Swift
+Switch Beginner / Experienced	Switch Iniciante / Experiente
+Switch Clean room / Deep	Quarto limpo / Profundo / Sem pensamento
+Switch light / dark theme	Alternar tema claro / escuro
+Switch target	Alvo de troca
+System	Sistema
+System services	Serviços do sistema
+Take a texture out of an Unreal game	Retire um texture de um jogo Unreal
+Take an asset out of a Unity game	Remova um ativo de um jogo Unity
+Take back a note	Leve de volta uma nota
+Take back: puts it in the box again	Leva de volta: coloca novamente na caixa
+Take files out of an Unreal pak	Remova arquivos de um Unreal pak
+Take out packed files	Retire os arquivos empacotados
+Target	Alvo
+Targets	Metas
+That folder already has {names}, where Craft Anything keeps its own files. Pick another folder, or move those out first.	Essa pasta já tem {names}, onde o Craft Anything armazena seus próprios arquivos. Escolha outra pasta ou mova esses arquivos primeiro.
+That folder is already a project, so it's open now.	Essa pasta já é um projeto, então foi aberta agora.
+The Rust toolchain (rustup.rs).	A ferramenta Rust (rustup.rs).
+The builder answers its own questions and says what it chose ("I decided: …"), so you can change it.	O construtor responde às suas próprias perguntas e diz o que escolheu ("Decidi: …"), então você pode alterá-lo.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	O construtor cria os modelos 3D e texturas do jogo com base em descrições de designs originais, pagos a partir da sua conta fal.ai. Os modelos são low-poly para que o jogo execute mais rápido. Um modelo texturizado custa {model} e uma imagem {picture}. Cada projeto tem um orçamento {budget}, e você é avisado antes que ele ultrapasse. A chave é mantida na sua chaveira do sistema.
+The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.	O construtor lê eles (código, notas, fotos) e constrói o app em uma nova pasta de aplicativo ao lado deles. Seus arquivos permanecem como estão.
+The builder will decide its questions and tell you what it chose.	O construtor decidirá suas perguntas e dirá o que escolheu.
+The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.	O construtor trabalha diretamente nestes arquivos e mantém o que funciona. Craft Anything adiciona alguns registros próprios ao lado deles.
+The builder's questions	As perguntas do construtor
+The builder's questions come to you as cards, and it waits for your answer.	As perguntas do construtor chegam como cartões, e ele espera sua resposta.
+The builder's questions will come to you.	As perguntas do construtor chegarão até você.
+The built-in engines still show you everything they find.	Os motores embutidos ainda mostram tudo o que encontram.
+The clipboard can't be read:	Não é possível ler a área de transferência:
+The code	O código
+The code format Android apps use.	O formato de código usado pelos aplicativos Android.
+The coding agent's estimate at API prices, not your bill. A subscription isn't charged this.	A estimativa do agente de codificação refere-se aos preços da API, não à sua conta. Uma assinatura não é cobrada dessa forma.
+The download keeps going in the background.	O download continua em segundo plano.
+The first instruction a program runs when it starts.	A primeira instrução que um programa executa ao iniciar.
+The full toolset, evidence and logs.	O conjunto completo de ferramentas, evidência e registros.
+The installer is open. Follow its steps, then come back here.	O instalador está aberto. Siga os passos e volte aqui.
+The lowest-level human-readable form of machine code: one small instruction per line.	A forma mais baixo nível e legível para humanos do código de máquina: uma instrução pequena por linha.
+The names were removed from the program before it was shipped, so we have to work them out.	Os nomes foram removidos do programa antes dele ser enviado, então temos que resolver isso.
+The packed contents of an Electron app (a website inside a desktop app)	O conteúdo preenchido de um app Electron (um website dentro de um aplicativo de desktop)
+The pasted picture wasn't attached: another screen was opened meanwhile.	A imagem colada não foi anexada: outra tela foi aberta no meio.
+The picture on the clipboard is too large.	A imagem na área de transferência é grande demais.
+The program's machine code written out as one tiny instruction per line.	O código da máquina do programa é escrito como uma instrução minúscula por linha.
+The project's name and round	O nome do projeto e a rodada
+The raw result	O resultado bruto
+The smallest unit of data in a file: a number from 0 to 255.	A menor unidade de dados em um arquivo: um número de 0 a 255.
+The smallest units of data in a file: numbers from 0 to 255.	As menores unidades de dados em um arquivo: números de 0 a 255.
+The {name} view isn't available yet in this build.	A visualização {name} ainda não está disponível nessa versão.
+The {} view isn't available yet in this build.	A visualização {} ainda não está disponível nessa versão.
+Theme	Tema
+There's no /{name} command. You can use {commands}.	Não há comando /{name}. Você pode usar {commands}.
+There's no AI brain set up yet, so here's what the built-in engines found:	Nenhum cérebro de IA configurado ainda, então isto é o que os motores embutidos encontraram:
+There's no picture on the clipboard to paste.	Não há imagem na área de transferência para colar.
+They're my app: edit them in place	Eles são meus app: editem-os no lugar
+Things a program borrows from the operating system or libraries, like "open a file" or "draw a window".	Coisas que um programa empresta ao sistema operacional ou bibliotecas, como "abrir um arquivo" ou "desenhar uma janela".
+Things a program or library offers for other programs to use.	Coisas que um programa ou biblioteca oferece para outros programas utilizarem.
+Things we couldn't establish yet are listed here, with what would settle them.	Coisas que ainda não conseguimos estabelecer estão listadas aqui, com o que resolveria isso.
+This answer won't be there after a restart:	Esta resposta não estará aqui depois de reiniciar:
+This build stopped part-way	Este build parou a metade
+This can't be undone.	Isto não pode ser desfeito.
+This folder already has files	Esta pasta já tem arquivos
+This is a big one. You can leave this open and come back later.	Esta é grande. Você pode deixar aberto e voltar depois.
+This is outside what the builder may do on its own. Nothing happens until you say so.	Isto está fora do que o construtor pode fazer sozinho. Nada acontece até você autorizar.
+This keeps going in the background, and each download is checked against its publisher's checksum before it's used.	Isso continua em segundo plano, e cada download é verificado contra o checksum do seu publisher antes de ser usado.
+This project is waiting its turn. Send your message once it starts.	Este projeto está esperando a vez. Envie sua mensagem quando começar.
+This runs code from the target or changes a device. Clicking Run is your OK.	Isto executa código do alvo ou altera um dispositivo. Clicar em Executar é o seu OK.
+This runs code from the target or changes a device. Nothing runs until you say so.	Isto executa código do alvo ou altera um dispositivo. Nada roda até você autorizar.
+This tool takes no settings.	Esta ferramenta não tem configurações.
+This updates by itself when it's done.	Isto se atualiza sozinho quando termina.
+This view arrives with the next engines. The Hex and Result views work today.	Essa visão chega com os próximos motores. As visões Hex e Resultado funcionam hoje.
+Those aren't pictures we can use (PNG, JPEG, WebP or GIF, up to 20 MB).	Essas não são imagens que possamos usar (PNG, JPEG, WebP ou GIF, até 20 MB).
+Time spent	Tempo gasto
+Tip: press Ctrl/⌘ K to run any tool.	Dica: pressione Ctrl/⌘ K para executar qualquer ferramenta.
+Tools may now run code from what you open without asking. Turn this back on unless you're sure.	As ferramentas podem agora executar código do que você abrir sem perguntar. Desative isso novamente a menos que você esteja certo.
+Tools that run code from a target or change a phone always ask first, unless you allowed them for a project.	Ferramentas que executam código de um alvo ou alteram um telefone sempre pedem primeiro, a menos que você as tenha permitido para um projeto.
+Trace a UI action	Trace a ação da interface do usuário
+Trace a feature	Trace a característica
+Try again	Tente novamente
+Try asking	Tente perguntar
+Try it out, then ask below for any changes.	Experimente e peça mudanças abaixo.
+Turn a program's machine code back into something that reads like source code. It's a reconstruction, not the original.	Transforme o código de máquina de um programa de volta para algo que leia como código fonte. É uma reconstrução, não o original.
+Turn off	Desligar
+Turn off an AI	Desligar uma IA
+Turn on	Ative
+Turn on Deep mode	Ative o modo Profundo
+Turn on an AI	Ligar uma IA
+Turning a plugin on or off takes effect from the next start.	Ligar ou desligar um plugin vale a partir do próximo início.
+Type a command or tool…	Digite um comando ou ferramenta…
+Type the website's address:	Digite o endereço do site:
+Type your question after /btw.	Digite sua pergunta depois de /btw.
+Unity assets	Ativos da Unity
+Unity bundle	Bundle da Unity
+Unity's own installer. It only opens if Unity's signature checks out.	Instalador próprio da Unity. Ele abre apenas se a assinatura da Unity for válida.
+Unknown	Desconhecido
+Unknown: we couldn't establish this yet.	Desconhecido: ainda não conseguimos estabelecer isso.
+Unknowns	Desconhecidos
+Unload a Frida script	Descarregar um script de Frida
+Unreal builds games with Apple's Xcode, free in the App Store.	Unreal constrói jogos com o Xcode da Apple, gratuito na App Store.
+Unreal is here, but it also needs Visual Studio's C++ tools.	Unreal está aqui, mas também precisa das ferramentas C++ do Visual Studio.
+Update a finding	Atualizar um achado
+Update a hypothesis	Atualizar uma hipótese
+Update an open question	Atualizar uma pergunta aberta
+Update the checklist	Atualize a lista de verificação
+Update the plan	Atualize o plano
+Use	Use /no_think
+Use as a goal	Use isso como um objetivo
+Use the projects folder	Use a pasta de projetos
+Use this	Usar este
+Value flow	Fluxo de valor
+Version	Versão
+Waiting	Espera
+Waiting for another build to finish: this one starts next.	Esperando outra build terminar: esta começa em seguida.
+Waiting for other builds to finish: {n} in line.	Esperando pelos outros builds terminarem: {n} na fila.
+Waiting: the builder reads it at its next step. Up arrow to edit.	Aguardando: o construtor lê no próximo passo. Seta para cima para editar.
+Waiting: the builder reads these at its next step. Up arrow to edit the last.	Aguardando: o construtor lê no próximo passo. Seta para cima edita a última.
+Want answers in plain words?	Quer respostas em palavras simples?
+Watch a Mac app's calls	Assista às chamadas de uma aplicação do Mac
+Watch a page over time	Observe uma página ao longo do tempo
+We didn't find an AI on this computer yet	Ainda não encontramos uma IA neste computador
+We list the web addresses and messages we can see inside it. Watching it live needs your OK first.	Listamos os endereços da web e as mensagens que podemos ver dentro dele. Assistir ao vivo exige seu OK primeiro.
+We only read it; nothing runs. Every answer shows how sure we are.	Só lemos; nada é executado. Cada resposta mostra o quão segura ela é.
+WebAssembly module	Módulo WebAssembly
+WebAssembly: fast compiled code that runs inside web browsers.	WebAssembly: código compilado rápido que executa dentro de navegadores web.
+Website address	Endereço do website
+Website pages	Páginas do site
+Welcome	Boas-vindas
+What a new game may spend on generated pictures and 3D models before you're asked. Each project keeps its own.	Quanto um novo jogo pode gastar em imagens geradas e modelos 3D antes que você seja solicitado. Cada projeto mantém o seu próprio.
+What a program exports	O que um programa exporta
+What a program imports	O que um programa importa
+What are its main parts?	Quais são suas principais partes?
+What brings you here?	O que te trouxe aqui?
+What can Craft Anything do?	O que o Craft Anything pode fazer?
+What data was sent?	Quais dados foram enviados?
+What do you want to look inside?	O que você quer examinar por dentro?
+What do you want to make?	O que você quer criar?
+What do you want to recreate?	O que você quer recriar?
+What does it need from the page?	O que ele precisa da página?
+What does it send over the internet?	O que envia pela internet?
+What does this app do?	O que essa aplicação faz?
+What does this app store?	O que esse app armazena?
+What does this contract do?	Que função esse contrato tem?
+What does this module do?	O que esse módulo faz?
+What does this program do?	O que esse programa faz?
+What happened in this build	O que aconteceu nesta build
+What is it	O que é?
+What is this?	O que é isso?
+What it calls	O que ele chama
+What kind of file is this?	Qual tipo de arquivo é esse?
+What permissions does it ask for?	Quais permissões ele pede?
+What pictures and textures are made with.	Quais imagens e texturas são feitas com.
+What settings are in here?	Quais configurações estão aqui?
+What tables are in here?	Quais mesas estão aqui?
+What we couldn't check	O que não pudemos verificar
+What would you like to find out?	O que você gostaria de descobrir?
+What would you like to know about {name}?	O que você gostaria de saber sobre {name}?
+What's at this address	O que há nesse endereço
+What's in this folder?	O que tem nessa pasta?
+What's inside this archive?	O que há dentro deste arquivo?
+Whatever Settings → AI builds with.	O que estiver definido em Configurações → IA.
+When a folder you pick has files	Quando uma pasta que você escolher tiver arquivos
+When the builder needs a choice made: show it to you and wait, or let it decide and say what it chose. Each project can choose for itself under its prompt box.	Quando o construtor precisa de uma escolha: mostre para você e espere, ou deixe que decida e diga o que escolheu. Cada projeto pode escolher por si mesmo dentro da caixa de prompt.
+When you rebuild an app or game, start it once to picture its window and compare the rebuild with it. It runs that program.	Quando você recria um app ou jogo, inicie-o uma vez para visualizar sua janela e comparar a recriação com ela. Ele executa esse programa.
+Where am I	Onde estou
+Where is Ghidra installed?	Onde o Ghidra está instalado?
+Where is the program?	Onde está o programa?
+Where should new projects go?	Onde os novos projetos devem ficar?
+Where we found it	Onde encontramos
+Whether they're the app to edit in place, or material the app starts from beside them.	Sejam eles o aplicativo para editar no local, ou o material do qual o aplicativo começa ao lado deles.
+Which AI answers your questions	Qual IA responde suas perguntas
+Which file is the main program?	Qual arquivo é o programa principal?
+Which files does it read or write?	Quais arquivos ele lê ou grava?
+Which function is this in	Qual função é essa
+Which servers does it talk to?	Com quais servidores ele se comunica?
+Which servers were contacted?	Quais servidores foram contactados?
+Which websites does it load?	Quais sites ele carrega?
+Who builds what you make	Quem constrói o que você faz
+Who calls it	Quem o chama
+Who can move funds?	Quem pode movimentar fundos?
+Who signed this Windows program	Quem assinou este programa do Windows
+Who uses this Android class?	Quem usa essa classe Android?
+Who uses this Java class?	Quem usa essa classe Java?
+Why we ask	Por que perguntamos
+Window / focus info	Janela / informações de foco
+Windows resources	Recursos do Windows
+Wireshark tools check	Ferramentas Wireshark verificam
+Without it, Deep mode uses Craft Anything's own decompiler, which is rougher.	Sem ele, o modo Profundo usa o descompilador do próprio Craft Anything, que é mais grosseiro.
+Work out a copy's size	Calcular o tamanho de uma cópia
+Work out what an installed app is built on	Descubra em qual framework está baseado um app instalado
+Worked it out	Acertei /no_think
+Worked it out: computed step by step from things we saw.	Acertei: calculei passo a passo com base nas coisas que vimos.
+Worked through {n} steps	Passos trabalhados: {n}
+Working on it	Estou trabalhando nisso
+Working on your answer	Trabalhando na sua resposta
+Working out how much space a copy takes…	Calculando quanto espaço uma cópia ocupa…
+Working…	Trabalhando…
+Working… ({n} steps so far)	Trabalhando… ({n} passos até agora)
+Write a project file	Escreva um arquivo de projeto
+Write a readable report	Escreva um relatório legível
+Write comment	Escreva um comentário
+Write inline comment	Escreva um comentário em linha
+Write pseudo-C to a folder	Escreva pseudo-C para uma pasta
+Write the brief	Escreva o resumo
+Write the handoff	Faça a transferência de responsabilidade
+You answered: {a}	Você respondeu: {a}
+You can add a Claude, ChatGPT or OpenRouter key, a local model (Ollama, LM Studio) or an agent you already use, later in Settings → AI.	Você pode adicionar uma chave Claude, ChatGPT ou OpenRouter, um modelo local (Ollama, LM Studio) ou um agente que já use, mais tarde em Configurações → IA.
+You chose:	Você escolheu:
+You're all set	Tudo pronto
+Your app is ready	Seu app está pronto
+Your brains	Seu cérebro
+Your fal.ai key	Sua chave do fal.ai
+Your game is ready	Seu jogo está pronto
+Your message wasn't sent: another project was opened while its pictures were copied.	Sua mensagem não foi enviada: outro projeto foi aberto enquanto as imagens eram copiadas.
+Your own tool installs (optional)	Sua própria ferramenta de instalação (opcional)
+Your project starts as soon as it's done.	Seu projeto começa assim que isto terminar.
+Your version	Sua versão
+Your website is ready	Seu site está pronto
+a new folder in {dir}	uma nova pasta em {dir}
+a picture	uma imagem
+about ${n}	sobre ${n}
+address, e.g. http://192.168.1.20:11434/v1	endereço, por exemplo: http://192.168.1.20:11434/v1
+and {n} more	e {n} mais
+arguments (optional)	argumentos (opcional)
+call graph	Gráfico de chamadas
+clean room	Sala limpa
+command, https:// address or .wasm file	comando, endereço https:// ou arquivo .wasm
+deep mode	modo profundo
+entry point	ponto de entrada
+files	arquivos
+findings	achados
+first run	primeira execução
+found on this computer; set up when you start	encontrado neste computador; configurado quando você começa
+from the builder's own memory of the build	da memória do próprio construtor sobre a build
+from the project's files	dos arquivos do projeto
+id, e.g. docs	id, ex.: docs
+is required	é obrigatório
+isn't available yet	ainda não está disponível
+job result	resultado do emprego
+job {title} panicked: {what}	job {title} panicou: {what}
+just now	agora mesmo
+managed	gerenciado
+model (optional)	modelo (opcional)
+must be a number	deve ser um número
+must be a whole number	deve ser um número inteiro
+name, e.g. Studio box	nome, por exemplo: Studio box
+number	número
+objdump output	saída do objdump
+or start with /btw to just ask	ou comece com /btw só para perguntar
+pinned builds couldn't be read: {}	builds fixadas não puderam ser lidas: {}
+say how to use the files there	diga como usar os arquivos ali
+scene	cena
+scenes	cenas
+source map	mapa de origem
+start page	página inicial
+the app is built beside your files, starting from them	o app é construído ao lado dos seus arquivos, partindo deles
+the built-in engines	os motores embutidos
+the prompt box changed height	a caixa de prompt mudou de altura
+title bar	Barra de título
+under $0.01	menos de US$ 0,01
+yesterday	ontem
+your files there are the app, edited in place	seus arquivos ali são o app, editados no lugar
+{held} of {n} requirements met	{held} de {n} requisitos atendidos
+{name} builds what you make.	{name} constrói o que você faz.
+{name} builds what you make; answers come from {brain}.	{name} constrói o que você faz; respostas vêm de {brain}.
+{name} can't be attached: a message takes pictures up to 20 MB.	{name} não pode ser anexado: uma mensagem pode enviar fotos até 20 MB.
+{name} can't be attached: it isn't a PNG, JPEG, GIF or WebP picture.	{name} não pode ser anexado: não é uma imagem PNG, JPEG, GIF ou WebP.
+{name} is ready	{name} está pronto
+{name} is ready.	{name} está pronto.
+{name} isn't available yet in this build.	{name} ainda não está disponível nessa versão.
+{name} isn't on this computer yet.	{name} ainda não está nesse computador.
+{n} actions done so far	{n} ações realizadas até agora
+{n} days ago	há {n} dias
+{n} h ago	{n} h atrás
+{n} job(s) running	{n} job(s) em execução
+{n} min ago	{n} min atrás
+{n} picture(s) to match.	{n} imagem(ns) para corresponder.
+{n} step(s) didn't work and were retried or skipped.	{n} etapa(s) não funcionou e foi retentada ou pulada.
+{n} · ${spent:.2} of ${budget:.2}	{n} · R$ ${spent:.2} de R$ ${budget:.2}
+{n} · ${spent} of ${budget}	{n} · ${spent} de ${budget}
+{title} hit a bug and stopped safely. ({what})	{title} bateu em um inseto e parou com segurança. ({what})
+{what} panicked: {msg}	{what} panicou: {msg}
+{} isn't available yet in this build.	{} ainda não está disponível nessa versão.
+{} key	{} chave
+{} report.md	{} relatório.md
+— use the filter to find the rest.	Use o filtro para encontrar o restante.
+… {n} more	... {n} mais
+… {n} older	... {n} mais velho
+… {} more	... {} mais
+… {} older	... {} mais velho
+← Back	← Voltar
+↑↓ to move · Enter to run · Esc to close	↑↓ para mover · Enter para executar · Esc para fechar
+Providers	Fornecedores
+Harnesses	Cintos de segurança
+Nothing of this kind was found.	Nada deste tipo foi encontrado.
+Another model	Outro modelo
+Fold a project's plan	Dobre o plano de um projeto
+Fold the plan	Recolher o plano
+The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.	O aplicativo de mesa do Claude está instalado, mas a compilação exige o Claude Code, sua ferramenta de linha de comando separada. Instale o Claude Code, faça login nele uma vez em um terminal, depois verifique novamente.
+Unreal is here, but its bundled Clang C++ toolchain wasn't found.	Unreal está aqui, mas sua cadeia de ferramentas Clang C++ embalada não foi encontrada.
+Add Unreal's Linux C++ toolchain	Adicione a cadeia de ferramentas C++ do Unreal para Linux
+Run Engine/Build/BatchFiles/Linux/SetupToolchain.sh in the engine folder to install its bundled Clang toolchain. If you built Unreal from source, Setup.sh downloads the native toolchain instead. A system Clang may not match the engine's version.	Execute o arquivo SetupToolchain.sh dentro da pasta do engine para instalar a sua própria versão do Clang. Se você compilou o Unreal a partir do código-fonte, o Setup.sh baixa a versão nativa do toolchain. Uma versão do Clang do sistema pode não corresponder à versão do engine.
+Unreal is here, but it also needs Xcode.	Unreal está aqui, mas também precisa do Xcode.
+About 60 GB, an Epic Games account, and Xcode.	Aproximadamente 60 GB, uma conta da Epic Games e o Xcode.
+File	Arquivo
+View	Visualizar
+Window	Janela
+Help	Ajuda
+Command palette	Palette de comandos
+Craft Anything on GitHub	Faça qualquer coisa no GitHub
+Report a problem…	Relate um problema…
+Quit Craft Anything	Deixe de fazer qualquer artesanato
+About Craft Anything	Sobre o Craft Anything
+Services	Serviços
+Hide Craft Anything	Esconde Arte Tudo
+Hide others	Esconder outros
+Show all	Mostrar tudo
+Close window	Fechar janela
+Full screen	Tela cheia
+Bring all to front	Traga tudo para frente
+Drag to give the plan more or less room; double-click to reset	Arraste para dar mais ou menos espaço ao plano; clique duas vezes para restaurar
+Copy the message	Copie a mensagem
+
+No chat models are visible in {agent}. Check its setup, then reload.	Nenhum modelo de chat aparece em {agent}. Verifique a configuração dele e recarregue.
+The saved model is no longer visible. Choose another model or the {agent} default.	O modelo salvo não aparece mais. Escolha outro modelo ou o padrão do {agent}.
+, ${c:.4}	, ${c:.4}
+Answers come from {brain}. To build, set up a coding agent in Settings → AI.	As respostas vêm de {brain}. Para construir, configure um agente de código em Configurações → IA.
+Change…	Alterar…
+Choose…	Escolher…
+Classes	Classes
+Download Godot {v}	Baixar Godot {v}
+Ghidra	Ghidra
+Hex	Hex
+It isn't on this computer yet. Craft Anything can download Ghidra {version} and the Java runtime it needs (about {mb} MB), check both against their publishers' checksums, and set them up in its own folder. Nothing else on your computer changes.	Ele ainda não está neste computador. O Craft Anything pode baixar o Ghidra {version} e o runtime Java necessário (cerca de {mb} MB), conferir ambos contra os checksums dos editores e configurá-los numa pasta própria. Nada mais no seu computador muda.
+It isn't on this computer yet. Install Ghidra {version} from its release page, then choose its folder.	Ele ainda não está neste computador. Instale o Ghidra {version} pela página de release e depois escolha a pasta dele.
+Java runtime	Runtime Java
+Jobs ({n_jobs})	Tarefas ({n_jobs})
+Last: {what}	Último: {what}
+Log	Registro
+Looking for the game's files…	Procurando os arquivos do jogo…
+Markdown	Markdown
+May I {action}?	Posso {action}?
+Not compared yet: {what}	Ainda não comparado: {what}
+Now: {what} ({time})	Agora: {what} ({time})
+Of this, {cost} was charged to an API key.	Deste valor, {cost} foi cobrado de uma chave de API.
+Opened {name}. Taking a first look…	Abri {name}. Dando uma primeira olhada…
+Opening {name}…	Abrindo {name}…
+Original	Original
+Pick another folder…	Escolher outra pasta…
+Plugins	Plugins
+Pseudo-C	Pseudo-C
+Reading what's inside…	Lendo o que há dentro…
+Ready: {what} is on this computer.	Pronto: {what} está neste computador.
+Reset	Redefinir
+SHA-256	SHA-256
+Stop listing {folder}	Parar de listar {folder}
+Strings	Strings
+Tokens	Tokens
+Unreal IoStore	Unreal IoStore
+Unreal pak	Unreal pak
+Use an API key…	Usar uma chave de API…
+Use {name}	Usar {name}
+Websites	Sites
+What does {what} do?	O que {what} faz?
+Workbench	Bancada
+Wrote {what} to {}	Gravei {what} em {}
+{:.1} GB	{:.1} GB
+{:.1}M	{:.1}M
+{backend}: {input_tokens} in / {output_tokens} out{cost}	{backend}: {input_tokens} de entrada / {output_tokens} de saída{cost}
+{cost} (estimate)	{cost} (estimativa)
+{c} · {size}	{c} · {size}
+{done} of {all} done	{done} de {all} concluídos
+{gb} GB for bigger ones	{gb} GB para os maiores
+{gb} GB for programs up to {size}	{gb} GB para programas até {size}
+{gb} GB up to {size}	{gb} GB até {size}
+{id} · {summary}	{id} · {summary}
+{in} in, {out} out.	{in} de entrada, {out} de saída.
+{k}: {s}	{k}: {s}
+{lbl}  {}	{lbl}  {}
+{line}, and {n} more	{line}, e mais {n}
+{mb} MB	{mb} MB
+{name} key	chave do {name}
+{n} item(s)	{n} item(ns)
+{n} tokens	{n} tokens
+{scenes} {}	{scenes} {}
+{text}, {}	{text}, {}
+{title} {id}	{title} {id}
+{title} · {:.0}%	{title} · {:.0}%
+{tool} finished	{tool} concluído
+{tool}: {}	{tool}: {}
+{} GB	{} GB
+{} item(s)	{} item(ns)
+{} {name}	{} {name}
+{} {said}	{} {said}
+{} {then}	{} {then}
+{} {v}	{} {v}
+{} {why}	{} {why}
+{} {} · {}{cost}	{} {} · {}{cost}
+{} · {mode}	{} · {mode}
+{}: {e}	{}: {e}
+{}: {some}{more}.	{}: {some}{more}.
+{}: {state}	{}: {state}
+{}h {:02}m	{}h {:02}m
+{}m {:02}s	{}m {:02}s
+Zoom	Zoom

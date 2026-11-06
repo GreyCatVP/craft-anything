@@ -28,6 +28,7 @@ pub static LANGUAGES: &[LangInfo] = &[
     LangInfo { code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv") },
     LangInfo { code: "ko", name: "한국어", source: include_str!("i18n/ko.tsv") },
     LangInfo { code: "cs", name: "Čeština", source: include_str!("i18n/cs.tsv") },
+    LangInfo { code: "pt-br", name: "Português (Brasil)", source: include_str!("i18n/pt-br.tsv") },
 ];
 
 /// Match a locale to a registered UI language. An explicit script wins over the region.
@@ -51,6 +52,7 @@ pub fn language_from_tag(tag: &str) -> Option<&'static str> {
                 Some("zh-hans")
             }
         }
+        "pt" => Some("pt-br"),
         _ => LANGUAGES.iter().find(|l| l.code == primary).map(|l| l.code),
     }
 }
