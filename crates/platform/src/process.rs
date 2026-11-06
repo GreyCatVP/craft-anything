@@ -980,7 +980,17 @@ impl Launch {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = spawn_retrying(|| cmd.spawn()).map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
+        let mut wrap = process_wrap::std::CommandWrap::from(cmd);
+        #[cfg(unix)]
+        wrap.wrap(process_wrap::std::ProcessGroup::leader());
+        #[cfg(windows)]
+        {
+            wrap.wrap(process_wrap::std::JobObject);
+            if self.hide_console {
+                wrap.wrap(process_wrap::std::CreationFlags(windows::Win32::System::Threading::CREATE_NO_WINDOW));
+            }
+        }
+        let child = spawn_retrying(|| wrap.spawn()).map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
         let launched = Launched { pid: child.id(), started: Instant::now(), state: Arc::new(Mutex::new(LaunchState { child: Some(child), ended: None })) };
         // Reap it when it closes. If no thread can be made the child still runs (and `ended`
         // stays unknown); on Unix it stays a zombie until we exit, which is harmless.
@@ -1012,7 +1022,7 @@ pub struct Launched {
 
 #[derive(Debug)]
 struct LaunchState {
-    child: Option<std::process::Child>,
+    child: Option<Box<dyn process_wrap::std::ChildWrapper>>,
     ended: Option<Ended>,
 }
 
@@ -1282,6 +1292,17 @@ mod launch_tests {
         assert!(l.stop());
         assert!(!l.is_running());
         assert!(l.ended().unwrap().after < Duration::from_secs(20));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_watched_program_stops_its_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let l = shell("sleep 2; echo survived > descendant & wait").cwd(dir.path()).start_watched().unwrap();
+        assert!(l.wait_timeout(Duration::from_millis(300)).is_none(), "it should still be running");
+        assert!(l.stop());
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!dir.path().join("descendant").exists(), "a descendant outlived the watched program");
     }
 
     fn exits_with(code: u8) -> Process {
