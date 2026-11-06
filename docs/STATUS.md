@@ -58,6 +58,13 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 
 ### Builder retry policy
 
+A builder selected explicitly with `--backend` or the API's backend option must be enabled.
+Selecting a disabled builder through that option returns `BadSettings` with its name and instructions
+to enable it or choose another, without falling back to a different backend. A disabled builder named
+in the project manifest is ignored during selection, allowing automatic fallback to an enabled
+backend. Selection regressions cover disabled API and CLI backends, enabled and missing explicit
+names, and automatic fallback. No live provider or coding agent was started.
+
 Builder failures carry a typed reason through `Conversation::last_failure`. Typed authentication,
 billing, missing programs, unavailable tools, configuration and unknown protocol failures stop
 for attention. Transport interruptions, rate limits and nonzero process exits without a typed

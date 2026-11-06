@@ -319,8 +319,9 @@ Owner: open · Status: todo
       settings and prints "Using Claude Code (…)": `ensure_agent` (`rebuild_cmd.rs`) runs whenever no
       agent app is set up, though this run won't use one. Run it only when the build needs one
       — claimed: AlexJoaquimPereira, branch `bugfix/r5.5-no-agent-with-api-backend`
-- [ ] `--backend <a name that is turned off>` still builds with it: `builder_backend`'s named
-      branch doesn't check `enabled`, while Settings treats an AI that is off as unusable
+- [x] Reject `--backend <a name that is turned off>` with a settings error naming the selected
+      backend and how to enable it or choose another, before starting any builder
+      — claimed: Afloat16, branch bugfix/r5.5-disabled-builder-review-20261104
 - [x] Bound accumulated data across all lines of one server-sent event, so short lines cannot
       grow a streamed API response without limit
       — claimed: Afloat16, branch bugfix/r5.5-bounded-sse-events-20261103
