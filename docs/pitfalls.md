@@ -78,6 +78,11 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 
 ## Tests
 
+**A heartbeat sampled before shutdown raced a successful stop.** A child could write between
+the baseline read and `stop()`, failing the descendant cleanup test even when cleanup worked.
+Sample after the stop returns, then check for further writes. Ignored child fixtures also need
+an explicit launch guard so running ignored tests directly cannot write in the working directory.
+
 **An isolated PATH still assumed system utilities lived in `/bin`.** The remote setup fixture
 linked `mkdir`, `chmod` and `mv` there, so a host with utilities elsewhere got dangling links.
 Resolve fixture utilities on the host, make their paths absolute, then populate the private PATH.

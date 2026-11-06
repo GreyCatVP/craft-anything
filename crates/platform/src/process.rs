@@ -1294,14 +1294,21 @@ mod launch_tests {
         assert!(l.ended().unwrap().after < Duration::from_secs(20));
     }
 
+    /// A descendant must leave its heartbeat unchanged once its watched launch has stopped.
     #[test]
     fn stopping_a_watched_program_stops_its_descendant() {
         let dir = tempfile::tempdir().unwrap();
         let exe = std::env::current_exe().unwrap();
         let command = if cfg!(windows) {
-            format!(r#"start "" /B "{}" --ignored --exact process::launch_tests::watched_descendant_stand_in & ping -n 30 127.0.0.1 > NUL"#, exe.display())
+            format!(
+                r#"set "CRAFT_ANYTHING_TEST_DESCENDANT=1" & start "" /B "{}" --ignored --exact process::launch_tests::watched_descendant_stand_in & ping -n 30 127.0.0.1 > NUL"#,
+                exe.display()
+            )
         } else {
-            format!("{} --ignored --exact process::launch_tests::watched_descendant_stand_in & wait", shell_quote(&exe.to_string_lossy()))
+            format!(
+                "CRAFT_ANYTHING_TEST_DESCENDANT=1 {} --ignored --exact process::launch_tests::watched_descendant_stand_in & wait",
+                shell_quote(&exe.to_string_lossy())
+            )
         };
         let l = shell(&command).cwd(dir.path()).start_watched().unwrap();
         let started = dir.path().join("descendant-started");
@@ -1312,15 +1319,19 @@ mod launch_tests {
         }
         assert!(started.exists(), "descendant never signalled that it started");
         assert!(heartbeat.exists(), "descendant never produced a heartbeat");
-        let before_stop = std::fs::read(&heartbeat).unwrap();
         assert!(l.stop());
+        let after_stop = std::fs::read(&heartbeat).unwrap();
         std::thread::sleep(Duration::from_millis(500));
-        assert_eq!(std::fs::read(&heartbeat).unwrap(), before_stop, "descendant continued running after the watched program stopped");
+        assert_eq!(std::fs::read(&heartbeat).unwrap(), after_stop, "descendant continued running after the watched program stopped");
     }
 
+    /// Emit liveness markers only when the parent test explicitly enables this child fixture.
     #[test]
     #[ignore = "stand-in invoked by stopping_a_watched_program_stops_its_descendant"]
     fn watched_descendant_stand_in() {
+        if std::env::var_os("CRAFT_ANYTHING_TEST_DESCENDANT").as_deref() != Some(OsStr::new("1")) {
+            return;
+        }
         std::fs::write("descendant-started", b"ready").unwrap();
         for n in 0..100 {
             std::fs::write("descendant-heartbeat", n.to_string()).unwrap();
@@ -1329,6 +1340,21 @@ mod launch_tests {
         std::fs::write("descendant-survived", b"yes").unwrap();
     }
 
+    /// An ignored-test invocation without the child guard must leave its working directory empty.
+    #[test]
+    fn a_direct_descendant_stand_in_run_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = Process::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "process::launch_tests::watched_descendant_stand_in"])
+            .env_remove("CRAFT_ANYTHING_TEST_DESCENDANT")
+            .cwd(dir.path())
+            .run()
+            .unwrap();
+        assert!(out.success, "{}", out.stderr_text());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "the unguarded stand-in wrote files");
+    }
+
+    /// Quote one Unix shell argument, including embedded apostrophes.
     fn shell_quote(value: &str) -> String {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
