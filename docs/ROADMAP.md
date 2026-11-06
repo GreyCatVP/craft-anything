@@ -601,6 +601,9 @@ Owner: open · Status: in progress
 
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
+- [ ] Retry missing native observation on follow-ups when runtime study is enabled, use the
+      built-in capture tool, and require comparison evidence before declaring a recreation ready
+      — claimed: Codex, branch bugfix/r2.4-observation-readiness
 - [ ] UI tree on Linux (AT-SPI)
 - [x] `apple_calls_observe`: the breakpoint callback is one valid line (it had a literal backslash
       and `n` between statements, so lldb stopped before launching, #251), covers every breakpoint
