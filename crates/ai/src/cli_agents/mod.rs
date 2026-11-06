@@ -49,10 +49,24 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("qwen-code", "qwen", "Qwen Code"),
     ("goose", "goose", "Goose"),
     ("maki", "maki", "Maki"),
+    // Free Claude Code (`fcc-claude`) is a wrapper around Claude Code that routes builds to other
+    // providers through its own proxy, instead of Anthropic OAuth. It runs the same `claude`
+    // binary headlessly, so the Claude adapter drives it unchanged.
+    ("free-claude-code", "fcc-claude", "Claude Code via Free Claude Code"),
 ];
 
 pub fn program_for(agent: &str) -> String {
     KNOWN.iter().find(|(id, _, _)| *id == agent).map(|(_, p, _)| p.to_string()).unwrap_or_else(|| agent.to_string())
+}
+
+/// Free Claude Code's wrapper around Claude Code.
+pub const FREE_CLAUDE_CODE_PROGRAM: &str = "fcc-claude";
+
+/// Whether `program` is Free Claude Code's wrapper around Claude Code (`fcc-claude`), which runs
+/// the same headless `claude` binary but authenticates through its own proxy with a token, not
+/// Anthropic OAuth.
+pub fn is_free_claude_code(program: &str) -> bool {
+    std::path::Path::new(program).file_name().and_then(|f| f.to_str()).is_some_and(|f| f == FREE_CLAUDE_CODE_PROGRAM)
 }
 
 /// The program a backend runs: the one chosen for it, else the agent's usual name. A chosen path
@@ -296,6 +310,13 @@ fn flatpak_sign_in(quoted: &str) -> String {
 /// to use (#165).
 pub const TOO_OLD_FOR_MODEL: &str = "does not support this model";
 
+/// Whether `why` says the installed Claude Code is too old for the requested model (#165). The
+/// fix — updating the `claude` tool — applies to Free Claude Code too, so it's told apart from
+/// the Anthropic sign-in guidance that doesn't.
+pub(crate) fn claude_too_old(why: &str) -> bool {
+    why.to_ascii_lowercase().contains(TOO_OLD_FOR_MODEL)
+}
+
 /// Claude Code's failure in plain words, and its fix when the person can make one: a version too
 /// old for the model (#165), or a sign-in.
 pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
@@ -305,7 +326,7 @@ pub fn claude_code_failure(why: &str) -> (String, Option<String>) {
 /// [`claude_code_failure`] for Claude Code in a folder chosen for it (`folder`), whose sign-in is
 /// its own.
 pub(crate) fn claude_code_failure_in(why: &str, folder: Option<&Path>) -> (String, Option<String>) {
-    if why.to_ascii_lowercase().contains(TOO_OLD_FOR_MODEL) {
+    if claude_too_old(why) {
         return (
             format!("Claude Code is too old for the model it was asked to use ({}).", why.chars().take(200).collect::<String>()),
             Some(
@@ -344,6 +365,10 @@ fn standalone(program: &str) -> Process {
 /// Parses one CLI's output stream: the adapter reads each line, this keeps what it learned.
 pub struct StreamParser {
     adapter: Arc<dyn AgentAdapter>,
+    /// Whether the program being run is Free Claude Code (`fcc-claude`), whose runs authenticate
+    /// through its own proxy rather than Anthropic OAuth, so Anthropic sign-in guidance doesn't
+    /// apply to its failures.
+    free_claude_code: bool,
     pub session_id: Option<String>,
     pub tool_names: HashMap<String, String>,
     pub input_tokens: u64,
@@ -393,6 +418,7 @@ impl StreamParser {
     pub fn new(adapter: Arc<dyn AgentAdapter>) -> Self {
         StreamParser {
             adapter,
+            free_claude_code: false,
             session_id: None,
             tool_names: HashMap::new(),
             input_tokens: 0,
@@ -844,6 +870,7 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let _ =
         tx.send(AgentEvent::Status { text: format!("Asking {}{}…", display_for(&agent), remote.as_ref().map(|h| format!(" on {h}")).unwrap_or_default()) });
     let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
+    parser.lock().unwrap_or_else(PoisonError::into_inner).free_claude_code = is_free_claude_code(&program);
     let (p2, tx2, tx_err, lost2, failure2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone(), failure.clone());
     let failed_tools = Arc::new(AtomicBool::new(false));
     let (failed_tools2, failed_tools3) = (failed_tools.clone(), failed_tools.clone());
@@ -1687,6 +1714,58 @@ mod tests {
         // Only agents that can be held to reading are asked.
         assert!(adapter_for("claude-code").answers_questions());
         assert!(!adapter_for("codex").answers_questions() && !adapter_for("gemini-cli").answers_questions() && !adapter_for("aider").answers_questions());
+    }
+
+    #[test]
+    fn free_claude_code_is_known_and_skips_the_anthropic_sign_in_gate() {
+        // The agent id is known, resolves to its wrapper program, and runs the Claude adapter.
+        assert_eq!(program_for("free-claude-code"), "fcc-claude");
+        let adapter = adapter_for("free-claude-code");
+        assert!(adapter.ids().contains(&"free-claude-code"));
+        // It drives the same headless Claude CLI, so it answers questions and resumes sessions.
+        assert!(adapter.prompt_on_stdin() && adapter.answers_questions() && adapter.resumes());
+        // The wrapper is recognised by name, not by a path that merely mentions it.
+        assert!(is_free_claude_code("fcc-claude"));
+        assert!(is_free_claude_code("/usr/local/bin/fcc-claude"));
+        assert!(!is_free_claude_code("claude"));
+        assert!(!is_free_claude_code("/bin/claude"));
+        // No Anthropic auth-status probe runs for it: `None` means "not checked", so a build
+        // proceeds on FCC's own token setup.
+        assert_eq!(adapter.signed_in("fcc-claude"), None);
+    }
+
+    #[test]
+    fn free_claude_code_failures_omit_anthropic_sign_in_guidance() {
+        let err = json!({"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired"}).to_string();
+        // Claude Code's own failure suggests signing in with `claude auth login`.
+        let mut claude = StreamParser::new(adapter_for("claude-code"));
+        match &claude.line(&err)[0] {
+            AgentEvent::Error { remediation: Some(r), .. } => assert!(r.contains("claude auth login"), "{r}"),
+            other => panic!("{other:?}"),
+        }
+        // Free Claude Code authenticates through its own proxy, so it gets no Anthropic sign-in fix.
+        let mut fcc = StreamParser::new(adapter_for("free-claude-code"));
+        fcc.free_claude_code = true;
+        match &fcc.line(&err)[0] {
+            AgentEvent::Error { message, remediation, .. } => {
+                assert_eq!(message, "Claude Code stopped: Failed to authenticate: OAuth session expired");
+                assert!(remediation.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        // ... but updating the `claude` tool when it's too old for the model fixes Free Claude Code
+        // too, so that hint is kept even though the Anthropic sign-in guidance isn't.
+        let too_old = r#"{"type":"result","subtype":"success","is_error":true,"result":"Claude Code 2.1.81 does not support this model; version 2"}"#;
+        let mut fcc = StreamParser::new(adapter_for("free-claude-code"));
+        fcc.free_claude_code = true;
+        match &fcc.line(too_old)[0] {
+            AgentEvent::Error { message, remediation: Some(r), .. } => {
+                assert!(message.contains("too old"), "{message}");
+                assert!(r.contains("claude update"), "{r}");
+                assert!(!r.contains("auth login"), "{r}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
