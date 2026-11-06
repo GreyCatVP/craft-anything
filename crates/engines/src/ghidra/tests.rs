@@ -451,7 +451,8 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
     lock.set_modified(std::time::SystemTime::now() - LOCK_STALE - Duration::from_secs(5)).unwrap();
     drop(lock);
     // Seen while the analysis runs, not after: by then both paths have cleaned up.
-    let store = d.path().to_path_buf();
+    // The project sits beside its lock, which the store may reach through a link.
+    let store = project.parent().unwrap().to_path_buf();
     let saw_aside = AtomicBool::new(false);
     let progress = |_: f32, msg: &str| {
         if msg.contains("Ghidra is analysing") {
