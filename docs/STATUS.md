@@ -290,6 +290,22 @@ into #794's wgpu error went DX12 → WARP → Vulkan by itself in about 2 s, ope
 next start, and went back to DX12 for another app version. The real #794 failure wasn't reproduced:
 DX12 and WARP both draw on that machine.
 
+### Headless project and engine tools
+
+Rebuild runs save the project's conversation in the versioned `feed.json`, including runs from
+the CLI. `project_show` reads it with `offset`/`limit` paging, and `project_inbox_answer` answers
+waiting questions and approvals. These tools are available through the engine, CLI and MCP.
+
+`engines_list` reports external and game-engine readiness; `engines_install` installs Ghidra,
+Godot and pinned engines. Unity and Unreal still need their vendor's installer and account:
+the tool opens an installer where supported, or reports the download page and requirements.
+`project_play` launches a built app or game with consent, `project_preview` serves a built website
+on loopback, and `project_open_folder` opens its folder. A preview lasts for the session; use
+`wait` to keep a CLI preview serving until cancellation. The desktop app calls these tools too.
+
+Checked against the registered tool implementations and rebuild feed writer; no live install,
+launch or preview was run for this documentation correction.
+
 ## Known limits
 
 - Locks: every mutex but the browser viewer's goes through `platform::sync`. A deadlock on one thread or across
@@ -347,8 +363,6 @@ DX12 and WARP both draw on that machine.
 - Several projects build at once (`[build] parallel`, 2 by default; Settings → Builds); more wait
   their turn. Queued builds start on their own as places come free, from MCP too. A build with an
   API key works alone, for now: it shares the app's session, so others wait for it and it for them.
-- Some flows exist only in the desktop app: the project feed, game-engine and Ghidra installs,
-  and launching results (ROADMAP R1.6).
 - Engine gaps from the audit: Frida session tools are partly simulated; imports outside the
   argument-count table show only the arguments set in the calling block. See tool-status.md.
 
