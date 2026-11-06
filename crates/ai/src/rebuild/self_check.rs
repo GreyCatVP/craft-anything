@@ -70,6 +70,27 @@ pub fn summary(checks: &[CheckResult], good_enough: f64) -> String {
     }
 }
 
+/// Shared by the builder's check and final completion, so a passing last check cannot hide
+/// a failed claim, missing comparison or an unresolved question essential to the recreation.
+pub(super) fn require_ready(checks: &[CheckResult], good_enough: f64, open: &[craft_anything_evidence::Unknown]) -> Result<(), ToolError> {
+    if let Some(failed) = checks.iter().find(|c| !c.passed) {
+        return Err(ToolError::new(ErrorCode::ProgramFailed, format!("The build isn't working yet. {}", failed.note))
+            .with_remediation("Ask for a fix in the box below, or press Try again."));
+    }
+    if checks.is_empty() || checks.iter().any(|c| !c.good(good_enough)) {
+        return Err(ToolError::new(
+            ErrorCode::ProgramFailed,
+            format!("The recreation is not ready: {}. Required checks or comparisons remain incomplete.", summary(checks, good_enough)),
+        )
+        .with_remediation("Review the failed checks and missing observations, then continue the project."));
+    }
+    if let Some(question) = open.iter().find(|u| u.severity >= craft_anything_evidence::Severity::High) {
+        return Err(ToolError::new(ErrorCode::NotFound, format!("The recreation is not ready: {}", question.question))
+            .with_remediation("Observe the missing behavior and resolve the investigation question with evidence, then check again."));
+    }
+    Ok(())
+}
+
 /// What the builder is told about its own check: each result with its likeness and the bar,
 /// what's still unknown (the checks' and its own open questions), where its pictures are, and
 /// whether it would pass.
@@ -105,10 +126,9 @@ pub fn report(checks: &[CheckResult], good_enough: f64, open: &[craft_anything_e
     if !pictures.is_empty() {
         lines.push(format!("Pictures of your build (compare each with the original's in capture/ or reference/): {}", pictures.join(", ")));
     }
-    lines.push(if checks.iter().all(|c| c.good(good_enough)) {
-        "This would pass. Finish what you're doing, then reply.".to_string()
-    } else {
-        "Not good enough yet: fix what it lists, build again, and check again with rebuild_check.".to_string()
+    lines.push(match require_ready(checks, good_enough, open) {
+        Ok(()) => "This would pass. Finish what you're doing, then reply.".to_string(),
+        Err(e) => format!("{} Not good enough yet: fix what it lists, build again, and check again with rebuild_check.", e.message),
     });
     lines.join("\n")
 }
@@ -119,12 +139,7 @@ impl Worker {
         let Some((kind, good_enough)) = self.self_check.clone() else { return Ok(()) };
         let asks = Inbox::new(asks_dir(&ws.root));
         for r in asks.pending() {
-            let checking = if ws.manifest.target == TargetRef::None {
-                "The builder is checking its work…"
-            } else {
-                "The builder is checking its work against the original…"
-            };
-            self.step(ws, Step::Build, Status::Building, checking)?;
+            self.step(ws, Step::Build, Status::Building, "The builder is checking its work and available evidence…")?;
             let (text, line) = match self.run_checks(ws, kind.as_ref(), SELF_CHECK_ROUND) {
                 Ok(checks) => {
                     let line = format!("The builder checked its work: {}.", summary(&checks, good_enough));

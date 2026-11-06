@@ -181,6 +181,19 @@ pub(super) fn ui_tree(ctx: &mut Ctx<'_>, pid: u32, max_nodes: usize) -> Result<V
     }
 }
 
+/// Locate a windowed process by its exact executable path, without starting or closing it.
+pub(super) fn running_program(ctx: &mut Ctx<'_>, program: &std::path::Path) -> Result<Option<u32>, ToolError> {
+    #[cfg(windows)]
+    {
+        windows::running_program(ctx, program)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (ctx, program);
+        Err(ToolError::new(ErrorCode::FeatureMissing, "Reusing an open program for capture is currently supported on Windows."))
+    }
+}
+
 fn runtime_ui_read(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
     let p: ObserveUiParams = parse_params(params)?;
     #[cfg(target_os = "macos")]
@@ -478,6 +491,30 @@ mod windows {
 
     /// Reads or drives one process's UI Automation tree; the request arrives as JSON on stdin.
     const UI_PS1: &str = include_str!("apple_runtime/native_ui_windows.ps1");
+
+    pub(super) fn running_program(ctx: &mut Ctx<'_>, program: &std::path::Path) -> Result<Option<u32>, ToolError> {
+        let result = run(ctx, &json!({"command": "find_program", "program": program}), Duration::from_secs(10))?;
+        single_running_pid(result)
+    }
+
+    fn single_running_pid(result: Value) -> Result<Option<u32>, ToolError> {
+        let pids: Vec<u32> = serde_json::from_value(result.get("pids").cloned().unwrap_or(Value::Null))
+            .map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("The running-program lookup returned invalid process ids: {e}")))?;
+        if pids.len() > 1 {
+            return Err(ToolError::invalid("More than one windowed process is running this program.")
+                .with_remediation("Keep one instance of the original open, then try again."));
+        }
+        Ok(pids.first().copied())
+    }
+
+    #[test]
+    fn running_program_selection_requires_one_unambiguous_process() {
+        assert_eq!(single_running_pid(json!({"pids": []})).unwrap(), None);
+        assert_eq!(single_running_pid(json!({"pids": [42]})).unwrap(), Some(42));
+        assert!(single_running_pid(json!({"pids": [42, 43]})).is_err());
+        assert!(single_running_pid(json!({"pids": ["wrong"]})).is_err());
+        assert!(single_running_pid(json!({})).is_err());
+    }
 
     fn env(ctx: &Ctx<'_>) -> Environment {
         Environment { clean_room: ctx.session.clean_room(), engine: "ui-automation".into(), engine_version: None, host: host_triple(), language_id: None }

@@ -11,7 +11,7 @@ pub mod clean_room;
 /// asks the person itself (`Effects::needs_consent`), so approving it there skips nothing.
 /// Everything else keeps the app's own policy; a test in the AI crate checks each is registered
 /// and asks for consent.
-pub const AGENT_APP_PREAPPROVED_TOOLS: &[&str] = &["rebuild_start"];
+pub const AGENT_APP_PREAPPROVED_TOOLS: &[&str] = &["rebuild_start", "native_window_capture", "runtime_ui_read", "runtime_ui_walkthrough_record"];
 pub mod feed;
 pub mod inbox;
 pub mod journal;

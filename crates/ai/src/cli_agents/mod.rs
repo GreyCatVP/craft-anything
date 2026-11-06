@@ -1480,6 +1480,9 @@ mod tests {
         // #540: `codex exec` can't ask, so the tools that ask for themselves are approved in the
         // same -c list, and nothing wider.
         assert!(a.contains(&"mcp_servers.craft-anything.tools.rebuild_start.approval_mode=\"approve\"".to_string()));
+        for tool in ["native_window_capture", "runtime_ui_read", "runtime_ui_walkthrough_record"] {
+            assert!(a.contains(&format!("mcp_servers.craft-anything.tools.{tool}.approval_mode=\"approve\"")));
+        }
         assert!(!a.iter().any(|x| x.contains("default_tools_approval_mode")));
         let g = build_args(adapter_for("gemini-cli").as_ref(), &BackendOptions::default(), "q", "", &mcp(), None, Access::Analyse);
         assert!(g.windows(2).any(|w| w[0] == "--output-format" && w[1] == "stream-json"));

@@ -642,6 +642,7 @@ impl Worker {
                 self.extract(ws, kind, &name, ex)?;
             }
         }
+        self.ensure_native_observation(ws)?;
         // A coding agent resumes its own session; our loop resumes its kept transcript.
         let resumable = api.as_ref().is_none_or(crate::agent::ApiConversation::resumed);
         let api_loop = api.is_some();
@@ -683,6 +684,9 @@ impl Worker {
                 if api_loop { format!("{API_BUILDER}\n\n{b}") } else { b }
             }
         };
+        if matches!(ws.manifest.target, TargetRef::Local { .. }) {
+            prompt.push_str("\n\nRead capture/README.md again before working: the host may have recovered observation since the previous turn. Open capture/window.png and read capture/ui-tree.json when present. These are observations from Craft Anything's built-in tools. A startup or license dialog is only that state, so keep unobserved workflows open as unknowns. Use the Craft Anything runtime tools for permitted observation; access to a separate computer-use plugin is independent of this project's tools.");
+        }
         // The extraction step left the original's files in app/Original/: the builder starts from them.
         if first && ws.app_dir().join(ORIGINALS_MANIFEST).is_file() {
             prompt.push_str(ORIGINALS_READY);
@@ -787,8 +791,7 @@ impl Worker {
                 }
             }
             round += 1;
-            let checking = if ws.manifest.target == TargetRef::None { "Checking the build…" } else { "Checking the build against the original…" };
-            self.step(ws, Step::Check, Status::Checking, checking)?;
+            self.step(ws, Step::Check, Status::Checking, "Checking the build and available evidence…")?;
             let checks = self.checks_with_a_retry(ws, kind, round)?;
             ws.manifest.checks.extend(checks.iter().cloned());
             ws.manifest.awaiting_check = false;
@@ -838,19 +841,13 @@ impl Worker {
             self.emit(RunEvent::Preview(url));
         }
         let last = ws.manifest.checks.last().cloned();
-        // A site that builds but isn't close enough is still usable; no working build is not.
-        let usable = last.as_ref().is_some_and(|c| c.passed);
-        if !usable {
-            let why = last.map(|c| c.note).unwrap_or_default();
-            return Err(ToolError::new(ErrorCode::ProgramFailed, format!("The build isn't working yet. {why}").trim().to_string())
-                .with_remediation("Ask for a fix in the box below, or press Try again."));
-        }
-        let last = ws.manifest.checks.last().cloned();
         // The last round's checks, all of them: the last one alone (say a mechanics sheet) isn't the verdict.
         let last_round: Vec<CheckResult> = last.map(|l| ws.manifest.checks.iter().filter(|c| c.round == l.round).cloned().collect()).unwrap_or_default();
-        let mut summary = if last_round.is_empty() { "Ready.".to_string() } else { format!("Ready: {}.", self_check::summary(&last_round, opts.good_enough)) };
+        let open = self_check::open_questions(ws);
+        self_check::require_ready(&last_round, opts.good_enough, &open)?;
+        let mut summary = format!("Ready: {}.", self_check::summary(&last_round, opts.good_enough));
         // What the builder couldn't find out is said, not hidden.
-        match self_check::open_questions(ws).len() {
+        match open.len() {
             0 => {}
             1 => summary.push_str(" 1 question about the original is still open."),
             n => summary.push_str(&format!(" {n} questions about the original are still open.")),

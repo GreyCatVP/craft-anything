@@ -6,6 +6,34 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 
 ## What works, and how it was checked
 
+Native recreation now retries missing window observation on follow-ups when Run to study is
+enabled. On Windows it reuses the single open process with the exact executable path, leaves
+that process running, and records its pid for further UI observation. Multiple instances are
+reported as ambiguous. The UI reader reports modal state, so startup dialogs stop observation
+and their buttons are excluded from comparison requirements. Old Windows captures without modal
+state are refreshed. A missing, corrupt or blank capture and absent usable references stop the
+builder with an action to take. Capture failures propagate through the normal error path. The builder receives
+the new capture and control tree even when continuing an older session. Codex exposes the
+built-in capture and UI tools through its MCP server, with consent handled by Craft Anything.
+
+Automatic Ready requires every check in the final round to meet its threshold, have no missing
+comparisons or failed claims, and have no unresolved high or critical investigation questions.
+The same rule governs the builder's self-check. A failed comparison cannot reuse an earlier
+round-zero screenshot or control tree. A startup capture establishes only that visible state;
+observing further workflows still requires interaction or additional references.
+
+Windows validation includes 360 passing AI tests and 513 passing engine tests, with regression coverage for old empty studies,
+corrupt and blank pictures, capture failure and cancellation, missing comparisons and unresolved
+questions. Live built-in captures of a local native editor detected a startup modal, then reused
+the same process after opening an unsaved broadleaf scene, saved its window and 257 UI entries,
+and left the process running. Matching the editor's full editing behavior remains unverified.
+The normal resume/check flow recovered the capture in an existing project and persisted Needs you
+when comparison requirements failed. A live Codex builder used the built-in UI reader and
+walkthrough after project consent. Desktop startup and the corrected project status were checked.
+The engine's directory-symlink workspace test fails on this Windows installation with OS error
+183; it also fails with the unmodified engine from `main`. That separate issue is tracked in
+the roadmap. The shared `craftrules` checkout was unavailable during this verification.
+
 | Area | State | Verified by |
 |---|---|---|
 | Java decompilation | `java_vineflower_decompile` decompiles a real JAR to source with the pinned Vineflower 1.12.0, run through the configured Java | Live run on Linux x86-64 (OpenJDK 21.0.12.1) against Apache Commons IO 2.16.1 (497 KB, 374 entries): 253 source files, exit 0; `org.apache.commons.io.FileUtils` returned 1,350 lines with the class and its file-reading methods present. The engine install matched the pinned SHA-256. Not checked: Windows and macOS, a `.class` input, or a second JAR |

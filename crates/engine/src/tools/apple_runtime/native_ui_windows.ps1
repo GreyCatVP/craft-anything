@@ -22,6 +22,19 @@ try {
 $stdin = New-Object System.IO.MemoryStream
 [Console]::OpenStandardInput().CopyTo($stdin)
 $req = [Text.Encoding]::UTF8.GetString($stdin.ToArray()) | ConvertFrom-Json
+if ($req.command -eq 'find_program') {
+  $wanted = [IO.Path]::GetFullPath([string]$req.program)
+  if ($wanted.StartsWith('\\?\UNC\')) { $wanted = '\\' + $wanted.Substring(8) }
+  elseif ($wanted.StartsWith('\\?\')) { $wanted = $wanted.Substring(4) }
+  $pids = @(Get-Process | Where-Object {
+    try {
+      $_.MainWindowHandle -ne [IntPtr]::Zero -and
+        [string]::Equals($_.Path, $wanted, [StringComparison]::OrdinalIgnoreCase)
+    } catch { $false }
+  } | Select-Object -First 32 -ExpandProperty Id)
+  ConvertTo-Json -Compress -InputObject @{ pids = $pids }
+  exit
+}
 $A = [System.Windows.Automation.AutomationElement]
 $max = [int]$req.max_nodes
 $window = if ($req.window_id) { [long]$req.window_id } else { 0 }
@@ -47,6 +60,10 @@ function Walk($el, $depth) {
     $r = $c.BoundingRectangle
     if (-not $r.IsEmpty) { $n.frame = [ordered]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height } }
     if (-not $c.IsEnabled) { $n.enabled = $false }
+    $p = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern, [ref]$p)) {
+      $n.modal = [bool]$p.Current.IsModal
+    }
     $p = $null
     if (-not $secret -and $el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$p)) {
       $v = [string]$p.Current.Value
