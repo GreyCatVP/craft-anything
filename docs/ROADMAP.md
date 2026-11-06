@@ -691,7 +691,7 @@ Gaps found while using the app for real projects.
 - [x] macOS: native close, minimise and zoom controls share one bar with the app's logo, title
       and tools, without a second title bar or duplicate window buttons (#20). The app reserves
       the system controls' measured space, including when UI zoom changes
-      — claimed: Codex, branch bugfix/r2.9-macos-native-controls
+      — claimed: Codex, branch bugfix/r2.9-macos-native-controls; PR #977
 - [ ] macOS: recheck the oversized Dock icon report (#20); the app already preserves the
       bundle's padded icon (#102), but this part of the report still needs live verification
 - [ ] Clear the four existing UI rustdoc warnings: private links in `slash.rs` and
