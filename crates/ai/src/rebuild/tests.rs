@@ -64,7 +64,15 @@ fn stack_choice() {
 
 #[test]
 fn the_word_player_alone_is_not_a_game() {
-    for request in ["A video player for my films", "a music player", "Um player de vídeo com canais, filmes e séries"] {
+    for request in [
+        "A video player for my films",
+        "a music player",
+        "Um player de vídeo com canais, filmes e séries",
+        "An MPEG-2 player",
+        "an mpeg-2-player",
+        "an mp2 player",
+        "an mp4 player",
+    ] {
         assert_eq!(choose(request, &TargetRef::None).0, "app", "{request}");
     }
     assert_eq!(choose("Um player de vídeo desktop, use Electron", &TargetRef::None), ("app", "Electron"));

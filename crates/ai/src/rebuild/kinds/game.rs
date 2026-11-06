@@ -47,8 +47,9 @@ impl TargetKind for GameKind {
             "single player",
             "two-player",
             "two player",
-            "2-player",
-            "2 player",
+            // The leading space keeps "MPEG-2 player" out.
+            " 2-player",
+            " 2 player",
             "游戏",
             "遊戲",
             "玩法",

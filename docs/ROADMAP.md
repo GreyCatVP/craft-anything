@@ -190,6 +190,8 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [ ] Measure #579 on Windows 11 (0.3.0 portable): the app's CPU while idle, while a build runs and
       during a website capture, before and after; and why a website capture is slow and sits for a
       long time (no details were given, so nothing was changed for it)
+- [ ] `remote_discovery_uses_the_remote_program_and_connection_context` fails on a computer with
+      OpenCode installed: its made-up path is missing, so `program_of` falls back to `opencode`
 
 ### R5.3 A builder that can't make progress stops
 Owner: open · Status: todo
@@ -651,6 +653,8 @@ Owner: open · Status: in progress
       found") and has no program for the screenshot check: `[[toolchain]]` could build it too
 - [x] "player" alone doesn't make a request a game: a video or music player is an app (#953)
       — claimed: justinjohn0306, branch bugfix/953-player-not-a-game
+- [ ] Game words are plain substrings, so "low-level" reads as a game and other player counts
+      ("four-player") don't: decide whether to match whole words
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
