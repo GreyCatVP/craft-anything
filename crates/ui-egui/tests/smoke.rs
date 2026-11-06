@@ -1100,7 +1100,23 @@ fn the_agent_console_opens_at_its_default_size() {
     });
     h.run_steps(4);
     let top = h.get_by_label("Agent").rect().top();
-    assert!(top > 1030.0 - 280.0, "a 280-point console's tabs start below 750, got {top}");
+    assert!((750.0..765.0).contains(&top), "a 280-point console's tabs start just below 750, got {top}");
+
+    // Dragging its top edge resizes it, and it stays that size (#942).
+    let edge = egui::pos2(900.0, 750.0);
+    h.hover_at(edge);
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton { pos: edge, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.step();
+    let up = edge - egui::vec2(0.0, 100.0);
+    h.hover_at(up);
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton { pos: up, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(10);
+    let dragged = h.get_by_label("Agent").rect().top();
+    assert!((650.0..665.0).contains(&dragged), "its edge dragged up to 650, the tabs just below it, got {dragged}");
+    h.run_steps(10);
+    assert_eq!(h.get_by_label("Agent").rect().top(), dragged, "it stays at that size");
 }
 
 #[test]
