@@ -287,6 +287,10 @@ fn the_assets_note_reads_prices_from_the_asset_table() {
     assert_eq!(assets_note(&ws, Some("no-such-model")), before, "an unknown model quotes the default's prices");
     let schnell = assets_note(&ws, Some("flux-schnell"));
     assert!(schnell.contains("(about $0.50 each)") && schnell.contains("a picture (under $0.01)"), "{schnell}");
+    let comfy = assets_note(&ws, Some("comfyui"));
+    assert!(comfy.starts_with("Realistic assets: pictures come from the person's own ComfyUI server at no cost;"), "{comfy}");
+    assert!(comfy.contains("a picture on that server (free)") && comfy.contains("ComfyUI for pictures, fal.ai for 3D models."), "{comfy}");
+    assert!(!comfy.contains("as made with fal.ai"), "{comfy}");
 }
 
 #[test]

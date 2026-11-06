@@ -27,6 +27,7 @@ pub mod make;
 pub mod manage;
 #[cfg(target_os = "macos")]
 pub mod menu;
+pub mod model_pick;
 pub mod palette;
 pub mod paste;
 pub mod pins;
@@ -159,6 +160,28 @@ pub enum Done {
     /// The configured backends, the ones chosen to build with and to extract with, and each one's
     /// options.
     Backends(Vec<BackendConfig>, Option<String>, Option<String>, std::collections::BTreeMap<String, craft_anything_ai::BackendOptions>),
+    /// The models a service or server lists for the endpoint form or a key card (see
+    /// `model_pick`); `seq` says which request it answers.
+    ModelsListed {
+        slot: model_pick::Slot,
+        seq: u64,
+        result: Result<Vec<String>, ToolError>,
+    },
+    /// The endpoint in the form answered a tiny request (or didn't).
+    EndpointTested {
+        seq: u64,
+        result: Result<craft_anything_ai::TestReport, ToolError>,
+    },
+    /// The ComfyUI server answered the check in Settings → Builds (or didn't), in words.
+    ComfyTested {
+        seq: u64,
+        result: Result<String, ToolError>,
+    },
+    /// A saved AI answered a tiny request (or didn't).
+    BackendTested {
+        name: String,
+        result: Result<craft_anything_ai::TestReport, ToolError>,
+    },
     /// The models an AI can be set to (Settings → AI's model picker).
     ModelChoices {
         name: String,
@@ -273,11 +296,15 @@ pub enum Done {
 /// service that speaks the OpenAI API.
 #[derive(Debug, Clone, Default)]
 pub struct ServerForm {
+    /// Which of `providers::services()` is chosen (0: your own server).
+    pub service: usize,
     pub name: String,
     pub address: String,
-    /// Empty: the first model it lists that can chat.
-    pub model: String,
     pub key: String,
+    /// The models the service lists, and the one picked or typed.
+    pub choice: model_pick::ModelChoice,
+    /// The last test of what the form holds.
+    pub test: Option<model_pick::FormTest>,
 }
 
 /// What a file dialog was for.
@@ -456,7 +483,15 @@ pub struct CraftApp {
     pub backend_choices: u64,
     pub log: Vec<LogLine>,
     pub key_inputs: std::collections::BTreeMap<String, String>,
-    /// Settings → AI's "Add an AI by its address" form. Not kept with the UI state: its key goes
+    /// The models listed for each key card once its key is pasted, by AI name.
+    pub card_models: model_pick::CardModels,
+    /// Counts listings and tests, so a late answer never replaces a newer one.
+    pub model_seq: u64,
+    /// Settings → Builds: ComfyUI's checkpoints and last test.
+    pub comfy_form: model_pick::ComfyForm,
+    /// The last test of each saved AI, shown under its row.
+    pub row_tests: std::collections::BTreeMap<String, model_pick::RowTest>,
+    /// Settings → AI's "Custom endpoint" form. Not kept with the UI state: its key goes
     /// only to the keychain.
     pub server_form: ServerForm,
     /// Every project's rebuild in this window: working, waiting their turn, or finished.
@@ -574,6 +609,10 @@ impl CraftApp {
             backend_choices: 0,
             log: Vec::new(),
             key_inputs: Default::default(),
+            card_models: Default::default(),
+            model_seq: 0,
+            comfy_form: model_pick::ComfyForm::default(),
+            row_tests: Default::default(),
             server_form: ServerForm::default(),
             runs: craft_anything_ai::rebuild::RunSet::new(craft_anything_engine::settings::BuildSettings::default().parallel),
             drafts: Default::default(),
@@ -1473,6 +1512,10 @@ impl CraftApp {
                         && self.backend_options.get(name).and_then(|options| options.cli_model.as_ref()) == state.cli_model.as_ref()
                 });
             }
+            Done::ModelsListed { slot, seq, result } => model_pick::listed(self, &slot, seq, result),
+            Done::EndpointTested { seq, result } => model_pick::endpoint_tested(self, seq, result),
+            Done::ComfyTested { seq, result } => model_pick::comfy_tested(self, seq, result),
+            Done::BackendTested { name, result } => model_pick::backend_tested(self, name, result),
             Done::ModelChoices { name, result } => match result {
                 // Kept only while the picker is still open for that AI.
                 Ok(models) if self.model_picker.as_ref().is_some_and(|(n, _)| *n == name) => self.model_picker = Some((name, Some(models))),

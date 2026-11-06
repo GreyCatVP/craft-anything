@@ -2,10 +2,11 @@
 //! build is good enough, generated art), Plugins (MCP servers), Safety.
 
 use crate::i18n::{LANGUAGES, tr, trf};
+use crate::model_pick::{self, Ask, Slot};
 use crate::state::SettingsTab;
 use crate::theme::{self, ThemeKind, Tokens};
-use crate::{CraftApp, Pick, icons, widgets};
-use craft_anything_ai::BackendKind;
+use crate::{CraftApp, Pick, ServerForm, icons, widgets};
+use craft_anything_ai::{BackendConfig, BackendKind, Detected};
 use craft_anything_engine::Mode;
 use egui::{RichText, Ui, Vec2};
 use std::path::PathBuf;
@@ -332,6 +333,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
     let mut save_folder = None;
+    let mut test = None;
     // Taken out while the rows borrow the app, and put back after them.
     let mut folder_drafts = std::mem::take(&mut app.folder_inputs);
     let (mut pick_model, mut chosen_model, mut close_picker) = (None, None, false);
@@ -355,7 +357,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     // An API's model has its own line below; an agent app is named by its `model`.
                     let what = if model_in_use.is_some() && b.kind != BackendKind::AgentCli { String::new() } else { format!(" · {}", b.model) };
                     let ssh = b.ssh_host.as_ref().map(|h| format!(" · ssh {h}")).unwrap_or_default();
-                    ui.add(egui::Label::new(RichText::new(format!("{:?}{what}{ssh}", b.kind)).color(t.text_faint).size(theme::CAPTION)).truncate());
+                    ui.add(egui::Label::new(RichText::new(format!("{}{what}{ssh}", kind_label(b))).color(t.text_faint).size(theme::CAPTION)).truncate());
                     // An agent app on this computer: which program runs it, for one installed
                     // where it isn't looked for (#53).
                     if b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty()) {
@@ -552,55 +554,74 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                 });
             });
             ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
+            // The indent is a column of its own, so a wrapped line starts where the first one does.
+            ui.horizontal_top(|ui| {
                 ui.add_space(26.0);
-                if app.state.backend.as_ref() == Some(&b.name) {
-                    widgets::pill(ui, "In use", t.on_accent, t.accent);
-                } else if widgets::secondary(ui, None, "Use").clicked() {
-                    pick = Some(b.name.clone());
-                }
-                // Who builds: the chosen one says so (click to go back to automatic).
-                if app.builder.as_ref() == Some(&b.name) {
-                    if widgets::secondary(ui, Some("hammer"), "Builds").on_hover_text(tr("Builds use this one. Click to choose automatically again.")).clicked()
-                    {
-                        builds = Some(None);
+                ui.horizontal_wrapped(|ui| {
+                    if app.state.backend.as_ref() == Some(&b.name) {
+                        widgets::status_chip(ui, "In use", t.on_accent, t.accent);
+                    } else if widgets::secondary(ui, None, "Use").clicked() {
+                        pick = Some(b.name.clone());
                     }
-                } else if b.enabled && widgets::secondary(ui, None, "Build with this").clicked() {
-                    builds = Some(Some(b.name.clone()));
-                }
-                // Who takes a game's files out in Deep mode (an API backend, e.g. Kimi K3).
-                if b.kind != BackendKind::AgentCli {
-                    if app.extractor.as_ref() == Some(&b.name) {
-                        if widgets::secondary(ui, Some("package"), "Extracts")
-                            .on_hover_text(tr("In Deep mode this one takes a game's own files out after the study. Click to stop."))
+                    // Who builds: the chosen one says so (click to go back to automatic).
+                    if app.builder.as_ref() == Some(&b.name) {
+                        if widgets::secondary(ui, Some("hammer"), "Builds")
+                            .on_hover_text(tr("Builds use this one. Click to choose automatically again."))
                             .clicked()
                         {
-                            extracts = Some(None);
+                            builds = Some(None);
                         }
-                    } else if b.enabled && widgets::secondary(ui, None, "Extract with this").clicked() {
-                        extracts = Some(Some(b.name.clone()));
+                    } else if b.enabled && widgets::secondary(ui, None, "Build with this").clicked() {
+                        builds = Some(Some(b.name.clone()));
                     }
-                }
-                // Off: kept with its key, but nothing uses it.
-                let (label, tip) = if b.enabled {
-                    ("Turn off", "Nothing uses it until it's on again; it keeps its key.")
-                } else {
-                    ("Turn on", "Builds and answers may use it again.")
-                };
-                if widgets::secondary(ui, None, label).on_hover_text(tr(tip)).clicked() {
-                    toggle = Some((b.name.clone(), !b.enabled));
-                }
-                if confirming.as_ref() == Some(&b.name) {
-                    if widgets::secondary(ui, Some("trash-2"), "Remove it and its key").clicked() {
-                        remove = Some(b.name.clone());
+                    // Who takes a game's files out in Deep mode (an API backend, such as one through OpenRouter).
+                    if b.kind != BackendKind::AgentCli {
+                        if app.extractor.as_ref() == Some(&b.name) {
+                            if widgets::secondary(ui, Some("package"), "Extracts")
+                                .on_hover_text(tr("In Deep mode this one takes a game's own files out after the study. Click to stop."))
+                                .clicked()
+                            {
+                                extracts = Some(None);
+                            }
+                        } else if b.enabled && widgets::secondary(ui, None, "Extract with this").clicked() {
+                            extracts = Some(Some(b.name.clone()));
+                        }
                     }
-                    if widgets::link(ui, "Keep it").clicked() {
-                        ui.data_mut(|d| d.remove::<String>(confirm_id));
+                    // Off: kept with its key, but nothing uses it.
+                    let (label, tip) = if b.enabled {
+                        ("Turn off", "Nothing uses it until it's on again; it keeps its key.")
+                    } else {
+                        ("Turn on", "Builds and answers may use it again.")
+                    };
+                    if widgets::secondary(ui, None, label).on_hover_text(tr(tip)).clicked() {
+                        toggle = Some((b.name.clone(), !b.enabled));
                     }
-                } else if icons::button(ui, "trash-2", 26.0, false, &trf("Remove {name}", &[("name", &b.name)])).clicked() {
-                    ui.data_mut(|d| d.insert_temp(confirm_id, b.name.clone()));
-                }
+                    if matches!(app.row_tests.get(&b.name), Some(model_pick::RowTest::Running)) {
+                        ui.add_enabled_ui(false, |ui| widgets::secondary(ui, None, "Testing…"));
+                    } else if widgets::secondary(ui, None, "Test").clicked() {
+                        test = Some(b.name.clone());
+                    }
+                    if confirming.as_ref() == Some(&b.name) {
+                        if widgets::secondary(ui, Some("trash-2"), "Remove it and its key").clicked() {
+                            remove = Some(b.name.clone());
+                        }
+                        if widgets::link(ui, "Keep it").clicked() {
+                            ui.data_mut(|d| d.remove::<String>(confirm_id));
+                        }
+                    } else if icons::button(ui, "trash-2", 26.0, false, &trf("Remove {name}", &[("name", &b.name)])).clicked() {
+                        ui.data_mut(|d| d.insert_temp(confirm_id, b.name.clone()));
+                    }
+                });
             });
+            match app.row_tests.get(&b.name) {
+                Some(model_pick::RowTest::Answered(r)) => {
+                    ui.add(egui::Label::new(RichText::new(model_pick::row_test_words(r)).color(t.success).size(theme::CAPTION)).truncate());
+                }
+                Some(model_pick::RowTest::Failed(e)) => {
+                    ui.add(egui::Label::new(RichText::new(e).color(t.danger).size(theme::CAPTION)).truncate()).on_hover_text(e);
+                }
+                _ => {}
+            }
             if !b.enabled {
                 ui.label(RichText::new(tr("Off")).color(t.text_faint).size(theme::CAPTION));
             }
@@ -609,6 +630,9 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     if let Some((name, on)) = toggle {
         app.set_backend_enabled(&name, on);
+    }
+    if let Some(name) = test {
+        app.test_backend(&name);
     }
     if let Some(name) = choose_program {
         app.picking_program_for = Some(name);
@@ -664,14 +688,9 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     ui.add_space(8.0);
     let detected = app.detected.clone().unwrap_or_default();
-    let mut tab = {
-        let (providers, harnesses) = crate::detect_tabs::counts(&detected);
-        crate::detect_tabs::resolve(app.state.detect_tab, providers, harnesses)
-    };
-    ui.horizontal(|ui| {
+    // A fixed-height row, so the title and the button are centred on each other.
+    ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
         widgets::caption(ui, "Found on this computer");
-        ui.add_space(12.0);
-        tab = crate::detect_tabs::bar(ui, &mut app.state.detect_tab, &detected);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if app.detecting {
                 ui.add(crate::widgets::Spinner::new().color(t.accent));
@@ -680,10 +699,16 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
             }
         });
     });
+    // The tabs on their own row, so they never share one with (or wrap around) the title.
+    let tab = crate::detect_tabs::bar(ui, &mut app.state.detect_tab, &detected);
     ui.add_space(4.0);
+    if tab == crate::detect_tabs::DetectTab::Custom {
+        server_form(app, ui);
+        return;
+    }
     if detected.is_empty() && !app.detecting {
         ui.label(
-            RichText::new(tr("Nothing found yet. We look for API keys, local model servers (Ollama, LM Studio) and agent apps you already have. One on another port or computer can be added by its address below."))
+            RichText::new(tr("Nothing found yet. We look for API keys, local model servers (llama.cpp, LM Studio) and agent apps you already have. One on another port or computer can be added on the Custom endpoint tab."))
                 .color(t.text_faint),
         );
     }
@@ -721,61 +746,212 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
             // different key can be used without restarting the app.
             let pastable = d.needs_key || d.suggestion.base_url.as_deref().is_some_and(craft_anything_ai::openai::is_opencode_go);
             if pastable && !configured {
-                ui.horizontal(|ui| {
-                    let key = app.key_inputs.entry(d.suggestion.name.clone()).or_default();
-                    ui.add(
-                        egui::TextEdit::singleline(key)
-                            .password(true)
-                            .hint_text(tr("API key (stored in your system keychain)"))
-                            .desired_width(260.0)
-                            .frame(widgets::text_field_frame_compact(&Tokens::get(ui.ctx()))),
-                    );
-                    let k = key.trim().to_string();
-                    if widgets::primary_icon(ui, None, "Add", !k.is_empty()).clicked() && !k.is_empty() {
-                        // The key goes to the keychain; the app keeps no copy of it.
-                        app.key_inputs.remove(&d.suggestion.name);
-                        app.add_backend(d.suggestion.clone(), Some(k));
-                    }
-                });
+                key_controls(app, ui, &d, KeyCard { hint: "API key (stored in your system keychain)", width: 260.0, compact: true, connect: "Add" });
             }
         });
         ui.add_space(6.0);
     }
-    server_form(app, ui);
 }
 
-/// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by
-/// its address (#54, #98). The server is asked for its models before it's added.
-/// The first run's AI step shows it too.
-pub(crate) fn server_form(app: &mut CraftApp, ui: &mut Ui) {
+/// What a row of Settings → AI says an AI is: its kind, and for a custom endpoint where it is.
+fn kind_label(b: &BackendConfig) -> String {
+    let kind = tr(b.kind.label());
+    let host = b.base_url.as_deref().and_then(|u| u.split_once("://")).and_then(|(_, rest)| rest.split('/').next()).filter(|h| !h.is_empty());
+    match (b.kind, host) {
+        (BackendKind::OpenaiCompatible, Some(host)) => format!("{kind} · {host}"),
+        _ => kind,
+    }
+}
+
+/// How a card that asks for a key looks: its field, and the button that adds it.
+pub(crate) struct KeyCard {
+    pub hint: &'static str,
+    pub width: f32,
+    pub compact: bool,
+    pub connect: &'static str,
+}
+
+/// The key field of a card, then (once a key has been pasted) the models it offers, then the button
+/// that adds the AI with the one chosen. First run and Settings share it.
+pub(crate) fn key_controls(app: &mut CraftApp, ui: &mut Ui, d: &Detected, card: KeyCard) {
     let t = Tokens::get(ui.ctx());
-    ui.add_space(14.0);
-    widgets::caption(ui, "Add an AI by its address");
-    ui.label(RichText::new(tr("Ollama or LM Studio on another computer, or any service that speaks the OpenAI API.")).color(t.text_faint).size(theme::CAPTION));
-    ui.add_space(4.0);
-    let form = &mut app.server_form;
-    // `width` is the text's; the compact frame adds 8 points a side and its border.
-    const FRAME: f32 = 18.0;
-    let field = |ui: &mut Ui, text: &mut String, hint: &str, width: f32, name: &str, secret: bool| {
-        let r = ui.add(egui::TextEdit::singleline(text).password(secret).hint_text(tr(hint)).desired_width(width).frame(widgets::text_field_frame_compact(&t)));
-        widgets::named(r, &tr(name));
+    let name = d.suggestion.name.clone();
+    let key = {
+        let key = app.key_inputs.entry(name.clone()).or_default();
+        let frame = if card.compact { widgets::text_field_frame_compact(&t) } else { widgets::text_field_frame(&t) };
+        ui.add(egui::TextEdit::singleline(key).password(true).hint_text(tr(card.hint)).desired_width(card.width).frame(frame));
+        key.trim().to_string()
     };
-    ui.horizontal(|ui| {
-        field(ui, &mut form.name, "name, e.g. Studio box", 150.0, "AI name", false);
-        let w = ui.available_width() - FRAME;
-        field(ui, &mut form.address, "address, e.g. http://192.168.1.20:11434/v1", w, "Server address", false);
+    let ask = model_pick::key_looks_real(&key).then(|| Ask { kind: d.suggestion.kind, base_url: d.suggestion.base_url.clone(), key: key.clone() });
+    let listing = ask.is_some();
+    let slot = Slot::Card(name.clone());
+    model_pick::drive(app, ui, &slot, ask, &d.suggestion.model);
+    ui.add_space(4.0);
+    let mut connect = false;
+    let height = if card.compact { 30.0 } else { 32.0 };
+    // The picker and the button on one row, one vertical centre, however the window is sized.
+    ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        connect = widgets::primary_icon(ui, None, card.connect, !key.is_empty()).clicked() && !key.is_empty();
+        if listing {
+            let width = (ui.available_width() - ui.spacing().item_spacing.x).max(80.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                model_pick::model_picker(ui, ("card-model", &name), model_pick::choice_mut(app, &slot), width);
+            });
+        }
     });
-    let ready = !form.name.trim().is_empty() && !form.address.trim().is_empty();
-    let mut add = false;
+    if listing {
+        model_pick::status_line(ui, model_pick::choice_mut(app, &slot), None);
+    }
+    if connect {
+        let mut config = d.suggestion.clone();
+        let chosen = model_pick::choice_mut(app, &slot).chosen().to_string();
+        if !chosen.is_empty() {
+            config.model = chosen;
+        }
+        // The key goes to the keychain; the app keeps no copy of it.
+        app.key_inputs.remove(&name);
+        app.card_models.remove(&name);
+        app.add_backend(config, Some(key));
+    }
+}
+
+/// The AI the form describes, and the key typed for it. `None` when its service is unknown.
+pub(crate) fn form_config(form: &ServerForm) -> Option<(BackendConfig, Option<String>)> {
+    let services = craft_anything_ai::providers::services();
+    let s = services.get(form.service)?;
+    let typed = form.name.trim();
+    let name = if typed.is_empty() && !s.needs_address { s.name.to_string() } else { typed.to_string() };
+    let base_url = if s.needs_address { Some(form.address.trim().trim_end_matches('/').to_string()) } else { s.base_url.map(str::to_string) };
+    let model = Some(form.choice.chosen()).filter(|m| !m.is_empty()).unwrap_or(s.default_model).to_string();
+    let model = if s.needs_address && form.choice.chosen().is_empty() { String::new() } else { model };
+    let key = Some(form.key.trim().to_string()).filter(|k| !k.is_empty());
+    Some((BackendConfig { name, kind: s.kind, model, base_url, ssh_host: None, enabled: true }, key))
+}
+
+/// A fingerprint of what a test was for, so its answer isn't shown for a form that has changed since.
+pub(crate) fn form_signature(form: &ServerForm) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (form.service, form.address.trim(), form.key.trim(), form.choice.chosen()).hash(&mut h);
+    h.finish()
+}
+
+/// What the form asks the service for its models with, once there is enough to ask.
+fn form_ask(form: &ServerForm, service: &craft_anything_ai::providers::Service) -> Option<Ask> {
+    let key = form.key.trim().to_string();
+    if service.needs_address {
+        let address = form.address.trim().trim_end_matches('/');
+        let web = address.split_once("://").is_some_and(|(scheme, rest)| matches!(scheme, "http" | "https") && !rest.is_empty());
+        return web.then(|| Ask { kind: service.kind, base_url: Some(address.to_string()), key });
+    }
+    // A hosted service is asked only once the key looks whole, as on the key cards: a pause while
+    // typing never sends part of a key.
+    model_pick::key_looks_real(&key).then(|| Ask { kind: service.kind, base_url: service.base_url.map(str::to_string), key })
+}
+
+/// A field label painted in the form's left column (painted, so a screen reader gets each field's
+/// own name from the field, not a second copy from here).
+/// `add` gets the width the control gets (all rows share it: from the field column to the form's
+/// right edge) and returns the control's rect, which the label is centred on.
+fn form_row(ui: &mut Ui, label_w: f32, label: &str, add: impl FnOnce(&mut Ui, f32) -> egui::Rect) {
+    let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        field(ui, &mut form.model, "model (optional)", 150.0, "Model", false);
-        // Room for the Add button after it.
-        let w = (ui.available_width() - FRAME - 90.0).max(120.0);
-        field(ui, &mut form.key, "API key, if it needs one", w, "API key", true);
-        add = widgets::primary_icon(ui, Some("plus"), "Add", ready).clicked() && ready;
+        let left = ui.cursor().left();
+        ui.add_space(label_w);
+        let rect = add(ui, ui.available_width());
+        let g = widgets::label_galley(ui, &tr(label), theme::CAPTION, t.text_dim);
+        ui.painter().galley_with_override_text_color(egui::pos2(left, rect.center().y - g.size().y / 2.0), g, t.text_dim);
+    });
+}
+
+/// An AI that "Look for AI" can't find: a server on this network, another computer's, or a hosted
+/// service with its key. Models are looked for once the address or key is typed; nothing is saved
+/// until Add. The first run's AI step shows it too, on its Custom endpoint tab.
+pub(crate) fn server_form(app: &mut CraftApp, ui: &mut Ui) {
+    // Left-aligned wherever it is shown (the first run's column centres what it holds).
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| server_form_body(app, ui));
+}
+
+fn server_form_body(app: &mut CraftApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let services = craft_anything_ai::providers::services();
+    ui.add_space(8.0);
+    widgets::caption(ui, "Custom LLM endpoint");
+    ui.label(
+        RichText::new(tr("Any engine that speaks the OpenAI API, such as llama.cpp, or a hosted service with its key."))
+            .color(t.text_faint)
+            .size(theme::CAPTION),
+    );
+    ui.add_space(8.0);
+    let service_at = app.server_form.service.min(services.len().saturating_sub(1));
+    let Some(service) = services.get(service_at) else { return };
+    // One left edge: the label column is as wide as the widest translated label.
+    let label_w = ["Service", "Name", "Address", "API key", "Model"]
+        .iter()
+        .map(|l| widgets::label_galley(ui, &tr(l), theme::CAPTION, t.text_dim).size().x)
+        .fold(0.0_f32, f32::max)
+        .ceil()
+        + 12.0;
+    let field = |ui: &mut Ui, w: f32, text: &mut String, hint: &str, name: &str, secret: bool| {
+        let r = ui.add(egui::TextEdit::singleline(text).password(secret).hint_text(tr(hint)).desired_width(w).frame(widgets::text_field_frame_compact(&t)));
+        widgets::named(r, name).rect
+    };
+    let form = &mut app.server_form;
+    form_row(ui, label_w, "Service", |ui, w| {
+        let r = egui::ComboBox::from_id_salt("endpoint-service").icon(widgets::combo_icon).width(w).selected_text(service.name).show_ui(ui, |ui| {
+            for (i, s) in services.iter().enumerate() {
+                if ui.selectable_label(i == service_at, s.name).clicked() && i != service_at {
+                    // The name follows the service unless the person typed their own.
+                    if form.name.trim().is_empty() || form.name.trim() == service.name {
+                        form.name = if s.needs_address { String::new() } else { s.name.to_string() };
+                    }
+                    form.service = i;
+                    form.test = None;
+                    // The old service's list, pick and key would otherwise go to the new one's address
+                    // (the key with the next model listing, unasked).
+                    form.choice = Default::default();
+                    form.key.clear();
+                }
+            }
+        });
+        widgets::named(r.response, "Service").rect
+    });
+    form_row(ui, label_w, "Name", |ui, w| field(ui, w, &mut form.name, "e.g. Home server", "AI name", false));
+    if service.needs_address {
+        form_row(ui, label_w, "Address", |ui, w| field(ui, w, &mut form.address, "e.g. http://192.168.1.20:8080/v1", "Server address", false));
+    }
+    form_row(ui, label_w, "API key", |ui, w| field(ui, w, &mut form.key, "if it needs one", "API key", true));
+    let ask = form_ask(form, service);
+    // Test needs only what the listing needs; Add also needs a name.
+    let can_test = ask.is_some();
+    let default_model = service.default_model;
+    // Taken out while the form's other fields are drawn, and put back after.
+    let mut choice = std::mem::take(&mut form.choice);
+    form_row(ui, label_w, "Model", |ui, w| model_pick::model_picker(ui, "endpoint", &mut choice, w));
+    form.choice = choice;
+    model_pick::drive(app, ui, &Slot::Form, ask, default_model);
+    let form = &mut app.server_form;
+    // The status line keeps its height: nothing moves when text appears.
+    let signature = form_signature(form);
+    let line = form.test.as_ref().filter(|t| t.signature == signature).map(|t| t.line.clone());
+    let ready = !form.name.trim().is_empty() || !service.needs_address;
+    let ready = ready && if service.needs_address { !form.address.trim().is_empty() } else { !form.key.trim().is_empty() };
+    let (mut add, mut test) = (false, false);
+    ui.add_space(4.0);
+    // One fixed-height row: the status on the left from the field column, the buttons on the right.
+    let gap = ui.spacing().item_spacing.x;
+    ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 34.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let added = widgets::primary_icon(ui, Some("plus"), "Add", ready);
+        add = added.clicked() && ready;
+        test = ui.add_enabled_ui(can_test, |ui| widgets::secondary_min(ui, Some("activity"), "Test", added.rect.height())).inner.clicked() && can_test;
+        let width = ui.available_width() - label_w - gap;
+        model_pick::status_line_w(ui, &form.choice, line.as_ref(), width, false);
     });
     if add {
         app.add_server();
+    }
+    if test {
+        app.test_endpoint();
     }
 }
 
@@ -825,8 +1001,12 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
         let current = table.image_model(a.image_model.as_deref()).or_else(|_| table.image_model(None)).map(|m| m.name.clone()).unwrap_or_default();
         egui::ComboBox::from_id_salt("image-model").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
             for m in table.images() {
-                let price = crate::usage::asset_cost_words(m.cost(craft_anything_engines::assets::Shape::Square));
-                let label = format!("{} · {} {}", m.name, price, tr("a picture"));
+                let cost = m.cost(craft_anything_engines::assets::Shape::Square);
+                let label = if cost > 0.0 {
+                    format!("{} · {} {}", m.name, crate::usage::asset_cost_words(cost), tr("a picture"))
+                } else {
+                    format!("{} · {}", m.name, tr("on your server"))
+                };
                 let on = a.image_model.as_deref() == Some(m.id.as_str());
                 if ui.selectable_label(on, label).on_hover_text(&m.licence).clicked() && !on {
                     a.image_model = Some(m.id.clone());
@@ -835,9 +1015,83 @@ fn builds(app: &mut CraftApp, ui: &mut Ui) {
             }
         });
     });
+    if table.image_model(app.settings.assets.image_model.as_deref()).is_ok_and(|m| m.id == craft_anything_engines::assets::comfyui::ID) {
+        changed |= comfy_rows(app, ui);
+    }
     if changed {
         app.settings_changed();
     }
+}
+
+/// The picture model is ComfyUI: where the server is, which checkpoint, an optional workflow, and
+/// a Test. Fields share the label column and the width; the checkpoints come on their own once the
+/// address is a web address. Returns true when a setting changed.
+fn comfy_rows(app: &mut CraftApp, ui: &mut Ui) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let mut changed = false;
+    let label_w = ["Address", "Checkpoint", "Workflow"]
+        .iter()
+        .map(|l| widgets::label_galley(ui, &tr(l), theme::CAPTION, t.text_dim).size().x)
+        .fold(0.0_f32, f32::max)
+        .ceil()
+        + 12.0;
+    ui.add_space(6.0);
+    ui.scope(|ui| {
+        ui.set_max_width(480.0);
+        let field = |ui: &mut Ui, w: f32, text: &mut String, hint: &str, name: &str| {
+            let r = ui.add(egui::TextEdit::singleline(text).hint_text(tr(hint)).desired_width(w).frame(widgets::text_field_frame_compact(&t)));
+            (widgets::named(r.clone(), name).rect, r.changed())
+        };
+        // The saved checkpoint is what the picker starts on, before any list has come.
+        let saved = app.settings.assets.comfyui.checkpoint.clone();
+        let choice = &mut app.comfy_form.choice;
+        if choice.typed_model.is_empty() && choice.picked.is_empty() && !saved.is_empty() {
+            choice.typed_model.clone_from(&saved);
+            choice.picked = saved.clone();
+        }
+        let address = &mut app.settings.assets.comfyui.address;
+        form_row(ui, label_w, "Address", |ui, w| {
+            let (rect, edited) = field(ui, w, address, "e.g. http://192.168.1.20:8188", "ComfyUI address");
+            changed |= edited;
+            rect
+        });
+        let ask = model_pick::comfy_ask(&app.settings.assets.comfyui.address);
+        let mut choice = std::mem::take(&mut app.comfy_form.choice);
+        form_row(ui, label_w, "Checkpoint", |ui, w| model_pick::model_picker(ui, "comfy-checkpoint", &mut choice, w));
+        app.comfy_form.choice = choice;
+        let c = &mut app.settings.assets.comfyui;
+        let mut workflow = c.workflow.clone().unwrap_or_default();
+        form_row(ui, label_w, "Workflow", |ui, w| {
+            let (rect, edited) = field(ui, w, &mut workflow, "API-format workflow JSON, optional", "ComfyUI workflow");
+            if edited {
+                c.workflow = (!workflow.trim().is_empty()).then_some(workflow);
+                changed = true;
+            }
+            rect
+        });
+        model_pick::drive(app, ui, &Slot::Comfy, ask.clone(), "");
+        let picked = app.comfy_form.choice.chosen().to_string();
+        if picked != app.settings.assets.comfyui.checkpoint && !(picked.is_empty() && app.comfy_form.choice.loading()) {
+            app.settings.assets.comfyui.checkpoint = picked;
+            changed = true;
+        }
+        let signature = model_pick::comfy_signature(&app.settings.assets.comfyui.address);
+        let line = app.comfy_form.test.as_ref().filter(|x| x.signature == signature).map(|x| x.line.clone());
+        let mut test = false;
+        ui.add_space(4.0);
+        let gap = ui.spacing().item_spacing.x;
+        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 30.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Greyed out until the address looks like a web address, as on the AI form.
+            test = ui.add_enabled_ui(ask.is_some(), |ui| widgets::secondary_min(ui, Some("activity"), "Test", 30.0)).inner.clicked() && ask.is_some();
+            let width = ui.available_width() - label_w - gap;
+            model_pick::status_line_w(ui, &app.comfy_form.choice, line.as_ref(), width, true);
+        });
+        if test {
+            app.test_comfyui();
+        }
+        ui.label(RichText::new(tr("No key needed; pictures are made on your server.")).color(t.text_faint).size(theme::CAPTION));
+    });
+    changed
 }
 
 /// Plugins: external MCP servers (`[[plugins.mcp]]`) and WASM components (`[[plugins.wasm]]`),
@@ -1014,6 +1268,16 @@ mod tests {
     use super::*;
     use crate::{Done, builders::AgentModelPicker, demo, jobs::Finished};
     use craft_anything_ai::{BackendConfig, BackendKind};
+
+    /// A hosted service's models are listed only once its key looks whole, never on part of one.
+    #[test]
+    fn a_hosted_service_is_never_asked_with_part_of_a_key() {
+        let services = craft_anything_ai::providers::services();
+        let hosted = services.iter().find(|s| !s.needs_address).expect("a hosted service");
+        let ask = |key: &str| form_ask(&ServerForm { key: key.into(), ..Default::default() }, hosted);
+        assert!(ask("").is_none() && ask("sk-or").is_none(), "part of a key");
+        assert_eq!(ask(" sk-test-0000 ").map(|a| a.key), Some("sk-test-0000".to_string()));
+    }
 
     #[test]
     fn identical_model_names_are_shown_once_in_the_shared_picker() {
