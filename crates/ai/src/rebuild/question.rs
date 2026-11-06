@@ -32,7 +32,7 @@ const SCAN_DEPTH: usize = 12;
 /// Folders a build makes again, never listed.
 const SKIPPED: &[&str] = &["node_modules", "target", ".godot", "Library", "Temp", "obj", ".venv", "__pycache__", ".next", ".turbo", ".git"];
 
-const PREAMBLE: &str = "You're answering a question the person asked about the project you built inside Craft Anything. This isn't a task: answer it and stop. Don't create, change or delete any file, don't run anything, and don't carry on the build; if the answer is that something should change, say what you'd change and that they can ask for it as a change. Answer in plain words for someone who doesn't code, briefly, with full paths when they ask where something is.\n\n";
+const PREAMBLE: &str = "You're answering a question the person asked about the project you built inside Craft Anything. This isn't a task: answer it and stop. Don't create, change or delete any file, don't run anything, and don't carry on the build; if the answer is that something should change, say what you'd change and that they can ask for it as a change. Answer in plain words for someone who doesn't code, briefly, with full paths when they ask where something is. You're a short-lived copy with fewer tools than the builder, and the build may still be running beside you. So a tool you can't see here is not a tool the build has lost, and a call with no result here may still be running: never report tools as disconnected or work as cut off because of what you see from here.\n\n";
 
 /// How a question was answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -276,6 +276,13 @@ fn ago(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A copy of the builder's session has no tool server, and saw the build's tools as gone.
+    #[test]
+    fn a_question_is_told_its_missing_tools_are_not_the_builds() {
+        assert!(PREAMBLE.contains("never report tools as disconnected"));
+        assert!(PREAMBLE.contains("may still be running"));
+    }
 
     /// A question that finds the builder's session missing forgets it, unless a build has saved
     /// another meanwhile: then that one stays.

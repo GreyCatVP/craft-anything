@@ -217,6 +217,7 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       it can still hang the console host on Windows Server 2022 (only a timeout ends the tree)
 - [ ] `process::launch_tests::a_watched_program_can_be_stopped` leaves its `sleep 30` (Windows:
       `ping -n 30`) running, on `main` too: `stop` ends the shell but not what the shell started
+      — in PR #1027
 - [x] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes failed when several crates'
       tests ran at once: a script just written can't start while another thread's child still
       holds it open ("Text file busy"). #787 tries again: on Linux 4 of 72 runs failed before
@@ -485,6 +486,9 @@ yet, and the quick start is how every new person begins.
 - [ ] A live run of a project copied between two real computers with Claude Code (#451, #452); done
       on one Mac with a second `CLAUDE_CONFIG_DIR` standing in for the other computer (STATUS.md)
 - [ ] Ghidra setup tried for real on Linux and macOS (the Java pins were checked by tests only)
+- [x] A Ghidra with no decompiler program for this computer (public downloads leave out macOS) is
+      refused before the long analysis, with the command that builds it; checked on a real Mac
+- [ ] `engines_install` builds Ghidra's native programs on macOS, so a Mac install works unaided
 - [ ] Follow the README quick start on a clean machine (Windows, and Linux or macOS)
 - [ ] Build the new DMG on a Mac (release dry run) and look at the window once
 - [ ] #490 on macOS: a real Deep build through Claude Code with the published 0.3.0 CLI, with
@@ -743,6 +747,13 @@ Owner: open · Status: in progress
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
 - [ ] UI tree on Linux (AT-SPI)
+- [x] `native_window_capture` on macOS: no Screen Recording is refused before the program starts
+      (it was "didn't show a window", which said to wait longer), and the name fallback matches
+      whole words and never the system, so `win` no longer pictures the menu bar
+- [x] `native_window_capture` keeps looking for up to 10 s past `wait_secs` when no window is there
+      yet, instead of deciding from one look; tried with a program that opens its window late
+- [ ] Close a pictured program politely before killing it: a helper it started through launchd
+      outlives the process group, and can stay running with the program's data files open
 - [x] `apple_calls_observe`: the breakpoint callback is one valid line (it had a literal backslash
       and `n` between statements, so lldb stopped before launching, #251), covers every breakpoint
       instead of only the first, a failed lldb run is an error and not "0 calls", and names or
@@ -838,6 +849,8 @@ Gaps found while using the app for real projects.
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
       total, so a forked answer shows none; count questions in the project's usage
 - [ ] "Make this change" on an answer that suggests one (sends it as a normal message)
+- [x] "Just ask" is told it has fewer tools than the builder and that the build may be running
+      beside it, so it no longer reports the build's tools as disconnected or its work as cut off
 - [x] "Change it" knows what was just talked about in "Just ask": the next message tells the builder
       the latest few questions and answers, once, and a Clean room build only those asked in Clean
       room (#857). Not checked in a live build
