@@ -36,6 +36,7 @@ fn bundle(version: u32, flags: u32, sizes: &[u32], data_len: usize) -> (Vec<u8>,
     (bytes, table)
 }
 
+/// Rejects individual and cumulative overruns even when table or suffix bytes could fill them.
 #[test]
 fn blocks_cannot_borrow_trailing_table_or_appended_bytes() {
     for version in [6, 7, 8] {
@@ -50,6 +51,7 @@ fn blocks_cannot_borrow_trailing_table_or_appended_bytes() {
     }
 }
 
+/// Preserves exact fits, unused data bytes and zero-length blocks across supported layouts.
 #[test]
 fn exact_boundaries_spare_data_and_empty_blocks_remain_valid() {
     for version in [6, 7, 8] {
@@ -70,6 +72,7 @@ fn exact_boundaries_spare_data_and_empty_blocks_remain_valid() {
     }
 }
 
+/// Excludes the alignment gap from the space available for compressed block contents.
 #[test]
 fn alignment_padding_is_not_available_to_blocks() {
     for flags in [0x200, 0x280] {
@@ -80,6 +83,7 @@ fn alignment_padding_is_not_available_to_blocks() {
     }
 }
 
+/// Checks totals above 32 bits using a large declared extent without allocating its contents.
 #[test]
 fn cumulative_block_sizes_do_not_wrap_at_32_bits() {
     let (bytes, table) = bundle(8, 0, &[u32::MAX, 2], 1);
