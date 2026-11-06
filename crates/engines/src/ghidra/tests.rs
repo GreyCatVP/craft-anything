@@ -423,7 +423,8 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
         compiler_spec: None,
         memory_gb: None,
     };
-    let (sha, digest) = ("ab".repeat(32), "cd".repeat(32));
+    // The bytes and their real sha, so this reaches the launch instead of failing on a mismatch.
+    let (sha, digest) = (craft_anything_evidence::sha256_hex(b"x"), "cd".repeat(32));
     // A temp folder can be under a dot folder (`/tmp/.tmpXXXX`): the project is then reached
     // through the store's link, which is the path analyse() gives back.
     let (_link, root) = LinkGuard::root(d.path());
@@ -465,29 +466,6 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
     assert!(!lock_path(&project).exists(), "its own lock is released when it fails");
     assert!(saw_aside.load(Ordering::Relaxed), "the folder the other analysis was filling must still be on disk, under its own name");
     assert!(!project.join("half-written.gpr").exists(), "it wrote into the folder the other analysis was filling");
-}
-
-/// #951: a big program takes hours, and the lock is what says so. An analysis that keeps working
-/// keeps its lock fresh, and only one that stopped lets it go stale.
-#[test]
-fn an_analysis_that_keeps_working_keeps_its_lock() {
-    let d = tempfile::tempdir().unwrap();
-    let lock = d.path().join("target-abcd.analysing");
-    std::fs::write(&lock, "").unwrap();
-    let file = std::fs::File::options().write(true).open(&lock).unwrap();
-    file.set_modified(SystemTime::now() - LOCK_STALE - Duration::from_secs(5)).unwrap();
-    drop(file);
-    assert!(!lock_is_fresh(&lock), "a lock this old reads as one left behind");
-
-    let beat = Heartbeat::every(&lock, Duration::from_millis(50));
-    std::thread::sleep(Duration::from_millis(300));
-    assert!(lock_is_fresh(&lock), "the analysis holds its lock while it works");
-
-    drop(beat);
-    let stopped = std::fs::metadata(&lock).unwrap().modified().unwrap();
-    std::thread::sleep(Duration::from_millis(300));
-    let after = std::fs::metadata(&lock).unwrap().modified().unwrap();
-    assert_eq!(after, stopped, "the refresh stopped with it");
 }
 
 /// #951: the folder a stale lock was guarding is moved, not removed, so a Ghidra that outlived the

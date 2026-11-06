@@ -483,10 +483,6 @@ fn headless(cfg: &Config, runtime_root: &Path, args: Vec<OsString>, lifetime: Du
 /// seconds, so one left behind by a process that died goes stale and is taken over.
 const LOCK_STALE: Duration = Duration::from_secs(90);
 
-/// How often the holder refreshes the lock, well inside [`LOCK_STALE`] so a busy analysis — a big
-/// program can take hours — is never mistaken for one that died.
-const LOCK_REFRESH: Duration = Duration::from_secs(20);
-
 /// The analysis lock this process holds, released when dropped (also on every error path).
 struct HeldLock(PathBuf);
 
@@ -502,45 +498,6 @@ fn lock_path(project_dir: &Path) -> PathBuf {
 
 fn lock_is_fresh(lock: &Path) -> bool {
     std::fs::metadata(lock).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age < LOCK_STALE))
-}
-
-/// Keep the analysis lock looking alive while this process works. Dropping it stops the refresh
-/// and waits for the thread, so nothing touches the lock after it is released.
-struct Heartbeat {
-    stop: Option<std::sync::mpsc::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Heartbeat {
-    /// Start refreshing `lock` at the pace a real analysis needs ([`LOCK_REFRESH`]).
-    fn start(lock: &Path) -> Self {
-        Self::every(lock, LOCK_REFRESH)
-    }
-
-    /// Start refreshing `lock` every `interval`, which the tests shorten.
-    fn every(lock: &Path, interval: Duration) -> Self {
-        let (stop, wait) = std::sync::mpsc::channel();
-        let lock = lock.to_path_buf();
-        let thread = std::thread::spawn(move || {
-            // Ends when the sender is dropped, which is what Heartbeat's Drop does.
-            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = wait.recv_timeout(interval) {
-                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&lock) {
-                    let _ = file.set_modified(SystemTime::now());
-                }
-            }
-        });
-        Heartbeat { stop: Some(stop), thread: Some(thread) }
-    }
-}
-
-impl Drop for Heartbeat {
-    fn drop(&mut self) {
-        // Dropping the sender ends the refresh thread's wait.
-        self.stop.take();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 /// A project folder a stale lock was guarding, moved out of the way instead of removed: a Ghidra
@@ -626,7 +583,6 @@ pub fn analyse(
         }
     };
     let held = HeldLock(lock.clone());
-    let _beat = Heartbeat::start(&lock);
     let _aside = kept_aside;
     let scratch = Scratch::new(&root, "ghidra-analysis")?;
     let program = format!("target-{}", target_sha256.get(..12).unwrap_or(target_sha256));
