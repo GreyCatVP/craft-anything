@@ -881,8 +881,9 @@ fn status_line(app: &CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let n = app.jobs.running().filter(|j| j.visible).count();
     let text = if n > 0 { crate::i18n::trf("{n} job(s) running", &[("n", &n.to_string())]) } else { tr("Ready") };
-    // One label that shortens: in a narrow console, two would run over the tabs beside them.
-    let text = format!("{text} · {} {}", app.view.findings.len(), tr("findings"));
+    // One label that shortens: in a narrow console, two would run over the tabs beside them. The
+    // count goes first so it's what stays; the Jobs tab's title also says how many are running.
+    let text = format!("{} {} · {text}", app.view.findings.len(), tr("findings"));
     ui.add(egui::Label::new(RichText::new(text).color(t.text_faint).size(theme::CAPTION)).truncate());
 }
 
