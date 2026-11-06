@@ -485,6 +485,9 @@ yet, and the quick start is how every new person begins.
 - [ ] A live run of a project copied between two real computers with Claude Code (#451, #452); done
       on one Mac with a second `CLAUDE_CONFIG_DIR` standing in for the other computer (STATUS.md)
 - [ ] Ghidra setup tried for real on Linux and macOS (the Java pins were checked by tests only)
+- [x] A Ghidra with no decompiler program for this computer (public downloads leave out macOS) is
+      refused before the long analysis, with the command that builds it; checked on a real Mac
+- [ ] `engines_install` builds Ghidra's native programs on macOS, so a Mac install works unaided
 - [ ] Follow the README quick start on a clean machine (Windows, and Linux or macOS)
 - [ ] Build the new DMG on a Mac (release dry run) and look at the window once
 - [ ] #490 on macOS: a real Deep build through Claude Code with the published 0.3.0 CLI, with

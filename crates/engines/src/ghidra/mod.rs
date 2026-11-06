@@ -500,6 +500,55 @@ fn lock_is_fresh(lock: &Path) -> bool {
     std::fs::metadata(lock).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age < LOCK_STALE))
 }
 
+/// The start of the folder names Ghidra gives this system's native programs (`mac_arm_64`, ...).
+/// None where we don't know them, so nothing is refused there.
+fn native_folder_prefix() -> Option<&'static str> {
+    if cfg!(target_os = "macos") {
+        Some("mac_")
+    } else if cfg!(target_os = "linux") {
+        Some("linux_")
+    } else if cfg!(windows) {
+        Some("win_")
+    } else {
+        None
+    }
+}
+
+/// Whether an install at `root` has a decompiler for a system whose folders start with `prefix`.
+/// Ghidra's public releases leave macOS out, and building them puts them under `build/os`.
+/// An install laid out in a way we don't recognise counts as having one: Ghidra then decides.
+fn has_decompiler_for(root: &Path, prefix: &str) -> bool {
+    let decompiler = root.join("Ghidra").join("Features").join("Decompiler");
+    let shipped = decompiler.join("os");
+    if !shipped.is_dir() {
+        return true;
+    }
+    [shipped, decompiler.join("build").join("os")].iter().any(|folder| {
+        std::fs::read_dir(folder).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with(prefix) && ["decompile", "decompile.exe"].iter().any(|exe| e.path().join(exe).is_file()))
+        })
+    })
+}
+
+/// Stops before a long analysis that couldn't lead to pseudo-code: without its decompiler program
+/// Ghidra analyses for as long as ever and then answers nothing.
+fn check_decompiler(analyze_headless: &Path) -> Result<(), GhidraError> {
+    let Some(prefix) = native_folder_prefix() else { return Ok(()) };
+    // <install>/support/analyzeHeadless; a linked launcher is followed to the real install.
+    let launcher = std::fs::canonicalize(analyze_headless).unwrap_or_else(|_| analyze_headless.to_path_buf());
+    let Some(root) = launcher.parent().and_then(Path::parent) else { return Ok(()) };
+    if has_decompiler_for(root, prefix) {
+        return Ok(());
+    }
+    let gradle = root.join("support").join("gradle");
+    Err(GhidraError::Launch(format!(
+        "this Ghidra has no decompiler program for this computer, which its public downloads leave out on macOS. Build it once by running `./gradlew buildNatives` in {}",
+        gradle.display()
+    )))
+}
+
 /// Make sure the target is analysed and saved in its cached project, analysing it now if no one
 /// has (a big program can take hours; it happens once). If another process is already analysing
 /// it, wait for that instead of starting over. Returns the cached project folder, as the path to
@@ -513,6 +562,7 @@ pub fn analyse(
     cancel: &Cancel<'_>,
     progress: &Progress<'_>,
 ) -> Result<PathBuf, GhidraError> {
+    check_decompiler(&cfg.analyze_headless)?;
     let started = Instant::now();
     let minutes = || started.elapsed().as_secs() / 60;
     let deadline = started + cfg.startup_timeout;

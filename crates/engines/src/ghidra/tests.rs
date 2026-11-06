@@ -597,3 +597,36 @@ fn a_bridge_that_stops_early_leaves_its_log_beside_the_analysis() {
     assert_eq!(keep_log(&[&none], &d.path().join("other.bridge.log")), none);
     assert!(!d.path().join("other.bridge.log").exists());
 }
+
+/// An install's decompiler folder, with this program in it.
+fn install_with(root: &std::path::Path, folder: &[&str], exe: &str) {
+    let mut dir = root.join("Ghidra").join("Features").join("Decompiler");
+    for part in folder {
+        dir = dir.join(part);
+    }
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(exe), b"").unwrap();
+}
+
+#[test]
+fn a_public_download_on_macos_has_no_decompiler_until_it_is_built() {
+    let d = tempfile::tempdir().unwrap();
+    install_with(d.path(), &["os", "linux_x86_64"], "decompile");
+    install_with(d.path(), &["os", "win_x86_64"], "decompile.exe");
+    assert!(!has_decompiler_for(d.path(), "mac_"), "other systems' programs don't count");
+    assert!(has_decompiler_for(d.path(), "linux_"));
+    assert!(has_decompiler_for(d.path(), "win_"));
+
+    install_with(d.path(), &["build", "os", "mac_arm_64"], "decompile");
+    assert!(has_decompiler_for(d.path(), "mac_"), "`gradlew buildNatives` puts it under build/os");
+}
+
+#[test]
+fn an_empty_platform_folder_is_not_a_decompiler_and_an_unknown_layout_is_left_to_ghidra() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("Ghidra/Features/Decompiler/os/mac_arm_64")).unwrap();
+    assert!(!has_decompiler_for(d.path(), "mac_"));
+
+    let unknown = tempfile::tempdir().unwrap();
+    assert!(has_decompiler_for(unknown.path(), "mac_"), "never refused on a guess");
+}
