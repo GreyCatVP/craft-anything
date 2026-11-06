@@ -161,6 +161,7 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
       remain release validation work.
 - [ ] Add to `docs/releasing.md`: after a release, close every ticket marked as waiting for it, so
       they don't stay open marked `fixed`
+      — claimed: doubektomas, branch docs/r5.1-post-release-tickets
 
 ### R5.2 Keeping contributions moving
 Owner: maintainers · Status: in progress
