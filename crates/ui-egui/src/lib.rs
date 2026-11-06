@@ -452,6 +452,7 @@ pub struct CraftApp {
     pub quick_models_generation: u64,
     /// Title bar's model list: what's typed in its search box, and whether to focus it next frame.
     pub model_filter: String,
+    /// One-shot: take keyboard focus in the model list's search box on the next frame.
     pub model_focus: bool,
     pub agent_model_picker: Option<builders::AgentModelPicker>,
     model_request: u64,
