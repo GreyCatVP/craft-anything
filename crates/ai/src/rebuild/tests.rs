@@ -1308,6 +1308,17 @@ mod picking_up_a_build {
         Bench { _dir: dir, hub, projects, prompts }
     }
 
+    /// #923: starting a run is what loads the keys, for builders that use this session's tools.
+    #[test]
+    fn a_run_loads_the_saved_asset_keys_into_its_session() {
+        let b = bench();
+        b.hub.set_asset_key("fal", "k-1").unwrap();
+        let ws = Workspace::create(&b.projects, "x", "Build a notes app", TargetRef::None).unwrap();
+        let _ = try_it(&b, &ws);
+        let keys = b.hub.engine.session().ext.get::<craft_anything_engine::tools::asset_tools::AssetKeys>().unwrap_or_default();
+        assert_eq!(keys.get("fal"), Some("k-1"));
+    }
+
     fn try_it(b: &Bench, ws: &Workspace) -> (bool, Vec<feed::FeedItem>) {
         try_with(b, ws, RunOptions::default())
     }
@@ -1904,6 +1915,76 @@ mod picking_up_a_build {
         assert!(!written.message.contains("has no files"), "{written:?}");
         assert_eq!(written.message, "The build stopped after two builder turns changed no files in app/.");
     }
+}
+
+/// The project hasn't turned on generated assets, so nothing is sent or spent.
+#[test]
+fn a_run_with_its_own_engine_gets_the_keys_and_the_app_can_still_change_them() {
+    use craft_anything_engine::tools::asset_tools::AssetKeys;
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path(), "x", "Make a game", TargetRef::None).unwrap();
+    let app = Engine::shared(craft_anything_engine::testing::session(), Vec::new());
+    let mut worker = check_worker(&ws, false);
+    worker.engine = app.for_a_run();
+    worker.attach(&ws).unwrap();
+    assert_eq!(app.session().ext.get::<InboxDir>().unwrap().0, ws.inbox_dir(), "the app still shows the project");
+    let store = crate::KeyStore::file_only(dir.path().join("keys.toml"));
+    store.set(crate::keys::FAL_KEY, "k-1").unwrap();
+    worker.load_asset_keys(&store);
+    assert!(worker.assets);
+    let call =
+        |w: &Worker| w.engine.call("assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"}), CallOptions::new(Caller::Ui)).err().unwrap();
+    assert_eq!(call(&worker).code, ErrorCode::NoPermission, "past the key check");
+    store.delete(crate::keys::FAL_KEY).unwrap();
+    crate::keys::refresh_loaded(&mut app.session(), &store);
+    assert!(app.session().ext.get::<AssetKeys>().is_some());
+    // With no FAL_KEY in this test's environment the key is gone; with one, it stays set up.
+    if std::env::var_os("FAL_KEY").is_none() {
+        assert_eq!(call(&worker).code, ErrorCode::BadSettings, "a removed key stops being spent");
+    }
+}
+
+#[test]
+fn only_a_run_that_would_use_the_apps_session_gets_its_own_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path(), "x", "Make a game", TargetRef::None).unwrap();
+    let hub_with = |roles: &str| {
+        let mut s = craft_anything_engine::testing::session();
+        s.settings.ai = toml::from_str(&format!(
+            "{roles}[[backends]]\nname = \"Agent\"\nkind = \"agent_cli\"\nmodel = \"claude-code\"\n[[backends]]\nname = \"Key\"\nkind = \"openrouter\"\nmodel = \"m\"\n"
+        ))
+        .unwrap();
+        AiHub::new(Arc::new(Engine::new(s)))
+    };
+    let opts = |message: Option<&str>| RunOptions { message: message.map(str::to_string), ..RunOptions::default() };
+    let hub = hub_with("");
+    let cfg = hub.config();
+    let (agent, key) = (cfg.get("Agent").unwrap(), cfg.get("Key").unwrap());
+    assert!(super::needs_its_own_engine(&hub, key, &ws, &opts(None)));
+    assert!(!super::needs_its_own_engine(&hub, agent, &ws, &opts(None)));
+
+    let hub = hub_with("[roles]\nextractor = \"Key\"\n");
+    assert!(super::needs_its_own_engine(&hub, agent, &ws, &opts(None)), "a fresh study may use the Extractor");
+    std::fs::create_dir_all(ws.capture_dir()).unwrap();
+    assert!(!super::needs_its_own_engine(&hub, agent, &ws, &opts(Some("make it blue"))), "a follow-up doesn't");
+}
+
+/// #923: with OpenRouter as the builder, every asset call said "No fal.ai key" with one saved. The
+/// project hasn't turned on generated assets, so nothing is sent or spent.
+#[test]
+fn a_saved_asset_key_gets_an_api_builders_tool_past_the_key_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path(), "x", "Make a game", TargetRef::None).unwrap();
+    let mut worker = check_worker(&ws, false);
+    worker.attach(&ws).unwrap();
+    let call =
+        |w: &Worker| w.engine.call("assets_image_generate", json!({"prompt": "a crate", "save_as": "crate.png"}), CallOptions::new(Caller::Ui)).err().unwrap();
+    assert_eq!(call(&worker).code, ErrorCode::BadSettings, "no key loaded yet");
+    let store = crate::KeyStore::file_only(dir.path().join("keys.toml"));
+    store.set(crate::keys::FAL_KEY, "k-1").unwrap();
+    worker.load_asset_keys(&store);
+    assert_eq!(call(&worker).code, ErrorCode::NoPermission);
+    assert!(worker.assets, "the brief and the tools go by the same read");
 }
 
 fn check_worker(ws: &Workspace, deep: bool) -> Worker {

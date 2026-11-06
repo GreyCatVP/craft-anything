@@ -111,6 +111,8 @@ impl Availability {
 pub struct Engine {
     registry: Registry,
     session: Mutex<Session>,
+    /// The engine this one works beside ([`Engine::for_a_run`]).
+    app: Option<std::sync::Weak<Engine>>,
 }
 
 /// A handle to the engine a tool runs in, for tools that start work which calls back into it (a
@@ -119,7 +121,7 @@ pub struct EngineRef(pub std::sync::Weak<Engine>);
 
 impl Engine {
     pub fn new(session: Session) -> Self {
-        Engine { registry: Registry::with_all_tools(), session: Mutex::new(session) }
+        Engine { registry: Registry::with_all_tools(), session: Mutex::new(session), app: None }
     }
 
     /// The engine as most apps use it: shared, with tools from higher layers (`extra`, e.g. the
@@ -138,8 +140,26 @@ impl Engine {
         std::sync::Arc::new_cyclic(|me| {
             let mut session = session;
             session.ext.insert(std::sync::Arc::new(EngineRef(me.clone())));
-            Engine { registry: Registry::new(tools).with_runtime(runtime), session: Mutex::new(session) }
+            Engine { registry: Registry::new(tools).with_runtime(runtime), session: Mutex::new(session), app: None }
         })
+    }
+
+    /// An engine of its own for work whose tools point its session at one project: the same tools,
+    /// with a session that takes on the person's changes here before each tool call
+    /// ([`Session::follow`]). It's what lets two API-key builds work at once.
+    pub fn for_a_run(self: &std::sync::Arc<Self>) -> std::sync::Arc<Engine> {
+        let session = self.session().for_a_run();
+        let registry = self.registry.clone();
+        std::sync::Arc::new_cyclic(|me| {
+            let mut session = session;
+            session.ext.insert(std::sync::Arc::new(EngineRef(me.clone())));
+            Engine { registry, session: Mutex::new(session), app: Some(std::sync::Arc::downgrade(self)) }
+        })
+    }
+
+    /// The engine this one works beside, if it was made with [`Engine::for_a_run`].
+    pub fn app(&self) -> Option<std::sync::Arc<Engine>> {
+        self.app.as_ref().and_then(std::sync::Weak::upgrade)
     }
 
     pub fn registry(&self) -> &Registry {
@@ -253,6 +273,12 @@ impl Engine {
             }
         };
         session.label(spec.id);
+        // Never waits: if the app's session is busy, this call goes by what it last saw.
+        if let Some(app) = self.app()
+            && let Some(app) = app.try_session()
+        {
+            session.follow(&app);
+        }
         if session.clean_room() && !clean_room::allows(spec.id) {
             return Err(clean_room::refusal(spec.id));
         }
@@ -309,6 +335,66 @@ mod tests {
         let e = Engine::new(crate::testing::session());
         let err = e.call("no_such_tool", Value::Null, CallOptions::new(Caller::Cli)).unwrap_err();
         assert_eq!(err.code, ErrorCode::BadInput);
+    }
+
+    /// Two API-key builds in one session wrote into whichever project started last.
+    #[test]
+    fn runs_with_their_own_engines_keep_to_their_own_projects() {
+        use crate::inbox::InboxDir;
+        use crate::workspace::{TargetRef, Workspace};
+        let d = tempfile::tempdir().unwrap();
+        let app = Engine::shared(crate::testing::session(), Vec::new());
+        let start = |name: &str| {
+            let ws = Workspace::create(d.path(), name, "A game", TargetRef::None).unwrap();
+            let run = app.for_a_run();
+            run.session().ext.insert(std::sync::Arc::new(InboxDir(ws.inbox_dir())));
+            (ws, run)
+        };
+        let ((ws_a, a), (ws_b, b)) = (start("A"), start("B"));
+        for (run, who) in [(&a, "a"), (&b, "b")] {
+            run.call(
+                "build_file_write",
+                serde_json::json!({"path": "app/who.txt", "content": who}),
+                CallOptions::new(Caller::Mcp).with_consent(Consent::Granted),
+            )
+            .unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(ws_a.app_dir().join("who.txt")).unwrap(), "a");
+        assert_eq!(std::fs::read_to_string(ws_b.app_dir().join("who.txt")).unwrap(), "b");
+        assert!(app.session().ext.get::<InboxDir>().is_none(), "the app's session isn't pointed anywhere by them");
+    }
+
+    /// What the person changes in the app reaches a run that's working: settings, a removed key,
+    /// and what they've allowed for its project.
+    #[test]
+    fn a_run_with_its_own_engine_takes_on_changes_made_in_the_app() {
+        use crate::project::{Project, Purpose};
+        use crate::tools::asset_tools::AssetKeys;
+        let d = tempfile::tempdir().unwrap();
+        let project = Project::create(d.path(), "A", Purpose::default()).unwrap();
+        let app = Engine::shared(crate::testing::session(), Vec::new());
+        app.session().ext.insert(std::sync::Arc::new(AssetKeys([("fal".to_string(), "k-1".to_string())].into())));
+        let run = app.for_a_run();
+        assert_eq!(run.session().ext.get::<AssetKeys>().unwrap().get("fal"), Some("k-1"), "it starts with them");
+        assert!(std::sync::Arc::ptr_eq(&run.app().unwrap(), &app));
+        let (mut with_app, mut with_run) = (project.clone(), project);
+        with_app.meta.allowed_tools.clear();
+        with_run.meta.allowed_tools.clear();
+        app.session().project = Some(with_app);
+        run.session().project = Some(with_run);
+
+        let auto = !app.session().settings.auto_mode;
+        {
+            let mut s = app.session();
+            s.settings.auto_mode = auto;
+            s.ext.remove::<AssetKeys>();
+            s.project.as_mut().unwrap().meta.allowed_tools.push("some_tool".into());
+        }
+        let _ = run.call("core_session_show", Value::Null, CallOptions::new(Caller::Cli));
+        let s = run.session();
+        assert_eq!(s.settings.auto_mode, auto);
+        assert!(s.ext.get::<AssetKeys>().is_none(), "a removed key stops being spent");
+        assert!(s.project.as_ref().unwrap().is_allowed("some_tool"));
     }
 
     #[test]

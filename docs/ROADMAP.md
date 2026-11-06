@@ -330,6 +330,15 @@ Owner: open · Status: todo
       "400: Provider returned error" (#369): a request with tools now sets
       `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
       text protocol like any server that rejects tools
+- [x] A saved fal.ai key reaches an API-key build's asset tools; every call said "No fal.ai key"
+      (#923). Outside a project the tools now say that instead. Not checked with a real fal.ai key
+      or API build
+- [x] Each API-key build has an engine of its own: sharing the app's session, whose `attach` points
+      at whichever project started last, sent a build's files and asset spending to the wrong project
+      (`build.parallel` is 2 by default). It takes on settings, keys and project permissions from the
+      app before each tool call. Unit-tested; two real API-key builds at once not run yet
+- [ ] A setting a builder changes with `settings_set` (Deep mode only) stays in its own engine and
+      file: the app's copy doesn't hear of it, and the app's next save can overwrite it
 - [ ] Check #369 live with Kimi K3 and a key limited to Kimi/Moonshot models (needs the person's
       OpenRouter key): that the build starts, or that the error now names the provider's reason
 - [ ] A live API-key build (needs a key on the test machine)

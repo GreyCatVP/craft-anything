@@ -105,6 +105,38 @@ impl Session {
         Session { settings, config_dir: Some(dir.to_path_buf()), ..Default::default() }
     }
 
+    /// A session for one piece of work beside this one ([`crate::Engine::for_a_run`]): the same
+    /// settings, plugins and keys, and nothing open.
+    pub fn for_a_run(&self) -> Session {
+        let mut run = Session { config_dir: self.config_dir.clone(), ..Default::default() };
+        if let Some(plugins) = self.ext.get::<crate::plugins::Plugins>() {
+            run.ext.insert(plugins);
+        }
+        run.follow(self);
+        run
+    }
+
+    /// Take on what the person changes in the app while this session works: settings, asset keys
+    /// and what they've allowed for this project.
+    pub fn follow(&mut self, app: &Session) {
+        use crate::tools::asset_tools::AssetKeys;
+        use craft_anything_engines::assets::AssetProviders;
+        self.settings.clone_from(&app.settings);
+        self.deep_for_run = app.deep_for_run;
+        match app.ext.get::<AssetKeys>() {
+            Some(keys) => self.ext.insert(keys),
+            None => drop(self.ext.remove::<AssetKeys>()),
+        }
+        if let Some(providers) = app.ext.get::<AssetProviders>() {
+            self.ext.insert(providers);
+        }
+        if let (Some(mine), Some(theirs)) = (self.project.as_mut(), app.project.as_ref())
+            && mine.root == theirs.root
+        {
+            mine.meta.allowed_tools.clone_from(&theirs.meta.allowed_tools);
+        }
+    }
+
     /// Keep a project started in a folder the person picked in the project list
     /// ([`Settings::remember_project`]), saving settings when that changed them.
     pub fn remember_project(&mut self, root: &std::path::Path) -> Result<(), craft_anything_evidence::ToolError> {

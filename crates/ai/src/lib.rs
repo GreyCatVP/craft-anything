@@ -384,6 +384,11 @@ impl AiHub {
         AiHub { engine, settings_path: Some(settings_path), keys }
     }
 
+    /// This hub with an engine of its own for one run (see [`Engine::for_a_run`]).
+    pub(crate) fn for_a_run(&self) -> Self {
+        AiHub { engine: self.engine.for_a_run(), settings_path: self.settings_path.clone(), keys: self.keys.clone() }
+    }
+
     fn settings_path(&self) -> PathBuf {
         self.settings_path.clone().unwrap_or_else(Settings::path)
     }
@@ -698,11 +703,16 @@ impl AiHub {
 
     /// Remove a backend and its stored key. Returns false when there was no such backend.
     pub fn remove_backend(&self, name: &str) -> Result<bool, ToolError> {
+        if self.config_to_change()?.get(name).is_none() {
+            return Ok(false);
+        }
+        // The key first: if it can't be removed the backend stays, so this can be tried again. The
+        // settings are read after it, because the keychain can take seconds and they may change.
+        self.keys.delete(name)?;
         let mut cfg = self.config_to_change()?;
         let removed = cfg.remove(name);
         if removed {
             self.save_config(&cfg)?;
-            self.keys.delete(name)?;
         }
         Ok(removed)
     }
@@ -720,6 +730,12 @@ impl AiHub {
 
     pub fn remove_asset_key(&self, provider: &str) -> Result<(), ToolError> {
         self.keys.delete(&keys::asset_key_name(provider))
+    }
+
+    /// See [`keys::refresh_loaded`]: for callers that don't hold the session. It can wait for a
+    /// running tool, so never call it from the UI thread or a tool.
+    pub fn refresh_loaded_asset_keys(&self) {
+        keys::refresh_loaded(&mut self.engine.session(), &self.keys);
     }
 
     /// The provider's key is stored or in its environment variable.
