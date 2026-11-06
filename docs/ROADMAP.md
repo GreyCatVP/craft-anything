@@ -612,8 +612,10 @@ Owner: open · Status: in progress
       fix if the helper is missing. Verified: POSIX-shell regression test (`the_remote_line_runs_on_a_posix_shell`)
       and an SSH round-trip to localhost (probe, byte-exact write, mode, cleanup). Not run with a live
       agent over SSH. — claimed: jelassiaymen94, branch feature/r2.2-opencode-remote-mcp
-- [ ] Make `the_remote_line_runs_on_a_posix_shell` accept the shell's missing-command status:
-      on macOS, `command -v` returns 1 rather than the asserted 127; the full AI suite fails.
+- [x] Make `the_remote_line_runs_on_a_posix_shell` accept the shell's missing-command status:
+      assert failure rather than 127, isolate PATH from installed helpers, and verify that a
+      missing helper writes nothing in a fresh home. The shell uses the bounded process runner.
+      Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).

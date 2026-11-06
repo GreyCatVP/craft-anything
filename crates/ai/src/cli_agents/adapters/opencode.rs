@@ -391,48 +391,55 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn the_remote_line_runs_on_a_posix_shell() {
-        use std::ffi::OsStr;
-        use std::os::unix::fs::PermissionsExt;
+        use craft_anything_platform::process::Process;
+        use std::os::unix::fs::{PermissionsExt, symlink};
 
-        let root = std::env::temp_dir().join(format!("craft-anything-remote-line-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("bin")).unwrap();
-        std::fs::create_dir_all(root.join("home")).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        let missing_bin = root.path().join("missing-bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::create_dir(&missing_bin).unwrap();
         // A fake helper on PATH, so `command -v craft-anything-cli` succeeds or fails on purpose.
-        std::fs::write(root.join("bin/craft-anything-cli"), "#!/bin/sh\nexit 0\n").unwrap();
-        std::fs::set_permissions(root.join("bin/craft-anything-cli"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(bin.join("craft-anything-cli"), "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(bin.join("craft-anything-cli"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Keep both paths isolated from any real helper installed on the test machine.
+        for utility in ["mkdir", "chmod", "mv"] {
+            symlink(Path::new("/bin").join(utility), bin.join(utility)).unwrap();
+            symlink(Path::new("/bin").join(utility), missing_bin.join(utility)).unwrap();
+        }
 
-        let home = root.join("home");
-        let bin = root.join("bin");
+        let home = root.path().join("home");
         let mcp = McpCommand { command: "craft-anything-cli".into(), args: vec!["mcp".into(), "--clean-room".into()], notes: None };
         let content = config_content(&mcp);
         let name = config_name(&content);
         let line = remote_prepare_line(&name, &content);
 
-        let run = |path: &OsStr| {
-            std::process::Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "export HOME={}; export PATH={}:/usr/bin:/bin; {line}",
-                    crate::ssh::shell_quote(&home.display().to_string()),
-                    crate::ssh::shell_quote(&path.to_string_lossy())
-                ))
-                .output()
+        let run = |path: &Path, home: &Path| {
+            Process::new("/bin/sh")
+                .args(["-c", &line])
+                .env_clear()
+                .env("HOME", home)
+                .env("PATH", path)
+                .timeout(Duration::from_secs(5))
+                .idle_timeout(Duration::from_secs(5))
+                .stdout_cap(4096)
+                .stderr_cap(4096)
+                .run()
                 .unwrap()
         };
-        let ok = run(bin.as_os_str());
-        assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+        let ok = run(&bin, &home);
+        assert!(ok.success, "{}", ok.stderr_text());
         let target = home.join(".cache/craft-anything").join(&name);
         assert_eq!(std::fs::read(&target).unwrap(), content.as_bytes());
         assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
 
-        // The helper missing: the line fails fast (127) and writes nothing.
-        let missing = run(OsStr::new("/nonexistent-craft-anything-xyz"));
-        assert_eq!(missing.status.code(), Some(127));
-        let leftover = home.join(".cache/craft-anything").join(format!("{name}.tmp.1"));
-        assert!(!leftover.exists());
-
-        std::fs::remove_dir_all(&root).ok();
+        // POSIX requires a nonzero lookup status, but shells differ on its exact value.
+        // A fresh home proves the failed lookup stops before any config directory or file is written.
+        let missing_home = root.path().join("missing-home");
+        let missing = run(&missing_bin, &missing_home);
+        assert!(!missing.success, "a missing helper must refuse setup");
+        assert!(missing.code.is_some(), "the shell must exit normally");
+        assert!(!missing_home.exists(), "a missing helper must not write anything");
     }
 
     #[test]
