@@ -1308,7 +1308,8 @@ mod launch_tests {
         let (started, heartbeat) = stop_after_descendant_startup(&l, dir.path(), Duration::from_secs(5));
         assert!(started, "descendant never signalled that it started");
         assert!(heartbeat, "descendant never produced a heartbeat");
-        let alive = std::fs::File::open(dir.path().join("descendant-alive")).unwrap();
+        // Exclusive locks may need write access (e.g. on NFS), so open for reading and writing.
+        let alive = std::fs::OpenOptions::new().read(true).write(true).open(dir.path().join("descendant-alive")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             match alive.try_lock() {
