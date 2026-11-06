@@ -724,6 +724,16 @@ ACP's `session/new`; explicit `--additional-mcp-config` made it available. An em
 `--available-tools=` restored native tools instead of disabling them. Verify the tools actually
 sent to a fake local model, including the no-tools case, before trusting startup or argument tests.
 
+**ACP extra arguments reached the agent unchanged.** Cursor Agent's default `acp_options` forwards
+`options.args`, so `--force`/`-f`/`--yolo` can skip its approval channel. ACP-only adapters refuse
+extra arguments (as Copilot does) and do not put them on argv.
+
+**ACP marked a session ready from its id while MCP never started.** Cursor CLI 2026.06.04 accepted
+`session/new.mcpServers` and then ran without those tools. If the session reports MCP status, fail
+when ours is missing, including an explicit empty `mcpServers` list. A missing field, or an entry
+with no status, is not a report. Questions send no server, so an empty list there is expected.
+For Cursor, refuse versions before 2026.06.05.
+
 **Shell quoting breaks generated edits.** Heredocs carrying Python with quotes, `'''` or `\n` were
 mangled by the shell several times. Write multi-line edit scripts to a file and run the file.
 

@@ -43,6 +43,7 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("codex", "codex", "Codex"),
     ("copilot", "copilot", "GitHub Copilot"),
     ("gemini-cli", "gemini", "Gemini CLI"),
+    ("agent", "agent", "Cursor Agent"),
     ("antigravity", "agy", "Antigravity"),
     ("opencode", "opencode", "OpenCode"),
     ("hermes", "hermes", "Hermes Agent"),
@@ -2393,7 +2394,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         reg.register(Arc::new(EchoAgent));
         assert_eq!(
             format!("{reg:?}"),
-            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "copilot", "dsh", "echo-agent"]"#
+            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "copilot", "agent", "dsh", "echo-agent"]"#
         );
     }
 
