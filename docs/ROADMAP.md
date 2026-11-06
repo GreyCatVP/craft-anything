@@ -344,7 +344,12 @@ Owner: open · Status: todo
 Owner: open · Status: todo
 Golden rule 3: the result is evidence. All four tickets are confirmed in the code, with no PR yet.
 Each fix needs a Mac to test on.
-- [ ] macOS: a denied Accessibility permission is reported as success with an empty tree (#240)
+- [x] macOS: a denied Accessibility permission is reported as success with an empty tree (#240).
+      An `error` from the helper is now a tool error (`no_permission` with the System Settings
+      path for this one), for `runtime_ui_read` and `runtime_ui_walkthrough_record` alike
+      — claimed: Term56, branch bugfix/r5.6-accessibility-denied
+- [ ] Check #240 live on a Mac without the Accessibility permission: `runtime_ui_read` fails with
+      the System Settings hint instead of reading 0 nodes
 - [ ] macOS: `runtime_ui_read` ignores `screenshot` (#248) and `accessibility` (#307): the Swift
       helper declares both and reads neither
 - [ ] macOS: call observation writes a literal `\n` into its lldb callback, so the Python is

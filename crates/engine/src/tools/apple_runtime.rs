@@ -269,6 +269,26 @@ fn lldb_failure(success: bool, code: Option<i32>, stderr: &str) -> Option<ToolEr
     )
 }
 
+/// An `error` from the accessibility helper is not an observation: without the Accessibility
+/// permission it reads nothing and answers `{"error": …, "nodes": []}`, which was reported as a
+/// successful read of zero nodes (#240).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn helper_error(result: &Value) -> Option<ToolError> {
+    let error = result.get("error")?;
+    let message = error.as_str().unwrap_or("an error it didn't describe");
+    if message == "accessibility permission not granted" {
+        return Some(
+            ToolError::new(ErrorCode::NoPermission, "macOS didn't allow reading other apps' screens, so nothing was read.")
+                .with_remediation("Turn on the app that runs Craft Anything (Craft Anything itself, or the terminal the CLI runs in) in System Settings → Privacy & Security → Accessibility, then try again.")
+                .with_details(serde_json::json!({"helper_error": message})),
+        );
+    }
+    Some(
+        ToolError::new(ErrorCode::ProgramFailed, format!("The accessibility helper stopped with an error, so nothing was read: {message}."))
+            .with_details(serde_json::json!({"helper_error": error})),
+    )
+}
+
 /// Build an lldb Python command that sets breakpoints, runs, and prints each hit as JSON.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn lldb_script(p: &ObserveCallsParams) -> String {
@@ -431,7 +451,12 @@ mod macos {
             .run_checked();
         let _ = std::fs::remove_dir_all(&root);
         let out = out?;
-        serde_json::from_slice(&out.stdout).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("accessibility helper output was not JSON: {e}")))
+        let result: Value = serde_json::from_slice(&out.stdout)
+            .map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("accessibility helper output was not JSON: {e}")))?;
+        match super::helper_error(&result) {
+            Some(e) => Err(e),
+            None => Ok(result),
+        }
     }
 
     pub fn runtime_ui_read(ctx: &mut Ctx<'_>, p: ObserveUiParams) -> Result<ToolOutput, ToolError> {
@@ -741,6 +766,23 @@ mod tests {
         assert_eq!(e.code, craft_anything_evidence::ErrorCode::ProgramFailed);
         assert!(e.message.contains("exited with code 1") && e.message.contains("SyntaxError") && e.message.contains("nothing was observed"), "{}", e.message);
         assert!(lldb_failure(false, None, "").unwrap().message.contains("stopped by the system"));
+    }
+
+    /// The helper's answer without the Accessibility permission is an error, not zero nodes (#240).
+    #[test]
+    fn a_denied_accessibility_permission_is_an_error_not_an_empty_tree() {
+        use super::helper_error;
+        let e = helper_error(&json!({"error": "accessibility permission not granted", "nodes": []})).unwrap();
+        assert_eq!(e.code, craft_anything_evidence::ErrorCode::NoPermission);
+        assert!(e.message.contains("nothing was read"), "{}", e.message);
+        assert!(e.remediation.as_deref().is_some_and(|r| r.contains("Privacy & Security → Accessibility")));
+        // Any other error the helper reports is an error too, with its words.
+        let e = helper_error(&json!({"error": "unknown command"})).unwrap();
+        assert_eq!(e.code, craft_anything_evidence::ErrorCode::ProgramFailed);
+        assert!(e.message.contains("unknown command"), "{}", e.message);
+        // A read, even of nothing, is still a read.
+        assert!(helper_error(&json!({"nodes": [], "truncated": false})).is_none());
+        assert!(helper_error(&json!({"steps": [], "nodes_before": [], "nodes_after": []})).is_none());
     }
 
     /// A line break in a name or argument would add a command to the command file.
