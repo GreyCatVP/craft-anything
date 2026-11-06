@@ -337,7 +337,7 @@ been run live.
       #417's case both turns put "### Summary:" after their one `json` fence, nothing ran, and the
       build stopped after two turns with no files. The next message now says that it wasn't run
       — PR #1028, branch bugfix/r5.4-fenced-call-summary
-- [ ] Keep the retry condition when `Action:` or `Final Answer:` appears between fenced
+- [x] Keep the retry condition when `Action:` or `Final Answer:` appears between fenced
       calls, without rejecting ordinary words between calls (PR #1031 review)
       — claimed: Codex, branch bugfix/r5.4-fenced-call-followup
 - [ ] A local builder spends its rounds on the project file and never writes the app: run 4 had a
