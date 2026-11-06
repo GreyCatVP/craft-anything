@@ -63,6 +63,17 @@ fn stack_choice() {
 }
 
 #[test]
+fn the_word_player_alone_is_not_a_game() {
+    for request in ["A video player for my films", "a music player", "Um player de vídeo com canais, filmes e séries"] {
+        assert_eq!(choose(request, &TargetRef::None).0, "app", "{request}");
+    }
+    assert_eq!(choose("Um player de vídeo desktop, use Electron", &TargetRef::None), ("app", "Electron"));
+    for request in ["A multiplayer shooter", "A single-player adventure", "a 2-player chess board", "A game with one player"] {
+        assert_eq!(choose(request, &TargetRef::None).0, "game", "{request}");
+    }
+}
+
+#[test]
 fn german_requests_keep_their_project_kind() {
     for request in ["Ein einfaches Snake-Spiel", "Dasselbe Spiel mit einer Bestenliste"] {
         assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
