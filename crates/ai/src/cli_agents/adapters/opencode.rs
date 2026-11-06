@@ -388,6 +388,7 @@ mod tests {
         assert_eq!(octal_escape(&[0x00, 0x27, 0x5C]), "\\000\\047\\134");
     }
 
+    /// Check private config creation and refusal without writes when the remote helper is absent.
     #[test]
     #[cfg(unix)]
     fn the_remote_line_runs_on_a_posix_shell() {
@@ -404,8 +405,10 @@ mod tests {
         std::fs::set_permissions(bin.join("craft-anything-cli"), std::fs::Permissions::from_mode(0o755)).unwrap();
         // Keep both paths isolated from any real helper installed on the test machine.
         for utility in ["mkdir", "chmod", "mv"] {
-            symlink(Path::new("/bin").join(utility), bin.join(utility)).unwrap();
-            symlink(Path::new("/bin").join(utility), missing_bin.join(utility)).unwrap();
+            let installed = craft_anything_platform::which(utility).unwrap();
+            let executable = installed.canonicalize().unwrap();
+            symlink(&executable, bin.join(utility)).unwrap();
+            symlink(&executable, missing_bin.join(utility)).unwrap();
         }
 
         let home = root.path().join("home");

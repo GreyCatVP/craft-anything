@@ -78,6 +78,10 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 
 ## Tests
 
+**An isolated PATH still assumed system utilities lived in `/bin`.** The remote setup fixture
+linked `mkdir`, `chmod` and `mv` there, so a host with utilities elsewhere got dangling links.
+Resolve fixture utilities on the host, make their paths absolute, then populate the private PATH.
+
 **Python compilation reused stale bytecode after a fast edit.** The new-project toolchain probe
 changed valid Python to a syntax error within the same mtime second. `compileall` skipped it and
 exited zero; the screenshot run then failed instead. Use `compileall -f` for a build check, and

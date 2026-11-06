@@ -615,7 +615,8 @@ Owner: open · Status: in progress
       agent over SSH. — claimed: jelassiaymen94, branch feature/r2.2-opencode-remote-mcp
 - [x] Make `the_remote_line_runs_on_a_posix_shell` accept the shell's missing-command status:
       assert failure rather than 127, isolate PATH from installed helpers, and verify that a
-      missing helper writes nothing in a fresh home. The shell uses the bounded process runner.
+      missing helper writes nothing in a fresh home. Fixture utilities use host lookup rather than
+      assuming `/bin`; the shell uses the bounded process runner.
       Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
