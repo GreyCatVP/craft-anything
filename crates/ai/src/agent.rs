@@ -470,7 +470,7 @@ impl AgentLoop {
         let backend = self.chain.get(self.current).map(|s| s.name.clone()).unwrap_or_default();
         self.emit(AgentEvent::TurnDone {
             backend,
-            input_tokens: msg_usage.input_tokens,
+            input_tokens: msg_usage.input_tokens.saturating_add(msg_usage.cache_read_tokens).saturating_add(msg_usage.cache_write_tokens),
             output_tokens: msg_usage.output_tokens,
             cost_usd: msg_cost,
             cost_is_estimate: false,
@@ -1243,7 +1243,8 @@ pub(crate) mod tests {
             assert!(seen[3].len() < seen[1].len() + 2);
         }
         assert!(
-            matches!(events.last(), Some(AgentEvent::TurnDone { input_tokens: 60, output_tokens: 19, cost_usd: Some(cost), .. }) if (cost - 0.00010125).abs() < 1e-12),
+            // Cached tokens count as input (R5.4: Ollama 0.40 reports them, and usage.json left them out).
+            matches!(events.last(), Some(AgentEvent::TurnDone { input_tokens: 70, output_tokens: 19, cost_usd: Some(cost), .. }) if (cost - 0.00010125).abs() < 1e-12),
             "{events:?}"
         );
         {

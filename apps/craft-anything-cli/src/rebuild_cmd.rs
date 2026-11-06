@@ -38,7 +38,8 @@ pub struct RebuildArgs {
     /// the computer stopped); the request is ignored.
     #[arg(long, requires = "continue_in")]
     pub resume: bool,
-    /// The coding agent to use (a backend name from `ai list`).
+    /// The coding agent to use (an enabled backend name from `ai list`, or an installed agent
+    /// such as `Claude Code`).
     #[arg(long)]
     pub backend: Option<String>,
     /// Refinement rounds after the first build.
@@ -71,12 +72,21 @@ pub fn rebuild(cli: &Cli, a: &RebuildArgs) -> u8 {
     }
 }
 
-/// Use the configured agent app, or add the first one found on this computer.
-fn ensure_agent(hub: &AiHub) -> Result<(), ToolError> {
-    if hub.backends().iter().any(|b| b.kind == BackendKind::AgentCli && b.enabled) {
+/// Add the agent app this run asks for, or the first one found when no enabled AI can build.
+fn ensure_agent(hub: &AiHub, requested: Option<&str>) -> Result<(), ToolError> {
+    let configured = hub.backends();
+    // An enabled backend can build, so a run that names none needs no agent app.
+    if requested.is_none() && configured.iter().any(|b| b.enabled) {
         return Ok(());
     }
-    if let Some(d) = hub.detect().into_iter().find(|d| d.suggestion.kind == BackendKind::AgentCli) {
+    // A name that is configured is left alone (including a backend that is off): don't add a
+    // second one under the same name; the run itself refuses a backend that is off.
+    if requested.is_some_and(|name| configured.iter().any(|b| b.name == name)) {
+        return Ok(());
+    }
+    // An explicit name may be an installed agent that isn't added yet: add only that one. With no
+    // name, add the first agent found.
+    if let Some(d) = hub.detect().into_iter().find(|d| d.suggestion.kind == BackendKind::AgentCli && requested.is_none_or(|name| d.suggestion.name == name)) {
         eprintln!("Using {} ({}).", d.suggestion.name, d.reason);
         hub.add_backend(d.suggestion, None)?;
     }
@@ -86,13 +96,18 @@ fn ensure_agent(hub: &AiHub) -> Result<(), ToolError> {
 fn run(cli: &Cli, a: &RebuildArgs) -> Result<bool, ToolError> {
     let engine = make_engine(None, cli.deep_for_run())?;
     let hub = AiHub::new(engine.clone());
-    ensure_agent(&hub)?;
     if a.build_with.is_some() && a.continue_in.is_some() {
         return Err(ToolError::invalid("--build-with is for new projects; a project keeps the stack it was built with.")
             .with_remediation("Leave out --build-with, or start a new project."));
     }
     if a.generate_assets && a.continue_in.is_some() {
         return Err(ToolError::invalid("--generate-assets is for new projects.").with_remediation("Use project-assets-allow for an existing project."));
+    }
+    ensure_agent(&hub, a.backend.as_deref())?;
+    // Refuse an unknown or switched-off name before opening or making a project: a command that
+    // can't build must not leave a new folder behind.
+    if let Some(name) = a.backend.as_deref() {
+        rebuild::builder_backend(&hub.config(), Some(name))?;
     }
     let (ws, message) = match &a.continue_in {
         Some(dir) => (Workspace::open(&std::path::absolute(dir).map_err(|e| ToolError::io(dir.display(), e))?)?, (!a.resume).then(|| a.request.clone())),

@@ -31,12 +31,15 @@ fn wait(h: &mut Harness<'static, CraftApp>, done: impl Fn(&CraftApp) -> bool) ->
     false
 }
 
+/// First run goes from the welcome to the AI step, with the window controls there throughout.
 #[test]
 fn first_run_walks_through_four_screens() {
     let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
     h.run_steps(3);
-    // The window controls are there from the first screen (the native frame is off).
-    h.get_by_label("Close");
+    // The window controls are there from the first screen (the native frame is off; macOS draws its own).
+    if !craft_anything_ui_egui::titlebar::NATIVE_FRAME {
+        h.get_by_label("Close");
+    }
     h.get_by_label("I'm new to this").click();
     h.run_steps(3);
     assert_eq!(h.state().state.first_run, FirstRunStep::Brain);
@@ -389,6 +392,41 @@ fn the_builders_checklist_is_pinned_above_the_prompt_box() {
     h.get_by_label("1 of 3 done");
     h.get_by_label("Add the snake");
     h.get_by_label("Keep score");
+}
+
+/// #826: a long plan scrolls instead of pushing the feed away, and the divider above it sets how
+/// tall it is, with the keyboard too; a double-click goes back to the usual height.
+#[test]
+fn a_long_plan_scrolls_and_its_divider_sets_its_height() {
+    use craft_anything_ui_egui::state::{FeedItem, PlanStatus, PlanStep};
+    const DIVIDER: &str = "Drag to give the plan more or less room; double-click to reset";
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::fill_project(&mut a);
+        let steps = (1..=40).map(|n| PlanStep { text: format!("Step {n}"), doing: String::new(), status: PlanStatus::Todo }).collect();
+        a.state.feed.push(FeedItem::Plan(steps));
+        a
+    });
+    h.run_steps(3);
+    let top = |h: &Harness<'static, CraftApp>| h.get_by_label(DIVIDER).rect().top();
+    let usual = top(&h);
+    assert!(usual > 820.0 / 3.0, "the feed keeps room above a long plan: the plan starts at {usual}");
+    h.get_by_label(DIVIDER).focus();
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(3);
+    let taller = h.state().state.plan_height.expect("Up gives the plan more room");
+    assert!((top(&h) - (usual - 24.0)).abs() < 1.0, "the plan grew upwards by a step: {} from {usual}", top(&h));
+    // Both clicks in one frame, so they're a double-click.
+    let at = h.get_by_label(DIVIDER).rect().center();
+    h.hover_at(at);
+    h.step();
+    for pressed in [true, false, true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    h.run_steps(3);
+    assert_eq!(h.state().state.plan_height, None, "a double-click resets {taller}");
+    assert!((top(&h) - usual).abs() < 1.0);
 }
 
 #[test]
@@ -990,6 +1028,23 @@ fn workbench_lists_fall_back_gracefully() {
 }
 
 #[test]
+fn the_agent_console_status_stays_clear_of_its_tabs_when_narrow() {
+    let mut h = harness_sized(egui::vec2(1000.0, 500.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    let log = h.get_by_label("Log").rect();
+    let row = log.y_range();
+    let status: Vec<_> = h.query_all_by_label_contains("findings").map(|n| n.rect()).filter(|r| row.contains(r.center().y)).collect();
+    assert!(!status.is_empty(), "the status is on the tabs' row");
+    for s in status {
+        assert!(log.right() <= s.left(), "the Log tab ends at {} and the status starts at {}", log.right(), s.left());
+    }
+}
+
+#[test]
 fn the_agent_console_keeps_its_size() {
     // The console's history and prompt box came out 17 points taller than the panel, so the panel
     // grew by that every frame until its maximum, and then the top of its tabs was cut off.
@@ -1005,6 +1060,83 @@ fn the_agent_console_keeps_its_size() {
     let top = h.get_by_label("Agent").rect().top();
     h.run_steps(10);
     assert_eq!(h.get_by_label("Agent").rect().top(), top, "the agent console grew while nothing changed");
+}
+
+#[test]
+fn the_agent_console_prompt_box_starts_tall_and_grows_inside_the_window() {
+    // #942: it started one line tall, too short to read what was being typed.
+    let mut h = harness_sized(egui::vec2(1920.0, 1030.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    assert!(wait(&mut h, |a| a.jobs.running().all(|j| !j.visible)), "the lists finished loading");
+    h.get_by_label("Agent").click();
+    h.run_steps(4);
+    let empty = h.get_by_label("Ask a question").rect().height();
+    assert!(empty >= 50.0, "room for three lines, got {empty}");
+    let hint = "Enter to send · Shift+Enter for a new line";
+
+    // Eight lines fit: the field isn't scrolled, so its rect is what's on screen.
+    h.state_mut().state.input = ["a line"; 8].join("\n");
+    h.run_steps(6);
+    let field = h.get_by_label("Ask a question").rect();
+    let (tabs, below) = (h.get_by_label("Agent").rect(), h.get_by_label(hint).rect());
+    assert!(field.height() > empty * 2.0, "it grows as lines are added: {} after {empty}", field.height());
+    assert!(field.top() >= tabs.bottom() && field.bottom() <= below.top(), "all eight lines show: tabs={tabs:?}, field={field:?}, hint={below:?}");
+
+    // Past what fits it scrolls, and the console settles with its tabs and send row in the window.
+    h.state_mut().state.input = ["a line"; 60].join("\n");
+    h.run_steps(6);
+    let (tabs, below) = (h.get_by_label("Agent").rect(), h.get_by_label(hint).rect());
+    h.run_steps(20);
+    assert_eq!(h.get_by_label("Agent").rect(), tabs, "the console settles");
+    assert!(tabs.top() >= 0.0 && below.bottom() <= 1030.0, "the tabs and the send row stay in the window: tabs={tabs:?}, hint={below:?}");
+}
+
+#[test]
+fn the_agent_console_leaves_room_for_the_code_in_a_small_window() {
+    let mut h = harness_sized(egui::vec2(1000.0, 500.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    assert!(wait(&mut h, |a| a.jobs.running().all(|j| !j.visible)), "the lists finished loading");
+    h.get_by_label("Agent").click();
+    h.run_steps(4);
+    let top = h.get_by_label("Agent").rect().top();
+    assert!(top > 200.0, "the console's tabs start at {top} of 500");
+}
+
+#[test]
+fn the_agent_console_opens_at_its_default_size() {
+    // The first frame guessed the prompt box too short; the panel grew to fit and saved that size.
+    let mut h = harness_sized(egui::vec2(1920.0, 1030.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    let top = h.get_by_label("Agent").rect().top();
+    assert!((750.0..765.0).contains(&top), "a 280-point console's tabs start just below 750, got {top}");
+
+    // Dragging its top edge resizes it, and it stays that size (#942).
+    let edge = egui::pos2(900.0, 750.0);
+    h.hover_at(edge);
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton { pos: edge, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.step();
+    let up = edge - egui::vec2(0.0, 100.0);
+    h.hover_at(up);
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton { pos: up, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(10);
+    let dragged = h.get_by_label("Agent").rect().top();
+    assert!((650.0..665.0).contains(&dragged), "its edge dragged up to 650, the tabs just below it, got {dragged}");
+    h.run_steps(10);
+    assert_eq!(h.get_by_label("Agent").rect().top(), dragged, "it stays at that size");
 }
 
 #[test]
@@ -1292,6 +1424,61 @@ fn claude_codes_account_folder_is_set_in_settings() {
     h.run_steps(2);
     h.get_by_label("Add another").click();
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
+}
+
+/// Zoom keys stop at 50% and 200%, Cmd/Ctrl 0 goes back to 100%, and a zoom saved outside the
+/// range comes back inside it.
+#[test]
+fn zoom_stays_between_half_and_double() {
+    fn press(h: &mut Harness<'static, CraftApp>, key: egui::Key, times: usize) {
+        for _ in 0..times {
+            h.key_press_modifiers(egui::Modifiers::COMMAND, key);
+            h.run_steps(2);
+        }
+    }
+    let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
+    h.run_steps(2);
+    press(&mut h, egui::Key::Minus, 12);
+    assert_eq!(h.ctx.zoom_factor(), 0.5);
+    press(&mut h, egui::Key::Equals, 20);
+    assert_eq!(h.ctx.zoom_factor(), 2.0);
+    press(&mut h, egui::Key::Num0, 1);
+    assert_eq!(h.ctx.zoom_factor(), 1.0);
+    h.ctx.set_zoom_factor(0.2);
+    h.run_steps(3);
+    assert_eq!(h.ctx.zoom_factor(), 0.5);
+    assert_eq!(craft_anything_ui_egui::bounded_zoom(f32::NAN), 1.0);
+}
+
+/// macOS keeps its own window buttons beside the title bar, and they don't zoom, so the bar
+/// doesn't either: at 50%, 100% and 150% its controls keep their size and place on screen (zoomed
+/// points times the zoom), while the body below does zoom.
+#[cfg(target_os = "macos")]
+#[test]
+fn title_bar_keeps_its_size_when_zoomed() {
+    let on_screen = |zoom: f32| {
+        let mut h = harness_sized(egui::vec2(1360.0, 600.0), || demo::app(demo::engine(Mode::Experienced, true)));
+        h.ctx.set_zoom_factor(zoom);
+        h.run_steps(4);
+        // The topmost node with the label: Settings and Advanced appear in the bar first.
+        let rect = |label: &str| {
+            let r = h.get_all_by_label(label).map(|n| n.rect()).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+            egui::Rect::from_min_max(r.min * zoom, r.max * zoom)
+        };
+        (rect("Settings"), rect("Advanced"), rect("Filter"))
+    };
+    let (settings, advanced, filter) = on_screen(1.0);
+    // The bar is the system title bar's height, and its controls sit centred in it.
+    assert!((settings.center().y - 16.0).abs() <= 1.0, "settings button at {settings:?}");
+    for zoom in [0.5, 1.5] {
+        let (s, a, f) = on_screen(zoom);
+        for (name, at_100, now) in [("Settings", settings, s), ("Advanced", advanced, a)] {
+            let moved = (now.min - at_100.min).length().max((now.max - at_100.max).length());
+            assert!(moved <= 1.0, "{name} moved {moved} pt at {zoom}x: {at_100:?} → {now:?}");
+        }
+        let grew = f.height() / filter.height();
+        assert!((grew - zoom).abs() < 0.15, "the body should zoom: Filter grew {grew}x at {zoom}x");
+    }
 }
 
 #[test]
@@ -1815,6 +2002,27 @@ fn the_front_door_makes_something_or_just_looks_inside() {
 }
 
 #[test]
+fn new_project_does_not_shift_when_its_scrollbar_is_not_needed() {
+    let mut h = harness_sized(egui::vec2(1000.0, 700.0), || demo::app(demo::engine(Mode::Beginner, true)));
+    h.run_steps(3);
+    let make_left = h.get_by_label("What do you want to make?").rect().left();
+    assert!(
+        h.query_all_by_role(egui::accesskit::Role::ScrollBar).any(|node| node.rect().left() > 200.0),
+        "the overflowing Make page should show its scrollbar"
+    );
+
+    h.get_by_label("Just look inside").click();
+    h.run_steps(20);
+    let look_left = h.get_by_label("What do you want to look inside?").rect().left();
+
+    assert_eq!(look_left, make_left, "removing the scrollbar must not recenter New project");
+    assert!(
+        h.query_all_by_role(egui::accesskit::Role::ScrollBar).all(|node| node.rect().left() <= 200.0),
+        "the short Just look inside page should not show a scrollbar"
+    );
+}
+
+#[test]
 fn a_running_build_says_what_it_is_on_and_opens_up_into_its_activity() {
     use craft_anything_ai::rebuild::{RunEvent, RunSet, StandIns};
     use craft_anything_ai::{AgentEvent, AiConfig, BackendConfig, BackendEntry, BackendKind, BackendOptions};
@@ -2316,6 +2524,31 @@ fn only_the_claude_desktop_app_is_named_when_nothing_can_build() {
     h.run_steps(2);
     h.get_by_label("No coding agent was found on this computer yet.");
     h.get_by_label("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.");
+
+    // Agents suggested from `~/.ssh/config` aren't checked, so the hint stays (review of #781).
+    use craft_anything_ai::{BackendConfig, Detected};
+    let remote = |name: &str| Detected {
+        suggestion: BackendConfig {
+            name: name.into(),
+            kind: craft_anything_ai::BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: Some("box".into()),
+            enabled: true,
+        },
+        reason: "From ~/.ssh/config".into(),
+        needs_key: false,
+    };
+    h.state_mut().detected = Some(vec![remote("Claude Code on box")]);
+    h.run_steps(2);
+    h.get_by_label("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.");
+    // An agent found on this computer can build, so the hint goes.
+    let mut local = remote("Codex");
+    local.suggestion.ssh_host = None;
+    local.suggestion.model = "codex".into();
+    h.state_mut().detected = Some(vec![remote("Claude Code on box"), local]);
+    h.run_steps(2);
+    assert!(h.query_by_label("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.").is_none());
 }
 
 #[test]
@@ -2658,4 +2891,45 @@ fn a_long_status_note_in_the_work_rows_stays_in_the_window() {
         eprintln!("HEADER {r:?}");
         assert!(r.min.x >= 0.0 && r.max.x <= 1280.0, "the header leaves the window: {r:?}");
     }
+}
+
+/// #983: in a longer language or a narrow window the two switches go on two lines, never over each other.
+#[test]
+fn the_switches_under_the_prompt_box_never_overlap() {
+    let d = tempfile::tempdir().unwrap();
+    let ws = craft_anything_engine::workspace::Workspace::create(d.path(), "Notes", "A notes app", craft_anything_engine::workspace::TargetRef::None).unwrap();
+    for width in [1600.0, 1000.0, 700.0, 560.0] {
+        let ws = ws.clone();
+        let mut h = harness_sized(egui::vec2(width, 800.0), move || {
+            let mut a = demo::app(demo::engine(Mode::Beginner, true));
+            a.workspace = Some(ws);
+            a.state.screen = Screen::Project;
+            a
+        });
+        h.run_steps(3);
+        let sending = h.get_by_label("Just ask").rect();
+        let (asking, title) = (h.get_by_label("Ask me").rect(), h.get_by_label("Builder's questions:").rect());
+        let hint = h.get_by_label("or start with /btw to just ask").rect();
+        assert!(!sending.intersects(title) && !sending.intersects(asking), "at {width}: {sending:?}, {title:?}, {asking:?}");
+        assert!(!hint.intersects(title) && !hint.intersects(asking), "at {width}: {hint:?}, {title:?}, {asking:?}");
+        assert!(title.left() >= 0.0 && asking.right() <= width, "at {width} they stay in the window: {title:?}, {asking:?}");
+    }
+}
+
+#[test]
+fn a_very_long_app_file_name_keeps_start_inside_the_window() {
+    use craft_anything_engine::workspace::TargetRef;
+    let name = format!("{}.apk", "com.example.some-very-long-apkmirror-name-".repeat(5));
+    let path = std::path::PathBuf::from(name);
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::fill_projects(&mut a);
+        a.state.make.target = TargetRef::Local { path };
+        a.state.make.game = false;
+        a
+    });
+    h.run_steps(4);
+    let content = h.ctx.content_rect();
+    let start = h.get_by_label("Start").rect();
+    assert!(start.left() >= 0.0 && start.right() <= content.right(), "Start ({start:?}) stays inside the window ({content:?})");
 }

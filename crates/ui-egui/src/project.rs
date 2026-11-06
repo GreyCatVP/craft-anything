@@ -100,6 +100,7 @@ impl CraftApp {
         // network drive must not freeze the window); `created` starts the build.
         self.creating = Some(self.jobs.spawn(tr("Create the project"), false, move |_| {
             let created = match &draft.folder {
+                Some(folder) if folder.join(craft_anything_engine::workspace::MANIFEST).is_file() => Workspace::open(folder),
                 Some(folder) => Workspace::create_at(folder, &name, &request, target, draft.existing),
                 None => Workspace::create(&projects_dir, &name, &request, target),
             };
@@ -128,6 +129,8 @@ impl CraftApp {
         }
         // A project in a folder of its own stays in the list.
         self.remember_project(&ws.root);
+        self.projects.retain(|p| p.root != ws.root);
+        self.projects.insert(0, ws.clone());
         // Make is cleared for the next one, unless the person has started on it meanwhile (a
         // project that waited for Ghidra).
         if self.state.make.request.trim() == request {
@@ -203,7 +206,11 @@ impl CraftApp {
             };
             self.load_asked(&ws);
         }
-        self.workspace = Some(ws);
+        self.workspace = Some(ws.clone());
+        if !self.projects.iter().any(|p| p.root == ws.root) {
+            self.projects.insert(0, ws);
+        }
+        self.remember_project(&root);
         self.refresh_side_panel();
         self.state.screen = Screen::Project;
         // A Send pressed before its picture checks finished, on a project they left: send now.
@@ -618,11 +625,41 @@ fn plan(feed: &[FeedItem]) -> Option<&[PlanStep]> {
     craft_anything_engine::feed::visible_plan(feed)
 }
 
+/// How tall the plan's steps get before they scroll, unless the person dragged the divider above
+/// the plan to another height (#826), and the least they can be dragged to.
+const PLAN_HEIGHT: f32 = 240.0;
+const PLAN_MIN: f32 = 48.0;
+
+/// The divider between the feed and the plan. Dragging it (or Up and Down while it has focus)
+/// sets how tall the plan's steps are, kept across restarts; a double-click goes back to the usual
+/// height. `shown` is the height the steps had on the last frame.
+fn plan_divider(ui: &mut Ui, t: &Tokens, height: &mut Option<f32>, shown: f32) {
+    let hint = tr("Drag to give the plan more or less room; double-click to reset");
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 10.0), egui::Sense::click_and_drag());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &hint));
+    let resp = resp.on_hover_cursor(egui::CursorIcon::ResizeVertical).on_hover_text(&hint);
+    let active = resp.hovered() || resp.dragged() || resp.has_focus();
+    ui.painter().rect_filled(egui::Rect::from_center_size(rect.center(), Vec2::new(36.0, 3.0)), 2.0, if active { t.text_faint } else { t.card_border });
+    widgets::focus_ring(ui, &resp, rect);
+    let mut by = -resp.drag_delta().y;
+    if resp.has_focus() {
+        ui.memory_mut(|m| m.set_focus_lock_filter(resp.id, egui::EventFilter { vertical_arrows: true, ..Default::default() }));
+        by += ui.input(|i| f32::from(i8::from(i.key_pressed(egui::Key::ArrowUp)) - i8::from(i.key_pressed(egui::Key::ArrowDown)))) * 24.0;
+    }
+    if resp.double_clicked() {
+        *height = None;
+    } else if by != 0.0 {
+        let most = (ui.ctx().content_rect().height() * 0.6).max(PLAN_MIN);
+        *height = Some((height.unwrap_or(shown) + by).clamp(PLAN_MIN, most));
+    }
+}
+
 /// The builder's checklist, pinned above the prompt box: what's done, what it's on now, what's
 /// next, and while it works how long it has been at it. Shown while it works, and afterwards only
 /// if something was left undone. `fold` offers a control to fold it away (between runs); the
-/// returned flag says the person pressed it.
-fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>, fold: bool) -> bool {
+/// returned flag says the person pressed it. Its steps scroll past `height`; the height they
+/// were shown at is kept under `shown_id` for the divider above.
+fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>, fold: bool, height: f32, shown_id: egui::Id) -> bool {
     let done = steps.iter().filter(|s| s.status == PlanStatus::Done).count();
     let mut folded = false;
     widgets::card(t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
@@ -646,31 +683,48 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
             });
         });
         ui.add_space(6.0);
-        for s in steps {
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
-                match s.status {
-                    PlanStatus::Done => {
-                        ui.painter().circle_filled(r.center(), 7.0, t.success);
-                        icons::paint(ui, r.shrink(4.0), "check", 10.0, t.canvas);
-                    }
-                    PlanStatus::Doing => {
-                        ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.5, t.accent));
-                        ui.painter().circle_filled(r.center(), 3.0, t.accent);
-                    }
-                    PlanStatus::Todo => {
-                        ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.0, t.field_border));
-                    }
+        let list =
+            egui::ScrollArea::vertical().id_salt("plan-steps").max_height(height).min_scrolled_height(height).auto_shrink([false, true]).show(ui, |ui| {
+                for s in steps {
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+                        match s.status {
+                            PlanStatus::Done => {
+                                ui.painter().circle_filled(r.center(), 7.0, t.success);
+                                icons::paint(ui, r.shrink(4.0), "check", 10.0, t.canvas);
+                            }
+                            PlanStatus::Doing => {
+                                ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.5, t.accent));
+                                ui.painter().circle_filled(r.center(), 3.0, t.accent);
+                            }
+                            PlanStatus::Todo => {
+                                ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.0, t.field_border));
+                            }
+                            // #504: a run ended with this step open.
+                            PlanStatus::Stopped => {
+                                ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.5, t.warning));
+                                ui.painter().circle_filled(r.center(), 3.0, t.warning);
+                            }
+                        }
+                        let text = RichText::new(&s.text).size(theme::BODY);
+                        let text = match s.status {
+                            PlanStatus::Done => text.color(t.text_faint).strikethrough(),
+                            PlanStatus::Doing => text.color(t.text).strong(),
+                            PlanStatus::Todo => text.color(t.text_dim),
+                            PlanStatus::Stopped => text.color(t.text_dim),
+                        };
+                        let resp = ui.add(egui::Label::new(text).wrap());
+                        if s.status == PlanStatus::Stopped {
+                            // Sighted users get the warning marker above; screen readers
+                            // get the status through the accessible label and the text.
+                            let name = format!("{}: {}", s.text, tr("Stopped here"));
+                            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
+                            ui.label(RichText::new(tr("Stopped here")).size(theme::SMALL).color(t.warning));
+                        }
+                    });
                 }
-                let text = RichText::new(&s.text).size(theme::BODY);
-                let text = match s.status {
-                    PlanStatus::Done => text.color(t.text_faint).strikethrough(),
-                    PlanStatus::Doing => text.color(t.text).strong(),
-                    PlanStatus::Todo => text.color(t.text_dim),
-                };
-                ui.add(egui::Label::new(text).wrap());
             });
-        }
+        ui.data_mut(|d| d.insert_temp(shown_id, list.inner_rect.height()));
     });
     folded
 }
@@ -1321,8 +1375,7 @@ fn draw_items(
             FeedItem::Step { text, .. } => chat::activity_row(ui, RichText::new(text).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Paused => chat::activity_row(ui, RichText::new(tr("Paused.")).color(t.text_dim).size(theme::SMALL)),
             FeedItem::Agent { text, streaming } => {
-                chat::bubble(&t, false, false).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                chat::answer_bubble(ui, false, text.trim(), |ui| {
                     chat::rich_text(ui, text.trim(), !advanced);
                     if *streaming {
                         widgets::thinking(ui);
@@ -1684,7 +1737,14 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
     if let Some(steps) = plan(&app.state.feed).filter(|p| running || p.iter().any(|s| s.status != PlanStatus::Done)) {
         let began = app.open_run().filter(|_| running).map(RebuildRun::started);
         let mut fold = false;
-        ui.allocate_ui(Vec2::new(width, 0.0), |ui| fold = checklist(ui, steps, t, began, !running));
+        let shown_id = egui::Id::new("plan-steps-shown");
+        let mut height = app.state.plan_height;
+        ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
+            let shown = ui.data(|d| d.get_temp::<f32>(shown_id)).unwrap_or(PLAN_HEIGHT);
+            plan_divider(ui, t, &mut height, shown);
+            fold = checklist(ui, steps, t, began, !running, height.unwrap_or(PLAN_HEIGHT), shown_id);
+        });
+        app.state.plan_height = height;
         if fold {
             app.fold_plan();
         }
@@ -1821,15 +1881,36 @@ fn questions_switch(app: &mut CraftApp, ui: &mut Ui) {
     let root = ws.root.clone();
     let t = Tokens::get(ui.ctx());
     ui.add_space(4.0);
+    let (sending, asking) = (["Change it", "Just ask"], ["Ask me", "Decide yourself"]);
+    let title = widgets::label_galley(ui, &tr(QUESTIONS_TITLE), theme::SMALL, t.text_dim).size().x;
+    let gaps = ui.spacing().item_spacing.x * 3.0;
+    // Side by side when both switches fit, else one under the other (a longer language, a narrow window).
+    let fits = widgets::segmented_width(ui, &sending) + widgets::segmented_width(ui, &asking) + title + gaps <= ui.available_width();
+    let hint = |ui: &mut Ui| {
+        ui.add(egui::Label::new(RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL)).truncate());
+    };
+    let right = egui::Layout::right_to_left(egui::Align::Center);
     ui.horizontal(|ui| {
         // What sending does: ask for a change, or just ask about the build.
-        if let Some(i) = widgets::segmented(ui, &["Change it", "Just ask"], usize::from(app.state.just_ask), 24.0) {
+        if let Some(i) = widgets::segmented(ui, &sending, usize::from(app.state.just_ask), 24.0) {
             app.state.just_ask = i == 1;
         }
-        ui.label(RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| questions_controls(app, ui, now, &root, &t));
+        if fits {
+            ui.with_layout(right, |ui| {
+                questions_controls(app, ui, now, &root, &t);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), hint);
+            });
+        } else {
+            hint(ui);
+        }
     });
+    if !fits {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| ui.with_layout(right, |ui| questions_controls(app, ui, now, &root, &t)));
+    }
 }
+
+const QUESTIONS_TITLE: &str = "Builder's questions:";
 
 fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engine::workspace::Questions, root: &Path, t: &Tokens) {
     use craft_anything_engine::workspace::Questions;
@@ -1844,7 +1925,7 @@ fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engin
         } else {
             tr("The builder answers its own questions and says what it chose (\"I decided: …\"), so you can change it.")
         };
-        ui.label(RichText::new(tr("Builder's questions:")).color(t.text_dim).size(theme::SMALL)).on_hover_text(tip);
+        ui.label(RichText::new(tr(QUESTIONS_TITLE)).color(t.text_dim).size(theme::SMALL)).on_hover_text(tip);
     }
 }
 
@@ -2411,6 +2492,30 @@ mod tests {
         apply(&mut feed, &RunEvent::Finished { ok: false, message: "Paused.".into(), paused: true });
         assert!(matches!(feed.last(), Some(FeedItem::Paused)));
         assert_eq!(feed.iter().filter(|f| matches!(f, FeedItem::Error { .. })).count(), 1, "a pause adds no error");
+    }
+
+    /// #966: a newly created project appears in app.projects immediately so the sidebar lists it.
+    #[test]
+    fn created_project_appears_in_projects_list_immediately() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        assert!(app.projects.is_empty());
+        app.created(ws.clone(), "A notes app".into(), "test-backend".into(), None);
+        assert!(!app.projects.is_empty(), "project is added to app.projects immediately");
+        assert_eq!(app.projects[0].root, ws.root);
+    }
+
+    /// #966: opening a project ensures it is listed in app.projects immediately.
+    #[test]
+    fn opening_project_adds_to_projects_list() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Timer", "A timer app", TargetRef::None).unwrap();
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+        assert!(app.projects.is_empty());
+        app.open_workspace(ws.clone());
+        assert!(!app.projects.is_empty(), "open project is listed in app.projects");
+        assert_eq!(app.projects[0].root, ws.root);
     }
 }
 

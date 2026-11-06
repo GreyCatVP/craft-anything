@@ -416,6 +416,22 @@ mod macos {
         Ok(bin)
     }
 
+    /// Turn the helper's own error object into a tool error. The helper exits 0 after reporting a
+    /// refusal (such as a denied Accessibility permission), so an unchecked `nodes: []` would look
+    /// like a successful read of an empty tree (#240).
+    pub(super) fn helper_error(result: &Value) -> Option<ToolError> {
+        let message = result.get("error")?.as_str()?;
+        let reason = result.get("reason").and_then(Value::as_str).unwrap_or("helper_error");
+        let error = if reason == "accessibility_not_granted" {
+            ToolError::new(ErrorCode::NoPermission, "The app's screen was not read: this app does not have Accessibility permission.".to_string())
+                .with_remediation("Allow the app running Craft Anything in System Settings → Privacy & Security → Accessibility, then run this again.")
+        } else {
+            ToolError::new(ErrorCode::Internal, format!("The accessibility helper refused the request: {message}"))
+                .with_remediation("This is a bug in Craft Anything; report it with the details below.")
+        };
+        Some(error.with_details(json!({"reason": reason})))
+    }
+
     pub(super) fn run_helper(ctx: &mut Ctx<'_>, request: Value, duration_ms: u64) -> Result<Value, ToolError> {
         let root = private_root()?;
         let helper = build_helper(&root).inspect_err(|_| {
@@ -431,19 +447,32 @@ mod macos {
             .run_checked();
         let _ = std::fs::remove_dir_all(&root);
         let out = out?;
-        serde_json::from_slice(&out.stdout).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("accessibility helper output was not JSON: {e}")))
+        let result: Value = serde_json::from_slice(&out.stdout)
+            .map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("accessibility helper output was not JSON: {e}")))?;
+        match helper_error(&result) {
+            Some(error) => Err(error),
+            None => Ok(result),
+        }
     }
 
+    /// Observe a running macOS app through the native helper and return its UI evidence.
+    /// Records the accessibility selection and reports a deliberately skipped tree in the
+    /// summary; with accessibility disabled, the helper needs no Accessibility permission.
     pub fn runtime_ui_read(ctx: &mut Ctx<'_>, p: ObserveUiParams) -> Result<ToolOutput, ToolError> {
         let pid = p.pid.ok_or_else(|| ToolError::invalid("pid is required to read a running app's UI"))?;
         let request = json!({"command": "observe", "pid": pid, "window_id": p.window_id, "screenshot": p.screenshot, "accessibility": p.accessibility, "max_nodes": p.max_nodes});
         let result = run_helper(ctx, request, 10_000)?;
         let nodes = result.get("nodes").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+        let summary = if p.accessibility {
+            format!("Read {nodes} accessibility node(s) from pid {pid}.")
+        } else {
+            format!("Skipped the accessibility tree for pid {pid}, as requested.")
+        };
         let b =
             EvidenceBuilder::new("runtime_ui_read", Subject { kind: "ui".into(), sha256: None, name: Some(format!("pid {pid}")) }, env(ctx, "accessibility"))
-                .params(json!({"pid": pid, "max_nodes": p.max_nodes, "screenshot": p.screenshot}))
+                .params(json!({"pid": pid, "max_nodes": p.max_nodes, "screenshot": p.screenshot, "accessibility": p.accessibility}))
                 .result(result)
-                .summary(format!("Read {nodes} accessibility node(s) from pid {pid}."))
+                .summary(summary)
                 .confidence(Confidence::Observed)
                 .authority(Authority::OurRun);
         Ok(ToolOutput::evidence(b.build()?))
@@ -605,6 +634,23 @@ mod tests {
         }
     }
 
+    /// Run the real Swift helper without reading app UI or requiring Accessibility permission.
+    /// Both zero and positive node limits must return an empty, non-truncated tree and evidence
+    /// that records the skipped read.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_can_skip_accessibility_without_reading_a_tree() {
+        let e = Engine::new(crate::testing::session());
+        for max_nodes in [0, 1] {
+            let output =
+                e.call("runtime_ui_read", json!({"pid": std::process::id(), "accessibility": false, "max_nodes": max_nodes}), granted()).unwrap().to_json();
+            assert_eq!(output["result"]["nodes"], json!([]), "{output}");
+            assert_eq!(output["result"]["truncated"], false, "{output}");
+            assert_eq!(output["params"]["accessibility"], false, "{output}");
+            assert!(output["summary"].as_str().unwrap().contains("Skipped the accessibility tree"), "{output}");
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn calls_validate_before_dispatch() {
@@ -703,6 +749,29 @@ mod tests {
         let e = Engine::new(crate::testing::session());
         let err = e.call("runtime_ui_read", json!({"pid": 1}), CallOptions::new(Caller::Mcp)).unwrap_err();
         assert_eq!(err.code, craft_anything_evidence::ErrorCode::ConsentRequired);
+    }
+
+    /// #240: the helper answers a denied Accessibility permission with `{"error": …}` and exits 0,
+    /// so the empty `nodes` list must not be reported as a successful read.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_denied_accessibility_permission_is_an_error_not_an_empty_tree() {
+        use craft_anything_evidence::ErrorCode;
+        let denied = json!({
+            "error": "accessibility permission not granted",
+            "reason": "accessibility_not_granted",
+            "nodes": []
+        });
+        let err = super::macos::helper_error(&denied).expect("a denial is an error");
+        assert_eq!(err.code, ErrorCode::NoPermission);
+        assert_eq!(err.details.as_ref().unwrap()["reason"], "accessibility_not_granted");
+        assert!(err.message.contains("was not read"), "{}", err.message);
+        assert!(err.remediation.as_deref().is_some_and(|r| r.contains("Accessibility")), "{err:?}");
+        // An empty tree the helper really read stays a successful result.
+        assert!(super::macos::helper_error(&json!({"nodes": [], "truncated": false})).is_none());
+        // Any other refusal is still an error, not an empty tree.
+        let err = super::macos::helper_error(&json!({"error": "unknown command"})).expect("a refusal is an error");
+        assert_eq!(err.code, ErrorCode::Internal);
     }
 
     /// #251: the callback had a literal backslash and `n` between its Python statements, which lldb

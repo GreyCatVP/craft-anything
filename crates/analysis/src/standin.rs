@@ -843,27 +843,57 @@ pub fn build(har: &Har, opts: &BuildOptions) -> StandIn {
         for n in &s.query_names {
             push_unique_sorted(&mut route.query_names, n);
         }
-        if route.samples.len() >= opts.max_samples_per_route {
+        let full = route.samples.len() >= opts.max_samples_per_route;
+        let replace = if full {
+            let request_key = sample_request_key(s, &scrub);
+            route
+                .samples
+                .iter()
+                .position(|sample| sample.status == 304 && sample.path == s.path && sample.query == s.query && sample.request_key == request_key)
+        } else {
+            None
+        };
+        if full && replace.is_none() {
             route.samples_left_out = route.samples_left_out.saturating_add(1);
             // Still read its headers, so what's dropped is counted the same however many are kept.
             let _ = scrub.headers(&s.entry.response.headers);
             note_status(route, u16::try_from(s.entry.response.status).unwrap_or(500), s.entry.response.mime.as_deref(), &mut scrub);
             continue;
         }
-        let sample = make_sample(s, opts, &mut scrub, &mut body_bytes);
-        note_status(route, sample.status, sample.content_type.as_deref(), &mut scrub);
+        let mut sample = make_sample(s, opts, &mut scrub);
         // A request polled over and over gives the same answer many times; one is enough.
-        let repeat = route.samples.last().is_some_and(|p| {
-            p.path == sample.path
-                && p.query == sample.query
-                && p.request_key == sample.request_key
-                && p.status == sample.status
-                && p.text == sample.text
-                && p.base64 == sample.base64
-        });
-        if repeat {
-            body_bytes = body_bytes.saturating_sub(sample.text.as_ref().map_or(0, String::len) + sample.base64.as_ref().map_or(0, String::len));
-        } else {
+        let repeats_last = |sample: &Sample| route.samples.last().is_some_and(|last| same_sample(last, sample));
+        let mut repeat = repeats_last(&sample);
+        if !repeat {
+            let size = sample.text.as_ref().map_or(0, String::len).saturating_add(sample.base64.as_ref().map_or(0, String::len));
+            if let Some(total) = body_bytes.checked_add(size).filter(|total| *total <= opts.max_total_body_bytes) {
+                body_bytes = total;
+            } else {
+                sample.text = None;
+                sample.base64 = None;
+                sample.body_left_out = Some(BodyLeftOut::FileLimit);
+                // A 304 without its cached body must remain unavailable to a fresh client.
+                if sample.was_not_modified {
+                    sample.status = 304;
+                    sample.was_not_modified = false;
+                }
+                // Leaving a body out can make it identical to the previous omitted answer.
+                repeat = repeats_last(&sample);
+            }
+        }
+        note_status(route, sample.status, sample.content_type.as_deref(), &mut scrub);
+        if replace.is_some() && (sample.status == 304 || sample.body_left_out.is_some_and(|reason| reason != BodyLeftOut::NotRecorded)) {
+            // A missing cached body or a refused body cannot improve the stored evidence. Neither was charged.
+            route.samples_left_out = route.samples_left_out.saturating_add(1);
+            continue;
+        }
+        if !repeat {
+            if let Some(at) = replace {
+                // The position came from this unchanged sample list. Remove only an unavailable
+                // answer to this exact request; append the replacement in recording order.
+                route.samples.remove(at);
+                route.samples_left_out = route.samples_left_out.saturating_add(1);
+            }
             route.samples.push(sample);
         }
     }
@@ -882,6 +912,34 @@ pub fn build(har: &Har, opts: &BuildOptions) -> StandIn {
         dropped: scrub.dropped,
         skipped,
     }
+}
+
+fn same_sample(left: &Sample, right: &Sample) -> bool {
+    // Keep this exhaustive so a new response field cannot silently disappear from repeat checks.
+    let Sample { path, query, request_key, status, content_type, headers, text, base64, body_left_out, was_not_modified } = left;
+    path == &right.path
+        && query == &right.query
+        && request_key == &right.request_key
+        && status == &right.status
+        && content_type == &right.content_type
+        && text == &right.text
+        && base64 == &right.base64
+        && body_left_out == &right.body_left_out
+        && was_not_modified == &right.was_not_modified
+        && same_headers(headers, &right.headers)
+}
+
+fn same_headers(left: &[(String, String)], right: &[(String, String)]) -> bool {
+    // Header names are case-insensitive; different names may move, but values for one name
+    // must keep their order. Capture caps this list, and the stored representation stays intact.
+    left == right
+        || (left.len() == right.len()
+            && left.iter().all(|(name, _)| {
+                left.iter()
+                    .filter(|(key, _)| key.eq_ignore_ascii_case(name))
+                    .map(|(_, value)| value)
+                    .eq(right.iter().filter(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value))
+            }))
 }
 
 fn push_unique_sorted(list: &mut Vec<String>, value: &str) {
@@ -911,12 +969,16 @@ fn note_status(route: &mut StandInRoute, status: u16, mime: Option<&str>, scrub:
     }
 }
 
-fn make_sample(s: &Seen<'_>, opts: &BuildOptions, scrub: &mut Scrub, body_bytes: &mut usize) -> Sample {
+fn sample_request_key(s: &Seen<'_>, scrub: &Scrub) -> Option<String> {
+    s.entry.request.post.as_ref().and_then(|p| p.text.as_deref()).and_then(|t| request_key(t.as_bytes())).filter(|k| !scrub.holds_hidden(k))
+}
+
+fn make_sample(s: &Seen<'_>, opts: &BuildOptions, scrub: &mut Scrub) -> Sample {
     let r = &s.entry.response;
     let mut sample = Sample {
         path: s.path.clone(),
         query: s.query.clone(),
-        request_key: s.entry.request.post.as_ref().and_then(|p| p.text.as_deref()).and_then(|t| request_key(t.as_bytes())).filter(|k| !scrub.holds_hidden(k)),
+        request_key: sample_request_key(s, scrub),
         status: u16::try_from(r.status).unwrap_or(500),
         content_type: clean_mime(r.mime.as_deref(), scrub),
         headers: scrub.headers(&r.headers),
@@ -966,13 +1028,8 @@ fn make_sample(s: &Seen<'_>, opts: &BuildOptions, scrub: &mut Scrub, body_bytes:
     } else {
         (Some(raw.to_string()), None)
     };
-    let size = text.as_ref().map_or(0, String::len) + binary.map_or(0, str::len);
     if text.as_ref().is_some_and(|t| t.len() > opts.max_body_bytes) {
         sample.body_left_out = Some(BodyLeftOut::TooLarge);
-        return sample;
-    }
-    if body_bytes.saturating_add(size) > opts.max_total_body_bytes {
-        sample.body_left_out = Some(BodyLeftOut::FileLimit);
         return sample;
     }
     if let Some(t) = text {
@@ -981,11 +1038,14 @@ fn make_sample(s: &Seen<'_>, opts: &BuildOptions, scrub: &mut Scrub, body_bytes:
             sample.body_left_out = Some(BodyLeftOut::HeldSecret);
             return sample;
         }
-        sample.text = Some(clean_text(t, sample.content_type.as_deref(), scrub));
-        *body_bytes = body_bytes.saturating_add(sample.text.as_ref().map_or(0, String::len));
+        let clean = clean_text(t, sample.content_type.as_deref(), scrub);
+        if clean.len() > opts.max_body_bytes {
+            sample.body_left_out = Some(BodyLeftOut::TooLarge);
+            return sample;
+        }
+        sample.text = Some(clean);
     } else {
         sample.base64 = binary.map(String::from);
-        *body_bytes = body_bytes.saturating_add(size);
     }
     // The answer a 304 stands for: the body the browser had cached.
     if sample.status == 304 {

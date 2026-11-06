@@ -40,9 +40,11 @@ fn net_error(what: &str, e: ureq::Error) -> ToolError {
 
 /// Turn a non-2xx response into a plain error. Keys are never echoed.
 pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
-    let detail: String = serde_json::from_str::<Value>(body)
-        .ok()
-        .map(|value| response_detail(&value).unwrap_or_else(|| "The service didn't provide an error message.".into()))
+    // Gemini's OpenAI-compatible endpoint wraps its error in a one-item array.
+    let parsed = serde_json::from_str::<Value>(body).ok().map(|v| if let Value::Array(a) = &v { a.first().cloned().unwrap_or(v) } else { v });
+    let detail: String = parsed
+        .as_ref()
+        .map(|value| response_detail(value).unwrap_or_else(|| "The service didn't provide an error message.".into()))
         .unwrap_or_else(|| body.chars().take(300).collect())
         .chars()
         .take(1000)
@@ -55,8 +57,8 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
         500..=599 => (ErrorCode::EngineMissing, "The service is having trouble. Try again soon, or use another backend."),
         _ => (ErrorCode::BadInput, "The request was rejected; see the message."),
     };
-    let provider = serde_json::from_str::<Value>(body)
-        .ok()
+    let provider = parsed
+        .as_ref()
         .and_then(|v| v.pointer("/error/code").and_then(Value::as_str).or_else(|| v.pointer("/error/type").and_then(Value::as_str)).map(str::to_string));
     ToolError::new(code, format!("{what} answered {status}: {detail}"))
         .with_remediation(remediation)
@@ -379,6 +381,8 @@ mod tests {
 
     #[test]
     fn status_errors_are_plain() {
+        let e = status_error("Gemini", 400, r#"[{"error":{"code":400,"message":"Function call is missing a thought_signature"}}]"#);
+        assert_eq!(e.message, "Gemini answered 400: Function call is missing a thought_signature");
         let e = status_error("Anthropic", 401, r#"{"error":{"message":"invalid x-api-key"}}"#);
         assert_eq!(e.code, ErrorCode::NoPermission);
         assert!(e.message.contains("invalid x-api-key"));

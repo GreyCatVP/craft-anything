@@ -265,3 +265,44 @@ fn help_does_not_advise_a_report_format_option() {
     assert!(!help.stdout_text().contains("(core-target-open, report"));
     assert_eq!(cli(&["report", "--format", "html"], cfg.path()).code, Some(2));
 }
+
+/// #855, #856: CLI mcp --restricted omits machine and web tools, and refuses web_site_open.
+#[test]
+fn mcp_restricted_mode_cli() {
+    let cfg = tempfile::tempdir().unwrap();
+    let input = [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}),
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "web_site_open", "arguments": {"url": "https://example.com"}}}),
+    ]
+    .iter()
+    .map(|v| format!("{v}\n"))
+    .collect::<String>();
+
+    let out = Process::new(env!("CARGO_BIN_EXE_craft-anything-cli"))
+        .arg("mcp")
+        .arg("--restricted")
+        .arg("--all-tools")
+        .env("CRAFT_ANYTHING_CONFIG_DIR", cfg.path())
+        .stdin_bytes(input)
+        .timeout(Duration::from_secs(30))
+        .run()
+        .unwrap();
+    assert!(out.success, "{}", out.stderr_text());
+    let msgs: Vec<Value> = out.stdout_text().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let by_id = |id: u64| msgs.iter().find(|m| m["id"] == json!(id)).unwrap().clone();
+
+    // Tools list omits machine tools and web tools
+    let tools = by_id(2)["result"]["tools"].as_array().unwrap().clone();
+    assert!(!tools.iter().any(|t| t["name"] == "web_site_open"));
+    assert!(!tools.iter().any(|t| t["name"] == "web_site_capture"));
+    assert!(!tools.iter().any(|t| t["name"] == "build_command_run"));
+    assert!(tools.iter().any(|t| t["name"] == "core_session_show"));
+
+    // tools/call web_site_open is refused
+    let call_res = by_id(3)["result"].clone();
+    assert_eq!(call_res["isError"], true);
+    let err_obj: Value = serde_json::from_str(call_res["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(err_obj["error"]["message"].as_str().unwrap().contains("turned off in restricted mode"));
+}

@@ -402,9 +402,14 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
             ui.add(crate::widgets::Spinner::new().color(t.accent));
             ui.label(RichText::new(tr("Looking on this computer…")).color(t.text_dim));
         });
-    } else if found.is_empty() {
-        ui.label(RichText::new(tr("No coding agent was found on this computer yet.")).color(t.text_dim));
-        for hint in &app.detect_hints {
+    } else {
+        if found.is_empty() {
+            ui.label(RichText::new(tr("No coding agent was found on this computer yet.")).color(t.text_dim));
+        }
+        // Agents on other computers (from `~/.ssh/config`) are offered without checking them, so
+        // they don't make the hints about this one any less true.
+        let hints = if found.iter().all(|b| b.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty())) { &app.detect_hints[..] } else { &[] };
+        for hint in hints {
             match hint {
                 craft_anything_ai::detect::DetectHint::ClaudeDesktopWithoutCli { .. } => ui.add(
                     egui::Label::new(

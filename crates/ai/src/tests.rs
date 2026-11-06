@@ -103,6 +103,30 @@ fn a_coding_agent_test_says_it_only_checked_the_version() {
     let r = h.test_backend("Agent").unwrap();
     assert!(r.version_only && r.reply.starts_with("cargo "), "{r:?}");
     assert_eq!(serde_json::to_value(&r).unwrap()["version_only"], true, "the CLI's ai test prints it");
+    assert_eq!((r.program.as_deref(), r.saved_program_replaced), (Some("cargo"), None), "the saved program ran");
+}
+
+/// #721: a saved path an update removed. A test that passes through the usual program says so, and
+/// doctor doesn't blame PATH when nothing can be found.
+#[test]
+fn a_saved_program_that_is_gone_is_named_by_test_and_doctor() {
+    let (h, _d) = hub();
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("old-build").join("agent").display().to_string();
+    let backend = |name: &str, model: &str| BackendEntry {
+        config: BackendConfig { name: name.into(), kind: BackendKind::AgentCli, model: model.into(), base_url: None, ssh_host: None, enabled: true },
+        options: BackendOptions { command: Some(gone.clone()), ..Default::default() },
+    };
+    // cargo stands in for the agent's usual program: it's there wherever these tests run.
+    h.add_backend_with(backend("Usual", "cargo"), None).unwrap();
+    h.add_backend_with(backend("Nowhere", "no-such-agent-program"), None).unwrap();
+
+    let r = h.test_backend("Usual").unwrap();
+    assert_eq!((r.program.as_deref(), r.saved_program_replaced.as_deref()), (Some("cargo"), Some(gone.as_str())));
+
+    let reach = h.check_reachability();
+    let nowhere = reach.iter().find(|(name, _)| name == "Nowhere").map(|(_, r)| r.clone()).unwrap();
+    assert_eq!(nowhere, Err(format!("there's no program at {gone}")));
 }
 
 /// Every known agent with an adapter of its own is offered when adding a coding agent.
@@ -145,10 +169,60 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
-/// A CLI stand-in checks saved selections and refuses native execution until its MCP server is wired.
+/// A named backend stays off for chat, including before API or agent setup can run.
+#[test]
+fn disabled_backends_are_refused_when_chat_starts() {
+    let (h, _dir) = hub();
+    for kind in [BackendKind::OpenaiCompatible, BackendKind::AgentCli] {
+        // A malformed tunnel port fails before opening SSH if API setup is reached.
+        let (base_url, ssh_host) =
+            if kind == BackendKind::OpenaiCompatible { ("http://127.0.0.1:not-a-port/v1", Some("unused".into())) } else { ("http://127.0.0.1:0/v1", None) };
+        h.add_backend(
+            BackendConfig { name: "Off".into(), kind, model: "no-such-agent".into(), base_url: Some(base_url.into()), ssh_host, enabled: false },
+            None,
+        )
+        .unwrap();
+        let error = h.start(Some("Off"), false).err().expect("chat must refuse a disabled backend");
+        assert_eq!(error.code, ErrorCode::BadSettings);
+        assert!(error.message.contains("Off") && error.message.contains("turned off"), "{error:?}");
+        assert!(error.remediation.as_deref().is_some_and(|s| s.contains("Settings → AI")), "{error:?}");
+    }
+}
+
+/// Compare checks either position; enabled named and automatic chat choices still work.
+#[test]
+fn disabled_backends_are_refused_on_either_side_of_compare() {
+    let (h, _dir) = hub();
+    for (name, enabled) in [("Off", false), ("On", true), ("Other", true)] {
+        h.add_backend(
+            BackendConfig {
+                name: name.into(),
+                kind: BackendKind::OpenaiCompatible,
+                model: "test-model".into(),
+                base_url: Some("http://127.0.0.1:0/v1".into()),
+                ssh_host: None,
+                enabled,
+            },
+            None,
+        )
+        .unwrap();
+    }
+    for (left, right) in [("Off", "On"), ("On", "Off")] {
+        let error = h.compare(left, right, true).err().expect("compare must refuse a disabled backend");
+        assert_eq!(error.code, ErrorCode::BadSettings);
+        assert!(error.message.contains("Off") && error.message.contains("turned off"), "{error:?}");
+    }
+    assert!(h.start(Some("On"), false).is_ok());
+    assert!(h.start(None, false).is_ok());
+    assert!(h.compare("On", "Other", false).is_ok());
+    let unknown = h.start(Some("Missing"), false).err().unwrap();
+    assert!(unknown.message.contains("No AI backend named"), "{unknown:?}");
+}
+
+/// A CLI stand-in checks saved selections, and an explicit one runs natively with our MCP server.
 #[cfg(unix)]
 #[test]
-fn opencode_selection_is_validated_saved_and_refused_without_native_mcp() {
+fn opencode_selection_is_validated_saved_and_run_natively_with_our_mcp_server() {
     use std::os::unix::fs::PermissionsExt;
     let (h, dir) = hub();
     let program = dir.path().join("agent");
@@ -156,8 +230,9 @@ fn opencode_selection_is_validated_saved_and_refused_without_native_mcp() {
     let seen = dir.path().join("arguments.txt");
     let quote = |p: &std::path::Path| ssh::shell_quote(&p.display().to_string());
     let script = format!(
-        "#!/bin/sh\ncase \"$1\" in\napi) cat {};;\nrun) printf '%s\\n' \"$@\" > {}; printf 'done';;\n*) exit 8;;\nesac\n",
+        "#!/bin/sh\ncase \"$1\" in\napi) cat {};;\nrun) printf '%s\\n' \"$@\" > {}; cat \"$OPENCODE_CONFIG\" >> {}; printf 'done';;\n*) exit 8;;\nesac\n",
         quote(&catalogue),
+        quote(&seen),
         quote(&seen)
     );
     std::fs::write(&program, script).unwrap();
@@ -185,12 +260,13 @@ fn opencode_selection_is_validated_saved_and_refused_without_native_mcp() {
     }
     events.extend(conversation.poll());
     events.retain(|event| !matches!(event, AgentEvent::Status { .. }));
-    assert!(
-        matches!(events.as_slice(), [AgentEvent::Error { message, .. }, AgentEvent::TurnDone { .. }]
-        if message.contains("cannot yet connect")),
-        "{events:?}"
-    );
-    assert!(!seen.exists(), "an explicit selection must not start a run without its MCP server");
+    assert!(matches!(events.last(), Some(AgentEvent::TurnDone { .. })), "{events:?}");
+    // The arguments, one per line, then the config file the run was handed.
+    let ran = std::fs::read_to_string(&seen).unwrap();
+    let args: Vec<&str> = ran.lines().collect();
+    assert_eq!(args.get(..4), Some(["run", "--standalone", "--model", "test/alias#max"].as_slice()), "{ran}");
+    let config: Value = serde_json::from_str(ran.lines().find(|l| l.starts_with("{\"mcp\"")).unwrap()).unwrap();
+    assert_eq!(config["mcp"][cli_agents::MCP_NAME]["type"], "local", "the run gets our MCP server: {ran}");
     assert!(h.set_agent_model("OpenCode", Some("test/alias"), Some(Effort::Xhigh)).is_err());
     assert_eq!(h.options()["OpenCode"].cli_thinking, Some(Effort::Max), "a failed validation changes nothing");
     let stale = h.model_context("OpenCode").unwrap();
@@ -712,7 +788,8 @@ fn anthropic_streaming_tool_loop_through_the_engine() {
     assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolFinished { tool, ok: true, .. } if tool == "core_session_show")));
     assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolFinished { tool, ok: true, .. } if tool == "core_targets_list")));
     let AgentEvent::TurnDone { backend, input_tokens, output_tokens, cost_usd, .. } = ev.last().unwrap().clone() else { panic!() };
-    assert_eq!((backend.as_str(), input_tokens, output_tokens), ("Claude", 300, 50));
+    // The 90 cached tokens count as input, as agent apps report them.
+    assert_eq!((backend.as_str(), input_tokens, output_tokens), ("Claude", 390, 50));
     assert!(cost_usd.unwrap() > 0.0);
 
     let seen = seen.lock().unwrap();

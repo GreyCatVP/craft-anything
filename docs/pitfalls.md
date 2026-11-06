@@ -30,6 +30,13 @@ whatever the PR's head was by then; its author had pushed two more commits meanw
 reached `main` with code neither CI nor review had seen. Merge with `--match-head-commit` set to
 the commit the green run tested (`gh run view <id> --json headSha`), never to a head read later.
 
+**Squash messages that lost their co-authors.** A batch of replays was merged from a script that
+kept each message on one line and turned `\n` back into line breaks. A shell heredoc had collapsed
+that step into one that did nothing, and `printf` broke other lines early, so a dozen squash
+commits reached `main` with `\n\nCo-authored-by:` as plain text or with the line cut off, and
+GitHub credited nobody. Write a squash message to a file with real line breaks, and read the first
+commit a new merge script makes (`git log -1 --format=%B`) before it does a second.
+
 **A squash commit names the wrong PR number.** The subject was written as "(#12)" before the PR
 existed; it became #11. Take the number from `gh pr create`'s output (`${URL##*/}`) and use it.
 
@@ -71,6 +78,11 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 
 ## Tests
 
+**Python compilation reused stale bytecode after a fast edit.** The new-project toolchain probe
+changed valid Python to a syntax error within the same mtime second. `compileall` skipped it and
+exited zero; the screenshot run then failed instead. Use `compileall -f` for a build check, and
+hold the valid and broken fixture revisions at the same timestamp in the real-Python regression.
+
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
 created folders in the real config directory (`Session::default()` uses it).
@@ -102,13 +114,30 @@ the engines its settings or store name.
 `a`, so `b`'s tests never ran; the rerun was filtered to the failing test, and a broken engine id
 reached `main`. Run with `--no-fail-fast`, and after a fix rerun the whole crates, not a filter.
 
+**A stopped server's port was no longer its identity.** A shutdown test connected to the old
+port and treated any listener there as the stopped server, although another fixture could reuse it.
+Observe the actual tool's registered server and a weak reference to its shared answerer; cancellation
+must release that resource and empty its registry. Do not reserve and release a port before startup.
+
 **A test that changes the whole process.** A UI test raised the process-wide stuck-lock banner; in
 CI the banner moved the layout under another test running beside it, and its click missed. It passed
 25 runs on a Mac. Anything a test sets for the whole process goes in a test program of its own.
 
+**A free port handed to another test.** For a negative TCP probe, a bound port stopped being
+ours as soon as its listener was dropped. Another fixture could acquire it before the probe.
+Use the unassigned loopback port zero to exercise a real connection refusal without borrowing
+and releasing a shared ephemeral port.
+
 **Fixtures that leak into each other.** A "nothing here" path sat beside a fake game folder in the
 same temp directory, and game detection walked up and found the game. Give each case its own
 `tempfile::tempdir()`.
+
+**A mock server closed on a partial request.** A loopback fixture read a request only once, then
+replied and closed. TCP can split even a short header; unread bytes made that close reset the
+connection. Consume the complete header before replying, with a size cap and an absolute deadline.
+Negative probes use loopback port zero so another fixture cannot acquire a released port.
+A controlled fragmented request reproduced the fixture defect; the old CI log did not preserve
+the probe's underlying error, so it does not establish that failure's cause.
 
 **A script written and run at once.** Tests that write a stand-in program and start it failed now
 and then on Linux with "Text file busy": another test thread was starting a child at that moment,
@@ -133,6 +162,16 @@ call it and make them `wait` for the result, not `run_steps(n)`.
 
 ## Building and running
 
+**A runner's PID isn't the window owner's.** `go run` starts a compiled child, so picturing the
+runner missed the app (or a name fallback found another app). Search only the launched process
+and its descendants, and read the UI tree from the same PID that supplied the picture.
+
+**Runtime capture passed relative paths to a tool that needs absolute ones.** With a relative
+project placement, the selected virtualenv interpreter and artifact paths stayed relative;
+PATH lookup can return a relative path too. Resolve workspace paths against the process's
+current directory, look up only bare program names, and make the result absolute without
+dereferencing the virtualenv symlink. Test the generated capture request without opening a GUI.
+
 **A model catalogue queried in the wrong project.** OpenCode V2's raw `api get /api/model` does
 not reliably select the invoking CLI's directory. Use the `model.list` operation with an explicit
 `location[directory]` parameter, and test that the returned Location matches it. Over SSH,
@@ -153,6 +192,12 @@ supervisor thread; the window-capture tool returned and the CLI exited before th
 the program it opened stayed open (and held the shell's pipe, so the command never returned). When
 the caller may exit next, use `kill_and_wait`, and check after a live run that nothing was left
 running.
+
+**A console held open by a program started next door.** On Windows Server 2022 opening a
+pseudoconsole briefly makes inheritable handles (a Unix terminal too, until it's made close-on-exec),
+so a program another thread started at that moment kept the console open until it ended, and closing
+a console with programs still attached hung its host. Program starts and console or terminal opens
+take `process::STARTING`; end a console's process tree before closing it.
 
 **The newest program isn't the app.** Play started the newest executable in `target/`; a
 workspace that builds an app and its CLI started the CLI, which printed help and quit with no
@@ -297,6 +342,10 @@ Node directly (`which::launch_target`); test a new program on Windows with a mul
 npm also writes an extensionless POSIX script beside each shim, and `which` returned that first,
 so OpenCode was offered and then every run said it wasn't installed (#41): look up the kinds
 Windows can start (`PATHEXT`) before the bare name.
+And when the shim's Node couldn't be found (nvm for Windows with no version in use, so its
+`C:\Program Files\nodejs` link was gone), we fell back to the `.cmd`, and Rust refused the
+multi-line prompt: "batch file arguments are invalid", which named neither Node nor nvm. Search
+nvm's version folders too, and when a shim's interpreter is missing, say so (`interpreter_missing`).
 
 **A first analysis that waited for a lock it could never take.** Ghidra's analysis lock is created
 with `create_new` in `ghidra-cache/`, which only existed on machines that had used it before; on a
@@ -395,6 +444,14 @@ navigation vanished from the run's network capture. Only the code that owns a ru
 drains its event queue; steps leave events where they are, and the run keeps them all, tagged
 with the step they arrived in.
 
+**Exclusive creation left a permission window.** Opening a private temporary file with default
+permissions could let another process retain a readable descriptor before a later chmod. Set
+mode 0600 in the first Unix open for private files. Temporary names must also stay short and
+independent of the destination name: adding a prefix and suffix can exceed the component limit
+even when the destination name is valid. Keep the temporary file in the destination directory,
+but exclude the destination component before creating a candidate, including case and trailing
+dot/space aliases. Probe a supported long name in tests instead of assuming a fixed filename limit.
+
 **Two writers to one file.** The app and the rebuild run both wrote `feed.json`. Give each persisted
 file one owner; when another writer is unavoidable (an answer given from the CLI while a run is
 going), merge what's on disk before saving instead of overwriting it.
@@ -419,6 +476,13 @@ over the newer app settings.
 builder preflight still checked ACP's helper and the native adapter never supplied the MCP server.
 Share transport selection between preflight and execution; reject unsupported native options
 before running a process rather than starting an agent without the tools its task requires.
+
+**A config route the installed version ignores.** OpenCode V2 (2.2.5) ignores
+`OPENCODE_CONFIG_CONTENT`, and `opencode run` hands the turn to a background service that never sees the
+run's environment, so the builder ran without our tools and fell back to calling the CLI from a shell.
+V2 also names a tool call `id` (V1: `callID`), so every tool event was dropped and the feed stayed empty
+for the whole turn. Use a file in `OPENCODE_CONFIG` with `run --standalone`, and confirm a live run
+reached the server (`mcp connected server=craft-anything` in OpenCode's log), not just that it started.
 
 **Keywords that only some code paths honour.** "…in Rust" picked Rust for apps but not for games, so
 a headless game rebuild stopped at once for want of Unity. It was found only by a live run. Run the
@@ -454,6 +518,8 @@ The agent console's panel grows to fit its content, so it grew 17 points every f
 maximum, and then the top of its tabs was cut off. When a part is sized to fill what's left, count
 the item spacing and use `horizontal_top` for tall rows, and test that the panel's size holds still
 over several frames.
+Its first frame had no measure yet and guessed 48 points for a box of 84 or more, so the panel grew
+on that frame, and egui saved the larger size (#942). Where a panel grows to fit, guess too tall.
 
 **A library default that blinked over a text field.** egui's scroll areas fade their edge when
 there's more below; the prompt box's one measured a few points of overflow on the frame after each
@@ -529,6 +595,11 @@ run, while the round numbers carried over, so "Try again" bought six more checks
 worked reached check 40 and 49 (#736). A limit that must hold across runs is a count saved with the project, and
 it's reset only by a new request. Test it with several runs in a row, not one.
 
+**One field, two meanings.** `TurnDone`'s `input_tokens` included cached tokens from every coding agent but not
+from the built-in loop, which keeps them apart as Anthropic reports them. Once Ollama 0.40 reported its cache, a
+local build's `usage.json` said 5,323 input tokens for 75,014. When several producers fill one field, say on the
+field what it counts, and test each producer with the case where they differ (here, a cached prompt).
+
 **Docs that drift.** `STATUS.md` described a branch 25 commits old and the tool count was stale.
 Update STATUS, the roadmap and generated docs (`cargo xtask tools`, `cargo xtask schemas`) in the
 same PR as the change.
@@ -578,6 +649,15 @@ API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]
 broke, and "Basic Membership" lost a word. It also tested whole tokens, so a secret inside a URL or
 after `ref=` passed. Test a scrubber on what must survive as well as what must go, and on each
 kind of content it can receive.
+
+**Response metadata that fills a replay limit.** Comparing stored HTTP headers literally kept
+equivalent polls apart: names ignore case, and only values for the same name retain order.
+Compare that way without rewriting the saved headers. Unavailable 304 samples still prove which
+request lacked a cached body. At capacity, replace one only with a usable response for the same
+path, query and request key, then append it in recording order. Keep other requests' evidence,
+count the displaced sample, and do not replace anything with a body refused by a size or secret
+check. Compare complete samples before charging retained bytes, so repeats need no refund. Test an
+exact total-body limit and one with room remaining, preserving the unavailable 304 and remaining budget.
 
 **A strict tool that sent an AI off to write its own.** `game_pak_extract` refused an output
 whose folder didn't exist and took one file per call; the extractor model hit that twice, then
@@ -744,3 +824,22 @@ sum the same payload repeatedly. Count checksum byte visits across the whole sca
 cancellation callback inside long sums, and distinguish skipped verification from a mismatch.
 Test overlapping candidates with correct checksums and a complete nested archive so a structural
 trailer cannot turn unchecked data into a high-confidence result.
+
+**A line cap that cut a JSON-RPC answer in pieces.** MCP over stdio answers one message per line,
+and a server with many richly described tools answers `tools/list` as several megabytes on that
+one line. The process reader capped a partial line at 1 MiB and delivered it anyway, so the answer
+arrived as fragments that never parsed and the plugin failed as a `tools/list` timeout — while the
+same server answered a direct probe in under a second. A cap protects memory, but a JSON-RPC line
+must arrive whole to parse at all: keep the cap at the size the MCP client already allows, and test
+with a multi-megabyte line, not a short one.
+
+**A capture budget checked before deduplication changed the replay.** Redaction expanded a repeated
+body, so its second copy was rejected before it could be discarded as a duplicate. Apply aggregate
+budgets only to distinct bodies actually retained. When a budget removes a body, preserve unavailable
+cached 304 responses and deduplicate identical omitted samples.
+
+**Two worktrees shared build artifacts during conflict checks.** Concurrent Cargo checks of
+different branches reused the same package output path and one saw the other branch's engine.
+Give every worktree its own `CARGO_TARGET_DIR`, even when one agent manages both. Cleaning
+the shared engine cache then removed 11.6 GiB of compiled artifacts: avoid shared-cache
+cleanup as a recovery shortcut; use an isolated target directory for further verification.

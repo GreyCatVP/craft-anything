@@ -8,12 +8,14 @@ use super::*;
 mod antigravity;
 mod copilot;
 mod cursor_agent;
+mod dsh;
 mod hermes;
 mod maki;
 mod opencode;
 pub use antigravity::Antigravity;
 pub use copilot::Copilot;
 pub use cursor_agent::CursorAgent;
+pub use dsh::DeepSeekHarness;
 pub use hermes::Hermes;
 pub use maki::Maki;
 pub use opencode::OpenCode;
@@ -173,6 +175,21 @@ pub trait AgentAdapter: Send + Sync {
     fn check_tool_server(&self, _stop: &CancelToken) -> Result<(), ToolError> {
         Ok(())
     }
+    /// An environment variable that hands a local native run our tool server, for an agent that
+    /// takes it from its environment rather than its arguments.
+    fn mcp_env(&self, _mcp: &McpCommand) -> Result<Option<(&'static str, String)>, ToolError> {
+        Ok(None)
+    }
+    /// Whether what a build needs on a remote SSH host is there, checked before a build starts.
+    /// Default: nothing to check on the host. `stop` ends the check when the person stops the build.
+    fn check_remote_tool_server(&self, _host: &str, _stop: &CancelToken) -> Result<(), ToolError> {
+        Ok(())
+    }
+    /// Prepare this run's tool server on a remote SSH host (a config file there), returning the
+    /// environment variable to set on the remote command. Default: the agent can't carry one.
+    fn remote_tool_server(&self, _host: &str, _mcp: &McpCommand) -> Result<Option<(&'static str, String)>, ToolError> {
+        Ok(None)
+    }
     /// The file in which this computer keeps the agent's saved session `id`, so the project can
     /// keep a copy that travels with it. `None`: it keeps none we can copy, or not here.
     fn session_file(&self, _id: &str) -> Option<std::path::PathBuf> {
@@ -235,6 +252,7 @@ impl AgentAdapters {
                 Arc::new(Maki),
                 Arc::new(Copilot),
                 Arc::new(CursorAgent),
+                Arc::new(DeepSeekHarness),
             ],
         }
     }
@@ -584,11 +602,7 @@ fn claude_config_dir() -> Option<std::path::PathBuf> {
     set.or_else(flatpak_claude_dir).or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
 }
 
-/// Whether this app runs in a Flatpak sandbox (it sets `FLATPAK_ID` and makes `/.flatpak-info`).
-pub fn in_flatpak() -> bool {
-    static IN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *IN.get_or_init(|| std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists())
-}
+pub use craft_anything_platform::in_flatpak;
 
 /// Where Claude Code keeps its conversations when we start it under a Flatpak and the person
 /// hasn't chosen a folder: its own is `~/.claude`, which the sandbox only lets us read, so a
@@ -744,7 +758,13 @@ impl AgentAdapter for Codex {
             v.extend(["--sandbox".into(), "workspace-write".into()]);
         }
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.command={}", toml_string(&cx.mcp.command))]);
-        let args_toml = format!("[{}]", cx.mcp.args.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "));
+        // Codex doesn't refresh its callable tools after enable_toolset (#538), so list every
+        // permitted tool from startup. The server still applies Clean room's restrictions.
+        let mut mcp_args = cx.mcp.args.clone();
+        if !mcp_args.iter().any(|a| a == "--all-tools") {
+            mcp_args.push("--all-tools".into());
+        }
+        let args_toml = format!("[{}]", mcp_args.iter().map(|s| toml_string(s)).collect::<Vec<_>>().join(", "));
         v.extend(["-c".into(), format!("mcp_servers.{MCP_NAME}.args={args_toml}")]);
         // `codex exec` can't ask, so without this it refuses a tool not marked read-only, such as
         // rebuild_start, before our server sees the call (#540). Only tools that ask the person

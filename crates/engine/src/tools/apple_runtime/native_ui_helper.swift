@@ -93,15 +93,19 @@ guard let req = try? JSONDecoder().decode(Request.self, from: input), let pid = 
     exit(2)
 }
 
-if !AXIsProcessTrusted() {
-    emit(["error": "accessibility permission not granted", "nodes": []])
+// Observation may explicitly omit the tree. Walkthroughs still need AX permission because
+// they read and drive controls, regardless of an observe-only flag in the request.
+let readAccessibility = req.command != "observe" || (req.accessibility ?? true)
+if readAccessibility && !AXIsProcessTrusted() {
+    // A typed reason so the caller can report a permission problem, not an empty tree.
+    emit(["error": "accessibility permission not granted", "reason": "accessibility_not_granted", "nodes": []])
     exit(0)
 }
 
 switch req.command {
 case "observe":
-    let nodes = snapshot(pid: pid, maxNodes: req.max_nodes ?? 5000)
-    emit(["nodes": nodes, "truncated": nodes.count >= (req.max_nodes ?? 5000)])
+    let nodes = readAccessibility ? snapshot(pid: pid, maxNodes: req.max_nodes ?? 5000) : []
+    emit(["nodes": nodes, "truncated": readAccessibility && nodes.count >= (req.max_nodes ?? 5000)])
 case "walkthrough":
     let app = AXUIElementCreateApplication(pid)
     var steps: [[String: Any]] = []

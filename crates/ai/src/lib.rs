@@ -77,7 +77,7 @@ impl BackendKind {
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::Gemini => openai::GEMINI_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "agent"],
+            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "agent", "dsh"],
         }
     }
 
@@ -266,6 +266,7 @@ pub enum AgentEvent {
     /// One assistant turn finished.
     TurnDone {
         backend: String,
+        /// Every prompt token, cached ones included, as agent apps report them.
         input_tokens: u64,
         output_tokens: u64,
         cost_usd: Option<f64>,
@@ -327,6 +328,13 @@ pub struct TestReport {
     /// whether it's signed in, has a model and quota shows only when it gets a message (#48).
     #[serde(default)]
     pub version_only: bool,
+    /// The coding agent's program that ran, which `reply` is the answer of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    /// The saved program that couldn't be used, when `program` ran in its place (#721: an update
+    /// moved it), so a passing test doesn't hide a setting that's out of date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_program_replaced: Option<String>,
 }
 
 /// Text kept in the journal for a user message (bounded).
@@ -691,11 +699,16 @@ impl AiHub {
 
     /// Remove a backend and its stored key. Returns false when there was no such backend.
     pub fn remove_backend(&self, name: &str) -> Result<bool, ToolError> {
+        if self.config_to_change()?.get(name).is_none() {
+            return Ok(false);
+        }
+        // The key first: if it can't be removed the backend stays, so this can be tried again. The
+        // settings are read after it, because the keychain can take seconds and they may change.
+        self.keys.delete(name)?;
         let mut cfg = self.config_to_change()?;
         let removed = cfg.remove(name);
         if removed {
             self.save_config(&cfg)?;
-            self.keys.delete(name)?;
         }
         Ok(removed)
     }
@@ -713,6 +726,12 @@ impl AiHub {
 
     pub fn remove_asset_key(&self, provider: &str) -> Result<(), ToolError> {
         self.keys.delete(&keys::asset_key_name(provider))
+    }
+
+    /// See [`keys::refresh_loaded`]: for callers that don't hold the session. It can wait for a
+    /// running tool, so never call it from the UI thread or a tool.
+    pub fn refresh_loaded_asset_keys(&self) {
+        keys::refresh_loaded(&mut self.engine.session(), &self.keys);
     }
 
     /// The provider's key is stored or in its environment variable.
@@ -821,7 +840,7 @@ impl AiHub {
         })
     }
 
-    /// Start a conversation with the lead backend (or the named one).
+    /// Start a conversation with the lead backend (or the named one, while it is enabled).
     pub fn start(&self, backend: Option<&str>, beginner: bool) -> Result<Box<dyn Conversation>, ToolError> {
         let cfg = self.config();
         let first = match backend {
@@ -831,6 +850,10 @@ impl AiHub {
                 .cloned()
                 .ok_or_else(|| ToolError::unavailable("No AI is set up yet.").with_remediation("Add one in Settings → AI."))?,
         };
+        if !first.config.enabled {
+            return Err(ToolError::new(ErrorCode::BadSettings, format!("{} is turned off.", first.config.name))
+                .with_remediation("Turn it on in Settings → AI, or choose another backend for this conversation."));
+        }
         if first.config.kind == BackendKind::AgentCli {
             return Ok(Box::new(cli_agents::SharedConversation::new(self.engine.clone(), first, beginner)?));
         }
@@ -947,6 +970,8 @@ impl AiHub {
                 latency_ms: start.elapsed().as_millis() as u64,
                 reply: out.stdout_text().lines().next().unwrap_or_default().trim().to_string(),
                 version_only: true,
+                saved_program_replaced: e.options.command.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != program).map(str::to_string),
+                program: Some(program),
             });
         }
         let mut slot = self.build_model(&e)?;
@@ -969,6 +994,8 @@ impl AiHub {
             latency_ms: start.elapsed().as_millis() as u64,
             reply: r.message.text().trim().to_string(),
             version_only: false,
+            program: None,
+            saved_program_replaced: None,
         })
     }
 
@@ -1047,7 +1074,11 @@ fn reach(e: &BackendEntry, key: Option<String>) -> Result<u64, String> {
         }
         BackendKind::AgentCli => {
             let program = cli_agents::program_of(&e.config, &e.options);
-            craft_anything_platform::which(&program).map(|_| ()).ok_or_else(|| format!("{program} isn't on PATH"))
+            // A saved path that's gone (#721): PATH has nothing to do with it.
+            let by_path = std::path::Path::new(&program).parent().is_some_and(|p| !p.as_os_str().is_empty());
+            craft_anything_platform::which(&program)
+                .map(|_| ())
+                .ok_or_else(|| if by_path { format!("there's no program at {program}") } else { format!("{program} isn't on PATH") })
         }
     };
     r.map(|_| start.elapsed().as_millis() as u64)

@@ -573,6 +573,8 @@ pub fn analyse(
     let mut last_progress = Instant::now();
     let done = loop {
         if cancel() {
+            // Confirmed here: the caller may be the app closing, and a drop only raises a flag (#946).
+            running.kill_and_wait(Duration::from_secs(10));
             return Err(GhidraError::Cancelled);
         }
         if let Some(r) = running.wait_timeout(Duration::from_millis(500)) {

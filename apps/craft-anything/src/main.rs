@@ -8,10 +8,13 @@ use craft_anything_ui_egui::CraftApp;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(any(windows, test))]
+mod renderer;
 mod start_guard;
 
-/// Set when the last start never opened its window (see [`start_guard`]): the software renderer
-/// (WARP) is asked for, as with `CRAFT_ANYTHING_RENDERER=software`, for this start only.
+/// Set when this start draws with the software renderer (WARP), as with
+/// `CRAFT_ANYTHING_RENDERER=software`: the renderer chain chose it (see [`renderer`]), or the
+/// environment picks the backend and the last start never opened its window.
 #[cfg(windows)]
 static RETRY_IN_SOFTWARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -33,13 +36,15 @@ fn main() -> eframe::Result {
     log_to_file();
     log::info!("starting {} (pid {})", env!("CARGO_PKG_VERSION"), std::process::id());
     // A driver that crashes natively leaves nothing behind but this mark (#74): the start after it
-    // draws without the graphics card, and the one after that is back to normal.
+    // draws another way (on Windows, the next renderer, which is kept once it works).
     let config = craft_anything_engine::settings::config_dir();
-    if start_guard::last_start_failed(&config) {
-        log::warn!("the last start never opened its window; drawing without the graphics card this time");
-        #[cfg(windows)]
-        RETRY_IN_SOFTWARE.store(true, std::sync::atomic::Ordering::Relaxed);
+    let last_failed = start_guard::last_start_failed(&config);
+    if last_failed {
+        log::warn!("the last start never opened its window");
     }
+    // Windows: the way to draw this time, the next one when the last start failed (#794).
+    #[cfg(windows)]
+    let renderer = pick_renderer(&config, last_failed);
     start_guard::begin(&config);
 
     let settings = Settings::load();
@@ -56,10 +61,15 @@ fn main() -> eframe::Result {
         .with_app_id("ai.storyteller.craft-anything")
         .with_inner_size([1360.0, 860.0])
         .with_min_inner_size([760.0, 520.0])
-        // Our own title bar draws the window controls, moves and resizes the window.
-        .with_decorations(false)
         .with_resizable(true)
         .with_drag_and_drop(true);
+    // Our own title bar draws the window controls, moves and resizes the window. macOS keeps its
+    // own buttons and frame instead, with the content reaching under a see-through title bar (#20).
+    let viewport = if cfg!(target_os = "macos") {
+        viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false)
+    } else {
+        viewport.with_decorations(false)
+    };
     // On macOS a window icon replaces the Dock icon, and the bundle's own icon is the one padded to
     // Apple's icon grid (the full tile looked bigger than other apps', #102). An empty icon keeps
     // the bundle's; no icon at all would bring eframe's own.
@@ -80,7 +90,7 @@ fn main() -> eframe::Result {
         // Intel drivers crash in it (ig9icd64.dll, #196), so the window never opens. Similarly,
         // starting Vulkan loads Intel's Vulkan driver (igvk64.dll, #394) and crashes before any
         // window. DX12 (with WARP) covers all Windows systems; `WGPU_BACKEND` still asks for others.
-        setup.instance_descriptor.backends = windows_backends(eframe::wgpu::Backends::from_env());
+        setup.instance_descriptor.backends = windows_backends(eframe::wgpu::Backends::from_env(), renderer);
         setup.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(eframe::wgpu::Dx12Compiler::from_env());
         setup.native_adapter_selector = Some(Arc::new(pick_adapter));
     }
@@ -89,6 +99,8 @@ fn main() -> eframe::Result {
     // starts the app that way and rejected the panic, exit 101), instead of returning an error.
     let shown = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let shown_by_app = Arc::clone(&shown);
+    // AssertUnwindSafe: after a caught panic nothing from this closure is used again. The event
+    // loop isn't retried; the app only reports the failure (below) and exits.
     let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         eframe::run_native(
             "Craft Anything",
@@ -112,24 +124,36 @@ fn main() -> eframe::Result {
             }),
         )
     }));
-    let run = match run {
-        Ok(run) => run,
-        // A window that never showed: report it like any other start failure, below.
-        Err(payload) if !shown.load(std::sync::atomic::Ordering::Relaxed) => Err(eframe::Error::AppCreation(panic_text(payload.as_ref()).into())),
-        // A panic after the window was up is a bug, not a start failure: it ends the app as before.
-        Err(payload) => std::panic::resume_unwind(payload),
-    };
+    let run = start_result(run, shown.load(std::sync::atomic::Ordering::Relaxed));
     match &run {
         Ok(()) => log::info!("closed"),
         Err(e) => {
             log::error!("the window couldn't start: {e}");
+            // A wgpu error before the window was shown, with another renderer still to try: start
+            // again with it at once rather than ask the person to (#794). The chain ends, so this
+            // can't loop.
+            #[cfg(windows)]
+            if !shown.load(std::sync::atomic::Ordering::Relaxed)
+                && let Some(next) = renderer.and_then(|r| renderer::relaunch_with(r, &e.to_string()))
+                && {
+                    start_guard::release();
+                    relaunch(&args)
+                }
+            {
+                log::warn!("starting again with {}", next.title());
+                return run;
+            }
             // Without a window the app would just vanish (#166): say why, and where the log is.
             let log = craft_anything_engine::settings::config_dir().join("desktop.log");
+            #[cfg(windows)]
+            let retry = renderer.map(|r| format!(" The next start will draw with {}.", renderer::choose(Some(r), true).title())).unwrap_or_default();
+            #[cfg(not(windows))]
+            let retry = String::new();
             let _ = rfd::MessageDialog::new()
                 .set_level(rfd::MessageLevel::Error)
                 .set_title("Craft Anything couldn't open its window")
                 .set_description(format!(
-                    "{e}\n\n{} What happened is written to {}; please attach it if you report this.",
+                    "{e}\n\n{}{retry} What happened is written to {}; please attach it if you report this.",
                     graphics_advice(&e.to_string()),
                     log.display()
                 ))
@@ -155,12 +179,27 @@ fn wants_software(setting: Option<&str>) -> bool {
     setting.is_some_and(|s| s.trim().eq_ignore_ascii_case("software"))
 }
 
+/// The result of a run that may have panicked. A panic before the window's first frames were shown
+/// becomes an error, which the start-failure dialog then reports: on eframe 0.36 that is how wgpu
+/// reports a surface it can't configure (no usable GPU, or no desktop). It can also be any other bug
+/// in the app's first moments, so the text says "internal error" and doesn't blame the graphics. A
+/// panic after the window was up is resumed, ending the app as a panic always did.
+fn start_result(run: std::thread::Result<eframe::Result>, shown: bool) -> eframe::Result {
+    match run {
+        Ok(run) => run,
+        Err(payload) if !shown => {
+            Err(eframe::Error::AppCreation(format!("internal error before the window was shown: {}", panic_text(payload.as_ref())).into()))
+        }
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
 /// The message a panic carried (`panic!` with a literal or a formatted string), or a generic one.
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
     match (payload.downcast_ref::<&str>(), payload.downcast_ref::<String>()) {
         (Some(text), _) => (*text).to_string(),
         (None, Some(text)) => text.clone(),
-        (None, None) => "the graphics start failed".to_string(),
+        (None, None) => "an unknown panic".to_string(),
     }
 }
 
@@ -204,9 +243,50 @@ fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgp
 /// only (#196, #394). Vulkan and GL load third-party driver DLLs (igvk64.dll, ig9icd64.dll) before
 /// an adapter is chosen, which crash on some Intel systems. DX12 (with WARP) covers all Windows
 /// installations; `WGPU_BACKEND=vulkan` or `gl` still asks for them explicitly.
+/// After a start that failed, the renderer chain may have moved on to Vulkan or GL (#794): it is
+/// only reached once DX12 has failed.
 #[cfg(windows)]
-fn windows_backends(from_env: Option<eframe::wgpu::Backends>) -> eframe::wgpu::Backends {
-    from_env.unwrap_or(eframe::wgpu::Backends::DX12)
+fn windows_backends(from_env: Option<eframe::wgpu::Backends>, renderer: Option<renderer::Renderer>) -> eframe::wgpu::Backends {
+    from_env.or(renderer.map(renderer::Renderer::backends)).unwrap_or(eframe::wgpu::Backends::DX12)
+}
+
+/// Windows: the renderer for this start (see [`renderer`]), remembered before the window is asked
+/// for, so a start that dies makes the next one try the next renderer. `None` when
+/// `WGPU_BACKEND` or `CRAFT_ANYTHING_RENDERER` decides; then a failed start only brings WARP, as
+/// before.
+#[cfg(windows)]
+fn pick_renderer(config: &std::path::Path, last_failed: bool) -> Option<renderer::Renderer> {
+    use std::sync::atomic::Ordering;
+    let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+    if set("WGPU_BACKEND") || set("CRAFT_ANYTHING_RENDERER") {
+        if last_failed {
+            log::warn!("drawing without the graphics card this time");
+            RETRY_IN_SOFTWARE.store(true, Ordering::Relaxed);
+        }
+        return None;
+    }
+    let version = env!("CARGO_PKG_VERSION");
+    let chosen = renderer::choose(renderer::remembered(config, version), last_failed);
+    renderer::remember(config, version, chosen);
+    RETRY_IN_SOFTWARE.store(chosen.software(), Ordering::Relaxed);
+    if last_failed {
+        log::warn!("drawing with {} ({}), after a start that never opened its window", chosen.title(), chosen.name());
+    } else if chosen != renderer::Renderer::Dx12 {
+        log::info!("drawing with {} ({}), which opened the window last time", chosen.title(), chosen.name());
+    }
+    Some(chosen)
+}
+
+/// Starts the app again with the same arguments; whether it started.
+#[cfg(windows)]
+fn relaunch(args: &[String]) -> bool {
+    let started = std::env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|exe| craft_anything_platform::process::Launch::new(&exe).args(args).label("Craft Anything").start().map_err(|e| e.to_string()));
+    if let Err(e) = &started {
+        log::warn!("couldn't start again: {e}");
+    }
+    started.is_ok()
 }
 
 /// Lower is better: GL last, fastest device first, DX12 before Vulkan only between same-class devices
@@ -235,18 +315,6 @@ mod tests {
     use super::*;
     use eframe::wgpu::{Backend as B, DeviceType as T};
 
-    /// A panic before the window showed becomes the error the start-failure dialog shows: wgpu's
-    /// own message when there is one (`panic!` with a literal or a formatted string).
-    #[test]
-    fn a_start_panic_keeps_its_message() {
-        let literal: Box<dyn std::any::Any + Send> = Box::new("wgpu error: Validation Error");
-        let formatted: Box<dyn std::any::Any + Send> = Box::new(String::from("In Surface::configure: Invalid surface"));
-        let other: Box<dyn std::any::Any + Send> = Box::new(7_u8);
-        assert_eq!(panic_text(literal.as_ref()), "wgpu error: Validation Error");
-        assert_eq!(panic_text(formatted.as_ref()), "In Surface::configure: Invalid surface");
-        assert_eq!(panic_text(other.as_ref()), "the graphics start failed");
-    }
-
     /// #27: a VMware VM offers its virtual GPU over GL and WARP over DX12; GL drew a black window.
     /// #33: a start that shows nothing is looked at through `desktop.log`; between same-class
     /// devices DX12 comes before Vulkan, and GL stays the last resort.
@@ -267,10 +335,16 @@ mod tests {
     #[test]
     fn gl_and_vulkan_are_only_started_when_asked_for() {
         use eframe::wgpu::Backends;
-        let started = windows_backends(None);
-        assert_eq!(started, Backends::DX12);
-        assert_eq!(windows_backends(Some(Backends::GL)), Backends::GL, "WGPU_BACKEND=gl still works");
-        assert_eq!(windows_backends(Some(Backends::VULKAN)), Backends::VULKAN, "WGPU_BACKEND=vulkan still works");
+        use renderer::Renderer;
+        assert_eq!(windows_backends(None, None), Backends::DX12);
+        assert_eq!(windows_backends(None, Some(Renderer::Dx12)), Backends::DX12);
+        assert_eq!(windows_backends(None, Some(Renderer::Warp)), Backends::DX12, "WARP is a DX12 adapter");
+        assert_eq!(windows_backends(Some(Backends::GL), None), Backends::GL, "WGPU_BACKEND=gl still works");
+        assert_eq!(windows_backends(Some(Backends::VULKAN), None), Backends::VULKAN, "WGPU_BACKEND=vulkan still works");
+        // #794: once DX12 and WARP failed, the chain reaches them without the variable.
+        assert_eq!(windows_backends(None, Some(Renderer::Vulkan)), Backends::VULKAN);
+        assert_eq!(windows_backends(None, Some(Renderer::Gl)), Backends::GL);
+        assert_eq!(windows_backends(Some(Backends::DX12), Some(Renderer::Gl)), Backends::DX12, "the variable wins");
     }
 }
 
@@ -319,6 +393,49 @@ fn log_to_file() {
 mod graphics_tests {
     use super::*;
     use eframe::wgpu::Dx12Compiler;
+
+    /// A panic before the window showed becomes the error the start-failure dialog shows: wgpu's
+    /// own message when there is one (`panic!` with a literal or a formatted string).
+    #[test]
+    fn a_start_panic_keeps_its_message() {
+        let literal: Box<dyn std::any::Any + Send> = Box::new("wgpu error: Validation Error");
+        let formatted: Box<dyn std::any::Any + Send> = Box::new(String::from("In Surface::configure: Invalid surface"));
+        let other: Box<dyn std::any::Any + Send> = Box::new(7_u8);
+        assert_eq!(panic_text(literal.as_ref()), "wgpu error: Validation Error");
+        assert_eq!(panic_text(formatted.as_ref()), "In Surface::configure: Invalid surface");
+        assert_eq!(panic_text(other.as_ref()), "an unknown panic");
+    }
+
+    /// A run that ended normally, or with an error, comes back as it was.
+    #[test]
+    fn a_run_without_a_panic_is_passed_through() {
+        assert!(start_result(Ok(Ok(())), false).is_ok());
+        let error = start_result(Ok(Err(eframe::Error::AppCreation("no adapter".into()))), true);
+        assert!(matches!(error, Err(eframe::Error::AppCreation(e)) if e.to_string() == "no adapter"));
+    }
+
+    /// A panic before the window showed becomes the start error the dialog reports, with the
+    /// panic's message and without blaming the graphics.
+    #[test]
+    fn a_panic_before_the_window_showed_becomes_a_start_error() {
+        let run: std::thread::Result<eframe::Result> = Err(Box::new("In Surface::configure: Invalid surface"));
+        let Err(eframe::Error::AppCreation(e)) = start_result(run, false) else {
+            panic!("expected a start error");
+        };
+        assert_eq!(e.to_string(), "internal error before the window was shown: In Surface::configure: Invalid surface");
+    }
+
+    /// A panic after the window was up isn't turned into a start error: it is resumed, with its
+    /// own payload, as if nothing had caught it.
+    #[test]
+    fn a_panic_after_the_window_showed_is_resumed() {
+        let resumed = std::panic::catch_unwind(|| {
+            let run: std::thread::Result<eframe::Result> = Err(Box::new("a bug in a frame"));
+            let _ = start_result(run, true);
+        });
+        let payload = resumed.expect_err("the panic must be resumed");
+        assert_eq!(panic_text(payload.as_ref()), "a bug in a frame");
+    }
 
     /// #522: wgpu's `Auto` found a `dxcompiler.dll` without `dxil.dll`, and the device was lost on
     /// an RTX 5060 Ti. FXC is the default; the environment variable still decides when set.

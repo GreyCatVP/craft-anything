@@ -149,8 +149,8 @@ pub struct StartParams {
     /// project_assets_allow.
     #[serde(default)]
     pub generate_assets: bool,
-    /// The coding agent to use (a backend name), kept with a new project for its later changes;
-    /// default: the one set up for building.
+    /// The coding agent to use (an enabled backend name), kept with a new project for its later
+    /// changes; default: the one set up for building.
     #[serde(default)]
     pub backend: Option<String>,
     /// Refinement rounds after the first build (default 2).
@@ -282,7 +282,10 @@ fn rebuild_question_ask(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, 
         super::question::ask(&AiHub::new(engine), &settings, Some(crate::failure_log::dir_in(&ctx.session.config_dir())), &ws, &p.question, &ctx.cancel)?;
     let question = p.question.trim();
     let from_session = answered.from == super::question::AnsweredFrom::BuildersSession;
-    let asked = AskedQuestion::new(question.to_string(), answered.answer.clone(), from_session, answered.backend.clone(), answered.cost_usd, after);
+    let asked = AskedQuestion {
+        deep: settings.deep_mode,
+        ..AskedQuestion::new(question.to_string(), answered.answer.clone(), from_session, answered.backend.clone(), answered.cost_usd, after)
+    };
     // An answer that couldn't be kept is still the answer.
     let not_kept = questions::add(&ws, asked).err().map(|e| e.message);
     Ok(ToolOutput::Value(json!({"project": ws.root, "question": question, "answered": answered, "not_kept": not_kept})))
@@ -301,6 +304,11 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
     })?;
     let runs = runs(ctx);
     let settings: &Settings = &ctx.session.settings;
+    // Refuse an unknown or switched-off name before opening or making a project or adding pictures:
+    // a refused start must not leave anything behind.
+    if let Some(name) = p.backend.as_deref() {
+        builder_backend(&crate::AiConfig::from_settings(settings), Some(name))?;
+    }
     let (ws, message) = match &p.project {
         Some(dir) => {
             if p.build_with.is_some() {
@@ -309,7 +317,9 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
             if p.generate_assets {
                 return Err(ToolError::invalid("generate_assets is for new projects.").with_remediation("Use project_assets_allow for an existing project."));
             }
-            (open(dir)?, (!p.resume).then(|| p.request.clone()))
+            let ws = open(dir)?;
+            ctx.session.remember_project(&ws.root)?;
+            (ws, (!p.resume).then(|| p.request.clone()))
         }
         None if p.resume => return Err(ToolError::invalid("resume is for an existing project.").with_remediation("Pass its folder as `project`.")),
         None => {
@@ -321,7 +331,7 @@ fn rebuild_start(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
                 (None, None) => project::Place::Projects,
             };
             let ws = project::new_project(settings, target, &p.request, place, p.build_with.as_deref(), p.generate_assets, p.backend.as_deref())?;
-            if p.project_folder.is_some() {
+            if p.project_folder.is_some() || matches!(place, project::Place::At(..)) {
                 ctx.session.remember_project(&ws.root)?;
             }
             (ws, None)
@@ -516,6 +526,21 @@ mod tests {
         assert!(e.call("rebuild_note", json!({"project": ws.root, "text": "blue"}), ok()).is_err());
         assert!(e.call("rebuild_note_withdraw", json!({"project": ws.root, "id": 1}), ok()).is_err());
         assert!(e.call("rebuild_stop", json!({"project": ws.root}), ok()).is_err());
+    }
+
+    #[test]
+    fn a_disabled_or_unknown_backend_is_refused_before_the_tool_makes_a_project() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = craft_anything_engine::testing::session();
+        s.settings.ai = toml::from_str("[[backends]]\nname = \"Off\"\nkind = \"anthropic\"\nmodel = \"claude-test\"\nenabled = false\n").unwrap();
+        let e = Engine::shared(s, specs());
+        let ok = || CallOptions::new(Caller::Cli).with_consent(Consent::Granted);
+        for (backend, expected) in [("Off", "turned off"), ("No Such AI", "No AI backend named")] {
+            let p = json!({"request": "A page", "target": "-", "projects_dir": d.path(), "backend": backend});
+            let err = e.call("rebuild_start", p, ok()).unwrap_err();
+            assert!(err.message.contains(expected), "{backend}: {err:?}");
+            assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 0, "{backend}: a refused start must not make a project");
+        }
     }
 
     #[test]
