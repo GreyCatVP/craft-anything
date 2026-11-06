@@ -1248,7 +1248,12 @@ impl CraftApp {
         if self.state.backend.is_some() && self.conversation.is_none() {
             match self.hub.start(self.state.backend.as_deref(), self.beginner()) {
                 Ok(c) => self.conversation = Some(c),
-                Err(e) => self.state.chat.push(ChatItem::Error { message: e.message, remediation: e.remediation, log: None }),
+                // The AI that was picked didn't start (it may be turned off), so the error is the
+                // answer; an AI is set up, so the built-in engines' "no AI brain" line would be wrong.
+                Err(e) => {
+                    self.state.chat.push(ChatItem::Error { message: e.message, remediation: e.remediation, log: None });
+                    return;
+                }
             }
         }
         if let Some(c) = self.conversation.as_mut() {
