@@ -40,6 +40,7 @@ use std::time::{Duration, Instant};
 pub mod activity;
 mod brief;
 mod check;
+pub mod device;
 pub mod feed;
 pub mod kinds;
 mod locate;
@@ -562,6 +563,21 @@ impl Worker {
         }
     }
 
+    /// The Kotlin stack builds with Gradle, which needs a JDK and the Android SDK: say so before
+    /// the first turn rather than after it.
+    fn check_android_tools(&self, stack: &str) -> Result<(), ToolError> {
+        if stack != kinds::AndroidAppKind::STACK {
+            return Ok(());
+        }
+        let settings = self.engine.session().settings.clone();
+        match kinds::android_homes(&settings) {
+            Some(_) => Ok(()),
+            None => Err(ToolError::new(ErrorCode::BadSettings, "Building an Android app needs a JDK (17 or newer) and the Android SDK, and one of them wasn't found.").with_remediation(
+                "Install them (a JDK, and the Android SDK with its command-line tools, platform 36 and build-tools), set JAVA_HOME and ANDROID_HOME or point Settings → Engines at javac and sdkmanager, then start again.",
+            )),
+        }
+    }
+
     /// How the builder's agent runs. Reads the session once: a lock taken twice in one statement
     /// is held by the first until the statement ends, and the second then waits forever.
     fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions) -> CliSpec {
@@ -634,6 +650,7 @@ impl Worker {
         self.self_check = Some((kind.clone(), opts.good_enough));
         let kind = kind.as_ref();
         self.editor = self.find_editor(&ws.manifest.stack)?;
+        self.check_android_tools(&ws.manifest.stack)?;
         let carrying_on = opts.continuing || (opts.message.is_none() && ws.builder_started());
         let first = (opts.message.is_none() && !carrying_on) || !ws.capture_dir().exists();
         if first {
@@ -789,6 +806,7 @@ impl Worker {
             round += 1;
             let checking = if ws.manifest.target == TargetRef::None { "Checking the build…" } else { "Checking the build against the original…" };
             self.step(ws, Step::Check, Status::Checking, checking)?;
+            let previous: Vec<CheckResult> = ws.manifest.checks.iter().filter(|c| c.round + 1 == round).cloned().collect();
             let checks = self.checks_with_a_retry(ws, kind, round)?;
             ws.manifest.checks.extend(checks.iter().cloned());
             ws.manifest.awaiting_check = false;
@@ -807,6 +825,14 @@ impl Worker {
                 continue;
             }
             let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
+            // A turn that changed no file but made the build measurably better (a check newly
+            // passes, its likeness rose) is progress while the round still isn't good enough:
+            // the unchanged-turn count starts again. A round that passes keeps its count, so
+            // Try again keeps the saved limit.
+            if not_good.is_some() && progress_available && self_check::moved(&previous, &checks) {
+                progress.reset();
+                progress.save(&ws.root)?;
+            }
             if not_good.is_some() && progress_available && progress.stalled() {
                 // A check-only resume skipped the builder's before-turn scan. A real edit
                 // while the project was closed (or during this check) still starts an attempt.
