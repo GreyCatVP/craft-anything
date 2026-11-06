@@ -588,8 +588,8 @@ pub fn analyse(
     let lock = lock_path(&project_dir);
     // The lock sits beside the project, in the cache folder a fresh store doesn't have yet.
     make_private_dir(lock.parent().unwrap_or(&root))?;
-    let mut kept_aside: Option<Aside> = None;
-    loop {
+    // The loop ends by handing over what it moved aside, if anything.
+    let kept_aside = loop {
         if is_analysed(&project_dir) {
             return Ok(project_dir);
         }
@@ -617,17 +617,14 @@ pub fn analyse(
         // Whatever the dead process left is moved, not removed, so a Ghidra that outlived it keeps
         // its own folder. A refusal to move it means that Ghidra is still working: wait for it.
         match set_aside(&project_dir) {
-            Ok(aside) => {
-                kept_aside = aside;
-                break;
-            }
+            Ok(aside) => break aside,
             Err(e) => {
                 let _ = std::fs::remove_file(&lock);
                 progress(0.05, &format!("waiting for the analysis of this program already under way ({e})"));
                 std::thread::sleep(Duration::from_secs(2));
             }
         }
-    }
+    };
     let held = HeldLock(lock.clone());
     let _beat = Heartbeat::start(&lock);
     let _aside = kept_aside;
