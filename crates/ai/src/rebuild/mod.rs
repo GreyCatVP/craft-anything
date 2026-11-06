@@ -40,6 +40,7 @@ use std::time::{Duration, Instant};
 pub mod activity;
 mod brief;
 mod check;
+pub mod device;
 pub mod feed;
 pub mod kinds;
 mod locate;
