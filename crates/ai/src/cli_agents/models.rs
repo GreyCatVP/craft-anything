@@ -277,9 +277,16 @@ mod tests {
             args.last().unwrap(),
             "'/opt/agent'\\''s tools/opencode' api model.list --server http://localhost:4096 --param \"location[directory]=$PWD\""
         );
+        // Locally a chosen path must exist: a missing one falls back to an installed `opencode`.
         cfg.ssh_host = None;
+        let folder = tempfile::tempdir().unwrap();
+        let chosen = folder.path().join("agent's tools").join("opencode");
+        std::fs::create_dir_all(chosen.parent().unwrap()).unwrap();
+        std::fs::write(&chosen, b"").unwrap();
+        let chosen = chosen.display().to_string();
+        let options = BackendOptions { command: Some(chosen.clone()), ..options };
         let (program, args) = query_command(&cfg, &options, Some(Path::new("/work/test"))).unwrap();
-        assert_eq!(program, "/opt/agent's tools/opencode");
+        assert_eq!(program, chosen);
         assert_eq!(args, ["api", "model.list", "--server", "http://localhost:4096", "--param", "location[directory]=/work/test"]);
     }
 
