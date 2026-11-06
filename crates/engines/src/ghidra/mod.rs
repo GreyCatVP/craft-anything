@@ -506,6 +506,7 @@ fn lock_is_fresh(lock: &Path) -> bool {
 struct Aside(PathBuf);
 
 impl Drop for Aside {
+    /// Free the room once this analysis has a folder of its own.
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
