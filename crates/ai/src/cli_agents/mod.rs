@@ -597,13 +597,8 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     let acp_args = selected_acp_args(adapter.as_ref(), &agent, &spec.options).filter(|_| local)?;
     // No program to start: the plain run reports why.
     let program = program_of(&spec.config, &spec.options).ok()?;
-    let access = match (spec.question, spec.deep, spec.builder.is_some()) {
-        (true, true, _) => Access::Question,
-        (true, false, _) => Access::CleanRoomQuestion,
-        (false, true, true) => Access::Build,
-        (false, false, true) => Access::CleanRoomBuild,
-        _ => Access::Analyse,
-    };
+    // Same modes as the plain runner, including Clean room chat (no builder, not deep).
+    let access = access_for(spec.builder.is_some(), spec.deep, spec.question);
     let mut args = adapter.acp_options(&spec.options, access);
     args.extend(acp_args.iter().map(|a| a.to_string()));
     args.extend(acp::model_args(&agent, spec.options.cli_model.as_deref()));
@@ -620,6 +615,7 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     Some(
         AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, if spec.question { None } else { spec.resume.clone() })
             .with_validation(adapter.validate_options(&spec.options))
+            .with_access_limit(adapter.validate_access(access))
             .with_adapter(adapter)
             .with_question(spec.question)
             .with_session_config(session_config)

@@ -97,6 +97,21 @@ impl AgentAdapter for Grok {
         }
     }
 
+    /// `grok agent` accepts no flag that stops native reads, and a read does not ask permission.
+    /// Saved permissions can also edit without a request. Clean room and questions are refused
+    /// rather than started under limits this agent cannot keep. A deep build may read, and an
+    /// edit is gated only when Grok sends `session/request_permission`. Deep chat uses that same
+    /// ask path.
+    fn validate_access(&self, access: Access) -> Result<(), ToolError> {
+        match access {
+            Access::Build | Access::Analyse => Ok(()),
+            Access::CleanRoomAnalyse | Access::CleanRoomBuild | Access::CleanRoomQuestion | Access::Question => {
+                Err(ToolError::invalid("Grok Build reads and edits without asking, so a Clean room run or a question can't hold it back.")
+                    .with_remediation("Use a deep build. Grok asks before an edit only when its own permission mode sends a request."))
+            }
+        }
+    }
+
     fn acp_mode_options(&self, options: &BackendOptions, _access: Access) -> Vec<String> {
         // `--no-leader` keeps this run off the person's shared Grok session, including one
         // already open in a terminal. Effort after `agent` is what the CLI actually applies.
@@ -109,6 +124,11 @@ impl AgentAdapter for Grok {
 
     fn acp_trailing(&self) -> &'static [&'static str] {
         &["stdio"]
+    }
+
+    /// Grok rejects a server object that has no `type`. Other agents do not send this field.
+    fn acp_mcp_stdio_type(&self) -> bool {
+        true
     }
 
     fn acp_session_config(&self, options: &BackendOptions) -> Vec<(String, String)> {
@@ -131,8 +151,15 @@ impl AgentAdapter for Grok {
     fn signed_in(&self, _program: &str) -> Option<bool> {
         let grok_home = std::env::var_os("GROK_HOME");
         // Existence only. The file holds the person's credentials and is not read.
-        auth_path(grok_home.as_deref(), dirs::home_dir().as_deref()).map(|path| path.is_file())
+        // Missing is unknown: `XAI_API_KEY` can authenticate with no auth.json, and the run reports it.
+        auth_present(auth_path(grok_home.as_deref(), dirs::home_dir().as_deref()))
     }
+}
+
+/// `Some(true)` when `auth.json` exists as a file. Missing, or not a file, is unknown (`None`),
+/// not "signed out".
+fn auth_present(path: Option<PathBuf>) -> Option<bool> {
+    path.and_then(|path| path.is_file().then_some(true))
 }
 
 /// `GROK_HOME/auth.json` when that variable is set, otherwise `~/.grok/auth.json`.
@@ -183,6 +210,8 @@ mod tests {
         assert!(adapter.has_model_catalog() && adapter.model_catalog_depends_on_selection());
         assert!(!adapter.supports_model_tuning());
         assert_eq!(adapter.acp_trailing(), &["stdio"]);
+        assert!(adapter.acp_mcp_stdio_type());
+        assert!(!AgentAdapters::built_in().for_agent("maki").acp_mcp_stdio_type());
         assert_eq!(super::super::acp::acp_args("grok"), Some(&["agent"][..]));
         assert_eq!(super::super::acp::model_args("grok", Some("grok-4.5")), ["--model", "grok-4.5"]);
         assert!(super::super::acp::model_args("grok", Some("  ")).is_empty());
@@ -208,6 +237,13 @@ mod tests {
         assert_eq!(Grok.acp_mode_options(&options, Access::Build), ["--no-leader", "--reasoning-effort", "low"]);
         assert_eq!(Grok.acp_session_config(&options), [("model".into(), "grok-4.6".into()), ("reasoning_effort".into(), "low".into())]);
         assert!(!Grok.acp_mode_options(&options, Access::CleanRoomBuild).iter().any(|arg| arg.contains("always-approve")));
+        for access in [Access::CleanRoomAnalyse, Access::CleanRoomBuild, Access::CleanRoomQuestion, Access::Question] {
+            let error = Grok.validate_access(access).expect_err("clean room and questions are refused");
+            assert!(error.message.contains("Clean room") && error.message.contains("question"));
+            assert!(error.remediation.as_deref().is_some_and(|fix| fix.contains("deep build")));
+        }
+        assert!(Grok.validate_access(Access::Build).is_ok());
+        assert!(Grok.validate_access(Access::Analyse).is_ok());
         let named =
             BackendOptions { cli_reasoning_effort: Some(crate::config::CliReasoningEffort::Xhigh), effort: Some(crate::Effort::Low), ..Default::default() };
         assert_eq!(Grok.acp_session_config(&named), [("reasoning_effort".into(), "xhigh".into())]);
@@ -255,5 +291,139 @@ mod tests {
         assert_eq!(auth_path(Some(OsStr::new("")), Some(&user)), Some(user.join(".grok").join("auth.json")));
         assert_eq!(auth_path(None, Some(&user)), Some(user.join(".grok").join("auth.json")));
         assert_eq!(auth_path(None, None), None);
+    }
+
+    #[test]
+    fn a_missing_auth_file_is_unknown_and_an_existing_file_is_signed_in() {
+        let root = std::env::temp_dir().join(format!("craft-grok-auth-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("auth.json");
+        // Not a credential. The check is existence only, and this file is empty.
+        assert_eq!(auth_present(Some(file.clone())), None);
+        std::fs::write(&file, b"").unwrap();
+        assert_eq!(auth_present(Some(file.clone())), Some(true));
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        assert_eq!(auth_present(Some(file)), None);
+        assert_eq!(auth_present(None), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One real deep build: our MCP server is called, and one permission request is answered.
+    /// Grok's home for this process is a temporary ask-mode config, so a shell write asks even
+    /// when the person's own config would approve every tool. That config is not modified.
+    /// Not part of the default suite.
+    #[test]
+    #[ignore = "live Grok Build session; needs grok signed in and craft-anything-cli built"]
+    #[cfg(unix)]
+    fn a_live_build_connects_tools_and_answers_one_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let pid = std::process::id();
+        let root = std::env::temp_dir().join(format!("craft-grok-live-{pid}"));
+        let home = std::env::temp_dir().join(format!("craft-grok-home-{pid}"));
+        let _keep_root = RemoveOnDrop(root.clone());
+        let _keep_home = RemoveOnDrop(home.clone());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(root.join("readme.txt"), "live check\n").unwrap();
+        // Ask, and no personal MCP servers. `ui.permission_mode` is what the CLI reads.
+        std::fs::write(
+            home.join("config.toml"),
+            "[ui]\npermission_mode = \"ask\"\nyolo = false\n\n[auto_mode]\nenabled = false\n\ndefault_auto_mode = false\ndisable_web_search = true\n\n[cli]\nauto_update = false\nuse_leader = false\n",
+        )
+        .unwrap();
+        let user_home = dirs::home_dir().expect("a home directory");
+        let auth = user_home.join(".grok").join("auth.json");
+        assert!(auth.is_file(), "this live check needs an existing grok auth file; it is not read");
+        std::os::unix::fs::symlink(&auth, home.join("auth.json")).unwrap();
+        let listed = std::process::Command::new("sh").arg("-c").arg("command -v grok").output().expect("look up grok");
+        let found = String::from_utf8_lossy(&listed.stdout).trim().to_string();
+        let grok_bin = if found.is_empty() { user_home.join(".grok").join("bin").join("grok") } else { PathBuf::from(found) };
+        assert!(grok_bin.is_file(), "grok has to be installed for this live check");
+        let wrapper = root.join("grok-ask");
+        let script = format!("#!/bin/sh\nexport GROK_HOME='{}'\nexec '{}' \"$@\"\n", home.display(), grok_bin.display());
+        std::fs::write(&wrapper, script).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::process::Command::new("git").arg("-C").arg(&root).arg("init").output();
+
+        let permissions = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let record = permissions.clone();
+        let approver: super::super::acp::Approver = std::sync::Arc::new(move |tool: &str, _input: &serde_json::Value| {
+            record.lock().unwrap().push(tool.to_string());
+            true
+        });
+        let mut spec = super::super::CliSpec::new(
+            crate::BackendConfig {
+                name: "Grok".into(),
+                kind: crate::BackendKind::AgentCli,
+                model: "grok".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            },
+            BackendOptions { command: Some(wrapper.display().to_string()), ..Default::default() },
+            false,
+            Some(root.clone()),
+        );
+        // Deep build: Clean room is refused, because Grok's native reads never ask.
+        spec.deep = true;
+        spec.builder = Some(super::super::Builder { investigation: Some(root.clone()), inbox: root.join("inbox") });
+        let mut conv = super::super::builder_conversation(spec, approver);
+        conv.send(
+            "Do exactly these two things in this folder, then stop. First call the craft-anything MCP tool core_session_show and no other MCP server. Then run this shell command and no other command: mkdir grok-live-marker",
+        );
+
+        let started = std::time::Instant::now();
+        let mut tools = Vec::new();
+        let mut notes = Vec::new();
+        let mut errors = Vec::new();
+        let mut done = false;
+        let mut saw_server = false;
+        while started.elapsed() < std::time::Duration::from_secs(180) {
+            for event in conv.poll() {
+                match event {
+                    crate::AgentEvent::ToolStarted { tool, input, .. } => {
+                        let blob = format!("{tool} {input}");
+                        let lower = blob.to_ascii_lowercase();
+                        if lower.contains("session_show") || lower.contains("craft-anything") || lower.contains("craft_anything") {
+                            saw_server = true;
+                        }
+                        let mut note = blob.chars().take(160).collect::<String>();
+                        note = note.replace(&user_home.display().to_string(), "~");
+                        notes.push(note);
+                        tools.push(tool);
+                    }
+                    crate::AgentEvent::ToolFinished { tool, .. } => tools.push(tool),
+                    crate::AgentEvent::Error { message, .. } => errors.push(message),
+                    crate::AgentEvent::TurnDone { .. } => done = true,
+                    crate::AgentEvent::ConsentNeeded { call_id, tool, .. } => {
+                        permissions.lock().unwrap().push(tool);
+                        conv.answer_consent(&call_id, true);
+                    }
+                    _ => {}
+                }
+            }
+            if done && !conv.is_busy() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        conv.stop();
+        let asked = permissions.lock().unwrap().clone();
+        assert!(done, "the turn did not finish; tools={tools:?} permissions={asked:?} notes={notes:?} errors={errors:?}");
+        assert!(!asked.is_empty(), "no permission was answered; tools={tools:?} notes={notes:?} errors={errors:?}");
+        assert!(saw_server, "craft-anything's tools did not run; tools={tools:?} permissions={asked:?} notes={notes:?} errors={errors:?}");
+    }
+
+    #[cfg(unix)]
+    struct RemoveOnDrop(PathBuf);
+    #[cfg(unix)]
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }

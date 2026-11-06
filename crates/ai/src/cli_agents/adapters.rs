@@ -88,6 +88,12 @@ pub trait AgentAdapter: Send + Sync {
     fn acp_mcp_options(&self, _mcp: &McpCommand) -> Vec<String> {
         Vec::new()
     }
+    /// Include `"type": "stdio"` on the MCP server in `session/new`. Grok's server enum requires
+    /// it. Other agents leave it off, so a session that has not been checked with the field
+    /// stays on the payload it already accepts.
+    fn acp_mcp_stdio_type(&self) -> bool {
+        false
+    }
     /// Arguments after the ACP mode words and the model flag, still before a trailing subcommand.
     /// The default adds none, so agents whose flags already sit in [`acp_options`](Self::acp_options)
     /// stay unchanged.
@@ -106,6 +112,12 @@ pub trait AgentAdapter: Send + Sync {
     /// Refuse backend options that could bypass this adapter's restrictions, before its ACP
     /// process starts. The refusal is kept on the conversation and reported by `send`.
     fn validate_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
+        Ok(())
+    }
+    /// Refuse an access mode this agent cannot hold. The default allows every mode. A refusal
+    /// is kept beside [`validate_options`](Self::validate_options) and reported by `send`.
+    /// Model-list discovery sends no prompt, so it does not apply this check.
+    fn validate_access(&self, _access: Access) -> Result<(), ToolError> {
         Ok(())
     }
     /// The model shown in Settings: an explicit choice or the CLI's own default. `None` means

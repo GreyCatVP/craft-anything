@@ -8,9 +8,11 @@ Settings → AI also offers **xAI (Grok)** as an OpenAI-compatible server for qu
 
 1. Install Grok Build. Its program is `grok`, usually in `~/.grok/bin` (or `%USERPROFILE%\.grok\bin`).
    Craft Anything looks there even when a desktop launch left that folder off `PATH`.
-2. In your own terminal, run `grok login` and finish the sign-in. Grok keeps the credentials.
-   Craft Anything only checks that `auth.json` exists under `GROK_HOME`, or `~/.grok` when that
-   variable is unset. It does not read the file, collect an API key, or sign in for you.
+2. Sign in with `grok login`, or set `XAI_API_KEY`. Grok keeps the credentials. Craft Anything
+   does not read them, collect a key, or sign in for you. When `auth.json` exists under
+   `GROK_HOME`, or under `~/.grok` when that variable is unset, the app treats Grok as signed
+   in. A missing file is unknown, so a build still starts and Grok reports an authentication
+   problem itself.
 3. In Settings → AI, detect and add **Grok Build**, then choose it for chat or **Build with this**.
    If `grok` is installed somewhere else, use **Choose...** and pick the program.
 
@@ -64,17 +66,25 @@ cli_thinking = "low"
 ```
 
 Discovery sends no prompt. It does open a session long enough to read the model list and apply
-`cli_model`, so the thinking choices match that model.
+`cli_model`, so the thinking choices match that model. That read is not a question run, so the
+refusal below does not apply to it.
 
 ## Tools, MCP and Clean room
 
 Builds attach Craft Anything's MCP server on `session/new` as a stdio server named
-`craft-anything`. Questions attach no server and refuse permission requests. Grok also keeps
-the MCP servers from your own Grok config. Craft Anything does not edit that config and cannot
-turn those servers off for one run.
+`craft-anything`, with `"type": "stdio"` because Grok's server list rejects an object that
+has no type. That field is sent only for Grok. Grok also keeps the MCP servers from your own
+Grok config. Craft Anything does not edit that config and cannot turn those servers off for
+one run.
 
-Clean room depends on Grok asking through `session/request_permission`. Requests it does not
-send are not something this integration can refuse.
+Clean room and questions are refused before Grok starts. `grok agent` does not accept
+`--permission-mode`, `--deny`, or `--disallowed-tools`, and those flags do not constrain the
+agent when they are placed before `agent`. A native read does not ask permission, so Clean
+room cannot keep the original out of reach. A question must not change files, and a saved
+permission or an always-approve setting can edit without a request. A deep build is allowed:
+it may read, and an edit is gated only when Grok sends `session/request_permission`. Deep
+chat uses that same ask path. A Grok config that approves every tool will still edit without
+asking. Craft Anything does not pass `--always-approve`.
 
 ## What was checked
 
@@ -82,5 +92,13 @@ Against Grok Build 1.0.77: `initialize`, `session/new`, and `session/set_config_
 string model id sticks; the CLI `--model` flag does not survive `session/new`;
 `--reasoning-effort` after `agent` does stick and is sent again after a model change). The
 argument order, the `type: stdio` server payload, and the config queue are covered by unit
-tests with a scripted agent. No live prompt or build was run, and a real Craft Anything MCP
-process was not connected during that check.
+tests with a scripted agent.
+
+A live deep build was run on 2026-11-06 with Grok Build 1.0.77. The turn finished in about
+30 seconds. A tool call named the `craft-anything` server or `core_session_show`, and one
+permission request was answered with allow. That run used a temporary `GROK_HOME` whose
+`ui.permission_mode` was `ask`, and a symlink to the existing auth file. The file was not
+read, and the person's own Grok config was not changed. A config that approves every tool
+does not send that request. Copilot, Gemini, and Maki were not checked live with
+`"type": "stdio"`; the field is still sent only for Grok. Clean room was not run live,
+because those runs are refused.

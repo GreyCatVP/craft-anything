@@ -163,6 +163,8 @@ pub struct AcpCore {
     /// A loaded session already has history. Set when the session response arrives, and copied
     /// onto [`session_has_history`](Self::session_has_history) once the config queue is done.
     opened_with_history: bool,
+    /// The adapter asked for `"type": "stdio"` on our MCP server. Off for every other agent.
+    typed_mcp: bool,
 }
 
 impl AcpCore {
@@ -190,6 +192,7 @@ impl AcpCore {
             config_options: Vec::new(),
             config_queue: VecDeque::new(),
             opened_with_history: false,
+            typed_mcp: false,
         }
     }
 
@@ -248,13 +251,16 @@ impl AcpCore {
     }
 
     fn mcp_servers(&self) -> Value {
-        // `type` is required by Grok's untagged server enum. Agents that already accept this
-        // object ignore the extra field. Questions attach no server.
+        // Questions attach no server. `"type": "stdio"` is only added for an adapter that
+        // requires it (Grok). Other agents keep the payload their sessions already accept.
         if self.question {
-            json!([])
-        } else {
-            json!([{"type": "stdio", "name": super::MCP_NAME, "command": self.mcp.command, "args": self.mcp.args, "env": []}])
+            return json!([]);
         }
+        let mut server = json!({"name": super::MCP_NAME, "command": self.mcp.command, "args": self.mcp.args, "env": []});
+        if self.typed_mcp {
+            server["type"] = json!("stdio");
+        }
+        json!([server])
     }
 
     /// The current string value of a session config option, when the agent reports one.
@@ -593,6 +599,8 @@ pub struct AcpConversation {
     question: bool,
     /// Report invalid backend settings through the conversation before starting a child process.
     validation_error: Option<craft_anything_evidence::ToolError>,
+    /// An access mode this agent cannot hold. Cleared for model-list discovery, which sends no prompt.
+    access_error: Option<craft_anything_evidence::ToolError>,
     /// Copied onto the core when the process starts, and applied before the session is ready.
     session_config: Vec<(String, String)>,
 }
@@ -613,6 +621,9 @@ impl AcpConversation {
 
     pub(crate) fn model_metadata_with_stop(mut self, timeout: Duration, stop: &Stop) -> Result<ModelMetadata, craft_anything_evidence::ToolError> {
         stop.check()?;
+        // No prompt is sent. The question-shaped session only keeps the tool server off, so a
+        // refusal of questions and Clean room does not apply to reading the model list.
+        self.access_error = None;
         self.spawn()?;
         self.busy.store(true, Ordering::SeqCst);
         let started = Instant::now();
@@ -651,6 +662,12 @@ impl AcpConversation {
     /// through the usual events without launching a process or changing the person's settings.
     pub fn with_validation(mut self, result: Result<(), craft_anything_evidence::ToolError>) -> Self {
         self.validation_error = result.err();
+        self
+    }
+
+    /// Keep an access-mode refusal until the conversation starts. Model-list discovery clears it.
+    pub fn with_access_limit(mut self, result: Result<(), craft_anything_evidence::ToolError>) -> Self {
+        self.access_error = result.err();
         self
     }
 
@@ -717,6 +734,7 @@ impl AcpConversation {
             failure: None,
             question: false,
             validation_error: None,
+            access_error: None,
             session_config: Vec::new(),
         }
     }
@@ -727,14 +745,15 @@ impl AcpConversation {
 
     /// Start the agent and send `initialize`.
     fn spawn(&mut self) -> Result<(), craft_anything_evidence::ToolError> {
-        if let Some(error) = &self.validation_error {
-            return Err(error.clone());
+        if let Some(error) = self.validation_error.clone().or_else(|| self.access_error.clone()) {
+            return Err(error);
         }
         let name = display_for(&self.agent);
         let resume = self.lock().as_ref().and_then(|s| s.core.session_id()).or_else(|| self.resume.clone());
         let mut core = AcpCore::new(&self.backend, &name, self.cwd.clone(), self.mcp.clone(), resume);
         core.question = self.question;
         core.sign_in_fix = self.adapter.sign_in_fix();
+        core.typed_mcp = self.adapter.acp_mcp_stdio_type();
         core.config_queue = VecDeque::from(self.session_config.clone());
         if self.approver.is_some() {
             core = core.deciding();
@@ -982,7 +1001,7 @@ mod tests {
         assert_eq!(new[0]["method"], "session/new");
         assert_eq!(new[0]["params"]["cwd"], "/w/project");
         assert_eq!(new[0]["params"]["mcpServers"][0]["name"], "craft-anything");
-        assert_eq!(new[0]["params"]["mcpServers"][0]["type"], "stdio");
+        assert!(new[0]["params"]["mcpServers"][0].get("type").is_none(), "only an adapter that asks sends type");
         assert_eq!(new[0]["params"]["mcpServers"][0]["env"], json!([]));
         let prompt = sent(&c.line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s-1"}}"#));
         assert_eq!(prompt[0]["method"], "session/prompt");
@@ -1269,6 +1288,32 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
         };
         let Some(c) = super::super::acp_for(&super::super::CliSpec::new(config, options, false, None)) else { panic!("Maki speaks ACP") };
         assert_eq!((c.program.as_str(), c.args.as_slice()), ("maki", &["--no-plugins", "acp", "-m", "anthropic/claude-sonnet-4-6"].map(String::from)[..]));
+        assert!(!c.adapter.acp_mcp_stdio_type());
+    }
+
+    /// Grok's server enum needs `"type": "stdio"`. A session for any other agent leaves it off,
+    /// and a question still attaches no server.
+    #[test]
+    fn only_grok_sends_a_typed_stdio_server() {
+        let mut plain = core(None);
+        plain.start();
+        let untyped = sent(&plain.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}"#));
+        assert_eq!(untyped[0]["method"], "session/new");
+        assert!(untyped[0]["params"]["mcpServers"][0].get("type").is_none());
+
+        let mut grok = core(None);
+        grok.typed_mcp = true;
+        grok.start();
+        let typed = sent(&grok.line(r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true}}}"#));
+        assert_eq!(typed[0]["params"]["mcpServers"][0]["type"], "stdio");
+        assert_eq!(typed[0]["params"]["mcpServers"][0]["name"], "craft-anything");
+
+        let mut question = core(None);
+        question.question = true;
+        question.typed_mcp = true;
+        question.start();
+        let asked = sent(&question.line(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#));
+        assert_eq!(asked[0]["params"]["mcpServers"], json!([]));
     }
 
     /// `grok agent [flags] stdio`: the model flag and `--no-leader` sit between `agent` and `stdio`.
@@ -1284,9 +1329,13 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
         assert!(!c.args.iter().any(|arg| arg.contains("always-approve") || arg.contains("yolo")));
 
         let quiet = crate::BackendOptions::default();
-        let Some(plain) = super::super::acp_for(&super::super::CliSpec::new(grok_config(), quiet, false, None)) else { panic!("Grok speaks ACP") };
+        let Some(plain) = super::super::acp_for(&super::super::CliSpec::new(grok_config(), quiet.clone(), false, None)) else { panic!("Grok speaks ACP") };
         assert_eq!(plain.args, ["agent", "--no-leader", "stdio"]);
         assert!(plain.session_config.is_empty());
+        assert!(plain.adapter.acp_mcp_stdio_type());
+        // A chat that is not deep is Clean room. Grok cannot hold that, so the run is refused
+        // before the process starts. The argv is still the one a deep build uses.
+        assert!(plain.access_error.as_ref().is_some_and(|error| error.message.contains("Clean room")));
 
         let mut question = super::super::CliSpec::new(
             grok_config(),
@@ -1298,7 +1347,15 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
         let Some(asked) = super::super::acp_for(&question) else { panic!("Grok answers questions") };
         assert_eq!(asked.args, ["agent", "--model", "grok-4.5", "--no-leader", "--reasoning-effort", "medium", "stdio"]);
         assert!(asked.question);
+        assert!(asked.access_error.as_ref().is_some_and(|error| error.message.contains("question")));
         assert_eq!(asked.session_config, [("model".into(), "grok-4.5".into()), ("reasoning_effort".into(), "medium".into())]);
+
+        let mut deep = super::super::CliSpec::new(grok_config(), quiet, false, None);
+        deep.deep = true;
+        deep.builder = Some(super::super::Builder { investigation: None, inbox: std::env::temp_dir() });
+        let Some(build) = super::super::acp_for(&deep) else { panic!("a deep build is allowed") };
+        assert!(build.access_error.is_none() && build.validation_error.is_none());
+        assert_eq!(build.args, ["agent", "--no-leader", "stdio"]);
 
         let blocked = crate::BackendOptions { args: vec!["--always-approve".into()], ..Default::default() };
         let Some(refused) = super::super::acp_for(&super::super::CliSpec::new(grok_config(), blocked, false, None)) else { panic!("Grok speaks ACP") };
