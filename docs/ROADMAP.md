@@ -614,6 +614,7 @@ Owner: open · Status: in progress
       agent over SSH. — claimed: jelassiaymen94, branch feature/r2.2-opencode-remote-mcp
 - [ ] Make `the_remote_line_runs_on_a_posix_shell` accept the shell's missing-command status:
       on macOS, `command -v` returns 1 rather than the asserted 127; the full AI suite fails.
+      — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 
