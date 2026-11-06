@@ -8,12 +8,14 @@ use super::*;
 mod antigravity;
 mod copilot;
 mod dsh;
+mod grok;
 mod hermes;
 mod maki;
 mod opencode;
 pub use antigravity::Antigravity;
 pub use copilot::Copilot;
 pub use dsh::DeepSeekHarness;
+pub use grok::Grok;
 pub use hermes::Hermes;
 pub use maki::Maki;
 pub use opencode::OpenCode;
@@ -84,6 +86,21 @@ pub trait AgentAdapter: Send + Sync {
     /// Session-only MCP startup flags for an agent that needs more than `session/new`'s server
     /// list. Questions never receive these flags, and the person's saved config isn't changed.
     fn acp_mcp_options(&self, _mcp: &McpCommand) -> Vec<String> {
+        Vec::new()
+    }
+    /// Arguments after the ACP mode words and the model flag, still before a trailing subcommand.
+    /// The default adds none, so agents whose flags already sit in [`acp_options`](Self::acp_options)
+    /// stay unchanged.
+    fn acp_mode_options(&self, _options: &BackendOptions, _access: Access) -> Vec<String> {
+        Vec::new()
+    }
+    /// Words after every other ACP argument. Grok Build needs `stdio` last.
+    fn acp_trailing(&self) -> &'static [&'static str] {
+        &[]
+    }
+    /// Session options applied with `session/set_config_option` after the session opens, in order,
+    /// before the conversation is ready. Each value is sent as a JSON string. The default sets none.
+    fn acp_session_config(&self, _options: &BackendOptions) -> Vec<(String, String)> {
         Vec::new()
     }
     /// Refuse backend options that could bypass this adapter's restrictions, before its ACP
@@ -231,7 +248,7 @@ impl Default for AgentAdapters {
 }
 
 impl AgentAdapters {
-    /// The built-in coding agents, including Copilot's ACP-only adapter.
+    /// The built-in coding agents, including the ACP-only Copilot and Grok Build adapters.
     pub fn built_in() -> AgentAdapters {
         AgentAdapters {
             adapters: vec![
@@ -243,6 +260,7 @@ impl AgentAdapters {
                 Arc::new(Hermes),
                 Arc::new(Maki),
                 Arc::new(Copilot),
+                Arc::new(Grok),
                 Arc::new(DeepSeekHarness),
             ],
         }

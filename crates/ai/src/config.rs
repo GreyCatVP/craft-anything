@@ -110,7 +110,7 @@ pub struct BackendOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
     /// Agent CLIs that speak ACP (`cli_agents::acp::ACP_AGENTS`): chat over it, one agent process
-    /// per conversation (on for Copilot, off for other agents unless set).
+    /// per conversation (on for Copilot and Grok Build, off for other agents unless set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acp: Option<bool>,
     /// Agent CLIs that keep their sign-in, settings and sessions in a folder of their own (Claude

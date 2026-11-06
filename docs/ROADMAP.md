@@ -562,6 +562,12 @@ Owner: open · Status: in progress
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
       — claimed: qu-gg, branch `feature/r2.2-copilot-integration` (recorded during PR preparation)
+- [x] Grok Build as a coding agent over ACP (`grok agent stdio`): discovery in `~/.grok/bin`,
+      the person's own `grok login`, model and reasoning effort, and our MCP server on the
+      session. Verified against Grok 1.0.77's ACP handshake and `session/set_config_option`
+      (the CLI `--model` flag does not stick after `session/new`). Not a live build.
+      See [Grok Build](grok.md).
+      — branch `feature/r2.2-grok-agent`
 - [x] Review hardening: cap target handoff at 128 while preserving the active target; propagate
       context-discovery cancellation, normalize CLI-only efforts for Claude requests, and name
       the configured agent in shared picker warnings, with focused regressions and translations

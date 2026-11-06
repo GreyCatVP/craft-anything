@@ -159,9 +159,11 @@ Anything runs your own, unmodified `claude` program, which uses your own sign-in
 never sees or handles your account. Your use of it falls under your own agreement with
 Anthropic. See [docs/claude-code.md](docs/claude-code.md) for how and why. A Codex adapter
 exists but hasn't been verified on a real install yet. **GitHub Copilot** can use your installed
-Copilot CLI through ACP: sign in separately with `copilot login`. Other agents that speak ACP (Gemini CLI,
+Copilot CLI through ACP: sign in separately with `copilot login`. **Grok Build** can use your
+installed `grok` program through ACP (`grok agent stdio`): sign in separately with `grok login`.
+See [docs/grok.md](docs/grok.md). Other agents that speak ACP (Gemini CLI,
 Qwen Code, opencode, goose, Hermes, Maki) can be switched to it per backend; of those, only Maki has
-been run live. Anthropic, OpenAI, OpenRouter and local
+been run live. Anthropic, OpenAI, OpenRouter, xAI (Grok, when `XAI_API_KEY` is set) and local
 OpenAI-compatible servers are available for questions and analysis (Settings → AI).
 
 ## Built for agents
