@@ -1,5 +1,6 @@
 //! UI smoke tests: every screen draws, the main controls work, and nothing blocks or panics.
 
+use craft_anything_ai::{BackendConfig, BackendKind};
 use craft_anything_engine::{Mode, TargetKind};
 use craft_anything_ui_egui::state::{ChatItem, FirstRunStep, RailKind, Screen};
 use craft_anything_ui_egui::{CraftApp, demo};
@@ -896,6 +897,43 @@ fn asking_without_ai_runs_the_built_in_engines() {
     h.get_by_label("Add a brain").click();
     h.run_steps(2);
     assert!(h.state().state.settings_open);
+}
+
+/// An AI that is turned off, picked in the titlebar: the chat says which one and that it is off. The
+/// built-in engines don't answer as though none were set up — that is the test above, where the
+/// backend is None.
+#[test]
+fn asking_an_ai_that_is_turned_off_says_so_instead_of_looking_alone() {
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::deep(&mut a);
+        for (name, enabled) in [("On", true), ("Off", false)] {
+            let config = BackendConfig {
+                name: name.into(),
+                kind: BackendKind::OpenaiCompatible,
+                model: "m".into(),
+                base_url: Some("http://127.0.0.1:9/v1".into()),
+                ssh_host: None,
+                enabled,
+            };
+            a.hub.add_backend(config, None).unwrap();
+        }
+        a.state.backend = Some("Off".into());
+        a.state.screen = Screen::Ask;
+        a
+    });
+    h.run_steps(3);
+    h.state_mut().send("What does this program do?");
+    h.run_steps(6);
+    let (said, add) = {
+        let chat = &h.state().state.chat;
+        (
+            chat.iter().any(|i| matches!(i, ChatItem::Error { message, .. } if message.contains("Off") && message.contains("turned off"))),
+            chat.iter().any(|i| matches!(i, ChatItem::AddBrain)),
+        )
+    };
+    assert!(said, "the chat says which AI is turned off");
+    assert!(!add, "an AI is set up, so there is nothing to add");
 }
 
 #[test]

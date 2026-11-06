@@ -182,12 +182,14 @@ fn a_chat_named_for_a_backend_that_is_turned_off_does_not_start() {
         Ok(_) => panic!("a backend that is turned off must not answer"),
         Err(e) => e,
     };
+    assert_eq!(err.code, ErrorCode::BadSettings, "{err:?}");
     assert!(err.message.contains("Off") && err.message.contains("turned off"), "{}", err.message);
     // A name that is not there keeps its own message, so the two cases stay apart.
     let missing = match h.start(Some("Nope"), false) {
         Ok(_) => panic!("a backend that is not there must not answer"),
         Err(e) => e,
     };
+    assert_eq!(missing.code, ErrorCode::BadInput, "{missing:?}");
     assert!(missing.message.contains("No AI backend named"), "{}", missing.message);
 }
 
