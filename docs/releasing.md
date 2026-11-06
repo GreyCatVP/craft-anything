@@ -44,17 +44,20 @@ not check what the package ships.
    Verify the tool result reports Deep mode. Also verify that the Craft MCP server used by this
    run is the bundled CLI from step 1, using Claude Code's MCP log if necessary. A server from
    another installation does not pass this check.
-4. Confirm a write or command reaches `core_action_approve` and returns a decision. For an action
-   that asks the person, answer its card in Craft Anything and confirm the builder continues.
-   Ordinary app edits and known build commands may be allowed automatically; these alone do not
-   exercise the card. See [the Claude Code integration](claude-code.md) for the approval rules.
+4. Ask the builder to perform a write or command that reaches `core_action_approve` and displays
+   an approval card in Craft Anything. Answer **Allow once** on that card and confirm the builder
+   continues with the approved action. A displayed and answered card is required: automatic
+   approvals for ordinary app edits or known build commands cannot satisfy this step. See
+   [the Claude Code integration](claude-code.md) for the approval rules.
 5. Let the run finish its build and checks, then use Play and inspect the requested behaviour.
-   Pass only if the Craft tool call and approval succeeded, the run reached Ready and the result
-   launches and does what was requested. Missing tools, a server that cannot start, a stuck
+   Pass only if the Craft tool call succeeded, the approval card appeared and was answered with
+   **Allow once**, the builder continued, the run reached Ready and the result launches and does
+   what was requested. Missing tools, a server that cannot start, a missing or stuck
    approval or a failed check must be resolved and this check repeated before publication.
 
 Record each platform's package filename, candidate version and commit, OS and Claude Code
-versions, request, tool and approval results, build/check outcome and Play result in the release
+versions, request, tool result, displayed card and its answer, builder continuation, build/check
+outcome and Play result in the release
 PR or release validation notes. Keep credentials and personal paths out of the record. If a
 platform has not been checked, record it as pending and leave the release in draft.
 
