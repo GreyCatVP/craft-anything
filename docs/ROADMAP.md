@@ -190,6 +190,9 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [ ] Measure #579 on Windows 11 (0.3.0 portable): the app's CPU while idle, while a build runs and
       during a website capture, before and after; and why a website capture is slow and sits for a
       long time (no details were given, so nothing was changed for it)
+- [ ] `remote_discovery_uses_the_remote_program_and_connection_context` fails on a computer with
+      OpenCode installed: its made-up path is missing, so `program_of` falls back to `opencode`
+      — claimed: justinjohn0306, branch test/remote-discovery-without-opencode
 
 ### R5.3 A builder that can't make progress stops
 Owner: open · Status: todo
