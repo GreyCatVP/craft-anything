@@ -169,6 +169,28 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
+/// R2.9: a chat or a `compare` named for a backend that is off says so, as a build does, instead of
+/// talking to an AI Settings shows as unusable.
+#[test]
+fn a_chat_named_for_a_backend_that_is_turned_off_does_not_start() {
+    let (h, _dir) = hub();
+    for (name, enabled) in [("On", true), ("Off", false)] {
+        let cfg = BackendConfig { name: name.into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled };
+        h.add_backend(cfg, None).unwrap();
+    }
+    let err = match h.start(Some("Off"), false) {
+        Ok(_) => panic!("a backend that is turned off must not answer"),
+        Err(e) => e,
+    };
+    assert!(err.message.contains("Off") && err.message.contains("turned off"), "{}", err.message);
+    // A name that is not there keeps its own message, so the two cases stay apart.
+    let missing = match h.start(Some("Nope"), false) {
+        Ok(_) => panic!("a backend that is not there must not answer"),
+        Err(e) => e,
+    };
+    assert!(missing.message.contains("No AI backend named"), "{}", missing.message);
+}
+
 /// A CLI stand-in checks saved selections, and an explicit one runs natively with our MCP server.
 #[cfg(unix)]
 #[test]

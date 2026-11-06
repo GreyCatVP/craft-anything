@@ -840,11 +840,19 @@ impl AiHub {
         })
     }
 
-    /// Start a conversation with the lead backend (or the named one).
+    /// Start a conversation with the lead backend (or the named one). A named backend that is turned
+    /// off is refused rather than used, as a build refuses one.
     pub fn start(&self, backend: Option<&str>, beginner: bool) -> Result<Box<dyn Conversation>, ToolError> {
         let cfg = self.config();
         let first = match backend {
-            Some(n) => self.entry(n)?,
+            Some(n) => {
+                let named = self.entry(n)?;
+                if !named.config.enabled {
+                    return Err(ToolError::new(ErrorCode::BadSettings, format!("{} is turned off, so it can't answer here.", n))
+                        .with_remediation(format!("Turn {} on in Settings → AI, or name a backend that is on.", n)));
+                }
+                named
+            }
             None => cfg
                 .backend_for(Role::Lead)
                 .cloned()
