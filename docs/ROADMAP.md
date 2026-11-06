@@ -167,7 +167,7 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 
 ### R5.2 Keeping contributions moving
 Owner: maintainers · Status: in progress
-- [ ] Clarify PR #1030's test Rustdoc: post-stop heartbeat sampling, child-fixture guard,
+- [x] Clarify PR #1030's test Rustdoc: post-stop heartbeat sampling, child-fixture guard,
       and the direct-run no-write check
       — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
 - [x] Address PR #1030 review: take the heartbeat baseline after stopping, guard the descendant

@@ -1294,7 +1294,11 @@ mod launch_tests {
         assert!(l.ended().unwrap().after < Duration::from_secs(20));
     }
 
-    /// A descendant must leave its heartbeat unchanged once its watched launch has stopped.
+    /// Verify that stopping a watched launch stops its descendant on Unix and Windows.
+    ///
+    /// Wait for the child's startup and heartbeat files before stopping the launch. Sample
+    /// the heartbeat only after `stop()` returns, so a write during shutdown cannot fail
+    /// the test; any subsequent change proves that the descendant continued running.
     #[test]
     fn stopping_a_watched_program_stops_its_descendant() {
         let dir = tempfile::tempdir().unwrap();
@@ -1325,7 +1329,11 @@ mod launch_tests {
         assert_eq!(std::fs::read(&heartbeat).unwrap(), after_stop, "descendant continued running after the watched program stopped");
     }
 
-    /// Emit liveness markers only when the parent test explicitly enables this child fixture.
+    /// Provide a child process whose marker files expose whether it survives shutdown.
+    ///
+    /// Return without writing unless `CRAFT_ANYTHING_TEST_DESCENDANT` is exactly `1`, as
+    /// set by the parent test. When enabled, write startup and periodic heartbeat files
+    /// in the working directory, then a survival marker if the loop reaches its end.
     #[test]
     #[ignore = "stand-in invoked by stopping_a_watched_program_stops_its_descendant"]
     fn watched_descendant_stand_in() {
@@ -1340,7 +1348,10 @@ mod launch_tests {
         std::fs::write("descendant-survived", b"yes").unwrap();
     }
 
-    /// An ignored-test invocation without the child guard must leave its working directory empty.
+    /// Verify that directly running the ignored fixture without its guard writes no files.
+    ///
+    /// Start the test executable in an empty temporary directory with the guard removed,
+    /// then require a successful exit and an unchanged directory.
     #[test]
     fn a_direct_descendant_stand_in_run_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();

@@ -171,6 +171,10 @@ call it and make them `wait` for the result, not `run_steps(n)`.
 
 ## Building and running
 
+**A documentation edit rebuilt dependencies in a separate cache.** A sequential review follow-up
+used another target directory for its commit hook, triggering an unnecessary build. Separate
+build caches are for concurrent work; reuse the current checkout's cache for sequential work.
+
 **A runner's PID isn't the window owner's.** `go run` starts a compiled child, so picturing the
 runner missed the app (or a name fallback found another app). Search only the launched process
 and its descendants, and read the UI tree from the same PID that supplied the picture.
