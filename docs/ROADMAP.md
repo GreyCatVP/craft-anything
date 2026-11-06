@@ -113,7 +113,8 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 - [ ] See that the launcher offers the new version: #74, #104 and #420 installed through it, and
       nothing in this repository says how it picks one
 - [ ] After it ships, close what it fixes: #166, #346, #420, #478. #74, #104 and #222 give no
-      detail, so they may be another cause: close them too, saying to file again if it still fails.
+      detail, so they may have another cause: keep them open until their fixes are validated
+      against the published release, following `docs/releasing.md`.
       Ask #201 whether `3861132` (#379) ended its early compression (a guess at the link)
 - [ ] Close the tickets 0.3.0 already fixed, and the spam: #47, #53, #66, #95, #112, #113, #130,
       #133, #138, #152, #179, #182, #185, #202, #214, #329, #344, #377, #378, #400, #449; spam #194,
