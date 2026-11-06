@@ -334,8 +334,8 @@ been run live.
       down (live, GPU). See whether naming the move gets it out, or whether the run should move it
 - [x] The model reads file paths from the project folder and commands from `app/` as one base:
       it ran `cargo init app` and `cd app && cargo build` after writing `app/Cargo.toml`.
-      `build_command_run`'s result now says where it ran (`ran_in`), a command that makes
-      `app/app/` is told the project goes in `app/` itself, and one that starts with `cd app` where
+      `build_command_run`'s result now says where it ran (`ran_in`), a command that makes a project
+      in `app/app/` is told it goes in `app/` itself, and one that starts with `cd app` where
       there's none is told to leave it out. Live (Ollama, `qwen2.5-coder:14b`) the first command
       was still `cargo new app`, before any result could say so. On a GPU (Ollama 0.40.7) the note
       then reached the model; on the CPU a second run wrote the call with a summary after it, so

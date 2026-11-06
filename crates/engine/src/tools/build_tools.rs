@@ -364,8 +364,11 @@ fn build_command_run(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, Too
     let first = p.command.split(['&', ';', '\n']).next().unwrap_or_default().trim().replace('\\', "/");
     if ["cd app", "cd app/", "cd ./app", "cd ./app/"].contains(&first.as_str()) && !inner.is_dir() {
         v["note"] = json!(format!("Commands already run in {}: leave out `cd app`.", ws.app_place()));
-    } else if !had_inner && inner.is_dir() && app != ws.root {
-        v["note"] = json!("This made app/app/: commands already run in app/, so the app's project goes in app/ itself (app/Cargo.toml, app/package.json).");
+    } else if !had_inner && app != ws.root && ["Cargo.toml", "package.json"].iter().any(|m| inner.join(m).is_file()) {
+        // Only a project: a folder named app is fine there (Next.js keeps its routes in one).
+        v["note"] = json!(
+            "This made a project in app/app/: commands already run in app/, so the app's project goes in app/ itself (app/Cargo.toml, app/package.json)."
+        );
     }
     Ok(ToolOutput::Value(v))
 }
@@ -503,12 +506,16 @@ mod tests {
         assert!(lost["note"].as_str().is_some_and(|n| n.contains("already run in app/")), "{lost}");
         let lines = call(&e, "build_command_run", json!({"command": "cd app\necho built"})).unwrap();
         assert!(lines["note"].as_str().is_some_and(|n| n.contains("already run in app/")), "{lines}");
-        // Live, its first command was `cargo new app`, which made app/app/.
-        let nested = call(&e, "build_command_run", json!({"command": "mkdir app"})).unwrap();
-        assert!(nested["note"].as_str().is_some_and(|n| n.contains("This made app/app/")), "{nested}");
+        // Live, its first command was `cargo new app`, which made a project in app/app/.
+        let nested = call(&e, "build_command_run", json!({"command": "mkdir app && cd app && echo [package]> Cargo.toml"})).unwrap();
+        assert!(nested["note"].as_str().is_some_and(|n| n.contains("This made a project in app/app/")), "{nested}");
         // Once there, it's a folder of the app's own: going into it is left alone.
         let inner = call(&e, "build_command_run", json!({"command": "cd app && echo built"})).unwrap();
         assert_eq!((inner["succeeded"].as_bool(), inner.get("note")), (Some(true), None));
+        // A folder named app with no project in it is fine (Next.js keeps its routes in one).
+        let (_d, _ws, e) = building();
+        let routes = call(&e, "build_command_run", json!({"command": "mkdir app"})).unwrap();
+        assert_eq!(routes.get("note"), None, "{routes}");
     }
 
     #[test]
