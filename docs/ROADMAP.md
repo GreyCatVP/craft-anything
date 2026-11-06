@@ -421,6 +421,7 @@ been run live.
 - [ ] A chat sent while a llama.cpp router is still loading the model ended after 31 s with "The
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
+      — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo

@@ -425,7 +425,10 @@ impl ChatStream {
             Some(f) => StopReason::parse(f),
             None if has_calls => StopReason::ToolUse,
             None if self.done => StopReason::EndTurn,
-            None => return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")),
+            None => {
+                return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")
+                    .with_remediation("The server ended the answer early (a local server may still be loading the model). Try again in a minute."));
+            }
         };
         // Some servers say "stop" for tool calls. A limit or refusal must still prevent execution.
         let stop = if has_calls && stop == StopReason::EndTurn { StopReason::ToolUse } else { stop };
@@ -947,6 +950,17 @@ mod tests {
             assert_eq!(result.stop, expected, "finish_reason={finish:?}");
             assert_eq!(result.message.tool_uses(), vec![("call_a".into(), "core_session_show".into(), json!({}))]);
         }
+    }
+
+    #[test]
+    fn early_stream_end_is_reported_with_remediation() {
+        let st = ChatStream::default();
+        let err = st.finish("m").unwrap_err();
+        assert_eq!(err.code, ErrorCode::Truncated);
+        assert_eq!(err.message, "The answer stream ended early.");
+        let fix = err.remediation.as_deref().expect("remediation is set");
+        assert!(fix.contains("loading the model"));
+        assert!(fix.contains("Try again in a minute."));
     }
 
     /// #369: OpenRouter routes to an upstream provider per request, and one without tool calling
