@@ -1296,37 +1296,88 @@ mod launch_tests {
 
     /// Verify that stopping a watched launch stops its descendant on Unix and Windows.
     ///
-    /// Wait for the child's startup and heartbeat files before stopping the launch. Sample
+    /// Wait for the child's startup and heartbeat files, then stop even if they are absent. Sample
     /// the heartbeat only after `stop()` returns, so a write during shutdown cannot fail
     /// the test; any subsequent change proves that the descendant continued running.
     #[test]
     fn stopping_a_watched_program_stops_its_descendant() {
-        let dir = tempfile::tempdir().unwrap();
-        let exe = std::env::current_exe().unwrap();
-        let command = if cfg!(windows) {
-            format!(
-                r#"set "CRAFT_ANYTHING_TEST_DESCENDANT=1" & start "" /B "{}" --ignored --exact process::launch_tests::watched_descendant_stand_in & ping -n 30 127.0.0.1 > NUL"#,
-                exe.display()
-            )
-        } else {
-            format!(
-                "CRAFT_ANYTHING_TEST_DESCENDANT=1 {} --ignored --exact process::launch_tests::watched_descendant_stand_in & wait",
-                shell_quote(&exe.to_string_lossy())
-            )
-        };
-        let l = shell(&command).cwd(dir.path()).start_watched().unwrap();
-        let started = dir.path().join("descendant-started");
+        let dir = tempfile::Builder::new().prefix("watched descendant ").tempdir().unwrap();
+        let l = start_descendant_fixture(dir.path(), true);
+        let (started, heartbeat) = stop_after_descendant_startup(&l, dir.path(), Duration::from_secs(5));
+        assert!(started, "descendant never signalled that it started");
+        assert!(heartbeat, "descendant never produced a heartbeat");
         let heartbeat = dir.path().join("descendant-heartbeat");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while (!started.exists() || !heartbeat.exists()) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(started.exists(), "descendant never signalled that it started");
-        assert!(heartbeat.exists(), "descendant never produced a heartbeat");
-        assert!(l.stop());
         let after_stop = std::fs::read(&heartbeat).unwrap();
         std::thread::sleep(Duration::from_millis(500));
         assert_eq!(std::fs::read(&heartbeat).unwrap(), after_stop, "descendant continued running after the watched program stopped");
+    }
+
+    /// Wait for bounded startup, snapshot its markers, and stop before callers assert on them.
+    fn stop_after_descendant_startup(launch: &Launched, dir: &std::path::Path, timeout: Duration) -> (bool, bool) {
+        let started = dir.join("descendant-started");
+        let heartbeat = dir.join("descendant-heartbeat");
+        let deadline = Instant::now() + timeout;
+        while (!started.exists() || !heartbeat.exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let markers = (started.exists(), heartbeat.exists());
+        assert!(launch.stop(), "could not stop the watched launch");
+        markers
+    }
+
+    /// Missing startup markers must still stop a live fixture before reporting startup failure.
+    #[test]
+    fn a_descendant_startup_timeout_stops_the_watched_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let l = start_descendant_fixture(dir.path(), false);
+        let markers = stop_after_descendant_startup(&l, dir.path(), Duration::from_millis(100));
+        assert_eq!(markers, (false, false));
+        assert!(!l.is_running(), "startup failure left the watched launch running");
+    }
+
+    /// Enable the guarded parent in an isolated directory, with or without child startup.
+    fn start_descendant_fixture(dir: &std::path::Path, start_descendant: bool) -> Launched {
+        std::fs::write(dir.join("descendant-fixture"), if start_descendant { "start" } else { "wait" }).unwrap();
+        Launch::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "process::launch_tests::watched_parent_stand_in"])
+            .cwd(dir)
+            .hide_console()
+            .start_watched()
+            .unwrap()
+    }
+
+    /// Start the bounded child in the watched parent's process group and wait for it.
+    ///
+    /// An exact directory-local guard enables this fixture. The `wait` mode simulates a
+    /// parent that stays alive without starting its child, exercising timeout cleanup.
+    #[test]
+    #[ignore = "stand-in invoked by watched descendant tests"]
+    fn watched_parent_stand_in() {
+        match std::fs::read("descendant-fixture").ok().as_deref() {
+            Some(b"start") => {}
+            Some(b"wait") => {
+                std::thread::sleep(Duration::from_secs(5));
+                return;
+            }
+            _ => return,
+        }
+        // This process-layer fixture must inherit the parent's group/job. Process and
+        // Launch deliberately create new Unix groups, which would invalidate the test.
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--ignored", "--exact", "process::launch_tests::watched_descendant_stand_in"])
+            .env("CRAFT_ANYTHING_TEST_DESCENDANT", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        // The child's heartbeat loop exits after five seconds even if no stop arrives.
+        let mut child = spawn_retrying(|| command.spawn()).unwrap();
+        assert!(child.wait().unwrap().success());
     }
 
     /// Provide a child process whose marker files expose whether it survives shutdown.
@@ -1355,19 +1406,16 @@ mod launch_tests {
     #[test]
     fn a_direct_descendant_stand_in_run_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let out = Process::new(std::env::current_exe().unwrap())
-            .args(["--ignored", "--exact", "process::launch_tests::watched_descendant_stand_in"])
-            .env_remove("CRAFT_ANYTHING_TEST_DESCENDANT")
-            .cwd(dir.path())
-            .run()
-            .unwrap();
-        assert!(out.success, "{}", out.stderr_text());
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "the unguarded stand-in wrote files");
-    }
-
-    /// Quote one Unix shell argument, including embedded apostrophes.
-    fn shell_quote(value: &str) -> String {
-        format!("'{}'", value.replace('\'', "'\\''"))
+        for fixture in ["watched_parent_stand_in", "watched_descendant_stand_in"] {
+            let out = Process::new(std::env::current_exe().unwrap())
+                .args(["--ignored", "--exact", &format!("process::launch_tests::{fixture}")])
+                .env_remove("CRAFT_ANYTHING_TEST_DESCENDANT")
+                .cwd(dir.path())
+                .run()
+                .unwrap();
+            assert!(out.success, "{fixture}: {}", out.stderr_text());
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "the unguarded {fixture} wrote files");
+        }
     }
 
     fn exits_with(code: u8) -> Process {

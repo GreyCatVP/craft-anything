@@ -82,6 +82,10 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 the baseline read and `stop()`, failing the descendant cleanup test even when cleanup worked.
 Sample after the stop returns, then check for further writes. Ignored child fixtures also need
 an explicit launch guard so running ignored tests directly cannot write in the working directory.
+The replacement's quoted `cmd /C` script still failed on Windows, and startup assertions skipped
+cleanup. Use a guarded Rust parent instead of shell syntax, and stop before asserting on startup.
+Its child must inherit the watched group/job: another `Process` or `Launch` creates a separate
+Unix group and would no longer test the ancestor's shutdown.
 
 **An isolated PATH still assumed system utilities lived in `/bin`.** The remote setup fixture
 linked `mkdir`, `chmod` and `mv` there, so a host with utilities elsewhere got dangling links.

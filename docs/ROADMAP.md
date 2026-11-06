@@ -167,9 +167,11 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 
 ### R5.2 Keeping contributions moving
 Owner: maintainers · Status: in progress
-- [ ] Fix PR #1030's Windows descendant fixture startup and stop the watched launch before
+- [x] Fix PR #1030's Windows descendant fixture startup and stop the watched launch before
       startup assertions can fail; cover the failure cleanup path
       — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
+- [ ] Run PR #1030's shell-free parent/descendant fixture and startup-timeout cleanup test
+      on Windows; the contributor reproduced startup failure and leaked processes on 07671fe
 - [x] Clarify PR #1030's test Rustdoc: post-stop heartbeat sampling, child-fixture guard,
       and the direct-run no-write check
       — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
