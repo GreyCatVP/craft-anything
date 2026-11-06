@@ -169,6 +169,60 @@ fn hub() -> (AiHub, tempfile::TempDir) {
     (h, dir)
 }
 
+/// A named backend stays off for chat, including before API or agent setup can run.
+#[test]
+fn disabled_backends_are_refused_when_chat_starts() {
+    let (h, _dir) = hub();
+    for kind in [BackendKind::OpenaiCompatible, BackendKind::AgentCli] {
+        h.add_backend(
+            BackendConfig {
+                name: "Off".into(),
+                kind,
+                model: "no-such-agent".into(),
+                base_url: Some("http://127.0.0.1:0/v1".into()),
+                ssh_host: None,
+                enabled: false,
+            },
+            None,
+        )
+        .unwrap();
+        let error = h.start(Some("Off"), false).err().expect("chat must refuse a disabled backend");
+        assert_eq!(error.code, ErrorCode::BadSettings);
+        assert!(error.message.contains("Off") && error.message.contains("turned off"), "{error:?}");
+        assert!(error.remediation.as_deref().is_some_and(|s| s.contains("Settings → AI")), "{error:?}");
+    }
+}
+
+/// Compare checks either position; enabled named and automatic chat choices still work.
+#[test]
+fn disabled_backends_are_refused_on_either_side_of_compare() {
+    let (h, _dir) = hub();
+    for (name, enabled) in [("Off", false), ("On", true), ("Other", true)] {
+        h.add_backend(
+            BackendConfig {
+                name: name.into(),
+                kind: BackendKind::OpenaiCompatible,
+                model: "test-model".into(),
+                base_url: Some("http://127.0.0.1:0/v1".into()),
+                ssh_host: None,
+                enabled,
+            },
+            None,
+        )
+        .unwrap();
+    }
+    for (left, right) in [("Off", "On"), ("On", "Off")] {
+        let error = h.compare(left, right, true).err().expect("compare must refuse a disabled backend");
+        assert_eq!(error.code, ErrorCode::BadSettings);
+        assert!(error.message.contains("Off") && error.message.contains("turned off"), "{error:?}");
+    }
+    assert!(h.start(Some("On"), false).is_ok());
+    assert!(h.start(None, false).is_ok());
+    assert!(h.compare("On", "Other", false).is_ok());
+    let unknown = h.start(Some("Missing"), false).err().unwrap();
+    assert!(unknown.message.contains("No AI backend named"), "{unknown:?}");
+}
+
 /// A CLI stand-in checks saved selections, and an explicit one runs natively with our MCP server.
 #[cfg(unix)]
 #[test]

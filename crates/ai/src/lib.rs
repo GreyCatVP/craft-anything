@@ -840,7 +840,7 @@ impl AiHub {
         })
     }
 
-    /// Start a conversation with the lead backend (or the named one).
+    /// Start a conversation with the lead backend (or the named one, while it is enabled).
     pub fn start(&self, backend: Option<&str>, beginner: bool) -> Result<Box<dyn Conversation>, ToolError> {
         let cfg = self.config();
         let first = match backend {
@@ -850,6 +850,10 @@ impl AiHub {
                 .cloned()
                 .ok_or_else(|| ToolError::unavailable("No AI is set up yet.").with_remediation("Add one in Settings → AI."))?,
         };
+        if !first.config.enabled {
+            return Err(ToolError::new(ErrorCode::BadSettings, format!("{} is turned off.", first.config.name))
+                .with_remediation("Turn it on in Settings → AI, or choose another backend for this conversation."));
+        }
         if first.config.kind == BackendKind::AgentCli {
             return Ok(Box::new(cli_agents::SharedConversation::new(self.engine.clone(), first, beginner)?));
         }
