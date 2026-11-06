@@ -89,6 +89,8 @@ fn turkish_requests_keep_their_project_kind() {
     // İngilizce büyük harf bozulmamalı: ASCII "I" Türkçeye çevrilip "websıte" olmamalı.
     assert_eq!(choose("Build a WEBSITE", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "WEBSITE");
     assert_eq!(choose("INTERNET SITESI", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "SITESI");
+    // Genel "sitesi" bileşikleri site sayılır, "apartman sitesi" sayılmaz.
+    assert_eq!(choose("Fırınım için bir alışveriş sitesi", &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "alışveriş sitesi");
 }
 
 #[test]

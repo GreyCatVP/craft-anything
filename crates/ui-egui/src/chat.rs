@@ -82,6 +82,7 @@ pub fn apply_event(chat: &mut Vec<ChatItem>, e: AgentEvent) {
     }
 }
 
+/// Clear the "thinking" mark on the last assistant bubble, if there is one.
 pub(crate) fn end_streaming(chat: &mut [ChatItem]) {
     if let Some(ChatItem::Assistant { streaming, .. }) = chat.last_mut() {
         *streaming = false;
