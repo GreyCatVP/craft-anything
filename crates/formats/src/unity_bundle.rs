@@ -144,7 +144,8 @@ pub fn decompress(kind: u32, input: &[u8], out_len: u32) -> Result<Vec<u8>, Form
     Ok(output)
 }
 
-/// Read the block table (`table` as stored in the file).
+/// Read the block table (`table` as stored in the file), checking that its compressed blocks
+/// fit the header's data region before returning them to readers.
 pub fn table(table: &[u8], h: &Header) -> Result<(Vec<Block>, Vec<Node>), FormatError> {
     let t = decompress(h.flags & 0x3f, table, h.table_uncompressed_size)?;
     let mut pos = 16; // the data's hash
@@ -155,11 +156,15 @@ pub fn table(table: &[u8], h: &Header) -> Result<(Vec<Block>, Vec<Node>), Format
         }
         Ok(n)
     };
+    let data_end = if h.flags & 0x80 != 0 { h.table_offset } else { h.size };
+    let bad_blocks = || FormatError::Malformed("the compressed blocks don't fit the bundle's data region".into());
+    let mut remaining = data_end.checked_sub(h.data_offset).ok_or_else(bad_blocks)?;
     let mut blocks = Vec::new();
     for _ in 0..count(&mut pos, "blocks", 10)? {
         let uncompressed_size = u32::from_be_bytes(be(&t, &mut pos, "block")?);
         let compressed_size = u32::from_be_bytes(be(&t, &mut pos, "block")?);
         let flags = u16::from_be_bytes(be(&t, &mut pos, "block")?);
+        remaining = remaining.checked_sub(u64::from(compressed_size)).ok_or_else(bad_blocks)?;
         blocks.push(Block { uncompressed_size, compressed_size, flags });
     }
     let mut nodes = Vec::new();
