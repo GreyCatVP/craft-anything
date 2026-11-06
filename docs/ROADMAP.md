@@ -703,7 +703,7 @@ Gaps found while using the app for real projects.
       itself once the process it serves is gone: the Windows loop checks that process every 30 s,
       and macOS uses `caffeinate -w`. Live on Windows: a CLI build killed outright, its helper
       ended 30 s later. Not run on a Mac
-- [ ] Zoom (Cmd/Ctrl + / − / 0) between 50% and 200%: egui's own limits are 20% and 500%, where
+- [x] Zoom (Cmd/Ctrl + / − / 0) between 50% and 200%: egui's own limits are 20% and 500%, where
       text is unreadable or the window has room for almost nothing
       — claimed: sanketdofe, branch feature/r2.9-zoom-bounds
 - [ ] Find why a site capture lost its browser ("the WebSocket is closed", 419 ms into
