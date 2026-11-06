@@ -1335,13 +1335,24 @@ mod launch_tests {
     }
 
     /// Missing startup markers must still stop a live fixture before reporting startup failure.
+    ///
+    /// Wait (bounded) for the parent to say it is waiting, so the stop is proven to end a live
+    /// process; stop before asserting, then require that it never finished on its own.
     #[test]
     fn a_descendant_startup_timeout_stops_the_watched_launch() {
         let dir = tempfile::tempdir().unwrap();
         let l = start_descendant_fixture(dir.path(), false);
+        let ready = dir.path().join("parent-waiting");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !ready.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let parent_ready = ready.exists();
         let markers = stop_after_descendant_startup(&l, dir.path(), Duration::from_millis(100));
+        assert!(parent_ready, "the waiting parent never signalled that it was ready");
         assert_eq!(markers, (false, false));
         assert!(!l.is_running(), "startup failure left the watched launch running");
+        assert!(!dir.path().join("parent-completed").exists(), "the waiting parent finished on its own instead of being stopped");
     }
 
     /// Enable the guarded parent in an isolated directory, with or without child startup.
@@ -1358,14 +1369,17 @@ mod launch_tests {
     /// Start the bounded child in the watched parent's process group and wait for it.
     ///
     /// An exact directory-local guard enables this fixture. The `wait` mode simulates a
-    /// parent that stays alive without starting its child, exercising timeout cleanup.
+    /// parent that stays alive without starting its child, exercising timeout cleanup: it
+    /// writes `parent-waiting` once running and `parent-completed` only if its wait runs out.
     #[test]
     #[ignore = "stand-in invoked by watched descendant tests"]
     fn watched_parent_stand_in() {
         match std::fs::read("descendant-fixture").ok().as_deref() {
             Some(b"start") => {}
             Some(b"wait") => {
+                std::fs::write("parent-waiting", b"ready").unwrap();
                 std::thread::sleep(Duration::from_secs(5));
+                std::fs::write("parent-completed", b"yes").unwrap();
                 return;
             }
             _ => return,
