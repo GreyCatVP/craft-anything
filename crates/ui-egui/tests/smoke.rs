@@ -1043,6 +1043,23 @@ fn the_agent_console_keeps_its_size() {
 }
 
 #[test]
+fn the_agent_console_status_stays_clear_of_its_tabs_when_narrow() {
+    let mut h = harness_sized(egui::vec2(1000.0, 500.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    let log = h.get_by_label("Log").rect();
+    let row = log.y_range();
+    let status: Vec<_> = h.query_all_by_label_contains("findings").map(|n| n.rect()).filter(|r| row.contains(r.center().y)).collect();
+    assert!(!status.is_empty(), "the status is on the tabs' row");
+    for s in status {
+        assert!(log.right() <= s.left(), "the Log tab ends at {} and the status starts at {}", log.right(), s.left());
+    }
+}
+
+#[test]
 fn command_palette_opens_and_lists_tools() {
     let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
     h.run_steps(3);

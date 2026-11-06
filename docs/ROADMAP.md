@@ -745,7 +745,7 @@ Gaps found while using the app for real projects.
 - [ ] A live build with two Claude Code AIs signed in to two accounts, and one over SSH with a
       `~/` folder (the remote line is unit-tested, not run on another computer)
 
-- [ ] The Advanced console's status stays clear of its tabs when the console is narrow
+- [x] The Advanced console's status stays clear of its tabs when the console is narrow
       — claimed: justinjohn0306, branch bugfix/r2.9-console-status-overlap
 - [ ] Keep the builder-availability smoke regression independent of live agent discovery.
       — claimed: Afloat16, branch test/r2.9-builder-discovery-fixture-20261104
