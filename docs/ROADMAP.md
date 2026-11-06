@@ -1054,6 +1054,7 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-unity-bundle-declared-size-20261105
 - [ ] Check that Unity bundle compressed blocks end before the trailing block table, or the declared
       bundle end for front-positioned tables, so bytes outside the data region cannot supply block contents.
+      — claimed: Codex, branch bugfix/r3.12-unity-bundle-data-region
 - [x] Reject Unity serialized objects outside their declared file.
       — claimed: Afloat16, branch bugfix/r3.12-unity-serialized-object-ranges-20261105
 - [x] Preserve compression method slots in Unreal pak indexes.
