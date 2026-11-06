@@ -112,7 +112,9 @@ fn a_coding_agent_test_says_it_only_checked_the_version() {
 fn a_saved_program_that_is_gone_is_named_by_test_and_doctor() {
     let (h, _d) = hub();
     let dir = tempfile::tempdir().unwrap();
-    let gone = dir.path().join("old-build").join("agent").display().to_string();
+    // Basename must not match a known agent program (`agent`, `claude`, …) or `model_from_command`
+    // rewrites `model` and this check would run the wrong usual binary (#721).
+    let gone = dir.path().join("old-build").join("removed-program").display().to_string();
     let backend = |name: &str, model: &str| BackendEntry {
         config: BackendConfig { name: name.into(), kind: BackendKind::AgentCli, model: model.into(), base_url: None, ssh_host: None, enabled: true },
         options: BackendOptions { command: Some(gone.clone()), ..Default::default() },
