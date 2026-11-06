@@ -177,6 +177,10 @@
           "format": "double",
           "default": null
         },
+        "not_compared": {
+          "type": "boolean",
+          "default": false
+        },
         "note": {
           "type": "string"
         },
