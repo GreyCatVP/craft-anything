@@ -737,6 +737,13 @@ Owner: open · Status: in progress
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
 - [ ] UI tree on Linux (AT-SPI)
+- [x] `native_window_capture` on macOS: no Screen Recording is refused before the program starts
+      (it was "didn't show a window", which said to wait longer), and the name fallback matches
+      whole words and never the system, so `win` no longer pictures the menu bar
+- [x] `native_window_capture` keeps looking for up to 10 s past `wait_secs` when no window is there
+      yet, instead of deciding from one look; tried with a program that opens its window late
+- [ ] Close a pictured program politely before killing it: a helper it started through launchd
+      outlives the process group, and can stay running with the program's data files open
 - [x] `apple_calls_observe`: the breakpoint callback is one valid line (it had a literal backslash
       and `n` between statements, so lldb stopped before launching, #251), covers every breakpoint
       instead of only the first, a failed lldb run is an error and not "0 calls", and names or
