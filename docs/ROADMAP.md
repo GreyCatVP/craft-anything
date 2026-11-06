@@ -232,6 +232,7 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       here any more: every job calls `storytold/craft-common-actions@main`, so a fix belongs there
 - [ ] STATUS.md's "Known limits" still says the project feed, game-engine and Ghidra installs and
       launching exist only in the desktop app, which R1.6 ended: update it
+      — claimed: Codex, branch docs/r5.2-headless-status
 - [x] A spinner on screen no longer makes the window redraw at the display's rate: egui's own asks
       for a frame at once every frame, ours at the animation's pace (`widgets::Spinner`, #579)
 - [ ] Measure #579 on Windows 11 (0.3.0 portable): the app's CPU while idle, while a build runs and
