@@ -334,7 +334,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, dense: bool) {
             crate::prompt_box::PromptBox {
                 name: "Ask a question",
                 hint,
-                rows: (1, if dense { 4 } else { 8 }),
+                rows: if dense { (3, 4) } else { (1, 8) },
                 attach: None,
                 previews: &[],
                 stop_button: answering.then_some("Stop"),
