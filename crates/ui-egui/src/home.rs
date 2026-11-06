@@ -48,10 +48,9 @@ pub static TUTORIALS: &[(&str, &str, &str, &[&str])] = &[
 ];
 
 pub fn show(app: &mut CraftApp, ui: &mut Ui) {
-    // Keep the gutter in both short and tall views: centring from a width that loses its
-    // scrollbar when a tab is shorter makes the whole page jump sideways.
-    egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).auto_shrink([false, false]).show(ui, |ui| {
-        let full_w = ui.available_width();
+    // Keep the content width stable while the scrollbar animates in and out.
+    let full_w = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(0.0);
+    egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded).auto_shrink([false, false]).show(ui, |ui| {
         let w = full_w.min(1000.0) - 48.0;
         let pad = ((full_w - w) / 2.0).max(24.0);
         // Tight enough that Start is in view at 900 px with every choice showing (tested).

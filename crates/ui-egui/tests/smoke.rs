@@ -1851,15 +1851,23 @@ fn the_front_door_makes_something_or_just_looks_inside() {
 
 #[test]
 fn new_project_does_not_shift_when_its_scrollbar_is_not_needed() {
-    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, true)));
+    let mut h = harness_sized(egui::vec2(1000.0, 500.0), || demo::app(demo::engine(Mode::Beginner, true)));
     h.run_steps(3);
     let make_left = h.get_by_label("What do you want to make?").rect().left();
+    assert!(
+        h.query_all_by_role(egui::accesskit::Role::ScrollBar).any(|node| node.rect().left() > 200.0),
+        "the overflowing Make page should show its scrollbar"
+    );
 
     h.get_by_label("Just look inside").click();
-    h.run_steps(3);
+    h.run_steps(20);
     let look_left = h.get_by_label("What do you want to look inside?").rect().left();
 
     assert_eq!(look_left, make_left, "removing the scrollbar must not recenter New project");
+    assert!(
+        h.query_all_by_role(egui::accesskit::Role::ScrollBar).all(|node| node.rect().left() <= 200.0),
+        "the short Just look inside page should not show a scrollbar"
+    );
 }
 
 #[test]
