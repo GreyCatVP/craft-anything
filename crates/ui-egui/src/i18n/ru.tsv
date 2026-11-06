@@ -326,6 +326,7 @@ Deep mode now decompiles with Ghidra. The first look at a large program can take
 Deep mode on	Включён режим «Глубокий»
 Deep: we read its code, files and page source with every tool we have, and with Ghidra when it's installed. Click to switch.	Глубокий: мы читаем его код, файлы и исходник страницы всеми имеющимися инструментами, а также Ghidra, если он установлен. Нажмите, чтобы переключить.
 Default	По умолчанию
+Default (its own settings)	По умолчанию (собственные настройки)
 Delete a project	Удалить проект
 Delete it	Удалить
 Delete the project	Удалить проект

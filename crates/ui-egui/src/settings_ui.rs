@@ -471,25 +471,30 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                                     ui.label(RichText::new(tr("Asking for its models…")).color(t.text_faint).size(theme::CAPTION));
                                 }
                                 Some((_, Some(models))) => {
-                                    egui::ComboBox::from_id_salt(("model", &b.name)).icon(widgets::combo_icon).selected_text(&current).show_ui(ui, |ui| {
-                                        for m in models {
-                                            if ui.selectable_label(*m == current, m).clicked() && *m != current {
-                                                chosen_model = Some((b.name.clone(), m.clone()));
-                                            }
-                                        }
+                                    // Claude Code with no choice saved passes no `--model`, so it uses
+                                    // the model its own settings name: `default` is what's shown. An
+                                    // API backend's model is its saved `config.model`.
+                                    let claude_code = craft_anything_ai::cli_agents::adapter_for(&b.model).ids().contains(&"claude-code");
+                                    let picked = app.backend_options.get(&b.name).and_then(|o| o.cli_model.clone()).unwrap_or_else(|| {
+                                        if claude_code { craft_anything_ai::anthropic::CLAUDE_CODE_DEFAULT.to_string() } else { b.model.clone() }
                                     });
-                                    // A model the list doesn't offer: a newer one, a variant such as
-                                    // `opusplan`, or one another harness serves (#470).
-                                    let id = egui::Id::new(("other-model", &b.name));
-                                    let mut other = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
-                                    let label = ui.label(RichText::new(tr("Another model")).color(t.text_faint).size(theme::CAPTION));
-                                    let r = ui.add(egui::TextEdit::singleline(&mut other).desired_width(140.0)).labelled_by(label.id);
-                                    let entered = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                    if (widgets::link(ui, "Use").clicked() || entered) && !other.trim().is_empty() && other.trim() != current {
-                                        chosen_model = Some((b.name.clone(), other.trim().to_string()));
-                                        other.clear();
-                                    }
-                                    ui.data_mut(|d| d.insert_temp(id, other));
+                                    let shown = |m: &str| {
+                                        if m == craft_anything_ai::anthropic::CLAUDE_CODE_DEFAULT {
+                                            tr("Default (its own settings)").to_string()
+                                        } else {
+                                            m.to_string()
+                                        }
+                                    };
+                                    egui::ComboBox::from_id_salt(("model", &b.name)).icon(widgets::combo_icon).selected_text(shown(&picked)).show_ui(
+                                        ui,
+                                        |ui| {
+                                            for m in models {
+                                                if ui.selectable_label(*m == picked, shown(m)).clicked() && *m != picked {
+                                                    chosen_model = Some((b.name.clone(), m.clone()));
+                                                }
+                                            }
+                                        },
+                                    );
                                     if widgets::link(ui, "Cancel").clicked() {
                                         close_picker = true;
                                     }

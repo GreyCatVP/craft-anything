@@ -1,5 +1,6 @@
 # ko: Korean UI translations. Licensed MIT OR Apache-2.0.
 # UTF-8: English source<TAB>Korean text. Keep placeholders and escapes intact.
+Default (its own settings)	기본값(자체 설정)
 OpenCode default	OpenCode 기본값
 Model default	모델 기본값
 Thinking depth	생각 깊이

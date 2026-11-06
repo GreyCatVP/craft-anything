@@ -714,6 +714,12 @@ Gaps found while using the app for real projects.
       variable we use can't turn it on)
 - [x] A model the list doesn't offer (`opusplan`, `[1m]` variants, one another harness serves) can
       be typed in beside the model list in Settings → AI, as `ai model` already allowed (#470)
+- [x] Claude Code's model follows the person's own setup: the backend no longer passes a
+      hard-coded `--model` (Opus 5.5) on every run, so a model customised in Claude Code's own
+      settings applies. Settings → AI offers "Default (its own settings)" first in the list, any
+      model id (custom ones included) can still be typed in, and `ai model <name> default` clears
+      the choice the same way. The args, the CLI and the settings picker are unit-tested; not run
+      with a live Claude Code build
 - [x] The preview server answers only requests addressed to this computer (a Host and Origin
       check against DNS rebinding), streams large files instead of reading them into memory,
       sends no body for HEAD on a missing file, and caps open connections and the time a

@@ -157,7 +157,8 @@ fn opencode_go_models_base(base: &str) -> String {
 pub fn effort_in_use(config: &BackendConfig, options: Option<&BackendOptions>) -> Option<Effort> {
     let claude = match config.kind {
         BackendKind::Anthropic => true,
-        BackendKind::AgentCli => config.model == "claude-code",
+        // By adapter, not id: Claude Code is also saved as `claude`.
+        BackendKind::AgentCli => cli_agents::adapter_for(&config.model).ids().contains(&"claude-code"),
         _ => false,
     };
     claude.then(|| prompt::choose_effort(options.and_then(|o| o.effort)))
@@ -605,12 +606,16 @@ impl AiHub {
         let Some(b) = cfg.backends.iter_mut().find(|b| b.config.name == name) else { return Ok(false) };
         match b.config.kind {
             BackendKind::AgentCli => {
-                if model_options::supported(&b.config) && b.options.cli_model.as_deref() != Some(model) {
+                // Ask the adapter, not the id: Claude Code is also saved as `claude`, and both must
+                // mean "no --model" when the choice is the default.
+                let claude_code = cli_agents::adapter_for(&b.config.model).ids().contains(&"claude-code");
+                let clear = claude_code && model == crate::anthropic::CLAUDE_CODE_DEFAULT;
+                if model_options::supported(&b.config) && (clear || b.options.cli_model.as_deref() != Some(model)) {
                     b.options.cli_context = None;
                     b.options.cli_reasoning_effort = None;
                     b.options.effort = None;
                 }
-                b.options.cli_model = Some(model.to_string());
+                b.options.cli_model = if clear { None } else { Some(model.to_string()) };
             }
             _ => b.config.model = model.to_string(),
         }

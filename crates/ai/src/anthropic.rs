@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 
 pub const DEFAULT_BASE: &str = "https://api.anthropic.com";
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
+/// A picker choice meaning "don't pass `--model`": Claude Code uses the model its own settings
+/// name, which a person may have customised (a custom model, an alias, `opusplan`…). Not a model id.
+pub const CLAUDE_CODE_DEFAULT: &str = "default";
 /// Offered in the model dropdown when the live list can't be fetched.
 pub const MODELS: &[&str] = &["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
 /// Models that offer fewer effort levels than all five (Claude's effort guide), by model id
