@@ -756,6 +756,8 @@ Gaps found while using the app for real projects.
       the system's Edit items need the text box to answer them, so they'd show greyed out today
 - [x] The Advanced console's prompt box starts tall enough to read what's typed (#942)
       — claimed: justinjohn0306, branch bugfix/942-console-input-height
+- [ ] When the Advanced console is narrow (a 1000-point window), its Log tab overlaps the status
+      beside it ("0 findings")
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
