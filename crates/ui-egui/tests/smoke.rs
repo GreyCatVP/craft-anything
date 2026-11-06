@@ -1091,6 +1091,19 @@ fn the_agent_console_leaves_room_for_the_code_in_a_small_window() {
 }
 
 #[test]
+fn the_agent_console_opens_at_its_default_size() {
+    // The first frame guessed the prompt box too short; the panel grew to fit and saved that size.
+    let mut h = harness_sized(egui::vec2(1920.0, 1030.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    let top = h.get_by_label("Agent").rect().top();
+    assert!(top > 1030.0 - 280.0, "a 280-point console's tabs start below 750, got {top}");
+}
+
+#[test]
 fn command_palette_opens_and_lists_tools() {
     let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
     h.run_steps(3);

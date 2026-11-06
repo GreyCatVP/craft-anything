@@ -454,6 +454,8 @@ The agent console's panel grows to fit its content, so it grew 17 points every f
 maximum, and then the top of its tabs was cut off. When a part is sized to fill what's left, count
 the item spacing and use `horizontal_top` for tall rows, and test that the panel's size holds still
 over several frames.
+Its first frame had no measure yet and guessed 48 points for a box of 84 or more, so the panel grew
+on that frame, and egui saved the larger size (#942). Where a panel grows to fit, guess too tall.
 
 **A library default that blinked over a text field.** egui's scroll areas fade their edge when
 there's more below; the prompt box's one measured a few points of overflow on the frame after each
