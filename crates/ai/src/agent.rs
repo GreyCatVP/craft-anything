@@ -423,6 +423,9 @@ impl AgentLoop {
                 StopReason::PauseTurn => {
                     self.history.push(result.message);
                     self.record_unrun_tools(&uses);
+                    if let Some(follow_up) = result.follow_up {
+                        self.history.push(Msg::user_text(follow_up));
+                    }
                     continue;
                 }
                 StopReason::ToolUse if !uses.is_empty() => {
@@ -1034,6 +1037,7 @@ pub(crate) mod tests {
             stop,
             usage: Usage { input_tokens: 10, output_tokens: 5, ..Default::default() },
             model: "claude-opus-5-5".into(),
+            follow_up: None,
         })
     }
 

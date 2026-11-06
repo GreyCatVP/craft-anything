@@ -417,7 +417,7 @@ impl ChatStream {
         // Some servers say "stop" for tool calls. A limit or refusal must still prevent execution.
         let stop = if has_calls && stop == StopReason::EndTurn { StopReason::ToolUse } else { stop };
         let model = if self.model.is_empty() { fallback_model.to_string() } else { self.model };
-        Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model })
+        Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model, follow_up: None })
     }
 }
 
@@ -545,7 +545,7 @@ fn json_action(text: &str) -> Option<ReactStep> {
 /// unclosed fence, words after the call, a JSON object quoted inline) means the reply is text,
 /// as before. So do the text protocol's own markers in the words (a final answer that ends in an
 /// example is still the answer); inside a call's arguments they're only content.
-fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
+fn parse_fenced_calls(text: &str) -> Option<(Vec<(String, Value)>, bool)> {
     let mut calls = Vec::new();
     let mut lines = text.lines();
     let mut words_after = false;
@@ -585,7 +585,12 @@ fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
         calls.push((tool, input));
         words_after = false;
     }
-    (!calls.is_empty() && !words_after).then_some(calls)
+    (!calls.is_empty()).then_some((calls, words_after))
+}
+
+fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
+    let (calls, words_after) = parse_fenced_calls(text)?;
+    (!words_after).then_some(calls)
 }
 
 /// The first balanced `{…}` in `s`, parsed.
@@ -639,6 +644,14 @@ fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
         r.stop = StopReason::ToolUse;
         return;
     }
+    if !from_json
+        && let Some((calls, true)) = parse_fenced_calls(&text)
+        && calls.iter().all(|(tool, _)| offered(tool))
+    {
+        r.follow_up = Some("The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it.".into());
+        r.stop = StopReason::PauseTurn;
+        return;
+    }
     let step = json_call.or_else(|| react.then(|| parse_react(&text)));
     if let Some(ReactStep::Action { tool, input }) = step
         && (!from_json || tools.iter().any(|definition| definition.name == tool))
@@ -689,6 +702,7 @@ mod tests {
             stop: StopReason::EndTurn,
             usage: Usage::default(),
             model: String::new(),
+            follow_up: None,
         };
         let mut r = turn(&several);
         react_postprocess(&mut r, &[tool("look"), tool("write")], false);
@@ -709,6 +723,17 @@ mod tests {
             react_postprocess(&mut r, &[tool("look")], react);
             assert!(r.message.tool_uses().is_empty() && r.stop == StopReason::EndTurn, "react={react}");
         }
+        let summary = format!("{}\n### Summary:\nI listed the files.", call("look"));
+        let mut r = turn(&summary);
+        react_postprocess(&mut r, &[tool("look")], false);
+        assert!(r.message.tool_uses().is_empty());
+        assert_eq!(r.stop, StopReason::PauseTurn);
+        assert_eq!(
+            r.follow_up.as_deref(),
+            Some(
+                "The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it."
+            )
+        );
     }
 
     /// Only the real OpenCode Go base gets its session header: not a look-alike host, path or scheme.
