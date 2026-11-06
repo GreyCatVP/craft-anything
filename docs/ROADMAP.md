@@ -832,6 +832,8 @@ Gaps found while using the app for real projects.
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
       total, so a forked answer shows none; count questions in the project's usage
 - [ ] "Make this change" on an answer that suggests one (sends it as a normal message)
+- [x] "Just ask" is told it has fewer tools than the builder and that the build may be running
+      beside it, so it no longer reports the build's tools as disconnected or its work as cut off
 - [x] "Change it" knows what was just talked about in "Just ask": the next message tells the builder
       the latest few questions and answers, once, and a Clean room build only those asked in Clean
       room (#857). Not checked in a live build
