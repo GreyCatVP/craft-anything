@@ -690,6 +690,7 @@ Gaps found while using the app for real projects.
       marked `#[ignore]` and a line in the CLI docs are welcome
 - [ ] macOS: the window draws Windows-style controls at the top right, since the app turns off the
       system's title bar (`with_decorations(false)`), and its icon is bigger than the system's (#20)
+      — claimed: Codex, branch bugfix/r2.9-macos-native-controls
 - [ ] Show a command's output while it runs: Claude Code reports a tool's result only when it
       ends, so a long `cargo build` is one quiet line until then. Watching the agent's child
       processes from outside could say what's running and for how long
