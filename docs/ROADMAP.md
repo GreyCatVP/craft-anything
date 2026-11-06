@@ -226,8 +226,8 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       Compare with the folder's canonical path
 - [ ] Revisit the two advisory exceptions in `deny.toml`: `rsa` (no fix; we only verify with public
       keys) when rsa 0.10 lands, and unmaintained `zbus_names`/`zvariant` (Linux-only via keyring
-      and accesskit) when those move on. `deny.toml`'s comments say this is tracked in R0.3: point
-      them here
+      and accesskit) when those move on. `deny.toml`'s comments pointed at R0.3, which never held
+      them; they name this line now — claimed: kuseidos, branch docs/r5.2-deny-points-at-its-own-roadmap-line
 - [ ] Check whether the release workflows still run actions that target Node.js 20. None is named
       here any more: every job calls `storytold/craft-common-actions@main`, so a fix belongs there
 - [x] Correct STATUS.md's obsolete GUI-only limit: document the shared project feed, engine
