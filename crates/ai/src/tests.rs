@@ -633,6 +633,80 @@ fn a_server_is_added_by_its_address() {
     assert_eq!(h.backends().len(), 2, "only the ones that answered");
 }
 
+/// Models are listed and a request is tried for a service that isn't saved: nothing is added, a key
+/// given outright is the one sent, and a bad address is refused before any I/O.
+#[test]
+fn models_are_listed_and_tried_without_saving_anything() {
+    let (h, _d) = hub();
+    let (url, seen) = mock(vec![(200, "application/json", r#"{"data":[{"id":"nomic-embed-text"},{"id":"qwen3:8b"}]}"#.into())]);
+    let ids = h.list_models_at(BackendKind::OpenaiCompatible, Some(&format!("{url}/")), Some(" sk-typed ".into())).unwrap();
+    assert_eq!(ids, ["nomic-embed-text", "qwen3:8b"]);
+    assert_eq!(seen.lock().unwrap()[0].path, "/models");
+    assert_eq!(seen.lock().unwrap()[0].header("authorization"), Some("Bearer sk-typed"));
+
+    let reply = chat_sse(&[json!({"model":"m1","choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]})]);
+    let (url, seen) = mock(vec![(200, "text/event-stream", reply)]);
+    let config = BackendConfig { name: "Tryout".into(), kind: BackendKind::Openai, model: "m1".into(), base_url: Some(url), ssh_host: None, enabled: true };
+    let report = h.test_config(&config, Some("sk-typed".into())).unwrap();
+    assert_eq!((report.reply.as_str(), report.backend.as_str(), report.version_only), ("ready", "Tryout", false));
+    assert_eq!(seen.lock().unwrap()[0].header("authorization"), Some("Bearer sk-typed"), "the typed key is the one sent");
+
+    assert!(h.backends().is_empty(), "nothing was saved");
+    assert!(h.keys.get("Tryout").is_none(), "no key was stored");
+
+    // An own server with no model named is tried with the chat model adding it would pick.
+    let reply = chat_sse(&[json!({"model":"qwen3:8b","choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]})]);
+    let (url, seen) =
+        mock(vec![(200, "application/json", r#"{"data":[{"id":"nomic-embed-text"},{"id":"qwen3:8b"}]}"#.into()), (200, "text/event-stream", reply)]);
+    let config =
+        BackendConfig { name: "Box".into(), kind: BackendKind::OpenaiCompatible, model: String::new(), base_url: Some(url), ssh_host: None, enabled: true };
+    let report = h.test_config(&config, None).unwrap();
+    assert_eq!((report.reply.as_str(), report.model.as_str()), ("ready", "qwen3:8b"));
+    assert_eq!(seen.lock().unwrap()[1].body["model"], "qwen3:8b", "the chat model is the one asked");
+}
+
+/// A test of an AI that isn't saved never sends a saved AI's key: the form may reuse a saved name
+/// with another address and an empty key field. Testing the saved AI still uses its key.
+#[test]
+fn an_unsaved_test_never_sends_a_saved_key_by_its_name() {
+    let (h, _d) = hub();
+    h.keys.set("Box", "sk-saved").unwrap();
+    let reply = chat_sse(&[json!({"model":"m1","choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]})]);
+    let (url, seen) = mock(vec![(200, "text/event-stream", reply)]);
+    let own = BackendConfig { name: "Box".into(), kind: BackendKind::OpenaiCompatible, model: "m1".into(), base_url: Some(url), ssh_host: None, enabled: true };
+    h.test_config(&own, None).unwrap();
+    assert_eq!(seen.lock().unwrap()[0].header("authorization"), None, "the saved key stayed home");
+    // An API kind at another address: no key given, none stored by name is read, none from the
+    // environment for an address that isn't the service's own. Refused before any request.
+    let api = BackendConfig { kind: BackendKind::Openai, base_url: Some("http://127.0.0.1:9/v1".into()), ..own };
+    let e = h.test_config(&api, None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadSettings, "{e:?}");
+}
+
+/// A kind's own environment key is only for the service's own address.
+#[test]
+fn a_kinds_environment_key_never_goes_to_another_address() {
+    let env = |v: &str| (v == "OPENAI_API_KEY").then(|| "sk-env".to_string());
+    assert_eq!(kind_env_key_with(BackendKind::Openai, None, env).as_deref(), Some("sk-env"));
+    assert_eq!(kind_env_key_with(BackendKind::Openai, Some(" "), env).as_deref(), Some("sk-env"), "a blank address is the default");
+    assert_eq!(kind_env_key_with(BackendKind::Openai, Some("http://other-host/v1"), env), None);
+    assert_eq!(kind_env_key_with(BackendKind::Openrouter, None, env), None, "another kind's variable");
+}
+
+#[test]
+fn listing_models_at_a_closed_port_or_a_bad_address_is_a_plain_error() {
+    let (h, _d) = hub();
+    let e = h.list_models_at(BackendKind::OpenaiCompatible, Some("http://127.0.0.1:9/v1"), None).unwrap_err();
+    assert!(e.remediation.as_deref().is_some_and(|r| r.contains("Check the address")), "{e:?}");
+    // Refused before any connection: this address would otherwise be waited for.
+    let e = h.list_models_at(BackendKind::OpenaiCompatible, Some("192.168.1.20:8080/v1"), None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::BadInput);
+    assert!(e.remediation.is_some());
+    assert!(h.list_models_at(BackendKind::OpenaiCompatible, None, None).is_err(), "a server needs an address");
+    assert!(h.list_models_at(BackendKind::AgentCli, None, None).is_err());
+    assert!(h.backends().is_empty());
+}
+
 #[test]
 fn a_backend_context_budget_reaches_the_model() {
     let (hub, dir) = hub();
@@ -1233,4 +1307,41 @@ fn openrouter_with_no_provider_for_tools_falls_back_to_the_text_protocol() {
     assert_eq!(seen[0].body["provider"], json!({"require_parameters": true}));
     assert!(seen[0].body.get("tools").is_some());
     assert!(seen[1].body.get("provider").is_none() && seen[1].body.get("tools").is_none(), "the second asks in text: {}", seen[1].body);
+}
+
+/// A ComfyUI server with a checkpoint, picked as the picture model, lets builds make assets with no key of any kind.
+#[test]
+fn a_comfyui_server_lets_builds_make_assets_without_a_key() {
+    if std::env::var_os("FAL_KEY").is_some() {
+        return; // a real key in the environment answers yes on its own
+    }
+    let (h, _d) = hub();
+    assert!(!h.can_make_assets(), "no key and no server");
+    h.engine.session().settings.assets.image_model = Some("comfyui".into());
+    assert!(!h.can_make_assets(), "ComfyUI picked but no address");
+    h.engine.session().settings.assets.comfyui.address = "http://192.168.1.20:8188".into();
+    assert!(!h.can_make_assets(), "an address but no checkpoint can't make a picture");
+    h.engine.session().settings.assets.comfyui.checkpoint = "sd_xl_base_1.0.safetensors".into();
+    assert!(h.can_make_assets());
+    h.engine.session().settings.assets.image_model = Some("flux-dev".into());
+    assert!(!h.can_make_assets(), "a ComfyUI server doesn't count when another model is picked");
+}
+
+/// A run started by a tool asks while that tool holds the session: the answer never waits for it.
+#[test]
+fn asking_whether_builds_can_make_assets_never_waits_for_the_session() {
+    if std::env::var_os("FAL_KEY").is_some() {
+        return; // a real key in the environment answers yes on its own
+    }
+    let (h, _d) = hub();
+    let h = Arc::new(h);
+    let held = h.engine.session();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let asker = h.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(asker.can_make_assets());
+    });
+    let answer = rx.recv_timeout(std::time::Duration::from_secs(5));
+    drop(held);
+    assert_eq!(answer, Ok(false), "answered from the saved settings while the session was busy");
 }

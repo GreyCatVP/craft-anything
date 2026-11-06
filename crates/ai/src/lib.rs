@@ -29,6 +29,7 @@ pub mod ssh;
 
 pub use cli_agents::models::{AgentModel, ModelContext};
 pub use config::{AiConfig, BackendEntry, BackendOptions, Price};
+pub use detect::first_chat_model;
 pub use failure::{FailureKind, TurnFailure};
 pub use keys::KeyStore;
 pub use model::Effort;
@@ -66,6 +67,18 @@ impl BackendKind {
             BackendKind::Gemini => "Gemini (Google AI Studio)",
             BackendKind::OpenaiCompatible => "Local / OpenAI-compatible server",
             BackendKind::AgentCli => "Agent app (command line)",
+        }
+    }
+
+    /// A short name for a row of settings: what this AI is, not how it's stored.
+    pub fn label(self) -> &'static str {
+        match self {
+            BackendKind::Anthropic => "Anthropic API",
+            BackendKind::Openai => "OpenAI API",
+            BackendKind::Openrouter => "OpenRouter",
+            BackendKind::Gemini => "Gemini API",
+            BackendKind::OpenaiCompatible => "Custom endpoint",
+            BackendKind::AgentCli => "Coding agent",
         }
     }
 
@@ -126,6 +139,20 @@ fn new_session_id() -> String {
 
 /// The OpenCode Go key from the environment, when the base URL is its own. A blank value counts as
 /// unset, so the other name is still tried.
+/// The kind's own environment key (`OPENAI_API_KEY`…), only for the service's own address: with
+/// another address given, it would go to whoever runs the server there.
+fn kind_env_key(kind: BackendKind, base: Option<&str>) -> Option<String> {
+    kind_env_key_with(kind, base, |v| std::env::var(v).ok())
+}
+
+/// [`kind_env_key`] with the environment passed in, so tests need no process state.
+fn kind_env_key_with(kind: BackendKind, base: Option<&str>, get: impl Fn(&str) -> Option<String>) -> Option<String> {
+    if base.is_some_and(|b| !b.trim().is_empty()) {
+        return None;
+    }
+    keys::env_var(kind).and_then(get).filter(|k| !k.trim().is_empty())
+}
+
 fn go_env_key(base: &str) -> Option<String> {
     if !openai::is_opencode_go(base) {
         return None;
@@ -480,26 +507,12 @@ impl AiHub {
         if name.is_empty() {
             return Err(ToolError::invalid("A backend needs a name."));
         }
-        if !(address.starts_with("http://") || address.starts_with("https://")) {
-            return Err(ToolError::invalid(format!("{address:?} isn't a web address."))
-                .with_remediation("Give the server's address, like http://192.168.1.20:11434/v1."));
-        }
+        check_address(address)?;
         let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
-        // OpenCode Go lists its models at /v1, not under the chat path a person would paste.
-        let probe = if openai::is_opencode_go(address) { opencode_go_models_base(address) } else { address.to_string() };
-        let models = openai::OpenAi::compatible(name, &probe, key.clone(), "").list_models(Duration::from_secs(10)).map_err(|e| {
-            let why = e.message.clone();
-            e.with_remediation(format!(
-                "Check the address (it usually ends in /v1), that the server is running and can be reached from this computer, and its key if it needs one. ({why})"
-            ))
-        })?;
+        let models = self.list_models_at(BackendKind::OpenaiCompatible, Some(address), key.clone())?;
         let model = match model.map(str::trim).filter(|m| !m.is_empty()) {
             Some(m) => m.to_string(),
-            None => detect::chat_model(&models).ok_or_else(|| {
-                let reason = if models.is_empty() { "has no models yet" } else { "doesn't list a model that can chat" };
-                ToolError::new(ErrorCode::NotFound, format!("{address} {reason}."))
-                    .with_remediation("Load a chat model on the server first, or enter the name of a chat model you know is available.")
-            })?,
+            None => chat_model_of(address, &models)?,
         };
         let config = BackendConfig {
             name: name.to_string(),
@@ -707,10 +720,22 @@ impl AiHub {
         Ok(removed)
     }
 
-    /// Some built-in asset provider has a key, so builds can generate assets.
-    pub fn has_asset_keys(&self) -> bool {
+    /// Builds can generate assets: some built-in asset provider has a key, or pictures come from
+    /// the person's own ComfyUI server (the picture model, with an address), which needs none.
+    pub fn can_make_assets(&self) -> bool {
+        let is_comfy = |a: &craft_anything_engine::settings::AssetSettings| {
+            // The same two fields the asset tools need before they send anything.
+            a.image_model.as_deref() == Some(craft_anything_engines::assets::comfyui::ID)
+                && !a.comfyui.address.trim().is_empty()
+                && !a.comfyui.checkpoint.trim().is_empty()
+        };
+        // Never wait for the session: a run started by a tool is called while that tool holds it.
+        let comfy = match self.engine.try_session() {
+            Some(s) => is_comfy(&s.settings.assets),
+            None => is_comfy(&Settings::load_from(&self.settings_path()).assets),
+        };
         let providers = craft_anything_engines::assets::AssetProviders::built_in();
-        providers.ids().into_iter().any(|id| self.has_asset_key(&providers, id))
+        comfy || providers.ids().into_iter().any(|id| self.has_asset_key(&providers, id))
     }
 
     /// Save an asset provider's key (keychain first). Returns where it went.
@@ -755,23 +780,37 @@ impl AiHub {
         })
     }
 
-    fn key_for(&self, e: &BackendEntry) -> Result<String, ToolError> {
+    /// The key for an API backend: one given outright wins, then the stored key, then the environment.
+    /// An AI that isn't saved (`stored` false) never gets a stored key by its name: a form that reuses
+    /// a saved AI's name with another address would send that key there.
+    fn key_for(&self, e: &BackendEntry, explicit: Option<String>, stored: bool) -> Result<String, ToolError> {
         let base = e.config.base_url.as_deref().unwrap_or("");
-        self.keys.resolve(&e.config.name, e.config.kind).or_else(|| go_env_key(base).or_else(|| providers::env_key(base))).ok_or_else(|| {
-            let var = if openai::is_opencode_go(base) {
-                "OPENCODEGO_API_KEY or OPENCODE_GO_API_KEY"
-            } else if e.config.kind == BackendKind::OpenaiCompatible {
-                providers::of_base(base).map_or("an API key", |p| p.key_env)
-            } else {
-                keys::env_var(e.config.kind).unwrap_or("an API key")
-            };
-            ToolError::new(ErrorCode::BadSettings, format!("{} has no API key.", e.config.name))
-                .with_remediation(format!("Add the key in Settings → AI, or set {var}."))
-        })
+        explicit
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .or_else(|| if stored { self.keys.resolve(&e.config.name, e.config.kind) } else { kind_env_key(e.config.kind, e.config.base_url.as_deref()) })
+            .or_else(|| go_env_key(base).or_else(|| providers::env_key(base)))
+            .ok_or_else(|| {
+                let var = if openai::is_opencode_go(base) {
+                    "OPENCODEGO_API_KEY or OPENCODE_GO_API_KEY"
+                } else if e.config.kind == BackendKind::OpenaiCompatible {
+                    providers::of_base(base).map_or("an API key", |p| p.key_env)
+                } else {
+                    keys::env_var(e.config.kind).unwrap_or("an API key")
+                };
+                ToolError::new(ErrorCode::BadSettings, format!("{} has no API key.", e.config.name))
+                    .with_remediation(format!("Add the key in Settings → AI, or set {var}."))
+            })
     }
 
     /// Build the model for an API backend (not agent CLIs).
     pub fn build_model(&self, e: &BackendEntry) -> Result<ModelSlot, ToolError> {
+        self.build_model_with_key(e, None, true)
+    }
+
+    /// [`AiHub::build_model`] with a key given outright; `stored` false for an AI that isn't saved,
+    /// which gets no stored key (see [`AiHub::key_for`]).
+    fn build_model_with_key(&self, e: &BackendEntry, explicit: Option<String>, stored: bool) -> Result<ModelSlot, ToolError> {
         let c = &e.config;
         let base = c.base_url.as_deref().filter(|b| !b.trim().is_empty());
         let mut tunnel = None;
@@ -798,16 +837,20 @@ impl AiHub {
         let local = c.kind == BackendKind::OpenaiCompatible && base.is_none_or(detect::on_this_network);
         let model: Box<dyn ChatModel> = match c.kind {
             BackendKind::Anthropic => {
-                let mut a = anthropic::Anthropic::new(base, self.key_for(e)?, &c.model);
+                let mut a = anthropic::Anthropic::new(base, self.key_for(e, explicit, stored)?, &c.model);
                 a.fallbacks = e.options.fallbacks_enabled.unwrap_or(true);
                 Box::new(a)
             }
-            BackendKind::Openai => Box::new(openai::OpenAi::official(base, self.key_for(e)?, &c.model)),
-            BackendKind::Openrouter => Box::new(openai::OpenAi::openrouter(base, self.key_for(e)?, &c.model)),
-            BackendKind::Gemini => Box::new(openai::OpenAi::gemini(base, self.key_for(e)?, &c.model)),
+            BackendKind::Openai => Box::new(openai::OpenAi::official(base, self.key_for(e, explicit, stored)?, &c.model)),
+            BackendKind::Openrouter => Box::new(openai::OpenAi::openrouter(base, self.key_for(e, explicit, stored)?, &c.model)),
+            BackendKind::Gemini => Box::new(openai::OpenAi::gemini(base, self.key_for(e, explicit, stored)?, &c.model)),
             BackendKind::OpenaiCompatible => {
                 let base = base.unwrap_or("http://127.0.0.1:11434/v1");
-                let key = self.keys.get(&c.name).or_else(|| go_env_key(base).or_else(|| providers::env_key(base)));
+                let key = explicit
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| stored.then(|| self.keys.get(&c.name)).flatten())
+                    .or_else(|| go_env_key(base).or_else(|| providers::env_key(base)));
                 let mut o = compatible_client(&c.name, base, key, &c.model, &self.session_id());
                 o.react = e.options.react_fallback.unwrap_or(false);
                 Box::new(o)
@@ -910,36 +953,78 @@ impl AiHub {
         Ok(vec![(a.to_string(), self.start(Some(a), beginner)?), (b.to_string(), self.start(Some(b), beginner)?)])
     }
 
-    /// Live model list for a backend. Blocking (bounded); run it off the UI thread.
+    /// Live model list for a saved backend. Blocking (bounded); run it off the UI thread.
     pub fn list_models(&self, name: &str) -> Result<Vec<String>, ToolError> {
         let e = self.entry(name)?;
         let base = e.config.base_url.as_deref().filter(|b| !b.trim().is_empty());
-        let t = Duration::from_secs(10);
         match e.config.kind {
-            BackendKind::Anthropic => anthropic::Anthropic::new(base, self.key_for(&e)?, &e.config.model).list_models(t),
-            BackendKind::Openai => openai::OpenAi::official(base, self.key_for(&e)?, &e.config.model).list_models(t),
-            BackendKind::Openrouter => openai::OpenAi::openrouter(base, self.key_for(&e)?, &e.config.model).list_models(t),
-            BackendKind::Gemini => openai::OpenAi::gemini(base, self.key_for(&e)?, &e.config.model).list_models(t),
+            BackendKind::AgentCli => self.model_choices(name),
             BackendKind::OpenaiCompatible => {
                 if e.config.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty()) {
                     return Err(ToolError::unavailable("Listing models on a remote server isn't supported yet.").with_remediation("Type the model name."));
                 }
-                let b = base.unwrap_or("http://127.0.0.1:11434/v1");
-                let key = self.keys.get(&e.config.name).or_else(|| go_env_key(b).or_else(|| providers::env_key(b)));
-                if openai::is_opencode_go(b) {
-                    // The chat base ends in /openai/v1; the model list answers at /v1 instead.
-                    return compatible_client(&e.config.name, &opencode_go_models_base(b), key, "", "").list_models(t);
-                }
-                compatible_client(&e.config.name, b, key, "", "").list_models(t)
+                self.list_models_at(e.config.kind, Some(base.unwrap_or("http://127.0.0.1:11434/v1")), self.keys.get(&e.config.name))
             }
-            BackendKind::AgentCli => self.model_choices(name),
+            kind => self.list_models_at(kind, base, Some(self.key_for(&e, None, true)?)),
+        }
+    }
+
+    /// The models a service or server offers, without saving anything. `key` given outright wins over
+    /// a stored or environment key. A custom server needs its address. Blocking
+    /// (bounded to 10 s); run it off the UI thread.
+    pub fn list_models_at(&self, kind: BackendKind, base_url: Option<&str>, key: Option<String>) -> Result<Vec<String>, ToolError> {
+        let base = base_url.map(|b| b.trim().trim_end_matches('/')).filter(|b| !b.is_empty());
+        let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+        let t = Duration::from_secs(10);
+        let need = |key: Option<String>| {
+            key.or_else(|| kind_env_key(kind, base)).or_else(|| base.and_then(|b| go_env_key(b).or_else(|| providers::env_key(b)))).ok_or_else(|| {
+                ToolError::new(ErrorCode::BadSettings, "No API key was given.")
+                    .with_remediation(format!("Paste the key, or set {}.", keys::env_var(kind).unwrap_or("an API key")))
+            })
+        };
+        match kind {
+            BackendKind::Anthropic => anthropic::Anthropic::new(base, need(key)?, "").list_models(t),
+            BackendKind::Openai => openai::OpenAi::official(base, need(key)?, "").list_models(t),
+            BackendKind::Openrouter => openai::OpenAi::openrouter(base, need(key)?, "").list_models(t),
+            BackendKind::Gemini => openai::OpenAi::gemini(base, need(key)?, "").list_models(t),
+            BackendKind::OpenaiCompatible => {
+                let b = base.ok_or_else(|| {
+                    ToolError::invalid("A server needs its address.").with_remediation("Give the server's address, like http://192.168.1.20:11434/v1.")
+                })?;
+                check_address(b)?;
+                let key = key.or_else(|| go_env_key(b).or_else(|| providers::env_key(b)));
+                // OpenCode Go lists its models at /v1, not under the chat path a person would paste.
+                let probe = if openai::is_opencode_go(b) { opencode_go_models_base(b) } else { b.to_string() };
+                compatible_client(b, &probe, key, "", "").list_models(t).map_err(|e| {
+                    let why = e.message.clone();
+                    e.with_remediation(format!(
+                        "Check the address (it usually ends in /v1), that the server is running and can be reached from this computer, and its key if it needs one. ({why})"
+                    ))
+                })
+            }
+            BackendKind::AgentCli => Err(ToolError::invalid("A coding agent has no model list to fetch.")),
         }
     }
 
     /// Send a tiny request and time it; a coding agent only runs `--version`, so its report says
     /// `version_only`. Blocking (bounded); run it off the UI thread.
     pub fn test_backend(&self, name: &str) -> Result<TestReport, ToolError> {
-        let e = self.entry(name)?;
+        self.test_entry(&self.entry(name)?, None, true)
+    }
+
+    /// The same tiny request for an AI that isn't saved, with the key given. Blocking (bounded).
+    pub fn test_config(&self, config: &BackendConfig, key: Option<String>) -> Result<TestReport, ToolError> {
+        let mut config = config.clone();
+        // An own server with no model named answers with its first chat model, as adding it would pick.
+        if config.kind == BackendKind::OpenaiCompatible && config.model.trim().is_empty() {
+            let address = config.base_url.clone().unwrap_or_default();
+            config.model = chat_model_of(&address, &self.list_models_at(BackendKind::OpenaiCompatible, Some(&address), key.clone())?)?;
+        }
+        self.test_entry(&BackendEntry { config, options: BackendOptions::default() }, key, false)
+    }
+
+    fn test_entry(&self, e: &BackendEntry, key: Option<String>, stored: bool) -> Result<TestReport, ToolError> {
+        let name = e.config.name.as_str();
         let start = Instant::now();
         if e.config.kind == BackendKind::AgentCli {
             let program = cli_agents::program_of(&e.config, &e.options);
@@ -958,7 +1043,7 @@ impl AiHub {
                 program: Some(program),
             });
         }
-        let mut slot = self.build_model(&e)?;
+        let mut slot = self.build_model_with_key(e, key, stored)?;
         let stop = Stop::default();
         let (tx, rx) = std::sync::mpsc::channel();
         // A hard bound even if the server trickles bytes forever.
@@ -970,8 +1055,9 @@ impl AiHub {
                 let _ = tx.send(r);
             })
             .map_err(|e| ToolError::internal(e.to_string()))?;
+        let slow = if e.config.kind == BackendKind::OpenaiCompatible { " The server may still be loading the model; try again in a minute." } else { "" };
         let (r, model) =
-            rx.recv_timeout(Duration::from_secs(60)).map_err(|_| ToolError::new(ErrorCode::TimedOut, format!("{name} didn't answer within 60 s.")))??;
+            rx.recv_timeout(Duration::from_secs(60)).map_err(|_| ToolError::new(ErrorCode::TimedOut, format!("{name} didn't answer within 60 s.{slow}")))??;
         Ok(TestReport {
             backend: e.config.name.clone(),
             model: if r.model.is_empty() { model } else { r.model },
@@ -1011,6 +1097,23 @@ impl AiHub {
         }
         entries.into_iter().zip(results).map(|(e, r)| (e.config.name, r.unwrap_or_else(|| Err("no answer in time".into())))).collect()
     }
+}
+
+/// An address a server can be at: it must say http:// or https://.
+/// The chat model a server answers with when none is named.
+fn chat_model_of(address: &str, models: &[String]) -> Result<String, ToolError> {
+    detect::chat_model(models).ok_or_else(|| {
+        let reason = if models.is_empty() { "has no models yet" } else { "doesn't list a model that can chat" };
+        ToolError::new(ErrorCode::NotFound, format!("{address} {reason}."))
+            .with_remediation("Load a chat model on the server first, or enter the name of a chat model you know is available.")
+    })
+}
+
+fn check_address(address: &str) -> Result<(), ToolError> {
+    if address.starts_with("http://") || address.starts_with("https://") {
+        return Ok(());
+    }
+    Err(ToolError::invalid(format!("{address:?} isn't a web address.")).with_remediation("Give the server's address, like http://192.168.1.20:11434/v1."))
 }
 
 fn req_parts() -> Vec<Msg> {
