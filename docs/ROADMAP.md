@@ -601,9 +601,14 @@ Owner: open · Status: in progress
 
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
-- [ ] Retry missing native observation on follow-ups when runtime study is enabled, use the
+- [x] Retry missing native observation on follow-ups when runtime study is enabled, use the
       built-in capture tool, and require comparison evidence before declaring a recreation ready
       — claimed: Codex, branch bugfix/r2.4-observation-readiness
+      Windows capture reuses the open editor and detects modal dialogs. Verified live through
+      resume/check and builder UI tools; incomplete comparison ends at Needs you.
+- [ ] Investigate Windows workspace creation through a directory symlink: the engine test
+      `a_project_behind_a_link_is_still_the_project` returns OS error 183, also with the
+      unmodified engine on `main` (verified during the observation correction).
 - [ ] UI tree on Linux (AT-SPI)
 - [x] `apple_calls_observe`: the breakpoint callback is one valid line (it had a literal backslash
       and `n` between statements, so lldb stopped before launching, #251), covers every breakpoint

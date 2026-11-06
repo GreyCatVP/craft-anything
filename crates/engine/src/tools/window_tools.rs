@@ -21,7 +21,7 @@ pub fn specs() -> Vec<ToolSpec> {
     vec![ToolSpec {
         id: "native_window_capture",
         title: "Picture a program's window",
-        summary: "Start a program (an app or a game), wait for its window, take a picture of it and close the program (Windows and macOS). Optionally save the PNG to `output`, and the UI tree of its windows (as runtime_ui_read reads it; Windows and macOS) to `ui_tree` as JSON. It runs the program, so it needs consent.",
+        summary: "Start a program, wait for its window, take a picture and close it (Windows and macOS). On Windows, reuse_running captures the one open process with the exact executable path and leaves it open; if none is open, starts one normally. Returns the observed pid. Optionally save the PNG to output and the UI tree to ui_tree. Execution still needs consent.",
         beginner: "Opens a program for a few seconds and takes a picture of its window.",
         toolset: Toolset::Runtime,
         effects: Effects::LAUNCHES_PROCESS.union(Effects::EXECUTES_FOREIGN_CODE).union(Effects::WRITES_FILESYSTEM).union(Effects::MUTATES_SESSION),
@@ -36,6 +36,10 @@ pub fn specs() -> Vec<ToolSpec> {
 pub struct CaptureParams {
     /// The program to start (an absolute path).
     pub program: PathBuf,
+    /// On Windows, use a single already-open process with this exact executable path when
+    /// available. It is left running; only a process started by this call is closed.
+    #[serde(default)]
+    pub reuse_running: bool,
     /// Arguments for it.
     #[serde(default)]
     pub args: Vec<String>,
@@ -61,6 +65,13 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     if p.ui_tree.as_ref().is_some_and(|t| !t.is_absolute()) {
         return Err(ToolError::invalid("ui_tree must be an absolute path"));
     }
+    if p.output.as_ref().is_some_and(|t| !t.is_absolute()) {
+        return Err(ToolError::invalid("output must be an absolute path"));
+    }
+    if p.reuse_running && !p.args.is_empty() {
+        return Err(ToolError::invalid("reuse_running cannot apply arguments to an already-open program.")
+            .with_remediation("Omit args to observe the open program, or turn off reuse_running to launch with arguments."));
+    }
     // Refused before the program starts where no picture can be taken.
     if !craft_anything_platform::window::SUPPORTED {
         return Err(craft_anything_platform::window::unsupported());
@@ -68,44 +79,51 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     let wait = Duration::from_secs(p.wait_secs.unwrap_or(8).clamp(1, 120));
     let dir = p.program.parent().map(PathBuf::from).unwrap_or_default();
     let cancel = ctx.cancel.clone();
-    ctx.report(None, format!("Starting {} for {} s…", p.program.display(), wait.as_secs()));
-    let mut running = Process::new(&p.program)
-        .args(&p.args)
-        .cwd(&dir)
-        .timeout(wait + Duration::from_secs(60))
-        .stdout_cap(64 * 1024)
-        .cancel_when(move || cancel.is_cancelled())
-        .label("the program")
-        .spawn()?;
+    let existing = if p.reuse_running { super::apple_runtime::running_program(ctx, &p.program)? } else { None };
+    let mut running = if existing.is_none() {
+        ctx.report(None, format!("Starting {} for {} s…", p.program.display(), wait.as_secs()));
+        Some(
+            Process::new(&p.program)
+                .args(&p.args)
+                .cwd(&dir)
+                .timeout(wait + Duration::from_secs(60))
+                .stdout_cap(64 * 1024)
+                .cancel_when(move || cancel.is_cancelled())
+                .label("the program")
+                .spawn()?,
+        )
+    } else {
+        ctx.report(None, format!("Observing the open window of {}…", p.program.display()));
+        None
+    };
+    let pid = existing.or_else(|| running.as_ref().map(|r| r.pid())).ok_or_else(|| ToolError::internal("No process was selected for capture."))?;
     let started = Instant::now();
-    while started.elapsed() < wait {
+    while running.as_mut().is_some_and(|r| !r.is_finished()) && started.elapsed() < wait {
         if ctx.cancel.is_cancelled() {
-            running.kill_and_wait(Duration::from_secs(10));
+            if let Some(running) = running.as_mut() {
+                running.kill_and_wait(Duration::from_secs(10));
+            }
             return Err(ToolError::cancelled());
-        }
-        if running.is_finished() {
-            break;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+    ctx.cancel.check()?;
     let name = p.program.file_stem().map(|s| s.to_string_lossy().into_owned());
-    let shot = craft_anything_platform::window::capture_window(running.pid(), name.as_deref());
+    let shot = craft_anything_platform::window::capture_window(pid, if existing.is_some() { None } else { name.as_deref() });
     // Read while it still runs; a tree that can't be read is only left out.
-    let tree = p.ui_tree.as_ref().map(|_| super::apple_runtime::ui_tree(ctx, running.pid(), UI_TREE_NODES));
-    // Always closed again, picture or not, and confirmed before we return (a caller such as the
-    // CLI may exit right after, before a background kill would happen).
-    if !running.kill_and_wait(Duration::from_secs(10)) {
+    let tree = p.ui_tree.as_ref().map(|_| super::apple_runtime::ui_tree(ctx, pid, UI_TREE_NODES));
+    // Close only a process this call owns, and confirm before returning to a CLI that may exit.
+    if let Some(running) = running.as_mut()
+        && !running.kill_and_wait(Duration::from_secs(10))
+    {
         log::warn!("{} may still be running", p.program.display());
     }
     let shot = shot?;
     let png = encode_png(&Image { width: shot.width, height: shot.height, rgba: shot.rgba })?;
     if let Some(out) = &p.output {
-        if !out.is_absolute() {
-            return Err(ToolError::invalid("output must be an absolute path"));
-        }
         crate::project::write_atomic(out, &png)?;
     }
-    let mut result = json!({"title": shot.title, "app": shot.app, "width": shot.width, "height": shot.height, "after_secs": started.elapsed().as_secs()});
+    let mut result = json!({"title": shot.title, "app": shot.app, "width": shot.width, "height": shot.height, "after_secs": started.elapsed().as_secs(), "pid": pid, "reused_running": existing.is_some()});
     if let Some(o) = result.as_object_mut() {
         if let Some(out) = &p.output {
             o.insert("output".into(), json!(out.display().to_string()));
@@ -128,7 +146,7 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     }
     let mut b =
         EvidenceBuilder::new("native_window_capture", Subject { kind: "program".into(), sha256: None, name: name.clone() }, super::artifact_tools::env(ctx))
-            .params(json!({"program": p.program.display().to_string(), "args": p.args, "wait_secs": wait.as_secs()}))
+            .params(json!({"program": p.program.display().to_string(), "args": p.args, "wait_secs": wait.as_secs(), "reuse_running": p.reuse_running}))
             .result(result)
             .summary(format!("Pictured \"{}\" ({}×{}) after {} s.", shot.title, shot.width, shot.height, started.elapsed().as_secs()))
             .confidence(Confidence::Observed)
@@ -153,6 +171,19 @@ mod tests {
         let granted = CallOptions::new(Caller::Mcp).with_consent(Consent::Granted);
         assert!(e.call("native_window_capture", p, granted).unwrap_err().message.contains("isn't a program file"));
         let exe = std::env::current_exe().unwrap();
+        let reuse = json!({"program": exe, "reuse_running": true});
+        assert_eq!(e.call("native_window_capture", reuse, CallOptions::new(Caller::Mcp)).unwrap_err().code, ErrorCode::ConsentRequired);
+        let with_args = json!({"program": exe, "reuse_running": true, "args": ["--help"]});
+        assert!(
+            e.call("native_window_capture", with_args, CallOptions::new(Caller::Mcp).with_consent(Consent::Granted)).unwrap_err().message.contains("arguments")
+        );
+        let relative_output = json!({"program": exe, "output": "picture.png", "reuse_running": true});
+        assert!(
+            e.call("native_window_capture", relative_output, CallOptions::new(Caller::Mcp).with_consent(Consent::Granted))
+                .unwrap_err()
+                .message
+                .contains("output")
+        );
         let relative = json!({"program": exe, "ui_tree": "tree.json"});
         assert!(
             e.call("native_window_capture", relative, CallOptions::new(Caller::Mcp).with_consent(Consent::Granted)).unwrap_err().message.contains("ui_tree"),

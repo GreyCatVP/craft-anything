@@ -74,6 +74,7 @@ impl Check for ScreenshotCheck {
         pictures.extend(Some(ws.capture_dir().join("window.png")).filter(|p| p.is_file()));
         let bar = cx.build_settings().picture_good_enough;
         let mut similarity = None;
+        let mut unknowns = Vec::new();
         let note = match picture_likeness(&img, &pictures) {
             Likeness::Best { score, name } => {
                 // With a bar set (`build.picture_good_enough`), the likeness decides when to stop.
@@ -82,16 +83,25 @@ impl Check for ScreenshotCheck {
                 }
                 format!("The program starts and draws ({}×{}). It looks about {score:.0}% like {name}.", img.width, img.height)
             }
-            Likeness::Unreadable => format!(
-                "The program starts and draws ({}×{}). The person's pictures couldn't be read (PNG, JPEG, WebP or GIF), so they weren't compared.",
-                img.width, img.height
-            ),
-            Likeness::NoPictures => format!("The program starts and draws ({}×{}).", img.width, img.height),
+            Likeness::Unreadable => {
+                unknowns.push("The reference pictures could not be read, so likeness is unverified".into());
+                format!(
+                    "The program starts and draws ({}×{}). The person's pictures couldn't be read (PNG, JPEG, WebP or GIF), so they weren't compared.",
+                    img.width, img.height
+                )
+            }
+            Likeness::NoPictures => {
+                if ws.manifest.target != TargetRef::None {
+                    unknowns.push("The original has no window capture or reference pictures, so likeness is unverified".into());
+                }
+                format!("The program starts and draws ({}×{}).", img.width, img.height)
+            }
         };
-        let (running, claims) = running_note(cx, &program, &base_args, &dir);
-        let note = note + &running;
+        let running = running_note(cx, &program, &base_args, &dir)?;
+        let note = note + &running.note;
+        unknowns.extend(running.unknowns);
         artifacts.extend(dir.join("window.png").strip_prefix(&ws.root).ok().map(Path::to_path_buf).filter(|p| ws.root.join(p).is_file()));
-        Ok(CheckResult { artifacts, similarity, good_enough: bar, claims, ..CheckResult::new(self.id(), round, true, note) })
+        Ok(CheckResult { artifacts, similarity, good_enough: bar, claims: running.claims, unknowns, ..CheckResult::new(self.id(), round, true, note) })
     }
 }
 
@@ -99,35 +109,70 @@ impl Check for ScreenshotCheck {
 /// (`capture/window.png`, and `capture/ui-tree.json` when its controls were read): how alike the
 /// windows look and the controls are, and a claim for each of the original's interactive
 /// controls ([`control_claims`]). Empty when there's nothing to compare with.
-fn running_note(cx: &CheckCx, program: &Path, args: &[String], dir: &Path) -> (String, Vec<Claim>) {
+#[derive(Default)]
+struct RunningComparison {
+    note: String,
+    claims: Vec<Claim>,
+    unknowns: Vec<String>,
+}
+
+fn running_note(cx: &CheckCx, program: &Path, args: &[String], dir: &Path) -> Result<RunningComparison, ToolError> {
     let capture = cx.ws.capture_dir();
     let (original, original_tree) = (capture.join("window.png"), capture.join("ui-tree.json"));
     if !original.is_file() {
-        return (String::new(), Vec::new());
+        return Ok(RunningComparison::default());
+    }
+    if super::super::study::has_blocking_dialog(&capture) {
+        return Ok(RunningComparison {
+            note: " A modal dialog blocks the original's working interface, so its controls are unverified.".into(),
+            unknowns: vec!["The original's working interface is blocked by a modal dialog".into()],
+            ..Default::default()
+        });
     }
     let (shot, tree) = (dir.join("window.png"), dir.join("ui-tree.json"));
     let mut params = json!({"program": program, "args": args, "wait_secs": 15, "output": &shot});
     if original_tree.is_file() {
         params["ui_tree"] = json!(&tree);
     }
-    if let Err(e) = cx.call("native_window_capture", params) {
-        return (format!(" Started normally, its window couldn't be pictured: {}", e.message), Vec::new());
+    // Round zero is reused by self-checks. Failed captures must not reuse an earlier tree.
+    for file in [&shot, &tree] {
+        match std::fs::remove_file(file) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(ToolError::io(file.display(), e)),
+        }
     }
-    let mut out = String::new();
+    if let Err(e) = cx.call("native_window_capture", params) {
+        if e.code == ErrorCode::Cancelled {
+            return Err(e);
+        }
+        return Ok(RunningComparison {
+            note: format!(" Its normally started window could not be compared: {}", e.message),
+            unknowns: vec!["The normally started build could not be observed for comparison".into()],
+            ..Default::default()
+        });
+    }
+    let mut out = RunningComparison::default();
     if let Some(img) = std::fs::read(&shot).ok().and_then(|b| decode_png(&b).ok())
         && let Likeness::Best { score, .. } = picture_likeness(&img, &[original])
     {
-        out.push_str(&format!(" Started normally, its window looks about {score:.0}% like the original's (capture/window.png)."));
+        out.note.push_str(&format!(" Started normally, its window looks about {score:.0}% like the original's (capture/window.png)."));
+    } else {
+        out.unknowns.push("The normally started window pictures could not be compared".into());
     }
-    let read = |p: &Path| std::fs::read(p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-    let mut claims = Vec::new();
-    if let (Some(o), Some(b)) = (read(&original_tree), read(&tree)) {
-        if let Some(c) = controls_likeness(&o, &b) {
-            out.push_str(&format!(" {}", c.note()));
+    let read =
+        |p: &Path| std::fs::read(p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(|tree| tree.get("nodes").is_some_and(Value::is_array));
+    if original_tree.is_file() {
+        if let (Some(o), Some(b)) = (read(&original_tree), read(&tree)) {
+            if let Some(c) = controls_likeness(&o, &b) {
+                out.note.push_str(&format!(" {}", c.note()));
+            }
+            out.claims = control_claims(&o, &b);
+        } else {
+            out.unknowns.push("The original's controls could not be compared with the build's controls".into());
         }
-        claims = control_claims(&o, &b);
     }
-    (out, claims)
+    Ok(out)
 }
 
 /// The roles of controls a person uses (lower case, macOS's `AX` prefix removed): each of the
@@ -390,5 +435,32 @@ mod tests {
         assert_eq!(small.rgba, [0, 0, 0, 255, 255, 255, 255, 255]);
         let back = decode_png(&encode_png(&half).unwrap()).unwrap();
         assert_eq!(back.rgba, half.rgba, "encode and decode round-trip");
+    }
+
+    #[test]
+    fn failed_runtime_comparison_keeps_an_unknown_and_discards_previous_artifacts() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "Editor", "Recreate editor", TargetRef::Local { path: d.path().join("missing.exe") }).unwrap();
+        std::fs::create_dir_all(ws.capture_dir()).unwrap();
+        let scene = img(4, 2, &|x, _| if x < 2 { [0, 0, 0] } else { [255, 255, 255] });
+        std::fs::write(ws.capture_dir().join("window.png"), encode_png(&scene).unwrap()).unwrap();
+        let dir = ws.checks_dir().join("round-0");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("window.png"), encode_png(&scene).unwrap()).unwrap();
+        std::fs::write(dir.join("ui-tree.json"), "{}").unwrap();
+        let worker = super::super::super::tests::check_worker(&ws, false);
+        let cx = CheckCx { worker: &worker, ws: &ws, round: 0 };
+        std::fs::write(ws.capture_dir().join("ui-tree.json"), r#"{"nodes":[{"role":"Window","modal":true}]}"#).unwrap();
+        let blocked = running_note(&cx, &d.path().join("missing.exe"), &[], &dir).unwrap();
+        assert_eq!(blocked.unknowns.len(), 1);
+        assert!(blocked.claims.is_empty(), "dialog buttons are not requirements for the recreation");
+        std::fs::remove_file(ws.capture_dir().join("ui-tree.json")).unwrap();
+        let result = running_note(&cx, &d.path().join("missing.exe"), &[], &dir).unwrap();
+        assert!(!result.unknowns.is_empty(), "failed observation cannot look like a passed comparison");
+        assert!(result.claims.is_empty());
+        assert!(!dir.join("window.png").exists());
+        assert!(!dir.join("ui-tree.json").exists());
+        worker.stop.cancel();
+        assert_eq!(running_note(&cx, &d.path().join("missing.exe"), &[], &dir).err().unwrap().code, ErrorCode::Cancelled);
     }
 }

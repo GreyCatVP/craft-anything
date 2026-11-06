@@ -133,6 +133,11 @@ call it and make them `wait` for the result, not `run_steps(n)`.
 
 ## Building and running
 
+**An empty study followed by Ready.** Follow-ups reused a capture folder containing only notes
+after runtime study was enabled, while the last successful build check could hide missing
+observation. Revalidate evidence before continuing, propagate capture failures, and use every
+required check and essential unresolved question for both self-check and final readiness.
+
 **A model catalogue queried in the wrong project.** OpenCode V2's raw `api get /api/model` does
 not reliably select the invoking CLI's directory. Use the `model.list` operation with an explicit
 `location[directory]` parameter, and test that the returned Location matches it. Over SSH,

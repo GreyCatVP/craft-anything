@@ -7,6 +7,9 @@ mod note_progress;
 #[path = "stall_tests.rs"]
 mod stall;
 
+#[path = "observation_tests.rs"]
+mod observation;
+
 // Helpers that take a built-in kind's id, so each test reads as one line.
 fn kind(id: &str) -> Arc<dyn TargetKind> {
     KindRegistry::built_in().get(id).unwrap()
@@ -1906,7 +1909,7 @@ mod picking_up_a_build {
     }
 }
 
-fn check_worker(ws: &Workspace, deep: bool) -> Worker {
+pub(super) fn check_worker(ws: &Workspace, deep: bool) -> Worker {
     let mut s = craft_anything_engine::testing::session();
     s.settings.deep_mode = deep;
     let (tx, _rx) = std::sync::mpsc::channel();
@@ -2498,7 +2501,8 @@ fn deep_mode_hands_the_builder_every_tool_and_clean_room_none_that_look_inside()
     for deep_only in ["web_page_show", "web_listeners_list", "page.html", "breakpoints", "how-it-works"] {
         assert!(!clean.contains(deep_only), "{deep_only} in a Clean room brief: {clean}");
     }
-    assert!(clean.contains("never open, read, list, fetch, run or decompile its files"), "{clean}");
+    assert!(clean.contains("never read, list, fetch or decompile the original's files") && clean.contains("never launch it through shell commands"), "{clean}");
+    assert!(clean.contains("native_window_capture") && clean.contains("execution still needs consent"), "{clean}");
     let prog = Workspace::create(d.path(), "Tool", "Rebuild it", TargetRef::Local { path: d.path().join("tool.exe") }).unwrap();
     let b = brief(&prog, "app", true, false, None, false, None);
     assert!(
@@ -2509,7 +2513,7 @@ fn deep_mode_hands_the_builder_every_tool_and_clean_room_none_that_look_inside()
         "{b}"
     );
     let clean = brief(&prog, "app", false, false, None, false, None);
-    assert!(!clean.contains("core_target_triage") && !clean.contains("native_") && clean.contains("ask the person with core_person_ask"), "{clean}");
+    assert!(!clean.contains("core_target_triage") && !clean.contains("native_function_pseudocode") && clean.contains("native_window_capture"), "{clean}");
 }
 
 #[test]

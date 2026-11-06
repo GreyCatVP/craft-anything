@@ -22,7 +22,7 @@ pub(super) fn steps(deep: bool) -> String {
     let follow_up = if deep {
         "capture another width or an opened state into a new folder under checks/, inspect a page or a bundle, look up a program's strings or functions by their exact names, read a game's settings or files."
     } else {
-        "capture another width or an opened state of a website into a new folder under checks/, or ask the person with core_person_ask. Clean room: nothing inside the original is looked at, so never open, read, list, fetch, run or decompile its files, its folder, its pages' code or its program, with any tool."
+        "capture another width or an opened state of a website into a new folder under checks/, observe an app through Craft Anything's native_window_capture or runtime_ui_read tools (execution still needs consent), or ask the person with core_person_ask. Clean room: never read, list, fetch or decompile the original's files, folder or page source, and never launch it through shell commands. The built-in runtime tools observe its visible interface under the engine's consent rules."
     };
     format!(
         "How to work: you lead the investigation and the craft-anything tools answer your questions with evidence.
@@ -63,7 +63,7 @@ const WEBSITE_FROM_OUTSIDE: &str = "capture/ holds what a visitor of the live si
      Match it exactly, not roughly: take colours, fonts, text sizes, padding, gaps, corner radii and content widths from capture.json as exact values (make them the project's theme tokens rather than a library's defaults), use the same font families (or the closest free ones), change the layout where the screenshots at each width show it changing (sections stack, columns per row and the navigation switch), and never let the page scroll sideways on a phone. Craft Anything measures your build the same way at every width and tells you each difference.";
 
 /// Clean room: what the builder has of an app or a game. Nothing inside it was read.
-const PROGRAM_FROM_OUTSIDE: &str = "capture/README.md says what we could see from outside. Clean room: nothing inside the program, its files or its folder was read, and you must not open, list, read, run or decompile anything there either (the tools that look inside are off, and reading its files is refused). Build from the person's request and description, the pictures in reference/ and, when capture/ has one, the picture of it running; ask the person with core_person_ask about anything you can't see.";
+const PROGRAM_FROM_OUTSIDE: &str = "capture/README.md says what we could see from outside. Clean room: nothing inside the program, its files or its folder was read. Do not read, list or decompile those files or launch the program through shell commands. Craft Anything's native_window_capture and runtime_ui_read tools can observe its visible interface with the required consent. Read capture/window.png and capture/ui-tree.json when present, together with reference/ and the person's request. If only a startup or license dialog was observed, keep the working interface and behavior unverified. Ask the person with core_person_ask about anything you can't see.";
 
 pub(super) fn brief(kind: &dyn TargetKind, cx: &BriefCx, extra: Option<&str>) -> String {
     let ws = cx.ws;
