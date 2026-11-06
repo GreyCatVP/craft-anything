@@ -139,9 +139,11 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
       driver that crashes while its device is created crashes the retry too. wgpu has no way to
       skip hardware adapters; needs a different route (another renderer, or a helper that starts
       the app with only WARP visible)
-- [ ] Add to `docs/releasing.md`: before publishing, a Deep build through Claude Code from the — claimed: doubektomas, branch docs/r5.1-packaged-deep-build-check
+- [x] Add to `docs/releasing.md`: before publishing, a Deep build through Claude Code from the
       finished package, on a Mac and on Windows. Starting the CLI from the package (#91) doesn't
-      show whether Claude Code accepts its tools
+      show whether Claude Code accepts its tools — PR #982; claimed: doubektomas,
+      branch docs/r5.1-packaged-deep-build-check. The checklist is documented; live package runs
+      remain release validation work.
 - [ ] Add to `docs/releasing.md`: after a release, close every ticket marked as waiting for it, so
       they don't stay open marked `fixed`
 
