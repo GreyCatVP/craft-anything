@@ -452,17 +452,17 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
     drop(lock);
     // Seen while the analysis runs, not after: by then both paths have cleaned up.
     let store = d.path().to_path_buf();
-    let saw_aside = std::cell::Cell::new(false);
+    let saw_aside = AtomicBool::new(false);
     let progress = |_: f32, msg: &str| {
         if msg.contains("Ghidra is analysing") {
             let aside = std::fs::read_dir(&store).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains(".orphaned-"));
-            saw_aside.set(aside);
+            saw_aside.store(aside, Ordering::Relaxed);
         }
     };
     let err = analyse(&cfg, b"x", &sha, &digest, &|| false, &progress).unwrap_err();
     assert!(matches!(err, GhidraError::Launch(_)), "took over and tried to run Ghidra: {err:?}");
     assert!(!lock_path(&project).exists(), "its own lock is released when it fails");
-    assert!(saw_aside.get(), "the folder the other analysis was filling must still be on disk, under its own name");
+    assert!(saw_aside.load(Ordering::Relaxed), "the folder the other analysis was filling must still be on disk, under its own name");
     assert!(!project.join("half-written.gpr").exists(), "it wrote into the folder the other analysis was filling");
 }
 
