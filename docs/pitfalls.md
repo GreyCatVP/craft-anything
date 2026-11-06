@@ -80,7 +80,8 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 
 **A heartbeat sampled before shutdown raced a successful stop.** A child could write between
 the baseline read and `stop()`, failing the descendant cleanup test even when cleanup worked.
-Sample after the stop returns, then check for further writes. Ignored child fixtures also need
+Probe for exit instead of timing writes: the child holds a file lock the system releases only
+when it exits, and the test takes it after the stop. Ignored child fixtures also need
 an explicit launch guard so running ignored tests directly cannot write in the working directory.
 The replacement's quoted `cmd /C` script still failed on Windows, and startup assertions skipped
 cleanup. Use a guarded Rust parent instead of shell syntax, and stop before asserting on startup.

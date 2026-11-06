@@ -1296,9 +1296,11 @@ mod launch_tests {
 
     /// Verify that stopping a watched launch stops its descendant on Unix and Windows.
     ///
-    /// Wait for the child's startup and heartbeat files, then stop even if they are absent. Sample
-    /// the heartbeat only after `stop()` returns, so a write during shutdown cannot fail
-    /// the test; any subsequent change proves that the descendant continued running.
+    /// Wait for the child's startup and heartbeat files, then stop even if they are absent. The
+    /// descendant holds an exclusive lock on `descendant-alive` for its whole life, and the system
+    /// releases it only when the process exits: taking that lock after `stop()` is the exit probe,
+    /// with no timing guess. A descendant that outlived the stop instead finishes its bounded loop
+    /// and writes `descendant-survived` before its lock is released.
     #[test]
     fn stopping_a_watched_program_stops_its_descendant() {
         let dir = tempfile::Builder::new().prefix("watched descendant ").tempdir().unwrap();
@@ -1306,10 +1308,16 @@ mod launch_tests {
         let (started, heartbeat) = stop_after_descendant_startup(&l, dir.path(), Duration::from_secs(5));
         assert!(started, "descendant never signalled that it started");
         assert!(heartbeat, "descendant never produced a heartbeat");
-        let heartbeat = dir.path().join("descendant-heartbeat");
-        let after_stop = std::fs::read(&heartbeat).unwrap();
-        std::thread::sleep(Duration::from_millis(500));
-        assert_eq!(std::fs::read(&heartbeat).unwrap(), after_stop, "descendant continued running after the watched program stopped");
+        let alive = std::fs::File::open(dir.path().join("descendant-alive")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            match alive.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                Err(e) => panic!("descendant still holds its lock after the watched program stopped: {e}"),
+            }
+        }
+        assert!(!dir.path().join("descendant-survived").exists(), "descendant ran to completion after the watched program stopped");
     }
 
     /// Wait for bounded startup, snapshot its markers, and stop before callers assert on them.
@@ -1383,14 +1391,17 @@ mod launch_tests {
     /// Provide a child process whose marker files expose whether it survives shutdown.
     ///
     /// Return without writing unless `CRAFT_ANYTHING_TEST_DESCENDANT` is exactly `1`, as
-    /// set by the parent test. When enabled, write startup and periodic heartbeat files
-    /// in the working directory, then a survival marker if the loop reaches its end.
+    /// set by the parent test. When enabled, hold an exclusive lock on `descendant-alive` until
+    /// the process exits, write startup and periodic heartbeat files in the working directory,
+    /// then a survival marker (before the lock is released) if the loop reaches its end.
     #[test]
     #[ignore = "stand-in invoked by stopping_a_watched_program_stops_its_descendant"]
     fn watched_descendant_stand_in() {
         if std::env::var_os("CRAFT_ANYTHING_TEST_DESCENDANT").as_deref() != Some(OsStr::new("1")) {
             return;
         }
+        let alive = std::fs::File::create("descendant-alive").unwrap();
+        alive.lock().unwrap();
         std::fs::write("descendant-started", b"ready").unwrap();
         for n in 0..100 {
             std::fs::write("descendant-heartbeat", n.to_string()).unwrap();
