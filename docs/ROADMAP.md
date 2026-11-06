@@ -334,6 +334,7 @@ been run live.
 - [ ] A call followed by a summary isn't run, and the model isn't told: in a second live run of
       #417's case both turns put "### Summary:" after their one `json` fence, nothing ran, and the
       build stopped after two turns with no files. Say in the next message that it wasn't run
+      — claimed: Copilot, branch bugfix/r5.4-fenced-call-summary
 - [ ] A local builder spends its rounds on the project file and never writes the app: run 4 had a
       compiling `Cargo.toml` by check 3, its last, with `main.rs` still "Hello, world!". See whether
       more rounds get there, or whether a small model needs the window and the `--screenshot`
