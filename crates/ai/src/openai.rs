@@ -557,7 +557,7 @@ fn parse_fenced_calls(text: &str) -> Option<(Vec<(String, Value)>, bool)> {
         }
         let length = opening.bytes().take_while(|byte| *byte == b'`').count();
         if length < 3 {
-            if ["Final Answer:", "Action:"].into_iter().any(|marker| line.contains(marker)) {
+            if calls.is_empty() && ["Final Answer:", "Action:"].into_iter().any(|marker| line.contains(marker)) {
                 return None;
             }
             words_after |= !opening.is_empty() && !calls.is_empty();
@@ -588,6 +588,7 @@ fn parse_fenced_calls(text: &str) -> Option<(Vec<(String, Value)>, bool)> {
     (!calls.is_empty()).then_some((calls, words_after))
 }
 
+/// Returns fenced calls only when no nonblank text follows the final call.
 fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
     let (calls, words_after) = parse_fenced_calls(text)?;
     (!words_after).then_some(calls)
@@ -723,17 +724,22 @@ mod tests {
             react_postprocess(&mut r, &[tool("look")], react);
             assert!(r.message.tool_uses().is_empty() && r.stop == StopReason::EndTurn, "react={react}");
         }
-        let summary = format!("{}\n### Summary:\nI listed the files.", call("look"));
-        let mut r = turn(&summary);
-        react_postprocess(&mut r, &[tool("look")], false);
-        assert!(r.message.tool_uses().is_empty());
-        assert_eq!(r.stop, StopReason::PauseTurn);
-        assert_eq!(
-            r.follow_up.as_deref(),
-            Some(
-                "The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it."
-            )
-        );
+        for trailing in ["### Summary:\nI listed the files.", "Action: look\nAction Input: {}", "Final Answer: I listed the files."] {
+            let text = format!("{}\n{}", call("look"), trailing);
+            for react in [false, true] {
+                let mut r = turn(&text);
+                react_postprocess(&mut r, &[tool("look")], react);
+                assert!(r.message.tool_uses().is_empty(), "react={react}, trailing={trailing}");
+                assert_eq!(r.stop, StopReason::PauseTurn, "react={react}, trailing={trailing}");
+                assert_eq!(
+                    r.follow_up.as_deref(),
+                    Some(
+                        "The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it."
+                    ),
+                    "react={react}, trailing={trailing}"
+                );
+            }
+        }
     }
 
     /// Only the real OpenCode Go base gets its session header: not a look-alike host, path or scheme.
