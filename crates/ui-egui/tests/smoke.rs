@@ -1076,6 +1076,21 @@ fn the_agent_console_prompt_box_starts_tall_and_grows_inside_the_window() {
 }
 
 #[test]
+fn the_agent_console_leaves_room_for_the_code_in_a_small_window() {
+    let mut h = harness_sized(egui::vec2(1000.0, 500.0), || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        demo::fill_workbench(&mut a);
+        a
+    });
+    h.run_steps(4);
+    assert!(wait(&mut h, |a| a.jobs.running().all(|j| !j.visible)), "the lists finished loading");
+    h.get_by_label("Agent").click();
+    h.run_steps(4);
+    let top = h.get_by_label("Agent").rect().top();
+    assert!(top > 200.0, "the console's tabs start at {top} of 500");
+}
+
+#[test]
 fn command_palette_opens_and_lists_tools() {
     let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
     h.run_steps(3);
