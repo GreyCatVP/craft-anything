@@ -443,13 +443,60 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
     assert_eq!(got.ok(), Some(project.clone()), "waited for the running analysis instead of starting another");
 
     // A lock left by a process that died goes stale and is taken over (here: an attempt to run).
+    // What that process had half-written is moved aside, never deleted under it (#951).
     std::fs::remove_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("half-written.gpr"), "the other analysis may still be filling this").unwrap();
     let lock = std::fs::File::options().write(true).open(lock_path(&project)).unwrap();
     lock.set_modified(std::time::SystemTime::now() - LOCK_STALE - Duration::from_secs(5)).unwrap();
     drop(lock);
     let err = analyse(&cfg, b"x", &sha, &digest, &|| false, &|_, _| {}).unwrap_err();
     assert!(matches!(err, GhidraError::Launch(_)), "took over and tried to run Ghidra: {err:?}");
     assert!(!lock_path(&project).exists(), "its own lock is released when it fails");
+    assert!(!project.join("half-written.gpr").exists(), "it wrote into the folder the other analysis was filling");
+}
+
+/// #951: a big program takes hours, and the lock is what says so. An analysis that keeps working
+/// keeps its lock fresh, and only one that stopped lets it go stale.
+#[test]
+fn an_analysis_that_keeps_working_keeps_its_lock() {
+    let d = tempfile::tempdir().unwrap();
+    let lock = d.path().join("target-abcd.analysing");
+    std::fs::write(&lock, "").unwrap();
+    let file = std::fs::File::options().write(true).open(&lock).unwrap();
+    file.set_modified(SystemTime::now() - LOCK_STALE - Duration::from_secs(5)).unwrap();
+    drop(file);
+    assert!(!lock_is_fresh(&lock), "a lock this old reads as one left behind");
+
+    let beat = Heartbeat::every(&lock, Duration::from_millis(50));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(lock_is_fresh(&lock), "the analysis holds its lock while it works");
+
+    drop(beat);
+    let stopped = std::fs::metadata(&lock).unwrap().modified().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let after = std::fs::metadata(&lock).unwrap().modified().unwrap();
+    assert_eq!(after, stopped, "the refresh stopped with it");
+}
+
+/// #951: the folder a stale lock was guarding is moved, not removed, so a Ghidra that outlived the
+/// app that started it keeps writing into its own folder instead of into this analysis's.
+#[test]
+fn a_half_written_project_is_moved_aside_with_its_files() {
+    let d = tempfile::tempdir().unwrap();
+    let project = d.path().join("target-abcd");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("half-written.gpr"), "still being filled").unwrap();
+
+    let aside = set_aside(&project).unwrap().expect("there was a folder to move");
+    assert!(!project.exists(), "the folder this analysis needs is free");
+    let moved =
+        std::fs::read_dir(d.path()).unwrap().flatten().map(|e| e.path()).find(|p| p != &project).expect("the folder is still on disk, under a name of its own");
+    assert!(moved.join("half-written.gpr").is_file(), "it kept the files the other analysis left");
+
+    drop(aside);
+    assert!(!moved.exists(), "and it goes once this analysis has its own folder");
+    assert!(set_aside(&project).unwrap().is_none(), "nothing to move is not a failure");
 }
 
 #[test]

@@ -483,6 +483,10 @@ fn headless(cfg: &Config, runtime_root: &Path, args: Vec<OsString>, lifetime: Du
 /// seconds, so one left behind by a process that died goes stale and is taken over.
 const LOCK_STALE: Duration = Duration::from_secs(90);
 
+/// How often the holder refreshes the lock, well inside [`LOCK_STALE`] so a busy analysis — a big
+/// program can take hours — is never mistaken for one that died.
+const LOCK_REFRESH: Duration = Duration::from_secs(20);
+
 /// The analysis lock this process holds, released when dropped (also on every error path).
 struct HeldLock(PathBuf);
 
@@ -498,6 +502,69 @@ fn lock_path(project_dir: &Path) -> PathBuf {
 
 fn lock_is_fresh(lock: &Path) -> bool {
     std::fs::metadata(lock).and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age < LOCK_STALE))
+}
+
+/// Keep the analysis lock looking alive while this process works. Dropping it stops the refresh
+/// and waits for the thread, so nothing touches the lock after it is released.
+struct Heartbeat {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Heartbeat {
+    /// Start refreshing `lock` at the pace a real analysis needs ([`LOCK_REFRESH`]).
+    fn start(lock: &Path) -> Self {
+        Self::every(lock, LOCK_REFRESH)
+    }
+
+    /// Start refreshing `lock` every `interval`, which the tests shorten.
+    fn every(lock: &Path, interval: Duration) -> Self {
+        let (stop, wait) = std::sync::mpsc::channel();
+        let lock = lock.to_path_buf();
+        let thread = std::thread::spawn(move || {
+            // Ends when the sender is dropped, which is what Heartbeat's Drop does.
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = wait.recv_timeout(interval) {
+                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&lock) {
+                    let _ = file.set_modified(SystemTime::now());
+                }
+            }
+        });
+        Heartbeat { stop: Some(stop), thread: Some(thread) }
+    }
+}
+
+impl Drop for Heartbeat {
+    fn drop(&mut self) {
+        // Dropping the sender ends the refresh thread's wait.
+        self.stop.take();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// A project folder a stale lock was guarding, moved out of the way instead of removed: a Ghidra
+/// that outlived the app that started it keeps writing into its own folder, not into the one this
+/// analysis is about to fill (#951). Dropping it frees the room once this analysis has its own.
+struct Aside(PathBuf);
+
+impl Drop for Aside {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Move `project_dir` aside if anything is there, and say where. Fails where the folder cannot be
+/// moved — Windows refuses while a process has files open in it — which is exactly the case a
+/// caller must read as *another analysis is still going* rather than as *nothing to do*.
+fn set_aside(project_dir: &Path) -> std::io::Result<Option<Aside>> {
+    if !project_dir.exists() {
+        return Ok(None);
+    }
+    let token = random_token();
+    let aside = project_dir.with_extension(format!("orphaned-{}", token.get(..8).unwrap_or(&token)));
+    std::fs::rename(project_dir, &aside)?;
+    Ok(Some(Aside(aside)))
 }
 
 /// Make sure the target is analysed and saved in its cached project, analysing it now if no one
@@ -521,6 +588,7 @@ pub fn analyse(
     let lock = lock_path(&project_dir);
     // The lock sits beside the project, in the cache folder a fresh store doesn't have yet.
     make_private_dir(lock.parent().unwrap_or(&root))?;
+    let mut kept_aside: Option<Aside> = None;
     loop {
         if is_analysed(&project_dir) {
             return Ok(project_dir);
@@ -539,19 +607,34 @@ pub fn analyse(
         // Stale or none: take it (create_new, so only one of two racing processes wins).
         let _ = std::fs::remove_file(&lock);
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
-            Ok(_) => break,
+            Ok(_) => {}
             Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
                 return Err(GhidraError::Launch(format!("taking the analysis lock {}: {e}", lock.display())));
             }
-            Err(_) => {}
+            // Another process won the race: look at the folder again.
+            Err(_) => continue,
+        }
+        // Whatever the dead process left is moved, not removed, so a Ghidra that outlived it keeps
+        // its own folder. A refusal to move it means that Ghidra is still working: wait for it.
+        match set_aside(&project_dir) {
+            Ok(aside) => {
+                kept_aside = aside;
+                break;
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&lock);
+                progress(0.05, &format!("waiting for the analysis of this program already under way ({e})"));
+                std::thread::sleep(Duration::from_secs(2));
+            }
         }
     }
     let held = HeldLock(lock.clone());
+    let _beat = Heartbeat::start(&lock);
+    let _aside = kept_aside;
     let scratch = Scratch::new(&root, "ghidra-analysis")?;
     let program = format!("target-{}", target_sha256.get(..12).unwrap_or(target_sha256));
     // Beside the saved analysis, so it can be read after a failure.
     let log = project_dir.with_extension("log");
-    remove_soon(&project_dir);
     make_private_dir(&project_dir)?;
     let script_dir = scratch.0.join("scripts");
     make_private_dir(&script_dir)?;
