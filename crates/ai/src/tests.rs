@@ -174,15 +174,11 @@ fn hub() -> (AiHub, tempfile::TempDir) {
 fn disabled_backends_are_refused_when_chat_starts() {
     let (h, _dir) = hub();
     for kind in [BackendKind::OpenaiCompatible, BackendKind::AgentCli] {
+        // A malformed tunnel port fails before opening SSH if API setup is reached.
+        let (base_url, ssh_host) =
+            if kind == BackendKind::OpenaiCompatible { ("http://127.0.0.1:not-a-port/v1", Some("unused".into())) } else { ("http://127.0.0.1:0/v1", None) };
         h.add_backend(
-            BackendConfig {
-                name: "Off".into(),
-                kind,
-                model: "no-such-agent".into(),
-                base_url: Some("http://127.0.0.1:0/v1".into()),
-                ssh_host: None,
-                enabled: false,
-            },
+            BackendConfig { name: "Off".into(), kind, model: "no-such-agent".into(), base_url: Some(base_url.into()), ssh_host, enabled: false },
             None,
         )
         .unwrap();

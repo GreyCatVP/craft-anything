@@ -30,6 +30,7 @@ pub mod target;
 pub mod testing;
 pub mod tool;
 pub mod tool_list;
+pub mod toolchains;
 pub mod tools;
 pub mod versioned;
 pub mod wasm_plugins;

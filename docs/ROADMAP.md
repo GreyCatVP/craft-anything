@@ -603,6 +603,14 @@ Owner: open · Status: in progress
       explicit model/thinking execution: a config file in `OPENCODE_CONFIG` with `run --standalone`
       (verified live locally). — claimed: advokat11, branch bugfix/r2.2-opencode-native-mcp
 - [ ] Hand native OpenCode runs over SSH the Craft Anything MCP server (the config file is local).
+- [x] Hand native OpenCode runs over SSH the Craft Anything MCP server (the config file is local).
+      One `ssh` run checks `craft-anything-cli` is on the host's PATH and writes the config on the
+      host (`~/.cache/craft-anything/`, mode 600, atomic rename); the builder fails fast with the
+      fix if the helper is missing. Verified: POSIX-shell regression test (`the_remote_line_runs_on_a_posix_shell`)
+      and an SSH round-trip to localhost (probe, byte-exact write, mode, cleanup). Not run with a live
+      agent over SSH. — claimed: jelassiaymen94, branch feature/r2.2-opencode-remote-mcp
+- [ ] Make `the_remote_line_runs_on_a_posix_shell` accept the shell's missing-command status:
+      on macOS, `command -v` returns 1 rather than the asserted 127; the full AI suite fails.
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
 
@@ -746,7 +754,7 @@ Owner: open · Status: in progress
       used to ask for Unity even in a Godot project, and an app got the kind's default
       — claimed: xerenon, branch bugfix/r2.7-stack-from-files; PR #755
 - [x] A person's own project (edited in place, nothing to recreate) is judged by what it does for
-      itself: its own build, then its own tests, through `[[toolchain]]` in `stacks.toml` (Rust,
+      itself: its own build, then its own tests, through `[[toolchain]]` in `engine/src/toolchains.toml` (Rust,
       Node.js, Python, Go, .NET, Maven, Gradle, Make). Nothing is added to it for our sake: no
       `--screenshot`, `--self-test` or mechanics sheet. A site stack with nothing to recreate is a
       website, whatever the request says
@@ -758,8 +766,18 @@ Owner: open · Status: in progress
 - [ ] A person's own tests that already failed before their request fail the check too, so the
       builder is sent to fix them. If that proves a nuisance, run them once before the first turn
       and hold it only to what it broke
-- [ ] A new project in Python, Go or the like still fails the build check ("No project to build
-      found") and has no program for the screenshot check: `[[toolchain]]` could build it too
+- [x] New projects build through the shared `[[toolchain]]` catalogue. Python root entrypoints,
+      Go's root `main.go`, and one root `.csproj` also launch for screenshots, self-tests and Play;
+      existing packaged programs, Rust, Electron and game-engine paths keep priority — PR #950
+      — claimed: Codex, branch bugfix/r2.7-new-project-toolchains
+- [x] Runtime window capture follows runner descendants (including `go run`) and reads controls
+      from the same process that supplied the picture, without falling back to unrelated names — PR #950
+- [x] Shared toolchain commands make project-local executables absolute before changing the
+      working directory, preserving virtualenv paths for relative project placements — PR #950
+- [ ] Extend launch recipes beyond conventional root entrypoints: Python package scripts, Go
+      `cmd/` layouts, and Java build outputs; build checks already use their toolchain commands
+- [ ] Audit relative project placements in build, option-run and Play paths too: runtime window
+      capture now normalizes its request paths, but earlier runner paths can still be relative
 - [x] "player" alone doesn't make a request a game: a video or music player is an app (#953)
       — claimed: justinjohn0306, branch bugfix/953-player-not-a-game
 - [ ] Game words can't tell these apart from games: "a low level disk tool", "an MPEG 2 player",
@@ -787,6 +805,7 @@ Gaps found while using the app for real projects.
 - [x] `chat --backend <a name that is turned off>` and `compare` refuse it before model or
       agent setup: `AiHub::start` checks `enabled` and says how to turn it on or choose another
       — PR #1008; claimed: Codex, branch bugfix/r2.9-disabled-chat-backend
+      (the API regression uses invalid tunnel settings to detect setup before the guard)
 - [x] Ctrl+V (Shift+Insert, Cmd+V) in a prompt box that takes pictures pastes a copied image (saved
       as a PNG) or copied picture files; attachments show as square picture tiles, the whole
       picture on hover, decoded on a worker

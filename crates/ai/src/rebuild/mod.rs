@@ -633,14 +633,19 @@ impl Worker {
             progress.save(&ws.root)?;
         }
         // Fail before any work when the agent's tools are missing or it can't sign in.
-        let remote = entry.config.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty());
-        if !remote && api.is_none() {
+        let remote_host = entry.config.ssh_host.as_deref().map(str::trim).filter(|h| !h.is_empty());
+        let remote = remote_host.is_some();
+        if api.is_none() {
             let adapter = opts.adapters.for_backend(&entry.config.model, &entry.options);
-            crate::cli_agents::check_builder_tools(adapter.as_ref(), &entry.config.model, &entry.options, &self.stop)?;
-            let program = crate::cli_agents::program_of(&entry.config, &entry.options);
-            if adapter.signed_in(&program) == Some(false) {
-                return Err(ToolError::new(ErrorCode::BadSettings, not_signed_in(&entry.config.model, adapter.signed_in_before()))
-                    .with_remediation(adapter.sign_in_fix().unwrap_or_default()));
+            if let Some(host) = remote_host {
+                adapter.check_remote_tool_server(host, &self.stop)?;
+            } else {
+                crate::cli_agents::check_builder_tools(adapter.as_ref(), &entry.config.model, &entry.options, &self.stop)?;
+                let program = crate::cli_agents::program_of(&entry.config, &entry.options);
+                if adapter.signed_in(&program) == Some(false) {
+                    return Err(ToolError::new(ErrorCode::BadSettings, not_signed_in(&entry.config.model, adapter.signed_in_before()))
+                        .with_remediation(adapter.sign_in_fix().unwrap_or_default()));
+                }
             }
         }
         self.attach(ws)?;

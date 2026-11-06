@@ -855,13 +855,15 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     // 30 minutes and a background build at 10).
     let (turn, quiet) = if builder { (24 * 3600, 8 * 3600) } else { (30 * 60, 15 * 60) };
     let mut env = agent_env(builder, spec.options.effort);
-    if remote.is_none() {
-        match adapter.mcp_env(&mcp) {
-            Ok(var) => env.extend(var),
-            Err(e) => {
-                let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
-                return nothing_done(&name);
-            }
+    let tool_env = match &remote {
+        None => adapter.mcp_env(&mcp),
+        Some(host) => adapter.remote_tool_server(host, &mcp),
+    };
+    match tool_env {
+        Ok(var) => env.extend(var),
+        Err(e) => {
+            let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
+            return nothing_done(&name);
         }
     }
     // Here the adapter's process runs the agent in its folder (`AgentAdapter::in_folder`); on

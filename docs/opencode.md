@@ -7,6 +7,13 @@ Model and thinking choices can be discovered, validated and saved. A run with an
 selection goes through the native adapter (`opencode run --standalone`), which hands a local run
 the Craft Anything MCP server in a config file named by `OPENCODE_CONFIG`; the person's own
 settings stay unchanged. Over SSH the native run has no Craft Anything tools yet.
+selection goes through the native adapter (`opencode run --standalone`), which hands the run
+the Craft Anything MCP server in a config file named by `OPENCODE_CONFIG`; the person's own
+settings stay unchanged. Over SSH one `ssh` run checks that `craft-anything-cli` is on the
+remote PATH and writes the file on the host itself (`~/.cache/craft-anything/`, named by its
+content, kept private), so the remote run gets the same tools. The host needs
+`craft-anything-cli` on its PATH — install Craft Anything there (the app keeps the helper
+next to it). If the check fails, the turn stops before any work with the fix.
 
 ## Desktop
 
@@ -97,6 +104,9 @@ even if `acp = true` was previously set and runs natively. OpenCode V2 ignores
 `OPENCODE_CONFIG_CONTENT`, and plain `opencode run` hands the turn to the background service,
 which never sees the run's environment; so the adapter writes the server to a temp config file
 and starts a private server with `--standalone`. V2 names a tool call `id` (V1: `callID`); both
+which never sees the run's environment; so the adapter writes the server to a config file
+and starts a private server with `--standalone` (locally in this computer's temporary
+folder, over SSH on the host itself). V2 names a tool call `id` (V1: `callID`); both
 are read, so tool calls reach the feed while the turn runs.
 
 Model discovery uses `opencode api model.list --param location[directory]=...` (the V2

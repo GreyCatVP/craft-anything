@@ -71,6 +71,11 @@ names (`git merge-base --is-ancestor <fix> <release tag>`), and check the messag
 
 ## Tests
 
+**Python compilation reused stale bytecode after a fast edit.** The new-project toolchain probe
+changed valid Python to a syntax error within the same mtime second. `compileall` skipped it and
+exited zero; the screenshot run then failed instead. Use `compileall -f` for a build check, and
+hold the valid and broken fixture revisions at the same timestamp in the real-Python regression.
+
 **A test started a real download on a contributor's machine.** A test called `engines_install` for
 Unity; a later change made that download the vendor installer and open it on Windows. It also
 created folders in the real config directory (`Session::default()` uses it).
@@ -149,6 +154,16 @@ fast machines and failed in CI on unrelated PRs. When work moves to a worker, gr
 call it and make them `wait` for the result, not `run_steps(n)`.
 
 ## Building and running
+
+**A runner's PID isn't the window owner's.** `go run` starts a compiled child, so picturing the
+runner missed the app (or a name fallback found another app). Search only the launched process
+and its descendants, and read the UI tree from the same PID that supplied the picture.
+
+**Runtime capture passed relative paths to a tool that needs absolute ones.** With a relative
+project placement, the selected virtualenv interpreter and artifact paths stayed relative;
+PATH lookup can return a relative path too. Resolve workspace paths against the process's
+current directory, look up only bare program names, and make the result absolute without
+dereferencing the virtualenv symlink. Test the generated capture request without opening a GUI.
 
 **A model catalogue queried in the wrong project.** OpenCode V2's raw `api get /api/model` does
 not reliably select the invoking CLI's directory. Use the `model.list` operation with an explicit
@@ -805,3 +820,9 @@ with a multi-megabyte line, not a short one.
 body, so its second copy was rejected before it could be discarded as a duplicate. Apply aggregate
 budgets only to distinct bodies actually retained. When a budget removes a body, preserve unavailable
 cached 304 responses and deduplicate identical omitted samples.
+
+**Two worktrees shared build artifacts during conflict checks.** Concurrent Cargo checks of
+different branches reused the same package output path and one saw the other branch's engine.
+Give every worktree its own `CARGO_TARGET_DIR`, even when one agent manages both. Cleaning
+the shared engine cache then removed 11.6 GiB of compiled artifacts: avoid shared-cache
+cleanup as a recovery shortcut; use an isolated target directory for further verification.
