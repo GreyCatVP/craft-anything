@@ -73,6 +73,7 @@ fn the_word_player_alone_is_not_a_game() {
         "an mp2 player",
         "an mp4 player",
         "a 12 player scoreboard",
+        "a music app with two playerctl shortcuts",
         "a low-level disk tool",
         "a multilevel menu",
     ] {
@@ -87,6 +88,8 @@ fn the_word_player_alone_is_not_a_game() {
         "a two player chess board",
         "Build a (2-player) chess board",
         "a 2  player chess board",
+        "chess for 2 players",
+        "party fun for four players.",
         "a two\nplayer chess board",
         "a four-player party",
         "4 player dungeon crawl",

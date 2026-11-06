@@ -8,18 +8,24 @@ use craft_anything_engines::game;
 const ASSETS_NOW_OFF: &str =
     "Generated assets are now off for this project: don't make more with assets_image_generate or assets_model_generate. Keep the ones already in app/.";
 
-/// `phrase` at the start of a word, where a hyphen joins it to the word before: "(level editor)",
-/// but not "low-level" or "multilevel".
-fn says_at_word_start(request: &str, phrase: &str) -> bool {
-    request.match_indices(phrase).any(|(at, _)| request.get(..at).and_then(|s| s.chars().next_back()).is_none_or(|c| !c.is_alphanumeric() && c != '-'))
+/// Whether `at` starts a word, where a hyphen joins it to the word before: "(level editor)", but
+/// not "low-level" or "multilevel".
+fn starts_word(request: &str, at: usize) -> bool {
+    request.get(..at).and_then(|s| s.chars().next_back()).is_none_or(|c| !c.is_alphanumeric() && c != '-')
 }
 
-/// A number of players as its own word: "2-player", "(four player)", but not "MPEG-2 player",
-/// "mp2 player" or "12 player".
+/// A number of players as its own words: "2-player", "(four players)", but not "MPEG-2 player",
+/// "mp2 player", "12 player" or "two playerctl".
 fn says_player_count(request: &str) -> bool {
     // Any run of spaces or line breaks counts as one space: "2  player".
     let request = request.split_whitespace().collect::<Vec<_>>().join(" ");
-    ["2", "3", "4", "two", "three", "four"].iter().any(|n| ["-player", " player"].iter().any(|player| says_at_word_start(&request, &format!("{n}{player}"))))
+    let ends_word = |rest: &str| rest.strip_prefix('s').unwrap_or(rest).chars().next().is_none_or(|c| !c.is_alphanumeric());
+    ["2", "3", "4", "two", "three", "four"].iter().any(|n| {
+        ["-player", " player"].iter().any(|player| {
+            let phrase = format!("{n}{player}");
+            request.match_indices(&phrase).any(|(at, _)| starts_word(&request, at) && request.get(at + phrase.len()..).is_some_and(ends_word))
+        })
+    })
 }
 
 pub struct GameKind;
@@ -49,7 +55,7 @@ impl TargetKind for GameKind {
             Some(200)
         // Not plain "player": a video or music player is an app (#953).
         } else if says_player_count(&cx.request)
-            || says_at_word_start(&cx.request, "level")
+            || cx.request.match_indices("level").any(|(at, _)| starts_word(&cx.request, at))
             || cx.says(&[
                 "game",
                 "gameplay",
