@@ -56,8 +56,11 @@ fn main() -> eframe::Result {
         .with_app_id("ai.storyteller.craft-anything")
         .with_inner_size([1360.0, 860.0])
         .with_min_inner_size([760.0, 520.0])
-        // Our own title bar draws the window controls, moves and resizes the window.
-        .with_decorations(false)
+        // Keep native macOS traffic lights while the app bar fills the title bar's background.
+        .with_decorations(cfg!(target_os = "macos"))
+        .with_fullsize_content_view(cfg!(target_os = "macos"))
+        .with_titlebar_shown(false)
+        .with_title_shown(false)
         .with_resizable(true)
         .with_drag_and_drop(true);
     // On macOS a window icon replaces the Dock icon, and the bundle's own icon is the one padded to

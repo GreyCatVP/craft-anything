@@ -35,8 +35,8 @@ fn wait(h: &mut Harness<'static, CraftApp>, done: impl Fn(&CraftApp) -> bool) ->
 fn first_run_walks_through_four_screens() {
     let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
     h.run_steps(3);
-    // The window controls are there from the first screen (the native frame is off).
-    h.get_by_label("Close");
+    // macOS supplies native controls; other desktops need the app's even during first run.
+    assert_window_controls(&h);
     h.get_by_label("I'm new to this").click();
     h.run_steps(3);
     assert_eq!(h.state().state.first_run, FirstRunStep::Brain);
@@ -108,6 +108,27 @@ fn simple_title_bar_keeps_only_the_essentials() {
     assert!(h.query_by_label("Advanced").is_none(), "the mode switch lives in Settings in Simple mode");
     h.get_by_label("Settings");
     h.get_by_label("Clean room");
+    assert_window_controls(&h);
+}
+
+fn assert_window_controls(h: &Harness<'_, CraftApp>) {
+    for label in ["Close", "Minimise", "Maximise"] {
+        assert_eq!(h.query_by_label(label).is_some(), !cfg!(target_os = "macos"), "custom {label} must match the platform's window frame");
+    }
+}
+
+/// Native traffic lights stay at their system size when the app's UI zoom changes.
+#[cfg(target_os = "macos")]
+#[test]
+fn title_bar_leaves_room_for_native_controls_at_different_ui_scales() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Beginner, false)));
+    for zoom in [0.5, 0.75, 1.0, 1.5] {
+        h.ctx.set_zoom_factor(zoom);
+        h.run_steps(4);
+        let title = h.get_all_by_label("Craft Anything").min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap();
+        assert!(title.rect().left() * zoom >= 92.0, "title overlaps the native controls at zoom {zoom}: {:?}", title.rect());
+        assert!(craft_anything_ui_egui::titlebar::height(&h.ctx) * zoom >= 32.0, "native controls extend below the bar at zoom {zoom}");
+    }
 }
 
 #[test]

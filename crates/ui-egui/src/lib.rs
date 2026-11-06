@@ -1756,8 +1756,8 @@ impl CraftApp {
         #[cfg(target_os = "macos")]
         menu::update(self, &ctx);
         let t = theme::Tokens::get(&ctx);
-        // The title bar is on every screen: it is how the window moves, resizes and closes.
-        egui::Panel::top("titlebar").exact_size(titlebar::HEIGHT).frame(egui::Frame::new().fill(t.chrome)).show(ui, |ui| {
+        // The app bar is on every screen, sharing the native macOS title bar's space.
+        egui::Panel::top("titlebar").exact_size(titlebar::height(&ctx)).frame(egui::Frame::new().fill(t.chrome)).show(ui, |ui| {
             guard_ui(ui, "title bar", |ui| titlebar::show(self, ui));
         });
         self.stuck_banner(ui, &ctx);
@@ -1942,6 +1942,8 @@ pub fn guard_ui(ui: &mut egui::Ui, what: &str, f: impl FnOnce(&mut egui::Ui)) {
 
 impl eframe::App for CraftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        titlebar::update_native_controls(ui.ctx(), _frame);
         // This frame is being built, so the ones before it have been shown.
         if let Some(f) = self.first_frames.as_mut() {
             f.drawn += 1;

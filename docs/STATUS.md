@@ -56,6 +56,19 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 | Parser review follow-ups | Java reference scans retain partial coverage; DEX signed LEB128 enforces 32-bit values; legacy AAPT strings stay inside their pool with a shared recovery probe limit; missing classic ext indirect metadata is not recovered as zeros. | Shared-budget revision `29c48e03` passed [full Linux CI](https://github.com/storytold/craft-anything/actions/runs/41762780268). The merge with main `41d2175e` awaits a new CI run. Extent-tree metadata handling is unchanged. |
 | Stand-in retained body budgets | Check per-body limits after redaction and charge the capture budget only for distinct retained samples. Budget-rejected cached 304 responses remain unavailable. | All four original capture regressions and six deduplication regressions passed in [full Linux CI](https://github.com/storytold/craft-anything/actions/runs/41788735130) at revision `d601bc4e`. Workspace tests, strict Clippy, formatting, layers, locks, secrets, wasm-plugin checks, shared WASM compilation and the lockfile check passed. |
 
+### macOS window controls
+
+The app bar shares the native title bar's space: the system supplies close, minimise and
+zoom/full-screen buttons at the left, followed by the app's logo and name. The separate system
+title and title-bar background are hidden. Native control measurements reserve their space even
+when the app's UI zoom changes; macOS also owns the window frame and resize edges. Other desktops
+keep the custom controls. UI smoke coverage checks that macOS has no duplicate app-drawn buttons
+on first run or the main screen, and that the title clears the native controls at multiple UI scales.
+Validated on macOS with 204 passing desktop/UI tests (one existing ignored test), strict Clippy,
+layers, locks and secrets checks, and a live preview confirming one bar with native controls.
+Windows/Linux live checks were not performed. UI rustdoc still reports four existing warnings,
+tracked under R2.9.
+
 ### Builder retry policy
 
 Builder failures carry a typed reason through `Conversation::last_failure`. Typed authentication,
