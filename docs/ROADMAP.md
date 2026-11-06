@@ -167,6 +167,9 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 
 ### R5.2 Keeping contributions moving
 Owner: maintainers · Status: in progress
+- [ ] Address PR #1030 review: take the heartbeat baseline after stopping, guard the descendant
+      stand-in against direct ignored-test runs, and document the test helpers
+      — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
 Review comes before new work while the queue is long, smallest and clean PRs first. A PR is merged
 only when it's green and a maintainer has fully reviewed it, code as well as wording.
 - [ ] Maintainers: protect `main` (PRs required, squash only); the only ruleset covers `release`
