@@ -49,20 +49,61 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
         .chars()
         .take(1000)
         .collect();
-    let (code, remediation) = match status {
-        401 | 403 => (ErrorCode::NoPermission, "The API key was rejected. Check it in Settings → AI."),
-        404 => (ErrorCode::BadSettings, "The model or address wasn't found. Check the model name and base URL."),
-        408 | 504 => (ErrorCode::TimedOut, "The service took too long. Try again."),
-        429 => (ErrorCode::OverLimit, "You've hit a rate or spending limit. Wait a moment or check your plan."),
-        500..=599 => (ErrorCode::EngineMissing, "The service is having trouble. Try again soon, or use another backend."),
-        _ => (ErrorCode::BadInput, "The request was rejected; see the message."),
-    };
     let provider = parsed
         .as_ref()
         .and_then(|v| v.pointer("/error/code").and_then(Value::as_str).or_else(|| v.pointer("/error/type").and_then(Value::as_str)).map(str::to_string));
+    let (code, remediation): (ErrorCode, std::borrow::Cow<'static, str>) = match status {
+        400 if is_context_overflow(provider.as_deref(), &detail) => (ErrorCode::OverLimit, context_overflow_remediation(&detail).into()),
+        401 | 403 => (ErrorCode::NoPermission, "The API key was rejected. Check it in Settings → AI.".into()),
+        404 => (ErrorCode::BadSettings, "The model or address wasn't found. Check the model name and base URL.".into()),
+        408 | 504 => (ErrorCode::TimedOut, "The service took too long. Try again.".into()),
+        429 => (ErrorCode::OverLimit, "You've hit a rate or spending limit. Wait a moment or check your plan.".into()),
+        500..=599 => (ErrorCode::EngineMissing, "The service is having trouble. Try again soon, or use another backend.".into()),
+        _ => (ErrorCode::BadInput, "The request was rejected; see the message.".into()),
+    };
     ToolError::new(code, format!("{what} answered {status}: {detail}"))
         .with_remediation(remediation)
         .with_details(serde_json::json!({"status": status, "provider_error": provider}))
+}
+
+fn is_context_overflow(provider: Option<&str>, detail: &str) -> bool {
+    if matches!(provider, Some("context_length_exceeded")) {
+        return true;
+    }
+    let lower = detail.to_ascii_lowercase();
+    lower.contains("exceeds the available context size")
+        || lower.contains("maximum context length")
+        || lower.contains("context_length_exceeded")
+        || lower.contains("exceeds the context window")
+        || lower.contains("prompt is too long")
+}
+
+fn extract_context_limit(text: &str) -> Option<&str> {
+    let lower = text.to_ascii_lowercase();
+    if let Some(pos) = lower.find("available context size (") {
+        let rest = &text[pos + "available context size (".len()..];
+        let digits = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+        if !digits.is_empty() {
+            return Some(digits);
+        }
+    }
+    if let Some(pos) = lower.find("maximum context length is ") {
+        let rest = &text[pos + "maximum context length is ".len()..];
+        let digits = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+        if !digits.is_empty() {
+            return Some(digits);
+        }
+    }
+    None
+}
+
+fn context_overflow_remediation(detail: &str) -> String {
+    match extract_context_limit(detail) {
+        Some(limit) => format!(
+            "The request exceeds the model's context window of {limit} tokens. Increase the server's context size (Ollama: num_ctx / context length), or lower context_tokens in the backend's configuration."
+        ),
+        None => "The request exceeds the model's context window. Increase the server's context size (Ollama: num_ctx / context length), or lower context_tokens in the backend's configuration.".into(),
+    }
 }
 
 /// Read only the human-readable fields, never serialise an arbitrary provider payload.
@@ -387,6 +428,45 @@ mod tests {
         assert_eq!(e.code, ErrorCode::NoPermission);
         assert!(e.message.contains("invalid x-api-key"));
         assert_eq!(status_error("x", 429, "slow down").code, ErrorCode::OverLimit);
+    }
+
+    #[test]
+    fn context_overflow_rejections_give_actionable_guidance() {
+        // (i) Ollama-style context overflow (exact phrase from #962)
+        let ollama = status_error(
+            "Ollama",
+            400,
+            r#"{"error":{"message":"request (69944 tokens) exceeds the available context size (65536 tokens), try increasing it","type":"invalid_request_error"}}"#,
+        );
+        assert_eq!(ollama.code, ErrorCode::OverLimit);
+        assert!(!crate::TurnFailure::from_api(&ollama).retryable());
+        assert!(ollama.remediation.as_deref().unwrap().contains("65536 tokens"));
+        assert!(ollama.remediation.as_deref().unwrap().contains("Ollama: num_ctx / context length"));
+        assert!(ollama.remediation.as_deref().unwrap().contains("context_tokens in the backend's configuration"));
+
+        // (ii) OpenAI-style context overflow (code: context_length_exceeded)
+        let openai = status_error(
+            "OpenAI",
+            400,
+            r#"{"error":{"message":"This model's maximum context length is 8192 tokens. However, your messages resulted in 12600 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}"#,
+        );
+        assert_eq!(openai.code, ErrorCode::OverLimit);
+        assert!(openai.remediation.as_deref().unwrap().contains("8192 tokens"));
+
+        // (iii) LM Studio-style context overflow (exact phrase from #832)
+        let lm = status_error("LM Studio", 400, r#"{"error":{"message":"request (80108 tokens) exceeds the available context size (16384 tokens)"}}"#);
+        assert_eq!(lm.code, ErrorCode::OverLimit);
+        assert!(lm.remediation.as_deref().unwrap().contains("16384 tokens"));
+
+        // (iv) Unrelated 400 with the word "context" that is NOT an overflow
+        let unrelated_context = status_error("Local", 400, r#"{"error":{"message":"Invalid context parameter: context must be an object"}}"#);
+        assert_eq!(unrelated_context.code, ErrorCode::BadInput);
+        assert_eq!(unrelated_context.remediation.as_deref(), Some("The request was rejected; see the message."));
+
+        // (v) Other unrelated 400
+        let other = status_error("Local", 400, r#"{"error":{"message":"Unknown parameter foo"}}"#);
+        assert_eq!(other.code, ErrorCode::BadInput);
+        assert_eq!(other.remediation.as_deref(), Some("The request was rejected; see the message."));
     }
 
     #[test]
