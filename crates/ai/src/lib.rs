@@ -958,7 +958,7 @@ impl AiHub {
         let e = self.entry(name)?;
         let start = Instant::now();
         if e.config.kind == BackendKind::AgentCli {
-            let program = cli_agents::program_of(&e.config, &e.options);
+            let program = cli_agents::program_of(&e.config, &e.options)?;
             let p = match e.config.ssh_host.as_deref().filter(|h| !h.trim().is_empty()) {
                 Some(h) => craft_anything_platform::Process::new("ssh").args(ssh::ssh_args(h, &[program.clone(), "--version".into()])),
                 None => craft_anything_platform::Process::new(&program).arg("--version"),
@@ -1072,14 +1072,16 @@ fn reach(e: &BackendEntry, key: Option<String>) -> Result<u64, String> {
                 compatible_client(&e.config.name, b, key, &e.config.model, "").list_models(t).map(|_| ()).map_err(|x| x.message)
             }
         }
-        BackendKind::AgentCli => {
-            let program = cli_agents::program_of(&e.config, &e.options);
-            // A saved path that's gone (#721): PATH has nothing to do with it.
-            let by_path = std::path::Path::new(&program).parent().is_some_and(|p| !p.as_os_str().is_empty());
-            craft_anything_platform::which(&program)
-                .map(|_| ())
-                .ok_or_else(|| if by_path { format!("there's no program at {program}") } else { format!("{program} isn't on PATH") })
-        }
+        BackendKind::AgentCli => match cli_agents::program_of(&e.config, &e.options) {
+            Err(x) => Err(x.message),
+            Ok(program) => {
+                // A saved path that's gone (#721): PATH has nothing to do with it.
+                let by_path = std::path::Path::new(&program).parent().is_some_and(|p| !p.as_os_str().is_empty());
+                craft_anything_platform::which(&program)
+                    .map(|_| ())
+                    .ok_or_else(|| if by_path { format!("there's no program at {program}") } else { format!("{program} isn't on PATH") })
+            }
+        },
     };
     r.map(|_| start.elapsed().as_millis() as u64)
 }

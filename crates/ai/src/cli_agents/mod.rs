@@ -60,31 +60,45 @@ pub fn program_for(agent: &str) -> String {
 /// that's gone from this computer is looked for again (#721): an agent that installs each version
 /// in a folder of its own (Codex's `bin/<build>/codex.exe`) moves on every update, so the same file
 /// in the newest folder beside the old one is used, else the usual name on PATH. On another
-/// computer (ssh) the chosen command is used as it is.
-pub fn program_of(config: &BackendConfig, options: &BackendOptions) -> String {
+/// computer (ssh) the chosen command is used as it is. Fails when the usual name would start only
+/// the Claude desktop app, which can't build.
+pub fn program_of(config: &BackendConfig, options: &BackendOptions) -> Result<String, ToolError> {
+    program_in(config, options, craft_anything_platform::which::search_path())
+}
+
+fn program_in(config: &BackendConfig, options: &BackendOptions, search: Option<std::ffi::OsString>) -> Result<String, ToolError> {
     let usual = program_for(&config.model);
     let local = config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let Some(chosen) = options.command.as_deref().map(str::trim).filter(|c| !c.is_empty()) else {
-        return if local { usual_program(usual) } else { usual };
+        return if local { Ok(usual_program(&usual, search)?.unwrap_or(usual)) } else { Ok(usual) };
     };
     // A folder or app bundle saved before set_command refused it (#467) can't be started: the usual
     // program is used, as when none is chosen.
     if local && Path::new(chosen).is_dir() {
-        return usual_program(usual);
+        return Ok(usual_program(&usual, search)?.unwrap_or(usual));
     }
     let path = Path::new(chosen);
     if !local || path.parent().is_none_or(|p| p.as_os_str().is_empty()) || path.exists() {
-        return chosen.to_string();
+        return Ok(chosen.to_string());
     }
-    moved_program(path).or_else(|| craft_anything_platform::which(&usual).map(|_| usual)).unwrap_or_else(|| chosen.to_string())
+    // Gone, and nothing beside it: the usual program if it's really here, else the saved path, so
+    // the error names it.
+    Ok(moved_program(path).or_else(|| usual_program(&usual, search).ok().flatten()).unwrap_or_else(|| chosen.to_string()))
 }
 
-/// The usual name, or the real program's path when the name alone would start something else that
-/// comes first on the search path (the Claude desktop app's `claude.exe`).
-fn usual_program(usual: String) -> String {
-    match (craft_anything_platform::which(&usual), find_program(&usual)) {
-        (Some(first), Some(real)) if first != real => real.display().to_string(),
-        _ => usual,
+/// How to start the usual program: its name, or the real program's path when the name alone would
+/// start something else that comes first on the search path (the Claude desktop app's
+/// `claude.exe`). `None` when nothing has that name; an error when only the desktop app does.
+fn usual_program(usual: &str, search: Option<std::ffi::OsString>) -> Result<Option<String>, ToolError> {
+    let first = craft_anything_platform::which::which_in(usual, search.clone()).into_iter().next();
+    match (first, find_program_in(usual, search)) {
+        (None, _) => Ok(None),
+        (Some(first), Some(real)) => Ok(Some(if first == real { usual.to_string() } else { real.display().to_string() })),
+        (Some(app), None) => Err(ToolError::new(
+            ErrorCode::EngineMissing,
+            format!("Claude Code isn't installed: the `claude` found ({}) is the Claude desktop app, which can't build.", app.display()),
+        )
+        .with_remediation("Install Claude Code apart from the desktop app, sign in to it once in a terminal, then try again.")),
     }
 }
 
@@ -580,7 +594,8 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     }
     let local = spec.config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let acp_args = selected_acp_args(adapter.as_ref(), &agent, &spec.options).filter(|_| local)?;
-    let program = program_of(&spec.config, &spec.options);
+    // No program to start: the plain run reports why.
+    let program = program_of(&spec.config, &spec.options).ok()?;
     let access = match (spec.question, spec.deep, spec.builder.is_some()) {
         (true, true, _) => Access::Question,
         (true, false, _) => Access::CleanRoomQuestion,
@@ -783,7 +798,13 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let RunState { session, verified, lost, failure } = state;
     let name = spec.config.name.clone();
     let agent = spec.config.model.clone();
-    let program = program_of(&spec.config, &spec.options);
+    let program = match program_of(&spec.config, &spec.options) {
+        Ok(program) => program,
+        Err(e) => {
+            let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
+            return nothing_done(&name);
+        }
+    };
     let remote = spec.config.ssh_host.clone().filter(|h| !h.trim().is_empty());
     // A folder chosen for it is on the computer it runs on: on another one, it's set below.
     let mut adapter = match remote {
@@ -1165,18 +1186,18 @@ mod tests {
             enabled: true,
         };
         let chosen = |p: &Path| BackendOptions { command: Some(p.display().to_string()), ..Default::default() };
-        assert_eq!(program_of(&config(None), &chosen(&gone)), new.display().to_string(), "the same file in the newer build folder");
-        assert_eq!(program_of(&config(None), &chosen(&new)), new.display().to_string(), "a path that's there is used as it is");
-        assert_eq!(program_of(&config(Some("box")), &chosen(&gone)), gone.display().to_string(), "another computer's path isn't checked here");
-        assert_eq!(program_of(&config(None), &BackendOptions::default()), "codex", "nothing chosen: the usual name");
+        assert_eq!(program_of(&config(None), &chosen(&gone)).unwrap(), new.display().to_string(), "the same file in the newer build folder");
+        assert_eq!(program_of(&config(None), &chosen(&new)).unwrap(), new.display().to_string(), "a path that's there is used as it is");
+        assert_eq!(program_of(&config(Some("box")), &chosen(&gone)).unwrap(), gone.display().to_string(), "another computer's path isn't checked here");
+        assert_eq!(program_of(&config(None), &BackendOptions::default()).unwrap(), "codex", "nothing chosen: the usual name");
         // #467: a saved app bundle is never started; the usual name is looked up instead.
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("Codex.app");
         std::fs::create_dir_all(&bundle).unwrap();
-        assert_eq!(program_of(&config(None), &chosen(&bundle)), "codex", "an app bundle is not the program");
-        assert_eq!(program_of(&config(Some("box")), &chosen(&bundle)), bundle.display().to_string(), "another computer's path isn't checked here");
+        assert_eq!(program_of(&config(None), &chosen(&bundle)).unwrap(), "codex", "an app bundle is not the program");
+        assert_eq!(program_of(&config(Some("box")), &chosen(&bundle)).unwrap(), bundle.display().to_string(), "another computer's path isn't checked here");
         let bare = BackendOptions { command: Some("my-codex".into()), ..Default::default() };
-        assert_eq!(program_of(&config(None), &bare), "my-codex", "a bare name is left to PATH");
+        assert_eq!(program_of(&config(None), &bare).unwrap(), "my-codex", "a bare name is left to PATH");
     }
 
     /// The Claude desktop app's older installer names its app `claude.exe`; with its folder on
@@ -1211,6 +1232,25 @@ mod tests {
         let (app_dir, cli_dir) = (app.parent().unwrap(), cli.parent().unwrap());
         assert_eq!(find_program_in("claude", path(&[app_dir, cli_dir])), Some(cli.clone()), "the desktop app is passed over");
         assert_eq!(find_program_in("claude", path(&[app_dir])), None, "only the desktop app: no Claude Code");
+        // What a run starts (review of #858): never the desktop app.
+        let claude = BackendConfig {
+            name: "Claude Code".into(),
+            kind: crate::BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        };
+        let none = BackendOptions::default();
+        let gone = BackendOptions { command: Some(d.path().join("old").join("claude").join(file).display().to_string()), ..Default::default() };
+        let real = cli.display().to_string();
+        assert_eq!(program_in(&claude, &none, path(&[app_dir, cli_dir])).unwrap(), real, "the real one, by path, when the app comes first");
+        assert_eq!(program_in(&claude, &gone, path(&[app_dir, cli_dir])).unwrap(), real, "a saved path that's gone falls back to the real one");
+        assert_eq!(program_in(&claude, &none, path(&[cli_dir, app_dir])).unwrap(), "claude", "the name, when it starts the real one");
+        let err = program_in(&claude, &none, path(&[app_dir])).unwrap_err();
+        assert_eq!(err.code, ErrorCode::EngineMissing);
+        assert!(err.message.contains("desktop app"), "{}", err.message);
+        assert_eq!(program_in(&claude, &gone, path(&[app_dir])).unwrap(), gone.command.clone().unwrap(), "only the app: the saved path, not the app");
         // Another agent's program in such a folder is only filtered for Claude.
         let other = app_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
         std::fs::write(&other, b"").unwrap();

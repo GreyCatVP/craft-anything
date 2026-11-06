@@ -106,7 +106,7 @@ pub(crate) fn query_args(options: &BackendOptions) -> Result<Vec<String>, ToolEr
 /// Select the configured executable and catalogue location, quoting SSH arguments for the remote shell.
 /// Local queries use the supplied directory or current directory; SSH queries expand remote `$PWD`.
 fn query_command(config: &BackendConfig, options: &BackendOptions, directory: Option<&Path>) -> Result<(String, Vec<String>), ToolError> {
-    let program = super::program_of(config, options);
+    let program = super::program_of(config, options)?;
     let mut args = query_args(options)?;
     match config.ssh_host.as_deref().filter(|h| !h.trim().is_empty()) {
         Some(host) => {
