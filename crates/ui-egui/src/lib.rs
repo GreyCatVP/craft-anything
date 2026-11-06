@@ -622,6 +622,8 @@ impl CraftApp {
     pub fn setup_context(ctx: &egui::Context) {
         theme::install_fonts(ctx);
         egui_extras::install_image_loaders(ctx);
+        // The zoom keys are ours (`shortcuts`), so zoom stays inside ZOOM_RANGE.
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
     }
 
     /// Gives the macOS app its menu bar (nothing elsewhere). Call once the window is open.
@@ -1878,6 +1880,24 @@ impl CraftApp {
         if palette {
             palette::toggle(self);
         }
+        // Cmd/Ctrl + / − / 0. A zoom saved from outside the range comes back inside it.
+        let zoom = ctx.zoom_factor();
+        let asked = ctx.input_mut(|i| {
+            use egui::gui_zoom::kb_shortcuts::{ZOOM_IN, ZOOM_IN_SECONDARY, ZOOM_OUT, ZOOM_RESET};
+            if i.consume_shortcut(&ZOOM_RESET) {
+                1.0
+            } else if i.consume_shortcut(&ZOOM_IN) || i.consume_shortcut(&ZOOM_IN_SECONDARY) {
+                zoom + 0.1
+            } else if i.consume_shortcut(&ZOOM_OUT) {
+                zoom - 0.1
+            } else {
+                zoom
+            }
+        });
+        let next = bounded_zoom(asked);
+        if next != zoom {
+            ctx.set_zoom_factor(next);
+        }
         if esc {
             if self.state.palette.open {
                 self.state.palette.open = false;
@@ -1891,6 +1911,18 @@ impl CraftApp {
             }
         }
     }
+}
+
+/// How far the app zooms (Cmd/Ctrl + / −). Below half size its text is unreadable; above double,
+/// the smallest window has room for almost nothing. egui's own limits are 20% and 500%.
+pub const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
+
+/// `zoom` on a 10% step, inside [`ZOOM_RANGE`].
+pub fn bounded_zoom(zoom: f32) -> f32 {
+    if !zoom.is_finite() {
+        return 1.0;
+    }
+    ((zoom * 10.0).round() / 10.0).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end())
 }
 
 /// The 256 px app icon.

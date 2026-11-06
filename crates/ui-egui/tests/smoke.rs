@@ -1329,6 +1329,30 @@ fn claude_codes_account_folder_is_set_in_settings() {
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Claude Code 2" && b.model == "claude-code")));
 }
 
+/// Zoom keys stop at 50% and 200%, Cmd/Ctrl 0 goes back to 100%, and a zoom saved outside the
+/// range comes back inside it.
+#[test]
+fn zoom_stays_between_half_and_double() {
+    fn press(h: &mut Harness<'static, CraftApp>, key: egui::Key, times: usize) {
+        for _ in 0..times {
+            h.key_press_modifiers(egui::Modifiers::COMMAND, key);
+            h.run_steps(2);
+        }
+    }
+    let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
+    h.run_steps(2);
+    press(&mut h, egui::Key::Minus, 12);
+    assert_eq!(h.ctx.zoom_factor(), 0.5);
+    press(&mut h, egui::Key::Equals, 20);
+    assert_eq!(h.ctx.zoom_factor(), 2.0);
+    press(&mut h, egui::Key::Num0, 1);
+    assert_eq!(h.ctx.zoom_factor(), 1.0);
+    h.ctx.set_zoom_factor(0.2);
+    h.run_steps(3);
+    assert_eq!(h.ctx.zoom_factor(), 0.5);
+    assert_eq!(craft_anything_ui_egui::bounded_zoom(f32::NAN), 1.0);
+}
+
 #[test]
 fn settings_window_tabs_draw() {
     let mut h = harness(|| {
