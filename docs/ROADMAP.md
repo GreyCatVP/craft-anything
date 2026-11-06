@@ -771,6 +771,7 @@ Gaps found while using the app for real projects.
 - [ ] Change a project's builder from its page (a tool, so the CLI and MCP can too) — in PR #245
 - [ ] `chat --backend <a name that is turned off>` (and `compare`) still talks to it:
       `AiHub::start` accepts a named backend without checking `enabled`, unlike a build
+      — claimed: kuseidos, branch `bugfix/r2.9-chat-named-backend-that-is-turned-off`
 - [x] Ctrl+V (Shift+Insert, Cmd+V) in a prompt box that takes pictures pastes a copied image (saved
       as a PNG) or copied picture files; attachments show as square picture tiles, the whole
       picture on hover, decoded on a worker
