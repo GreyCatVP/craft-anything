@@ -385,6 +385,9 @@ fn use_search_path(cmd: &mut std::process::Command) {
 }
 
 fn spawn_error(name: &str, program: &OsStr, cwd: Option<&std::path::Path>, e: std::io::Error, remediation: Option<&str>) -> ToolError {
+    if let Some(interpreter) = crate::which::shim_missing_interpreter(program) {
+        return interpreter_missing_error(name, program, &interpreter, &e);
+    }
     // Unix starts a relative path from the folder the child runs in; Windows from ours.
     let looked_up = if cfg!(unix) { started_from(program, cwd) } else { std::path::PathBuf::from(program) };
     let found = crate::which::which_in(&looked_up.to_string_lossy(), crate::which::search_path()).into_iter().next();
@@ -417,6 +420,17 @@ fn spawn_error_for(name: &str, program: &OsStr, e: std::io::Error, remediation: 
         .with_details(serde_json::json!({"program": program.to_string_lossy(), "reason": "found_but_not_started", "path": path.to_string_lossy()})),
         (kind, _) => spawn_error_kind(name, program, e, kind, remediation),
     }
+}
+
+/// An npm shim whose interpreter isn't anywhere we look. Rust then refuses to hand the `.cmd` an
+/// argument with a line break ("batch file arguments are invalid"), which says nothing about Node.
+/// It's a missing program, so builder turns aren't retried.
+fn interpreter_missing_error(name: &str, program: &OsStr, interpreter: &str, e: &std::io::Error) -> ToolError {
+    ToolError::new(ErrorCode::EngineMissing, format!("{name} was installed with npm and needs `{interpreter}` (Node.js) to run, but `{interpreter}` wasn't found."))
+        .with_remediation(format!(
+            "Install Node.js, or if you use nvm for Windows, run `nvm use <version>` in a terminal opened as administrator. Then restart Craft Anything. Installing {name} without npm also works, when it offers that."
+        ))
+        .with_details(serde_json::json!({"program": program.to_string_lossy(), "reason": "interpreter_missing", "interpreter": interpreter, "error": e.to_string()}))
 }
 
 fn spawn_error_kind(name: &str, program: &OsStr, e: std::io::Error, kind: std::io::ErrorKind, remediation: Option<&str>) -> ToolError {
@@ -1300,6 +1314,19 @@ mod launch_tests {
 #[cfg(test)]
 mod error_tests {
     use super::*;
+
+    /// An npm shim whose Node is missing is a missing program, named, with what to do about it.
+    #[test]
+    fn a_shim_without_its_interpreter_says_so() {
+        let e = std::io::Error::new(std::io::ErrorKind::InvalidInput, "batch file arguments are invalid");
+        let err = interpreter_missing_error("Claude Code", OsStr::new("claude"), "node", &e);
+        assert_eq!(err.code, ErrorCode::EngineMissing);
+        assert!(err.message.contains("needs `node`") && !err.message.contains("batch file"), "{}", err.message);
+        assert!(err.remediation.as_deref().is_some_and(|r| r.contains("nvm use")), "{:?}", err.remediation);
+        let details = err.details.unwrap();
+        assert_eq!((details["reason"].as_str(), details["interpreter"].as_str()), (Some("interpreter_missing"), Some("node")));
+        assert_eq!(details["error"].as_str(), Some("batch file arguments are invalid"));
+    }
 
     /// A busy program file is tried again; any other error, or a file that stays busy, is returned.
     #[test]

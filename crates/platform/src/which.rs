@@ -51,27 +51,16 @@ pub fn search_path() -> Option<OsString> {
 /// by its full path.
 #[cfg(windows)]
 pub(crate) fn launch_target(program: &std::ffi::OsStr) -> (OsString, Vec<OsString>) {
-    let Some(found) = which_in(&program.to_string_lossy(), search_path()).into_iter().next() else { return (program.to_owned(), Vec::new()) };
+    let path = search_path();
     // Started by the path it was found at, not by name: a child with a cleared environment, or a
     // lookup that differs from ours, would say "not found" for a program that is there (#152).
-    if !found.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
-        return (found.into_os_string(), Vec::new());
-    }
-    let dir = found.parent().map(Path::to_path_buf).unwrap_or_default();
-    let shim = std::fs::metadata(&found)
-        .ok()
-        .filter(|m| m.len() <= 64 * 1024)
-        .and_then(|_| std::fs::read_to_string(&found).ok())
-        .and_then(|text| parse_npm_shim(&text));
-    match shim {
-        Some((None, target)) if is_executable(&dir.join(&target)) => (dir.join(target).into_os_string(), Vec::new()),
-        Some((Some(interpreter), target)) if dir.join(&target).is_file() => {
-            let local = dir.join(format!("{interpreter}.exe"));
-            match if local.is_file() { Some(local) } else { which_in(&interpreter, search_path()).into_iter().next() } {
-                Some(i) => (i.into_os_string(), vec![dir.join(target).into_os_string()]),
-                None => (found.into_os_string(), Vec::new()),
-            }
-        }
+    let Some(found) = which_in(&program.to_string_lossy(), path.clone()).into_iter().next() else { return (program.to_owned(), Vec::new()) };
+    match read_shim(&found) {
+        Some((dir, None, target)) if is_executable(&dir.join(&target)) => (dir.join(target).into_os_string(), Vec::new()),
+        Some((dir, Some(interpreter), target)) if dir.join(&target).is_file() => match find_interpreter(&dir, &interpreter, path) {
+            Some(i) => (i.into_os_string(), vec![dir.join(target).into_os_string()]),
+            None => (found.into_os_string(), Vec::new()),
+        },
         _ => (found.into_os_string(), Vec::new()),
     }
 }
@@ -79,6 +68,46 @@ pub(crate) fn launch_target(program: &std::ffi::OsStr) -> (OsString, Vec<OsStrin
 #[cfg(not(windows))]
 pub(crate) fn launch_target(program: &std::ffi::OsStr) -> (OsString, Vec<OsString>) {
     (program.to_owned(), Vec::new())
+}
+
+/// The interpreter (`node`) an npm shim needs when it can't be found: then [`launch_target`] can
+/// only start the `.cmd` itself, which can't take an argument with a line break.
+#[cfg(windows)]
+pub(crate) fn shim_missing_interpreter(program: &std::ffi::OsStr) -> Option<String> {
+    let path = search_path();
+    let found = which_in(&program.to_string_lossy(), path.clone()).into_iter().next()?;
+    missing_interpreter_in(&found, path)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn shim_missing_interpreter(_program: &std::ffi::OsStr) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+fn missing_interpreter_in(shim: &Path, path: Option<OsString>) -> Option<String> {
+    let (dir, interpreter, target) = read_shim(shim)?;
+    let interpreter = interpreter?;
+    (dir.join(&target).is_file() && find_interpreter(&dir, &interpreter, path).is_none()).then_some(interpreter)
+}
+
+/// A `.cmd`/`.bat` npm shim's folder, interpreter and target (see [`parse_npm_shim`]).
+#[cfg(windows)]
+fn read_shim(found: &Path) -> Option<(PathBuf, Option<String>, String)> {
+    if !found.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
+        return None;
+    }
+    let dir = found.parent().map(Path::to_path_buf).unwrap_or_default();
+    let text = std::fs::metadata(found).ok().filter(|m| m.len() <= 64 * 1024).and_then(|_| std::fs::read_to_string(found).ok())?;
+    let (interpreter, target) = parse_npm_shim(&text)?;
+    Some((dir, interpreter, target))
+}
+
+/// The shim's interpreter: `node.exe` beside it, as npm's shim prefers, else on `path`.
+#[cfg(windows)]
+fn find_interpreter(dir: &Path, interpreter: &str, path: Option<OsString>) -> Option<PathBuf> {
+    let local = dir.join(format!("{interpreter}.exe"));
+    if local.is_file() { Some(local) } else { which_in(interpreter, path).into_iter().next() }
 }
 
 /// What an npm (or pnpm) `.cmd` shim runs: its interpreter (`node`; none when the target is an
@@ -105,22 +134,39 @@ fn parse_npm_shim(text: &str) -> Option<(Option<String>, String)> {
 /// installs there, and only a shell that loaded nvm has them on `PATH` (#112).
 #[cfg(unix)]
 fn nvm_bins(home: &Path) -> Vec<PathBuf> {
-    let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) else { return Vec::new() };
+    newest_versions(&home.join(".nvm/versions/node")).into_iter().map(|v| v.join("bin")).collect()
+}
+
+/// nvm for Windows' version folders (`node.exe` and the agents npm installed with it), newest
+/// first. `PATH` reaches them only through the link `nvm use` makes (`C:\Program Files\nodejs`),
+/// which is gone when no version is in use; npm shims then had no Node and failed with "batch file
+/// arguments are invalid".
+#[cfg(windows)]
+fn nvm_bins(home: &Path) -> Vec<PathBuf> {
+    let root = std::env::var_os("NVM_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| home.join(r"AppData\Roaming\nvm"));
+    newest_versions(&root)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn nvm_bins(_home: &Path) -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// The `v<number>…` folders in `root`, newest version first, at most eight.
+#[cfg(any(unix, windows))]
+fn newest_versions(root: &Path) -> Vec<PathBuf> {
+    let Ok(versions) = std::fs::read_dir(root) else { return Vec::new() };
     let mut found: Vec<(Vec<u64>, PathBuf)> = versions
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            let version = name.trim_start_matches('v').split('.').map(|n| n.parse().unwrap_or(0)).collect();
-            Some((version, e.path().join("bin")))
+            let number = name.strip_prefix('v').filter(|n| n.starts_with(|c: char| c.is_ascii_digit()))?;
+            let path = e.path();
+            path.is_dir().then(|| (number.split('.').map(|n| n.parse().unwrap_or(0)).collect(), path))
         })
         .collect();
     found.sort_by(|a, b| b.0.cmp(&a.0));
-    found.into_iter().map(|(_, bin)| bin).take(8).collect()
-}
-
-#[cfg(not(unix))]
-fn nvm_bins(_home: &Path) -> Vec<PathBuf> {
-    Vec::new()
+    found.into_iter().map(|(_, dir)| dir).take(8).collect()
 }
 
 /// Where npm puts what it installs globally when the person moved its prefix
@@ -402,9 +448,11 @@ mod tests {
         let dirs: Vec<PathBuf> = std::env::split_paths(&with_usual_dirs(Some(path), Some(home.clone()), None).unwrap()).collect();
         assert_eq!(dirs[..3], [PathBuf::from(r"C:\Windows"), home.join(r".local\bin"), home.join(r"AppData\Roaming\npm")]);
         // PATH's two less `.local\bin`, which is a usual one too; Antigravity's two folders (plus
-        // npm's prefix where the environment sets one).
+        // npm's prefix where the environment sets one, and nvm for Windows' versions where
+        // `NVM_HOME` names them).
         let npm = usize::from(npm_global_bin(&home).is_some());
-        assert_eq!(dirs.len(), 1 + USUAL_HOME_DIRS.len() + 2 + USUAL_DIRS.len() + npm, "nothing twice");
+        let nvm = nvm_bins(&home).len();
+        assert_eq!(dirs.len(), 1 + USUAL_HOME_DIRS.len() + 2 + USUAL_DIRS.len() + npm + nvm, "nothing twice");
         assert!(dirs.contains(&home.join("AppData").join("Local").join("agy").join("bin")));
         assert!(dirs.contains(&home.join("AppData").join("Local").join("Antigravity")));
         // Each way Claude Code installs on Windows: native, npm, WinGet (per user and machine-wide).
@@ -444,6 +492,45 @@ mod tests {
         assert_eq!(launch_target(dir.path().join("gemini").as_os_str()), (dir.path().join("node.exe").into_os_string(), vec![script.into_os_string()]));
         // An .exe is started by the path it was found at.
         assert_eq!(launch_target(dir.path().join("node").as_os_str()), (dir.path().join("node.exe").into_os_string(), Vec::new()));
+    }
+
+    /// nvm for Windows keeps each version's `node.exe` in `v<version>` beside its own files.
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn node_versions_are_listed_newest_first_without_other_files() {
+        let root = tempfile::tempdir().unwrap();
+        for v in ["v18.17.0", "v22.22.1", "v20.18.0", "v20.20.1", "temp", "vendor"] {
+            std::fs::create_dir_all(root.path().join(v)).unwrap();
+        }
+        for f in ["elevate.cmd", "nvm.exe", "settings.txt", "v9.0.0"] {
+            std::fs::write(root.path().join(f), "").unwrap();
+        }
+        let names: Vec<String> = newest_versions(root.path()).iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["v22.22.1", "v20.20.1", "v20.18.0", "v18.17.0"]);
+        assert!(newest_versions(&root.path().join("missing")).is_empty());
+    }
+
+    /// An npm shim with its script but no Node anywhere: the interpreter is named, so the error can
+    /// say what's missing instead of "batch file arguments are invalid".
+    #[cfg(windows)]
+    #[test]
+    fn a_shim_without_node_names_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("claude.cmd");
+        std::fs::write(&shim, NPM_SHIM).unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let path = || Some(empty.path().as_os_str().to_owned());
+        assert_eq!(missing_interpreter_in(&shim, path()), None, "no script: not a shim we can run anyway");
+        let script = dir.path().join(r"node_modules\@google\gemini-cli\dist\index.js");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "").unwrap();
+        assert_eq!(missing_interpreter_in(&shim, path()), Some("node".into()));
+        std::fs::write(empty.path().join("node.exe"), "").unwrap();
+        assert_eq!(missing_interpreter_in(&shim, path()), None, "Node on the search path");
+        std::fs::remove_file(empty.path().join("node.exe")).unwrap();
+        std::fs::write(dir.path().join("node.exe"), "").unwrap();
+        assert_eq!(missing_interpreter_in(&shim, path()), None, "Node beside the shim");
+        assert_eq!(missing_interpreter_in(&dir.path().join("node.exe"), path()), None, "not a shim");
     }
 
     /// A prompt with line breaks and quotes reaches the agent whole (needs Node; skipped without).
