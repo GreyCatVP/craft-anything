@@ -1294,15 +1294,43 @@ mod launch_tests {
         assert!(l.ended().unwrap().after < Duration::from_secs(20));
     }
 
-    #[cfg(unix)]
     #[test]
-    fn stopping_a_watched_program_stops_its_process_group() {
+    fn stopping_a_watched_program_stops_its_descendant() {
         let dir = tempfile::tempdir().unwrap();
-        let l = shell("sleep 2; echo survived > descendant & wait").cwd(dir.path()).start_watched().unwrap();
-        assert!(l.wait_timeout(Duration::from_millis(300)).is_none(), "it should still be running");
+        let exe = std::env::current_exe().unwrap();
+        let command = if cfg!(windows) {
+            format!(r#"start "" /B "{}" --ignored --exact process::launch_tests::watched_descendant_stand_in & ping -n 30 127.0.0.1 > NUL"#, exe.display())
+        } else {
+            format!("{} --ignored --exact process::launch_tests::watched_descendant_stand_in & wait", shell_quote(&exe.to_string_lossy()))
+        };
+        let l = shell(&command).cwd(dir.path()).start_watched().unwrap();
+        let started = dir.path().join("descendant-started");
+        let heartbeat = dir.path().join("descendant-heartbeat");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while (!started.exists() || !heartbeat.exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(started.exists(), "descendant never signalled that it started");
+        assert!(heartbeat.exists(), "descendant never produced a heartbeat");
+        let before_stop = std::fs::read(&heartbeat).unwrap();
         assert!(l.stop());
-        std::thread::sleep(Duration::from_secs(3));
-        assert!(!dir.path().join("descendant").exists(), "a descendant outlived the watched program");
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(std::fs::read(&heartbeat).unwrap(), before_stop, "descendant continued running after the watched program stopped");
+    }
+
+    #[test]
+    #[ignore = "stand-in invoked by stopping_a_watched_program_stops_its_descendant"]
+    fn watched_descendant_stand_in() {
+        std::fs::write("descendant-started", b"ready").unwrap();
+        for n in 0..100 {
+            std::fs::write("descendant-heartbeat", n.to_string()).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::fs::write("descendant-survived", b"yes").unwrap();
+    }
+
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 
     fn exits_with(code: u8) -> Process {
