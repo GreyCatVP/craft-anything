@@ -1851,7 +1851,7 @@ fn the_front_door_makes_something_or_just_looks_inside() {
 
 #[test]
 fn new_project_does_not_shift_when_its_scrollbar_is_not_needed() {
-    let mut h = harness_sized(egui::vec2(1000.0, 500.0), || demo::app(demo::engine(Mode::Beginner, true)));
+    let mut h = harness_sized(egui::vec2(1000.0, 700.0), || demo::app(demo::engine(Mode::Beginner, true)));
     h.run_steps(3);
     let make_left = h.get_by_label("What do you want to make?").rect().left();
     assert!(
