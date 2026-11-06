@@ -21,6 +21,7 @@ release: `gh workflow run ci.yml --ref main`. The other workflows (`freebsd.yml`
    platform and creates or updates the draft GitHub Release **Craft Anything vX.Y.Z**.
 3. When every job is green, run the packaged Deep-build check below on macOS and Windows.
    Publish the draft only after both pass.
+4. After publication, follow the ticket checklist below.
 
 A dry run of the unsigned platforms from any branch: `gh workflow run release.yml --ref <branch>`.
 
@@ -60,6 +61,27 @@ versions, request, tool result, displayed card and its answer, builder continuat
 outcome and Play result in the release
 PR or release validation notes. Keep credentials and personal paths out of the record. If a
 platform has not been checked, record it as pending and leave the release in draft.
+
+## After publishing: close tickets waiting for the release
+
+A fix on `main` does not help someone still using an older release. Close tickets waiting for
+that fix only after the release containing it has been published.
+
+1. Find every open ticket marked as fixed but waiting for a release. Check the open issues,
+   the roadmap's release follow-ups and the fixes included since the previous release; do not
+   rely on a `fixed` label alone.
+2. For each ticket, verify that the published release contains its fix. Compare the fix commit
+   with the published tag (`git merge-base --is-ancestor <fix-commit> <release-tag>`), rather
+   than checking today's `main`. Read the ticket's reported version and symptoms before
+   deciding it is covered. Keep tickets open when their cause is still uncertain, the fix is
+   absent from the release or related work remains.
+3. Close each covered ticket with a comment naming the published version, linking to its
+   release page and the fix, and asking the person to file again if the problem persists after
+   updating. Say whether the reported case was reproduced or the fix was checked another way;
+   do not claim a live check that was not run.
+4. Update the roadmap's release follow-ups with what was closed and leave an unticked line
+   for anything still waiting. Record unresolved symptoms or missing validation under the
+   relevant item so the next release does not lose them.
 
 ## What it ships
 

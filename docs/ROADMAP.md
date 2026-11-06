@@ -159,9 +159,10 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
       show whether Claude Code accepts its tools — PR #982; claimed: doubektomas,
       branch docs/r5.1-packaged-deep-build-check. The checklist is documented; live package runs
       remain release validation work.
-- [ ] Add to `docs/releasing.md`: after a release, close every ticket marked as waiting for it, so
-      they don't stay open marked `fixed`
-      — claimed: doubektomas, branch docs/r5.1-post-release-tickets
+- [x] Add to `docs/releasing.md`: after a release, close every ticket marked as waiting for it, so
+      they don't stay open marked `fixed` — PR #1006; claimed: doubektomas,
+      branch docs/r5.1-post-release-tickets. The checklist is documented; closing tickets waits
+      for publication of the release containing their fixes.
 
 ### R5.2 Keeping contributions moving
 Owner: maintainers · Status: in progress
