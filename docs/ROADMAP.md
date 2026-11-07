@@ -781,8 +781,11 @@ Owner: open · Status: in progress
       own profile is left untouched. Verified with adapter and overlay tests and a live follow-up
       website build whose journal shows `rebuild_check`, `core_unknown_add` and `core_handoff_write`
       going through our server — claimed: 0231071, branch `feature/dsh-agent-adapter`
-- [ ] DeepSeek Harness: no resume (its headless profile keeps no session), a build on the harness's
-      desktop profile is untried, and the task still goes over in argv (see the argv note above)
+- [ ] DeepSeek Harness: send tasks on stdin so multiline and long messages can start through the
+      Windows desktop launcher (see the argv note above)
+      — claimed: gtxy27, branch `bugfix/r2.2-dsh-stdin`
+- [ ] DeepSeek Harness: no resume (its headless profile keeps no session), and a build on the harness's
+      desktop profile is untried
 - [ ] `setup` writes the plain `mcp` command, so it drops an `--all-tools` an entry already has, and
       `doctor` then calls that entry "a different copy or shape of the command" and suggests the very
       command that breaks it. The installed skill now warns against running `setup` on such an entry;
