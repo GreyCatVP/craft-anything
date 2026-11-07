@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-/// A Ghidra stand-in whose analysis of `bytes` another process holds the lock for, so `prepare`
-/// waits until it's told to stop. Returns a project folder maker and the waiting analyses' start.
-fn waiting_analysis(d: &Path, bytes: &'static [u8]) -> impl Fn(&str) -> (PathBuf, JoinHandle<Result<(), String>>) {
+/// A Ghidra stand-in whose analyses of `bytes` another process holds the lock for, so `prepare`
+/// waits until it's told to stop. Returns a starter: a project named `name`, its build asking for
+/// the analysis with Ghidra's language set to `lang` (`""`: detected).
+fn waiting_analysis(d: &Path, bytes: &'static [u8]) -> impl Fn(&str, &str) -> (PathBuf, JoinHandle<Result<(), String>>) {
     let launcher = d.join("analyzeHeadless");
     std::fs::write(&launcher, "").unwrap();
     let store = d.join("store");
@@ -18,16 +19,18 @@ fn waiting_analysis(d: &Path, bytes: &'static [u8]) -> impl Fn(&str) -> (PathBuf
     settings.engines.ghidra.install_dir = Some(launcher);
     settings.engines.ghidra.startup_timeout_secs = Some(120);
     let sha = craft_anything_evidence::sha256_hex(bytes);
-    let digest = craft_anything_evidence::sha256_hex(b"craft-anything-ghidra-fast-profile-v2|lang=");
-    let project = ghidra::project_cache_dir(&store, &sha, &digest);
-    std::fs::create_dir_all(project.parent().unwrap()).unwrap();
-    std::fs::write(project.with_extension("analysing"), "").unwrap();
     let d = d.to_path_buf();
-    move |name| {
+    move |name, lang| {
+        let digest = craft_anything_evidence::sha256_hex(format!("craft-anything-ghidra-fast-profile-v2|lang={lang}").as_bytes());
+        let project = ghidra::project_cache_dir(&store, &sha, &digest);
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+        std::fs::write(project.with_extension("analysing"), "").unwrap();
         let root = d.join(name);
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(MANIFEST), "{}").unwrap();
-        let (settings, sha, r) = (settings.clone(), sha.clone(), root.clone());
+        let mut settings = settings.clone();
+        settings.engines.ghidra.language_id = (!lang.is_empty()).then(|| lang.to_string());
+        let (sha, r) = (sha.clone(), root.clone());
         let (tx, waiting) = std::sync::mpsc::channel();
         let h = std::thread::spawn(move || {
             deep::prepare(&settings, bytes, &sha, &r, &move |_| {
@@ -54,7 +57,7 @@ fn ends_within(h: &JoinHandle<Result<(), String>>, within: Duration) -> bool {
 fn deleting_the_project_stops_its_analysis() {
     let d = tempfile::Builder::new().prefix("ca").tempdir().unwrap();
     let start = waiting_analysis(d.path(), b"a program its project was deleted from");
-    let (root, a) = start("game");
+    let (root, a) = start("game", "");
     assert!(!ends_within(&a, Duration::from_secs(3)), "it stopped while its project was there");
     std::fs::remove_file(root.join(MANIFEST)).unwrap();
     assert!(ends_within(&a, Duration::from_secs(30)), "the analysis kept going");
@@ -66,10 +69,25 @@ fn deleting_the_project_stops_its_analysis() {
 fn another_projects_build_keeps_the_analysis_going() {
     let d = tempfile::Builder::new().prefix("ca").tempdir().unwrap();
     let start = waiting_analysis(d.path(), b"a program two projects rebuild");
-    let (first, a) = start("first");
-    let (second, b) = start("second");
+    let (first, a) = start("first", "");
+    let (second, b) = start("second", "");
     std::fs::remove_file(first.join(MANIFEST)).unwrap();
     assert!(!ends_within(&a, Duration::from_secs(5)), "the second project still needs it");
     std::fs::remove_file(second.join(MANIFEST)).unwrap();
     assert!(ends_within(&a, Duration::from_secs(30)) && ends_within(&b, Duration::from_secs(30)), "the analysis kept going");
+}
+
+/// A project waiting for another analysis of the same program (another Ghidra language) doesn't
+/// keep this one going.
+#[test]
+fn another_analysis_of_the_program_doesnt_keep_it_going() {
+    let d = tempfile::Builder::new().prefix("ca").tempdir().unwrap();
+    let start = waiting_analysis(d.path(), b"a program analysed two ways");
+    let (first, a) = start("first", "");
+    let (second, b) = start("second", "x86:LE:32:default");
+    std::fs::remove_file(first.join(MANIFEST)).unwrap();
+    assert!(ends_within(&a, Duration::from_secs(30)), "the second project's analysis kept this one going");
+    assert!(!b.is_finished(), "the second project's own analysis stopped too");
+    std::fs::remove_file(second.join(MANIFEST)).unwrap();
+    assert!(ends_within(&b, Duration::from_secs(30)), "the analysis kept going");
 }

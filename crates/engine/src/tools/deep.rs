@@ -116,17 +116,19 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
 /// has been deleted (#948).
 pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, project: &Path, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
     let (cfg, digest) = config(settings, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
-    let _asked = Asked::new(sha256, project);
-    let stop = || CLOSING.load(Ordering::SeqCst) || !wanted(sha256);
+    // The analysis is the one Ghidra saves: the program, its settings and the store, not the program alone.
+    let analysis = ghidra::project_cache_dir(&cfg.store_dir, sha256, &digest);
+    let _asked = Asked::new(&analysis, project);
+    let stop = || CLOSING.load(Ordering::SeqCst) || !wanted(&analysis);
     ghidra::analyse(&cfg, bytes, sha256, &digest, &stop, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// One [`prepare`] under way, counted and recorded until it ends, however it ends.
-struct Asked((String, PathBuf));
+struct Asked((PathBuf, PathBuf));
 
 impl Asked {
-    fn new(sha256: &str, project: &Path) -> Self {
-        let asked = (sha256.to_string(), project.to_path_buf());
+    fn new(analysis: &Path, project: &Path) -> Self {
+        let asked = (analysis.to_path_buf(), project.to_path_buf());
         WANTED.lock().unwrap_or_else(PoisonError::into_inner).push(asked.clone());
         ANALYSING.fetch_add(1, Ordering::SeqCst);
         Asked(asked)
@@ -146,17 +148,17 @@ impl Drop for Asked {
     }
 }
 
-/// Whether a project that asked [`prepare`] for this program's analysis still exists.
-fn wanted(sha256: &str) -> bool {
-    let projects: Vec<PathBuf> = WANTED.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|(s, _)| s == sha256).map(|(_, p)| p.clone()).collect();
+/// Whether a project that asked [`prepare`] for this analysis still exists.
+fn wanted(analysis: &Path) -> bool {
+    let projects: Vec<PathBuf> = WANTED.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|(a, _)| a == analysis).map(|(_, p)| p.clone()).collect();
     projects.iter().any(|p| p.join(MANIFEST).is_file())
 }
 
 /// Analyses [`prepare`] has under way, and whether they are being stopped.
 static ANALYSING: AtomicUsize = AtomicUsize::new(0);
 static CLOSING: AtomicBool = AtomicBool::new(false);
-/// The program (by sha256) and project of each [`prepare`] under way.
-static WANTED: Mutex<Vec<(String, PathBuf)>> = Mutex::new(Vec::new());
+/// The analysis (its saved project folder) and the asking project of each [`prepare`] under way.
+static WANTED: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
 
 /// The app is closing: stop every analysis [`prepare`] started and wait up to `within` for them to
 /// end, as nothing acts on a process's drop once the app has gone (#946).
