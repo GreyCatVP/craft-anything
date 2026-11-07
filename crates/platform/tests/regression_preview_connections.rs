@@ -3,6 +3,8 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
+/// The server refuses connections beyond its limit with a 503, and dropping it releases the
+/// listener promptly, closing excess connections without a full response.
 #[test]
 fn regression_preview_limits_connections_and_releases_listener() {
     let dir = tempfile::tempdir().unwrap();
