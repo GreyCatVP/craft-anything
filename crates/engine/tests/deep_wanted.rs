@@ -28,7 +28,15 @@ fn waiting_analysis(d: &Path, bytes: &'static [u8]) -> impl Fn(&str) -> (PathBuf
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(MANIFEST), "{}").unwrap();
         let (settings, sha, r) = (settings.clone(), sha.clone(), root.clone());
-        (root, std::thread::spawn(move || deep::prepare(&settings, bytes, &sha, &r, &|_| {})))
+        let (tx, waiting) = std::sync::mpsc::channel();
+        let h = std::thread::spawn(move || {
+            deep::prepare(&settings, bytes, &sha, &r, &move |_| {
+                let _ = tx.send(());
+            })
+        });
+        // Its first line comes once it's recorded and waiting for the lock.
+        assert!(waiting.recv_timeout(Duration::from_secs(30)).is_ok(), "the analysis never began waiting");
+        (root, h)
     }
 }
 

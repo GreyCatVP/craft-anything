@@ -116,17 +116,34 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
 /// has been deleted (#948).
 pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, project: &Path, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
     let (cfg, digest) = config(settings, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
-    let asked = (sha256.to_string(), project.to_path_buf());
-    WANTED.lock().unwrap_or_else(PoisonError::into_inner).push(asked.clone());
-    ANALYSING.fetch_add(1, Ordering::SeqCst);
+    let _asked = Asked::new(sha256, project);
     let stop = || CLOSING.load(Ordering::SeqCst) || !wanted(sha256);
-    let result = ghidra::analyse(&cfg, bytes, sha256, &digest, &stop, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string());
-    ANALYSING.fetch_sub(1, Ordering::SeqCst);
-    let mut w = WANTED.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(i) = w.iter().position(|a| *a == asked) {
-        w.remove(i);
+    ghidra::analyse(&cfg, bytes, sha256, &digest, &stop, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// One [`prepare`] under way, counted and recorded until it ends, however it ends.
+struct Asked((String, PathBuf));
+
+impl Asked {
+    fn new(sha256: &str, project: &Path) -> Self {
+        let asked = (sha256.to_string(), project.to_path_buf());
+        WANTED.lock().unwrap_or_else(PoisonError::into_inner).push(asked.clone());
+        ANALYSING.fetch_add(1, Ordering::SeqCst);
+        Asked(asked)
     }
-    result
+}
+
+impl Drop for Asked {
+    fn drop(&mut self) {
+        ANALYSING.fetch_sub(1, Ordering::SeqCst);
+        // Never `lock`, which may unwind: a drop can run while unwinding already.
+        if let Ok(w) = WANTED.lock_unless(&|| false) {
+            let mut w = w.unwrap_or_else(PoisonError::into_inner);
+            if let Some(i) = w.iter().position(|a| *a == self.0) {
+                w.remove(i);
+            }
+        }
+    }
 }
 
 /// Whether a project that asked [`prepare`] for this program's analysis still exists.
