@@ -1066,7 +1066,8 @@ Gaps found while using the app for real projects.
       Noto Sans CJK while the rest of the word is DM Sans. Bundle a DM Sans build that has the
       Vietnamese set (with its OFL notice) so Tiếng Việt renders in one face
 - [x] Deleting a project stops the Ghidra analysis its build started, unless another project's
-      build still waits for it (#948). Not run against a live Ghidra
+      build still waits for it (#948). Run against Ghidra 12.1.4 on Windows: stopped 0.6 s after
+      the delete, no `java` left
 - [ ] A Stop button for Ghidra's analysis while the project stays (pausing lets it go on, so
       nothing is lost; today only deleting the project or closing the app stops it) (#948)
       — claimed: justinjohn0306, branch bugfix/r2.9-stop-ghidra-analysis

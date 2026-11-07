@@ -77,6 +77,47 @@ fn another_projects_build_keeps_the_analysis_going() {
     assert!(ends_within(&a, Duration::from_secs(30)) && ends_within(&b, Duration::from_secs(30)), "the analysis kept going");
 }
 
+/// Real Ghidra, only where `CRAFT_ANYTHING_TEST_GHIDRA` names the engine store holding `ghidra/`
+/// and `jdk/` (the app's is `%APPDATA%/craft-anything/engines`): deleting the project while Ghidra
+/// analyses this test program stops it. Its analysis goes to a temp folder. Check afterwards that
+/// no `java` is left running.
+#[test]
+fn live_ghidra_stops_when_its_project_is_deleted() {
+    let Some(store) = std::env::var_os("CRAFT_ANYTHING_TEST_GHIDRA").map(PathBuf::from) else { return };
+    // Ghidra rejects project paths with a folder that starts with a dot, as tempdir()'s do.
+    let d = tempfile::Builder::new().prefix("ghidra-live").tempdir().unwrap();
+    let mut settings = craft_anything_engine::testing::session().settings.clone();
+    settings.engines.store_dir = Some(d.path().join("store"));
+    settings.engines.ghidra.install_dir = Some(ghidra::get::headless(None, &store).expect("Ghidra in the engine store"));
+    settings.engines.ghidra.java_home = ghidra::get::java_home(None, &store);
+    let bytes: &'static [u8] = std::fs::read(std::env::current_exe().unwrap()).unwrap().leak();
+    let root = d.path().join("project");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join(MANIFEST), "{}").unwrap();
+    let (tx, said) = std::sync::mpsc::channel::<String>();
+    let r = root.clone();
+    let h = std::thread::spawn(move || {
+        let sha = craft_anything_evidence::sha256_hex(bytes);
+        deep::prepare(&settings, bytes, &sha, &r, &move |m| {
+            let _ = tx.send(m.to_string());
+        })
+    });
+    // Its first line once Ghidra has run for 10 s.
+    let until = Instant::now() + Duration::from_secs(120);
+    while !said.recv_timeout(Duration::from_secs(1)).is_ok_and(|m| m.contains("min so far")) {
+        if h.is_finished() {
+            panic!("Ghidra ended before it got going: {:?}", h.join().unwrap());
+        }
+        assert!(Instant::now() < until, "Ghidra never got going");
+    }
+    let deleted = Instant::now();
+    std::fs::remove_file(root.join(MANIFEST)).unwrap();
+    assert!(ends_within(&h, Duration::from_secs(30)), "Ghidra kept going");
+    let stopped = h.join().unwrap();
+    assert!(stopped.as_ref().is_err_and(|e| e.contains("cancel")), "{stopped:?}");
+    eprintln!("stopped {:.1} s after the project was deleted", deleted.elapsed().as_secs_f32());
+}
+
 /// A project waiting for another analysis of the same program (another Ghidra language) doesn't
 /// keep this one going.
 #[test]
