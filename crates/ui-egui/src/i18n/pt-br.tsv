@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	Neste projeto, {kind}: {choice}.
 Couldn't change the approvals:	Não foi possível alterar as aprovações:
 What the builder may do without asking you, in this project.	O que o agente pode fazer sem perguntar a você, neste projeto.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	A opção Padrão segue o Modo automático: com ele ativado, o que pode ser desfeito é executado e o restante é recusado; com ele desativado, o agente pergunta antes.
+Context budget (tokens)	Orçamento de contexto (tokens)
+Auto	Automático
+How much of the conversation is sent before older parts are trimmed. Auto: what the model's server says it has room for, or a safe default when it doesn't say.	Quanto da conversa é enviado antes de as partes mais antigas serem cortadas. Automático: o espaço que o servidor do modelo diz ter, ou um padrão seguro quando ele não diz.
+Set an AI's context budget	Definir o orçamento de contexto de uma IA

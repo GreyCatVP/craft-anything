@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	在这个项目中，{kind}：{choice}。
 Couldn't change the approvals:	无法更改审批：
 What the builder may do without asking you, in this project.	在这个项目中，构建助手无需问你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	默认跟随自动模式：开启时，可撤销的操作会执行，其余的会被拒绝；关闭时，构建助手会询问。
+Context budget (tokens)	上下文预算（令牌）
+Auto	自动
+How much of the conversation is sent before older parts are trimmed. Auto: what the model's server says it has room for, or a safe default when it doesn't say.	在截短较早内容之前发送多少对话。自动：模型服务器所说的容量，若它不说则用安全的默认值。
+Set an AI's context budget	设置 AI 的上下文预算

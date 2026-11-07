@@ -75,6 +75,9 @@ pub struct OpenAi {
     /// The AI's own limit on one streamed answer (a slow local model can need hours); none uses
     /// the defaults.
     pub stream_limit: Option<std::time::Duration>,
+    /// A server on this computer or its network, asked for its context window in its own ways;
+    /// any other is asked only through its model list (see [`crate::window`]).
+    pub on_this_network: bool,
 }
 
 impl OpenAi {
@@ -105,6 +108,7 @@ impl OpenAi {
             auto_react: true,
             openrouter: false,
             stream_limit: None,
+            on_this_network: false,
         }
     }
 
@@ -238,6 +242,15 @@ impl ChatModel for OpenAi {
 
     fn model(&self) -> String {
         self.model.clone()
+    }
+
+    fn context_window(&self) -> Option<crate::window::Window> {
+        // OpenAI's and Gemini's model lists don't say a window, so they aren't asked.
+        if !self.on_this_network && !self.openrouter {
+            return None;
+        }
+        let server = crate::window::Server { base: &self.base_url, model: &self.model };
+        crate::window::read_from_server(&server, &self.headers(), self.on_this_network)
     }
 }
 

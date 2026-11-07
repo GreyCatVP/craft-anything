@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	В этом проекте {kind}: {choice}.
 Couldn't change the approvals:	Не удалось изменить разрешения:
 What the builder may do without asking you, in this project.	Что конструктор может делать в этом проекте, не спрашивая вас.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	«По умолчанию» следует авторежиму: когда он включён, то, что можно отменить, выполняется, а остальное отклоняется; когда выключен, конструктор спрашивает.
+Context budget (tokens)	Бюджет контекста (токены)
+Auto	Авто
+How much of the conversation is sent before older parts are trimmed. Auto: what the model's server says it has room for, or a safe default when it doesn't say.	Сколько разговора отправляется, прежде чем старые части сокращаются. Авто: столько, сколько, по словам сервера модели, в него помещается, или безопасное значение, если он не говорит.
+Set an AI's context budget	Задать бюджет контекста ИИ
