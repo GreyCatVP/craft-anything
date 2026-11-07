@@ -22,7 +22,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             id: "runtime_ui_read",
             title: "Read an app's screen",
-            summary: "Read the UI tree of a running app by its pid: every window's controls in order with their depth, role, title, identifier and value (macOS: the accessibility tree, optionally with a screenshot; Windows: UI Automation, also the class, position and size, and whether it's enabled; window_id picks one window by its handle). Password fields' values are never read; long values are cut at 500 characters. Other hosts get a clear wrong_os result.",
+            summary: "Read the UI tree of a running app by its pid: every window's controls in order with their depth, role, title, identifier and value (macOS: the accessibility tree, optionally with a picture of the app's largest visible window, which needs Screen Recording permission; Windows: UI Automation, also the class, position and size, and whether it's enabled; window_id picks one window by its handle). Password fields' values are never read; long values are cut at 500 characters. Other hosts get a clear wrong_os result.",
             beginner: "See the buttons, labels and fields of a running app.",
             toolset: runtime,
             effects,
@@ -166,8 +166,7 @@ pub enum Breakpoint {
 pub(super) fn ui_tree(ctx: &mut Ctx<'_>, pid: u32, max_nodes: usize) -> Result<Value, ToolError> {
     #[cfg(target_os = "macos")]
     {
-        let request =
-            serde_json::json!({"command": "observe", "pid": pid, "window_id": null, "screenshot": false, "accessibility": true, "max_nodes": max_nodes});
+        let request = serde_json::json!({"command": "observe", "pid": pid, "window_id": null, "accessibility": true, "max_nodes": max_nodes});
         macos::run_helper(ctx, request, 10_000)
     }
     #[cfg(windows)]
@@ -302,6 +301,7 @@ fn lldb_script(p: &ObserveCallsParams) -> String {
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use super::super::web_common::{Image, encode_png, png_artifact};
     use super::*;
     use craft_anything_evidence::{Authority, Confidence, Coverage, Environment, EvidenceBuilder, Limitation, Subject, host_triple};
     use craft_anything_platform::process::{Process, StdinMode};
@@ -455,22 +455,62 @@ mod macos {
         }
     }
 
+    /// The inline PNG artifact for a window picture, with its size and hash.
+    pub(super) fn screenshot_artifact(shot: craft_anything_platform::window::WindowShot) -> Result<Value, ToolError> {
+        let png = encode_png(&Image { width: shot.width, height: shot.height, rgba: shot.rgba })?;
+        png_artifact(&png)
+    }
+
+    /// Picture the largest visible window of `pid`. A missing Screen Recording permission or no
+    /// visible window is an error, never an empty picture (#248).
+    fn screenshot(pid: u32) -> Result<Value, ToolError> {
+        if let Err(e) = craft_anything_platform::window::check_can_see_windows() {
+            return Err(ToolError::new(e.code, "The app's window was not pictured: this app can't see other windows without Screen Recording permission.")
+                .with_remediation(e.remediation.unwrap_or_else(|| {
+                    "Allow the app running Craft Anything in System Settings → Privacy & Security → Screen Recording, restart that app, then run this again."
+                        .to_string()
+                })));
+        }
+        let shot = craft_anything_platform::window::capture_window(pid, None).map_err(|e| {
+            if e.code == ErrorCode::NotFound {
+                ToolError::new(ErrorCode::NotFound, format!("The app (pid {pid}) has no visible window to picture."))
+                    .with_remediation("Open a window in the app, bring it to the front, then run this again.")
+            } else {
+                e
+            }
+        })?;
+        screenshot_artifact(shot)
+    }
+
+    /// What the evidence says was read, so a skipped tree or a taken picture shows in the summary.
+    pub(super) fn read_summary(pid: u32, nodes: usize, accessibility: bool, screenshot: bool) -> String {
+        match (accessibility, screenshot) {
+            (true, true) => format!("Read {nodes} accessibility node(s) and pictured the app's window (pid {pid})."),
+            (true, false) => format!("Read {nodes} accessibility node(s) from pid {pid}."),
+            (false, true) => format!("Skipped the accessibility tree and pictured the app's window (pid {pid})."),
+            (false, false) => format!("Skipped the accessibility tree for pid {pid}, as requested."),
+        }
+    }
+
     /// Observe a running macOS app through the native helper and return its UI evidence.
     /// Records the accessibility selection and reports a deliberately skipped tree in the
-    /// summary; with accessibility disabled, the helper needs no Accessibility permission.
+    /// summary; with accessibility disabled, the helper needs no Accessibility permission. A
+    /// requested picture is taken from the app's largest visible window and needs Screen
+    /// Recording permission.
     pub fn runtime_ui_read(ctx: &mut Ctx<'_>, p: ObserveUiParams) -> Result<ToolOutput, ToolError> {
         let pid = p.pid.ok_or_else(|| ToolError::invalid("pid is required to read a running app's UI"))?;
-        let request = json!({"command": "observe", "pid": pid, "window_id": p.window_id, "screenshot": p.screenshot, "accessibility": p.accessibility, "max_nodes": p.max_nodes});
-        let result = run_helper(ctx, request, 10_000)?;
+        let request = json!({"command": "observe", "pid": pid, "window_id": p.window_id, "accessibility": p.accessibility, "max_nodes": p.max_nodes});
+        let mut result = run_helper(ctx, request, 10_000)?;
+        if p.screenshot {
+            let picture = screenshot(pid)?;
+            let fields = result.as_object_mut().ok_or_else(|| ToolError::internal("the accessibility helper did not return an object"))?;
+            fields.insert("screenshot".into(), picture);
+        }
         let nodes = result.get("nodes").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
-        let summary = if p.accessibility {
-            format!("Read {nodes} accessibility node(s) from pid {pid}.")
-        } else {
-            format!("Skipped the accessibility tree for pid {pid}, as requested.")
-        };
+        let summary = read_summary(pid, nodes, p.accessibility, p.screenshot);
         let b =
             EvidenceBuilder::new("runtime_ui_read", Subject { kind: "ui".into(), sha256: None, name: Some(format!("pid {pid}")) }, env(ctx, "accessibility"))
-                .params(json!({"pid": pid, "max_nodes": p.max_nodes, "screenshot": p.screenshot, "accessibility": p.accessibility}))
+                .params(json!({"pid": pid, "max_nodes": p.max_nodes, "screenshot": p.screenshot, "accessibility": p.accessibility, "window_id": p.window_id}))
                 .result(result)
                 .summary(summary)
                 .confidence(Confidence::Observed)
@@ -772,6 +812,32 @@ mod tests {
         // Any other refusal is still an error, not an empty tree.
         let err = super::macos::helper_error(&json!({"error": "unknown command"})).expect("a refusal is an error");
         assert_eq!(err.code, ErrorCode::Internal);
+    }
+
+    /// #248: a requested picture must be inline PNG evidence with its size and hash.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_requested_picture_is_inline_png_evidence() {
+        use craft_anything_platform::window::WindowShot;
+        let shot = WindowShot { title: "Calculator".into(), app: "Calculator".into(), width: 2, height: 1, rgba: vec![255, 0, 0, 255, 0, 0, 255, 255] };
+        let art = super::macos::screenshot_artifact(shot).expect("a small picture is encoded");
+        assert_eq!(art["media_type"], "image/png");
+        assert_eq!(art["width"], 2);
+        assert_eq!(art["height"], 1);
+        assert!(art["bytes"].as_u64().is_some_and(|b| b > 0), "{art}");
+        assert!(art["base64"].as_str().is_some_and(|b| !b.is_empty()), "{art}");
+        assert!(art["sha256"].as_str().is_some_and(|s| s.len() == 64), "{art}");
+    }
+
+    /// #248: the summary must not hide a skipped tree or a picture that was taken.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_summary_says_what_was_read_and_pictured() {
+        use super::macos::read_summary;
+        assert_eq!(read_summary(7, 3, true, false), "Read 3 accessibility node(s) from pid 7.");
+        assert_eq!(read_summary(7, 3, true, true), "Read 3 accessibility node(s) and pictured the app's window (pid 7).");
+        assert_eq!(read_summary(7, 0, false, true), "Skipped the accessibility tree and pictured the app's window (pid 7).");
+        assert_eq!(read_summary(7, 0, false, false), "Skipped the accessibility tree for pid 7, as requested.");
     }
 
     /// #251: the callback had a literal backslash and `n` between its Python statements, which lldb

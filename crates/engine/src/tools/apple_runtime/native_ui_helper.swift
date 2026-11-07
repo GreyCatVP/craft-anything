@@ -5,7 +5,7 @@
 // between reads. It is our own clean-room code; it names no third-party product.
 //
 // Request shapes:
-//   {"command":"observe","pid":1234,"window_id":null,"screenshot":false,"accessibility":true,"max_nodes":5000}
+//   {"command":"observe","pid":1234,"window_id":null,"accessibility":true,"max_nodes":5000}
 //   {"command":"walkthrough","pid":1234,"steps":[{"action":"AXPress","element":"Save"}],"max_nodes":5000}
 //
 // Compiled lazily on the host with `xcrun swiftc`; never shipped as a binary.
@@ -17,7 +17,6 @@ struct Request: Decodable {
     var command: String
     var pid: Int32?
     var window_id: UInt64?
-    var screenshot: Bool?
     var accessibility: Bool?
     var max_nodes: Int?
     var steps: [Step]?
