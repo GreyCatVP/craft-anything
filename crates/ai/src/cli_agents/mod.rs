@@ -334,17 +334,18 @@ fn access_for(builder: bool, deep: bool, question: bool) -> Access {
     }
 }
 
-/// True when `program`'s help mentions every required flag (10 s limit, stdin closed).
-pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> bool {
+/// Whether `program`'s help mentions every required flag (10 s limit, stdin closed); `None` when
+/// the help couldn't be read (the program is missing, or too slow).
+pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> Option<bool> {
     if needed.is_empty() {
-        return true;
+        return Some(true);
     }
     match Process::new(program).args(help_args).timeout(Duration::from_secs(10)).stdout_cap(256 * 1024).run() {
         Ok(out) => {
             let text = format!("{}{}", out.stdout_text(), out.stderr_text());
-            needed.iter().all(|f| text.contains(f))
+            Some(needed.iter().all(|f| text.contains(f)))
         }
-        Err(_) => false,
+        Err(_) => None,
     }
 }
 
@@ -896,13 +897,18 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     }
     let (help, needed) = adapter.required_flags();
     if !needed.is_empty() {
-        let ok = match remote {
-            Some(_) => true, // can't cheaply check a remote CLI; its errors are streamed back
+        let checked = match remote {
+            Some(_) => Some(true), // can't cheaply check a remote CLI; its errors are streamed back
             None => {
+                // Only a help that was read is kept: a probe that couldn't run is tried next turn.
                 let mut v = verified.lock().unwrap_or_else(PoisonError::into_inner);
-                *v.get_or_insert_with(|| verify_flags(&program, help, needed))
+                if v.is_none() {
+                    *v = verify_flags(&program, help, needed);
+                }
+                *v
             }
         };
+        let ok = checked == Some(true);
         if !ok && adapter.plain_fallback() {
             let _ = tx.send(AgentEvent::Status {
                 text: format!("{program}'s help doesn't list {} here, so it runs with the plain adapter (prompt in, text out).", needed.join(" / ")),
@@ -912,7 +918,8 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
             // Forget it before retry chooses between the original request and a continuation.
             *session.lock().unwrap_or_else(PoisonError::into_inner) = None;
         } else if !ok {
-            if let Some((message, remediation)) = adapter.missing_flags_error() {
+            // Only a help that was read and lacks the flags says which version this is (#1111).
+            if let Some((message, remediation)) = adapter.missing_flags_error().filter(|_| checked == Some(false)) {
                 let _ = tx.send(AgentEvent::Error { message: message.into(), remediation: Some(remediation.into()), log: None });
                 return nothing_done(&name);
             }
@@ -2715,6 +2722,25 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         let said = |w: &str| all.iter().any(|e| matches!(e, AgentEvent::Status { text } if text.contains(w)));
         assert!(!said("trying it anyway"), "{all:?}");
         assert!(!ran.exists(), "OpenCode 1.x ran anyway: {all:?}");
+    }
+
+    /// A help that couldn't be read (here, no program) isn't taken for OpenCode 1.x: the run goes
+    /// on to say the program is missing.
+    #[test]
+    fn a_missing_opencode_is_not_called_version_1() {
+        let config =
+            BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = BackendOptions { command: Some("no-such-opencode-xyz".into()), ..Default::default() };
+        let mut c = CliConversation::new(CliSpec::new(config, options, false, None));
+        c.send("What does this program do?");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut all = Vec::new();
+        while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+            all.extend(c.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(all.iter().any(|e| matches!(e, AgentEvent::Error { message, .. } if message.contains("isn't installed"))), "{all:?}");
+        assert!(!all.iter().any(|e| matches!(e, AgentEvent::Error { message, .. } if message.contains("1.x"))), "{all:?}");
     }
 
     /// A fork's own agent: JSON lines of `{"say": …}`, registered under its id.
