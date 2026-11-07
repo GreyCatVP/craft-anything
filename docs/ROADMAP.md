@@ -737,6 +737,9 @@ Owner: open · Status: in progress
 - [ ] A turn stopped before OpenCode's first event leaves no session id to delete: OpenCode names its
       session only in that event, so the session it may already have made stays (#1115, review on
       #1176). Needs a session id known before the run (one we create and pass in), if OpenCode allows it
+- [ ] Stop with a plain error when the `opencode` found is 1.x (its `run --help` has no
+      `--standalone`), instead of running it anyway and showing its usage (#1111)
+      — claimed: Agapenordev, branch bugfix/r2.2-opencode-v1-refusal
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
