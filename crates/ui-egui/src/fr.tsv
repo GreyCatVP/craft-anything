@@ -1443,3 +1443,21 @@ yesterday	hier
 … {} older	… {} plus anciens
 Drag to give the plan more or less room; double-click to reset	Faites glisser pour donner plus ou moins de place au plan ; double-cliquez pour rétablir
 Copy the message	Copier le message
+Choose what the builder's approvals get	Choisir ce que reçoivent les autorisations du constructeur
+Reading the web	Lecture du web
+Other commands	Autres commandes
+Files outside the project	Fichiers hors du projet
+Pushing and publishing	Push et publication
+Deleting outside the project	Suppressions hors du projet
+System changes	Modifications du système
+Other tools	Autres outils
+Allow	Autoriser
+Ask	Demander
+Refuse	Refuser
+After /approvals, type a kind and allow, ask, refuse or default, like /approvals publish ask. Kinds: {kinds}.	Après /approvals, tapez un type et allow, ask, refuse ou default, par exemple /approvals publish ask. Types : {kinds}.
+There's no kind called {name}. Kinds: {kinds}.	Il n'y a pas de type {name}. Types : {kinds}.
+Approvals	Autorisations
+In this project, {kind}: {choice}.	Dans ce projet, {kind} : {choice}.
+Couldn't change the approvals:	Impossible de modifier les autorisations :
+What the builder may do without asking you, in this project.	Ce que le constructeur peut faire sans vous demander, dans ce projet.
+Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Par défaut suit le mode automatique : activé, ce qui peut être annulé se fait et le reste est refusé ; désactivé, le constructeur demande.

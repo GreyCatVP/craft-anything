@@ -80,6 +80,31 @@ fn a_tools_own_project_option_reaches_the_tool() {
     assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 0, "no investigation was created in the folder");
 }
 
+/// A builder that runs our CLI from its shell is an agent to the tools, so it can't allow itself to
+/// push; the person, running the same command, can.
+#[test]
+fn the_cli_inside_an_agent_cant_loosen_a_projects_approvals() {
+    use craft_anything_engine::workspace::{ActionKind, Approval, TargetRef, Workspace};
+    let cfg = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(dir.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let project = ws.root.to_str().unwrap().to_string();
+    let args = ["project-approvals-set", "--project", project.as_str(), "--kind", "publish", "--mode", "allow"];
+    let run = |agent: bool| {
+        let p = Process::new(env!("CARGO_BIN_EXE_craft-anything-cli")).args(args).env("CRAFT_ANYTHING_CONFIG_DIR", cfg.path());
+        let p = if agent { p.env(craft_anything_engine::AGENT_ENV, "1") } else { p };
+        p.timeout(Duration::from_secs(60)).run().unwrap()
+    };
+    let saved = || Workspace::open(&ws.root).unwrap().manifest.approvals.get(&ActionKind::Publish).copied();
+    let refused = run(true);
+    assert!(!refused.success, "{}", refused.stdout_text());
+    assert!(refused.stdout_text().contains("can't loosen"), "{}", refused.stdout_text());
+    assert_eq!(saved(), None, "nothing changed");
+    let allowed = run(false);
+    assert!(allowed.success, "{}{}", allowed.stdout_text(), allowed.stderr_text());
+    assert_eq!(saved(), Some(Approval::Allow));
+}
+
 #[test]
 fn target_tools_open_then_close_and_project_journal() {
     let cfg = tempfile::tempdir().unwrap();

@@ -1857,19 +1857,33 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
             app.pause();
         }
         if out.send {
-            // A question (the switch, or /btw) is answered without building.
-            match crate::just_ask::question_in(&app.state.project_input, app.state.just_ask) {
-                Ok(Some(q)) => {
+            // /approvals changes a choice and sends nothing.
+            match crate::approvals::command_in(&app.state.project_input) {
+                Some(Ok((kind, choice))) => {
                     app.state.project_input.clear();
-                    app.ask_about_build(q);
+                    if let Some(root) = app.workspace.as_ref().map(|w| w.root.clone()) {
+                        app.set_approval(&root, kind, choice);
+                    }
                 }
-                Ok(None) => app.send_message(),
-                // It stays in the box to be fixed.
-                Err(why) => app.toast(why, true),
+                Some(Err(why)) => app.toast(why, true),
+                None => send_or_ask(app),
             }
         }
         questions_switch(app, ui);
     });
+}
+
+/// Send what's in the prompt box: a question (the switch, or /btw) is answered without building.
+fn send_or_ask(app: &mut CraftApp) {
+    match crate::just_ask::question_in(&app.state.project_input, app.state.just_ask) {
+        Ok(Some(q)) => {
+            app.state.project_input.clear();
+            app.ask_about_build(q);
+        }
+        Ok(None) => app.send_message(),
+        // It stays in the box to be fixed.
+        Err(why) => app.toast(why, true),
+    }
 }
 
 /// Under the prompt box: what sending does (ask for a change, or just ask about the build), and
@@ -1883,7 +1897,10 @@ fn questions_switch(app: &mut CraftApp, ui: &mut Ui) {
     ui.add_space(4.0);
     let (sending, asking) = (["Change it", "Just ask"], ["Ask me", "Decide yourself"]);
     let title = widgets::label_galley(ui, &tr(QUESTIONS_TITLE), theme::SMALL, t.text_dim).size().x;
-    let gaps = ui.spacing().item_spacing.x * 3.0;
+    // The approvals menu's link, the space before it and one more item gap.
+    let approvals = widgets::label_galley(ui, &tr("Approvals"), theme::BODY, t.text).size().x + 8.0;
+    let gaps = ui.spacing().item_spacing.x * 4.0;
+    let title = title + approvals;
     // Side by side when both switches fit, else one under the other (a longer language, a narrow window).
     let fits = widgets::segmented_width(ui, &sending) + widgets::segmented_width(ui, &asking) + title + gaps <= ui.available_width();
     let hint = |ui: &mut Ui| {
@@ -1914,6 +1931,9 @@ const QUESTIONS_TITLE: &str = "Builder's questions:";
 
 fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engine::workspace::Questions, root: &Path, t: &Tokens) {
     use craft_anything_engine::workspace::Questions;
+    // Right to left: the approvals menu at the end of the row.
+    crate::approvals::menu(app, ui, root);
+    ui.add_space(8.0);
     {
         let sel = usize::from(now == Questions::Decide);
         if let Some(i) = widgets::segmented(ui, &["Ask me", "Decide yourself"], sel, 24.0) {

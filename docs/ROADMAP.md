@@ -167,6 +167,20 @@ cheapest help we can give anyone, so nothing below should hold it up for long.
 
 ### R5.2 Keeping contributions moving
 Owner: maintainers · Status: in progress
+- [x] Fix PR #1030's Windows descendant fixture startup and stop the watched launch before
+      startup assertions can fail; cover the failure cleanup path
+      — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
+- [ ] Run PR #1030's shell-free parent/descendant fixture and startup-timeout cleanup test
+      on Windows; the contributor reproduced startup failure and leaked processes on 07671fe
+- [x] Clarify PR #1030's test Rustdoc: post-stop heartbeat sampling, child-fixture guard,
+      and the direct-run no-write check
+      — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
+- [x] Address PR #1030 review: take the heartbeat baseline after stopping, guard the descendant
+      stand-in against direct ignored-test runs, and document the test helpers
+      — claimed: Codex, branch bugfix/r5.2-watched-launch-tests
+- [ ] `regression_preview_limits_connections_and_releases_listener` (platform) fails on macOS
+      with `Invalid argument` in its socket fixture, also reported before PR #1030's review fixes.
+      Investigate the fixture separately from the watched descendant shutdown test
 Review comes before new work while the queue is long, smallest and clean PRs first. A PR is merged
 only when it's green and a maintainer has fully reviewed it, code as well as wording.
 - [ ] Maintainers: protect `main` (PRs required, squash only); the only ruleset covers `release`
@@ -197,6 +211,9 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       by then made a cancelled run, not a hand-off. The test now waits for the launcher's mark, and
       a kill that finds the program already exited reports its exit, not a cancel
       — claimed: 00xJS, branch test/r5.2-hand-off-race
+- [ ] `website_tools::tests::a_browser_that_exits_at_once_is_reported_at_once` (engine) failed once
+      on Windows with the whole engine suite running (66 s under load) and passes alone, three
+      times in a row. Find what it times
 - [ ] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes fails when several crates'
       tests run at once and passes alone: it writes a script and runs it straight away, which a
       busy machine can refuse while another test's child still holds the file open
@@ -217,6 +234,7 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       it can still hang the console host on Windows Server 2022 (only a timeout ends the tree)
 - [ ] `process::launch_tests::a_watched_program_can_be_stopped` leaves its `sleep 30` (Windows:
       `ping -n 30`) running, on `main` too: `stop` ends the shell but not what the shell started
+      — in PR #1027
 - [x] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes failed when several crates'
       tests ran at once: a script just written can't start while another thread's child still
       holds it open ("Text file busy"). #787 tries again: on Linux 4 of 72 runs failed before
@@ -226,8 +244,8 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       Compare with the folder's canonical path
 - [ ] Revisit the two advisory exceptions in `deny.toml`: `rsa` (no fix; we only verify with public
       keys) when rsa 0.10 lands, and unmaintained `zbus_names`/`zvariant` (Linux-only via keyring
-      and accesskit) when those move on. `deny.toml`'s comments say this is tracked in R0.3: point
-      them here
+      and accesskit) when those move on. `deny.toml`'s comments pointed at R0.3, which never held
+      them; they name this line now — claimed: kuseidos, branch docs/r5.2-deny-points-at-its-own-roadmap-line
 - [ ] Check whether the release workflows still run actions that target Node.js 20. None is named
       here any more: every job calls `storytold/craft-common-actions@main`, so a fix belongs there
 - [x] Correct STATUS.md's obsolete GUI-only limit: document the shared project feed, engine
@@ -331,9 +349,14 @@ been run live.
       tool, with only words before or between them, now runs them all (`fenced_calls`, ids
       `react_N` as other text calls); words after the last fence, other code, an unclosed fence or
       a tool that wasn't offered keep it text (#753)
-- [ ] A call followed by a summary isn't run, and the model isn't told: in a second live run of
+- [x] A call followed by a summary isn't run, and the model is told to retry it without trailing
+      text: in a second live run of
       #417's case both turns put "### Summary:" after their one `json` fence, nothing ran, and the
-      build stopped after two turns with no files. Say in the next message that it wasn't run
+      build stopped after two turns with no files. The next message now says that it wasn't run
+      — PR #1028, branch bugfix/r5.4-fenced-call-summary
+- [x] Keep the retry condition when `Action:` or `Final Answer:` appears between fenced
+      calls, without rejecting ordinary words between calls (PR #1031 review)
+      — claimed: Codex, branch bugfix/r5.4-fenced-call-followup
 - [ ] A local builder spends its rounds on the project file and never writes the app: run 4 had a
       compiling `Cargo.toml` by check 3, its last, with `main.rs` still "Hello, world!". See whether
       more rounds get there, or whether a small model needs the window and the `--screenshot`
@@ -380,6 +403,8 @@ been run live.
 - [ ] Find how each local server is told its context size and set it, or stop with a plain message
       when the prompt won't fit. We assume 24k and send no `num_ctx`, which an OpenAI-style endpoint
       may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73)
+- [x] When a server refuses a request for its context window and says the size (Ollama, llama.cpp,
+      OpenAI-style), fit the conversation to that window and ask once more, else say how to raise it (#962)
 - [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
       services whose real window differs from 150k (#374) — implementation: `6bd94b84828ec89b805cb8a246f557d0a778c037`
 - [x] Find LM Studio on another port (#73): the port in its settings file (when it is there) and
@@ -396,6 +421,7 @@ been run live.
 - [ ] A chat sent while a llama.cpp router is still loading the model ended after 31 s with "The
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
+      — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
@@ -485,6 +511,9 @@ yet, and the quick start is how every new person begins.
 - [ ] A live run of a project copied between two real computers with Claude Code (#451, #452); done
       on one Mac with a second `CLAUDE_CONFIG_DIR` standing in for the other computer (STATUS.md)
 - [ ] Ghidra setup tried for real on Linux and macOS (the Java pins were checked by tests only)
+- [x] A Ghidra with no decompiler program for this computer (public downloads leave out macOS) is
+      refused before the long analysis, with the command that builds it; checked on a real Mac
+- [ ] `engines_install` builds Ghidra's native programs on macOS, so a Mac install works unaided
 - [ ] Follow the README quick start on a clean machine (Windows, and Linux or macOS)
 - [ ] Build the new DMG on a Mac (release dry run) and look at the window once
 - [ ] #490 on macOS: a real Deep build through Claude Code with the published 0.3.0 CLI, with
@@ -615,7 +644,8 @@ Owner: open · Status: in progress
       agent over SSH. — claimed: jelassiaymen94, branch feature/r2.2-opencode-remote-mcp
 - [x] Make `the_remote_line_runs_on_a_posix_shell` accept the shell's missing-command status:
       assert failure rather than 127, isolate PATH from installed helpers, and verify that a
-      missing helper writes nothing in a fresh home. The shell uses the bounded process runner.
+      missing helper writes nothing in a fresh home. Fixture utilities use host lookup rather than
+      assuming `/bin`; the shell uses the bounded process runner.
       Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
@@ -736,6 +766,13 @@ Owner: open · Status: in progress
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
 - [ ] UI tree on Linux (AT-SPI)
+- [x] `native_window_capture` on macOS: no Screen Recording is refused before the program starts
+      (it was "didn't show a window", which said to wait longer), and the name fallback matches
+      whole words and never the system, so `win` no longer pictures the menu bar
+- [x] `native_window_capture` keeps looking for up to 10 s past `wait_secs` when no window is there
+      yet, instead of deciding from one look; tried with a program that opens its window late
+- [ ] Close a pictured program politely before killing it: a helper it started through launchd
+      outlives the process group, and can stay running with the program's data files open
 - [x] `apple_calls_observe`: the breakpoint callback is one valid line (it had a literal backslash
       and `n` between statements, so lldb stopped before launching, #251), covers every breakpoint
       instead of only the first, a failed lldb run is an error and not "0 calls", and names or
@@ -806,6 +843,26 @@ Owner: maintainers · Status: in progress
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
 Gaps found while using the app for real projects.
+- [x] Each project chooses, per kind of action, what the builder's approvals get (allow, ask or
+      refuse): reading the web, commands, files outside the project, pushing and publishing,
+      deleting outside the project, system changes, other tools. Unset kinds follow Auto mode as
+      today. Found when Auto mode refused every `git push` without a card, so the person's OK in
+      the prompt box never reached the check, and refused `gh repo view` as publishing too
+      — claimed: tanish2k09, branch feature/r2.9-project-approvals
+- [ ] Agents that don't ask our approval tool (OpenCode `--auto`, Hermes `-z`, Maki's `-p`) aren't
+      held to a project's approval choices either; part of R2.2's approval decision
+- [ ] While "commands" are allowed (Auto mode's default), a builder can run any program. Commands
+      that name `craft.json`, the inbox or the approvals tool count as system changes, and our CLI
+      started inside an agent calls tools as an agent, but a script that builds the path, or
+      unsets `CRAFT_ANYTHING_AGENT`, isn't caught. Keep the person's choices where a builder's
+      shell can't write them, or say plainly that "commands: allow" trusts the builder
+- [ ] A typed note ("yes, push it") still reaches the builder only as text: say in the card's
+      place, when the builder is refused, how the person can allow that kind
+- [x] The project page and a slash command change those choices (like `/btw`): the Approvals
+      menu under the prompt box and `/approvals <kind> <allow|ask|refuse|default>`
+      — claimed: tanish2k09, branch feature/r2.9-approvals-ui
+- [ ] The new approvals strings in every catalog were written with an AI; not reviewed by native
+      speakers yet
 - [x] Keep New project's content column fixed while the vertical scrollbar animates in or out,
       hiding it when there is nothing to scroll, so switching tabs never shifts the page horizontally
       — claimed: Codex, branch bugfix/r2.9-home-scrollbar-gutter
@@ -831,6 +888,8 @@ Gaps found while using the app for real projects.
 - [ ] A question's own cost: a forked Claude Code session reports the whole session's running
       total, so a forked answer shows none; count questions in the project's usage
 - [ ] "Make this change" on an answer that suggests one (sends it as a normal message)
+- [x] "Just ask" is told it has fewer tools than the builder and that the build may be running
+      beside it, so it no longer reports the build's tools as disconnected or its work as cut off
 - [x] "Change it" knows what was just talked about in "Just ask": the next message tells the builder
       the latest few questions and answers, once, and a Clean room build only those asked in Clean
       room (#857). Not checked in a live build
@@ -1052,8 +1111,9 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-unity-bundle-decompressed-length-20261105
 - [x] Locate Unity bundle metadata within the declared bundle size.
       — claimed: Afloat16, branch bugfix/r3.12-unity-bundle-declared-size-20261105
-- [ ] Check that Unity bundle compressed blocks end before the trailing block table, or the declared
+- [x] Check that Unity bundle compressed blocks end before the trailing block table, or the declared
       bundle end for front-positioned tables, so bytes outside the data region cannot supply block contents.
+      — claimed: Codex, branch bugfix/r3.12-unity-bundle-data-region; PR #1021
 - [x] Reject Unity serialized objects outside their declared file.
       — claimed: Afloat16, branch bugfix/r3.12-unity-serialized-object-ranges-20261105
 - [x] Preserve compression method slots in Unreal pak indexes.

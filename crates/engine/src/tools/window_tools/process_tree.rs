@@ -86,9 +86,58 @@ pub(super) fn capture<T>(
     Err(missing)
 }
 
+/// Look until something other than "no window yet" comes back, or `can_wait` says to stop.
+pub(super) fn keep_looking<T>(mut look: impl FnMut() -> Result<T, ToolError>, mut can_wait: impl FnMut() -> bool, pause: Duration) -> Result<T, ToolError> {
+    loop {
+        match look() {
+            Err(e) if e.code == ErrorCode::NotFound && can_wait() => std::thread::sleep(pause),
+            done => return done,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_late_window_is_waited_for_but_not_forever_and_other_errors_end_it() {
+        let mut looks = 0;
+        let found = keep_looking(
+            || {
+                looks += 1;
+                if looks < 3 { Err(missing()) } else { Ok("picture") }
+            },
+            || true,
+            Duration::ZERO,
+        );
+        assert_eq!(found.unwrap(), "picture");
+        assert_eq!(looks, 3);
+
+        let mut waits = 0;
+        let gave_up = keep_looking::<()>(
+            || Err(missing()),
+            || {
+                waits += 1;
+                waits < 3
+            },
+            Duration::ZERO,
+        );
+        assert_eq!(gave_up.unwrap_err().code, ErrorCode::NotFound);
+        assert_eq!(waits, 3);
+
+        let mut looks = 0;
+        let denied = keep_looking::<()>(
+            || {
+                looks += 1;
+                Err(ToolError::new(ErrorCode::ProgramFailed, "denied"))
+            },
+            || true,
+            Duration::ZERO,
+        );
+        assert_eq!(denied.unwrap_err().message, "denied");
+        assert_eq!(looks, 1, "only a missing window is worth another look");
+    }
 
     fn missing() -> ToolError {
         ToolError::new(ErrorCode::NotFound, "No window")

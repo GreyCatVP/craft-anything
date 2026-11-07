@@ -1444,3 +1444,21 @@ Bring all to front	Trazer todas para a frente
 Drag to give the plan more or less room; double-click to reset	Arraste para ajustar o espaço do plano. Clique duas vezes para restaurar o tamanho original
 Copy the message	Copiar a mensagem
 {n} · ${spent} of ${budget}	{n} · ${spent} de ${budget}
+Choose what the builder's approvals get	Escolher o que as aprovações do agente recebem
+Reading the web	Ler a web
+Other commands	Outros comandos
+Files outside the project	Arquivos fora do projeto
+Pushing and publishing	Push e publicação
+Deleting outside the project	Apagar fora do projeto
+System changes	Mudanças no sistema
+Other tools	Outras ferramentas
+Allow	Permitir
+Ask	Perguntar
+Refuse	Recusar
+After /approvals, type a kind and allow, ask, refuse or default, like /approvals publish ask. Kinds: {kinds}.	Depois de /approvals, digite um tipo e allow, ask, refuse ou default, por exemplo /approvals publish ask. Tipos: {kinds}.
+There's no kind called {name}. Kinds: {kinds}.	Não existe um tipo chamado {name}. Tipos: {kinds}.
+Approvals	Aprovações
+In this project, {kind}: {choice}.	Neste projeto, {kind}: {choice}.
+Couldn't change the approvals:	Não foi possível mudar as aprovações:
+What the builder may do without asking you, in this project.	O que o agente pode fazer sem perguntar a você, neste projeto.
+Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Padrão segue o modo automático: ligado, o que pode ser desfeito segue em frente e o resto é recusado; desligado, o agente pergunta.

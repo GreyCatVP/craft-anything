@@ -78,7 +78,18 @@ fn program_in(config: &BackendConfig, options: &BackendOptions, search: Option<s
         return Ok(usual_program(&usual, search)?.unwrap_or(usual));
     }
     let path = Path::new(chosen);
-    if !local || path.parent().is_none_or(|p| p.as_os_str().is_empty()) || path.exists() {
+    let bare = path.parent().is_none_or(|p| p.as_os_str().is_empty());
+    // A saved `claude`, by name or as the desktop app's own file, is looked up as the usual one is,
+    // so it never starts the desktop app.
+    let named_claude = bare && path.file_stem().is_some_and(|s| s.eq_ignore_ascii_case(&usual));
+    if local && usual == "claude" && (named_claude || is_claude_desktop(path)) {
+        return match usual_program(&usual, search)? {
+            Some(program) => Ok(program),
+            None if bare => Ok(chosen.to_string()),
+            None => Err(desktop_app_error(path)),
+        };
+    }
+    if !local || bare || path.exists() {
         return Ok(chosen.to_string());
     }
     // Gone, and nothing beside it: the usual program if it's really here, else the saved path, so
@@ -94,12 +105,16 @@ fn usual_program(usual: &str, search: Option<std::ffi::OsString>) -> Result<Opti
     match (first, find_program_in(usual, search)) {
         (None, _) => Ok(None),
         (Some(first), Some(real)) => Ok(Some(if first == real { usual.to_string() } else { real.display().to_string() })),
-        (Some(app), None) => Err(ToolError::new(
-            ErrorCode::EngineMissing,
-            format!("Claude Code isn't installed: the `claude` found ({}) is the Claude desktop app, which can't build.", app.display()),
-        )
-        .with_remediation("Install Claude Code apart from the desktop app, sign in to it once in a terminal, then try again.")),
+        (Some(app), None) => Err(desktop_app_error(&app)),
     }
+}
+
+fn desktop_app_error(app: &Path) -> ToolError {
+    ToolError::new(
+        ErrorCode::EngineMissing,
+        format!("Claude Code isn't installed: the `claude` found ({}) is the Claude desktop app, which can't build.", app.display()),
+    )
+    .with_remediation("Install Claude Code apart from the desktop app, sign in to it once in a terminal, then try again.")
 }
 
 /// Where an agent's program is on this computer: the first match on the search path that is
@@ -750,6 +765,8 @@ fn agent_env(builder: bool, effort: Option<crate::model::Effort>) -> Vec<(&'stat
         // High effort for Claude Code unless chosen. An environment variable rather than
         // `--effort`: it ranks highest, and an older Claude Code that doesn't know it ignores it.
         ("CLAUDE_CODE_EFFORT_LEVEL", crate::prompt::choose_effort(effort).as_str().into()),
+        // Our own CLI, started from inside the agent, calls tools as an agent (not the person).
+        (craft_anything_engine::AGENT_ENV, "1".into()),
     ]
 }
 
@@ -1251,6 +1268,18 @@ mod tests {
         assert_eq!(err.code, ErrorCode::EngineMissing);
         assert!(err.message.contains("desktop app"), "{}", err.message);
         assert_eq!(program_in(&claude, &gone, path(&[app_dir])).unwrap(), gone.command.clone().unwrap(), "only the app: the saved path, not the app");
+        // A saved `claude`, by name or as the app's own file (review of #1017), is filtered the same way.
+        let saved = |c: &str| BackendOptions { command: Some(c.into()), ..Default::default() };
+        let (by_name, the_app) = (saved(file), saved(&app.display().to_string()));
+        assert_eq!(program_in(&claude, &by_name, path(&[app_dir, cli_dir])).unwrap(), real, "a saved name, the app first");
+        assert_eq!(program_in(&claude, &by_name, path(&[cli_dir, app_dir])).unwrap(), "claude", "a saved name that starts the real one");
+        assert_eq!(program_in(&claude, &by_name, path(&[app_dir])).unwrap_err().code, ErrorCode::EngineMissing);
+        assert_eq!(program_in(&claude, &by_name, path(&[])).unwrap(), file, "nothing found: the saved name, so the run says so");
+        assert_eq!(program_in(&claude, &the_app, path(&[app_dir, cli_dir])).unwrap(), real, "the app's own file saved: the real one");
+        let err = program_in(&claude, &the_app, path(&[])).unwrap_err();
+        assert!(err.code == ErrorCode::EngineMissing && err.message.contains("desktop app"), "{}", err.message);
+        let saved_cli = saved(&cli.display().to_string());
+        assert_eq!(program_in(&claude, &saved_cli, path(&[app_dir])).unwrap(), real, "a saved real path is kept");
         // Another agent's program in such a folder is only filtered for Claude.
         let other = app_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
         std::fs::write(&other, b"").unwrap();

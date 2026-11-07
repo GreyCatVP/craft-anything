@@ -60,9 +60,36 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
     let provider = parsed
         .as_ref()
         .and_then(|v| v.pointer("/error/code").and_then(Value::as_str).or_else(|| v.pointer("/error/type").and_then(Value::as_str)).map(str::to_string));
-    ToolError::new(code, format!("{what} answered {status}: {detail}"))
-        .with_remediation(remediation)
-        .with_details(serde_json::json!({"status": status, "provider_error": provider}))
+    let overflow = context_overflow(&detail);
+    let remediation = match overflow {
+        Some((window, _)) => format!(
+            "The conversation is longer than the model's context window ({window} tokens). Give the model a larger context \
+             in its server (Ollama: the Context length setting or OLLAMA_CONTEXT_LENGTH; LM Studio: the model's Context Length), \
+             or set context_tokens for this AI in Settings → AI so less is sent."
+        ),
+        None => remediation.to_string(),
+    };
+    ToolError::new(code, format!("{what} answered {status}: {detail}")).with_remediation(remediation).with_details(serde_json::json!({
+        "status": status,
+        "provider_error": provider,
+        "context_window": overflow.map(|o| o.0),
+        "prompt_tokens": overflow.and_then(|o| o.1),
+    }))
+}
+
+/// The context window a server says a request didn't fit in, and the request's size when it says
+/// that too (#962). Local servers word it as llama.cpp does ("request (69944 tokens) exceeds the
+/// available context size (65536 tokens)"), OpenAI-style ones as "maximum context length is 8192
+/// tokens ... you requested 9000 tokens".
+pub fn context_overflow(message: &str) -> Option<(u64, Option<u64>)> {
+    let m = message.to_ascii_lowercase();
+    let after = |marker: &str| -> Option<u64> {
+        let (_, rest) = m.split_once(marker)?;
+        let digits: String = rest.trim_start().chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok().filter(|n| *n > 0)
+    };
+    let window = after("available context size (").or_else(|| after("maximum context length is"))?;
+    Some((window, after("request (").or_else(|| after("requested"))))
 }
 
 /// Read only the human-readable fields, never serialise an arbitrary provider payload.
@@ -229,6 +256,26 @@ mod tests {
         })
         .unwrap();
         v
+    }
+
+    #[test]
+    fn a_full_context_window_is_read_from_the_servers_words() {
+        let ollama = "request (69944 tokens) exceeds the available context size (65536 tokens), try increasing it";
+        assert_eq!(context_overflow(ollama), Some((65536, Some(69944))));
+        let openai = "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (8000 in the messages).";
+        assert_eq!(context_overflow(openai), Some((8192, Some(9000))));
+        assert_eq!(context_overflow("maximum context length is 4096 tokens"), Some((4096, None)));
+        for other in ["Invalid request: the message at position 64 must not be empty", "context size (abc tokens)", "", "available context size ("] {
+            assert_eq!(context_overflow(other), None, "{other:?}");
+        }
+        let body = serde_json::json!({"error": {"message": ollama}}).to_string();
+        let e = status_error("Ollama (local)", 400, &body);
+        let details = e.details.unwrap();
+        assert_eq!((details["context_window"].as_u64(), details["prompt_tokens"].as_u64()), (Some(65536), Some(69944)));
+        assert!(e.remediation.unwrap().contains("OLLAMA_CONTEXT_LENGTH"));
+        let plain = status_error("Ollama (local)", 400, r#"{"error":{"message":"bad"}}"#);
+        assert!(plain.details.unwrap()["context_window"].is_null());
+        assert_eq!(plain.remediation.as_deref(), Some("The request was rejected; see the message."));
     }
 
     #[test]

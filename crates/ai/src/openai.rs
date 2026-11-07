@@ -267,9 +267,22 @@ pub fn messages_json(m: &Msg, react: bool) -> Vec<Value> {
             out
         }
         Speaker::Assistant => {
+            // Some providers (Kimi, #849) refuse an assistant message with nothing in it; blank text
+            // counts as nothing.
             let text = m.text();
+            let mut text = if text.trim().is_empty() { String::new() } else { text };
             if react {
-                return vec![json!({"role": "assistant", "content": text})];
+                // Calls made natively before the switch to the text protocol are written as the
+                // protocol's own lines, so the turn isn't empty and the model sees what it did.
+                if !text.contains("Action:") {
+                    for (_, name, input) in m.tool_uses() {
+                        if !text.is_empty() && !text.ends_with('\n') {
+                            text.push('\n');
+                        }
+                        text.push_str(&format!("Action: {name}\nAction Input: {input}"));
+                    }
+                }
+                return if text.is_empty() { Vec::new() } else { vec![json!({"role": "assistant", "content": text})] };
             }
             let calls: Vec<Value> = m
                 .tool_uses()
@@ -412,12 +425,15 @@ impl ChatStream {
             Some(f) => StopReason::parse(f),
             None if has_calls => StopReason::ToolUse,
             None if self.done => StopReason::EndTurn,
-            None => return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")),
+            None => {
+                return Err(ToolError::new(ErrorCode::Truncated, "The answer stream ended early.")
+                    .with_remediation("The server ended the answer early (a local server may still be loading the model). Try again in a minute."));
+            }
         };
         // Some servers say "stop" for tool calls. A limit or refusal must still prevent execution.
         let stop = if has_calls && stop == StopReason::EndTurn { StopReason::ToolUse } else { stop };
         let model = if self.model.is_empty() { fallback_model.to_string() } else { self.model };
-        Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model })
+        Ok(TurnResult { message: Msg { role: Speaker::Assistant, blocks }, stop, usage: self.usage, model, follow_up: None })
     }
 }
 
@@ -543,12 +559,14 @@ fn json_action(text: &str) -> Option<ReactStep> {
 /// Every fence must be a complete `json` (or unlabelled) call, and nothing but blank lines may
 /// follow the last one; anything else (other code, a `~~~` fence, a fence inside a fence, an
 /// unclosed fence, words after the call, a JSON object quoted inline) means the reply is text,
-/// as before. So do the text protocol's own markers in the words (a final answer that ends in an
-/// example is still the answer); inside a call's arguments they're only content.
-fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
+/// as before. Protocol markers before the first call keep the reply as text; after a call they
+/// require a retry even if another fence follows (it could be an example after a final answer).
+/// Inside a call's arguments they're only content.
+fn parse_fenced_calls(text: &str) -> Option<(Vec<(String, Value)>, bool)> {
     let mut calls = Vec::new();
     let mut lines = text.lines();
     let mut words_after = false;
+    let mut protocol_after = false;
     while let Some(line) = lines.next() {
         let opening = line.trim();
         // Anything in a tilde fence is an example, whatever it holds.
@@ -558,7 +576,11 @@ fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
         let length = opening.bytes().take_while(|byte| *byte == b'`').count();
         if length < 3 {
             if ["Final Answer:", "Action:"].into_iter().any(|marker| line.contains(marker)) {
-                return None;
+                if calls.is_empty() {
+                    return None;
+                }
+                // A later fence may be an example after a final answer, not another call.
+                protocol_after = true;
             }
             words_after |= !opening.is_empty() && !calls.is_empty();
             continue;
@@ -585,7 +607,13 @@ fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
         calls.push((tool, input));
         words_after = false;
     }
-    (!calls.is_empty() && !words_after).then_some(calls)
+    (!calls.is_empty()).then_some((calls, words_after || protocol_after))
+}
+
+/// Returns fenced calls only when no nonblank text follows the final call.
+fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
+    let (calls, words_after) = parse_fenced_calls(text)?;
+    (!words_after).then_some(calls)
 }
 
 /// The first balanced `{…}` in `s`, parsed.
@@ -639,6 +667,14 @@ fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
         r.stop = StopReason::ToolUse;
         return;
     }
+    if !from_json
+        && let Some((calls, true)) = parse_fenced_calls(&text)
+        && calls.iter().all(|(tool, _)| offered(tool))
+    {
+        r.follow_up = Some("The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it.".into());
+        r.stop = StopReason::PauseTurn;
+        return;
+    }
     let step = json_call.or_else(|| react.then(|| parse_react(&text)));
     if let Some(ReactStep::Action { tool, input }) = step
         && (!from_json || tools.iter().any(|definition| definition.name == tool))
@@ -689,11 +725,14 @@ mod tests {
             stop: StopReason::EndTurn,
             usage: Usage::default(),
             model: String::new(),
+            follow_up: None,
         };
-        let mut r = turn(&several);
-        react_postprocess(&mut r, &[tool("look"), tool("write")], false);
-        assert_eq!(r.stop, StopReason::ToolUse);
-        assert_eq!(r.message.tool_uses().into_iter().map(|(_, name, _)| name.to_string()).collect::<Vec<_>>(), ["look", "write"]);
+        for react in [false, true] {
+            let mut r = turn(&several);
+            react_postprocess(&mut r, &[tool("look"), tool("write")], react);
+            assert_eq!(r.stop, StopReason::ToolUse, "react={react}");
+            assert_eq!(r.message.tool_uses().into_iter().map(|(_, name, _)| name.to_string()).collect::<Vec<_>>(), ["look", "write"]);
+        }
         let mut r = turn(&several);
         react_postprocess(&mut r, &[tool("look")], false);
         assert!(r.message.tool_uses().is_empty() && r.stop == StopReason::EndTurn, "one isn't offered: none run");
@@ -708,6 +747,40 @@ mod tests {
             let mut r = turn(&answer);
             react_postprocess(&mut r, &[tool("look")], react);
             assert!(r.message.tool_uses().is_empty() && r.stop == StopReason::EndTurn, "react={react}");
+        }
+        for trailing in ["### Summary:\nI listed the files.", "Action: look\nAction Input: {}", "Final Answer: I listed the files."] {
+            let text = format!("{}\n{}", call("look"), trailing);
+            for react in [false, true] {
+                let mut r = turn(&text);
+                react_postprocess(&mut r, &[tool("look")], react);
+                assert!(r.message.tool_uses().is_empty(), "react={react}, trailing={trailing}");
+                assert_eq!(r.stop, StopReason::PauseTurn, "react={react}, trailing={trailing}");
+                assert_eq!(
+                    r.follow_up.as_deref(),
+                    Some(
+                        "The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it."
+                    ),
+                    "react={react}, trailing={trailing}"
+                );
+            }
+        }
+        // Protocol text between calls must not be cleared by another fence (PR #1031).
+        for marker in ["Action: look\nAction Input: {}", "Final Answer: Here's an example:"] {
+            let text = format!("{}\n{marker}\n{}\nThen:\n{}", call("look"), call("write"), call("look"));
+            assert!(fenced_calls(&text).is_none(), "{marker}");
+            for react in [false, true] {
+                let mut r = turn(&text);
+                react_postprocess(&mut r, &[tool("look"), tool("write")], react);
+                assert!(r.message.tool_uses().is_empty(), "react={react}, marker={marker}");
+                assert_eq!(r.stop, StopReason::PauseTurn, "react={react}, marker={marker}");
+                assert_eq!(
+                    r.follow_up.as_deref(),
+                    Some(
+                        "The fenced tool call in your previous response was not run because text followed the closing fence. Send the tool call again without adding a summary or other text after it."
+                    ),
+                    "react={react}, marker={marker}"
+                );
+            }
         }
     }
 
@@ -879,6 +952,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn early_stream_end_is_reported_with_remediation() {
+        let st = ChatStream::default();
+        let err = st.finish("m").unwrap_err();
+        assert_eq!(err.code, ErrorCode::Truncated);
+        assert_eq!(err.message, "The answer stream ended early.");
+        let fix = err.remediation.as_deref().expect("remediation is set");
+        assert!(fix.contains("loading the model"));
+        assert!(fix.contains("Try again in a minute."));
+    }
+
     /// #369: OpenRouter routes to an upstream provider per request, and one without tool calling
     /// answered "400: Provider returned error". With tools in the request, only providers that
     /// support every parameter are used; nothing else changes.
@@ -961,6 +1045,10 @@ mod tests {
         let b = react.body(&TurnRequest { system: "S", messages: &msgs, tools: &tools, effort: Effort::Low, max_tokens: 100 });
         assert!(b.get("tools").is_none());
         assert!(b["messages"][0]["content"].as_str().unwrap().contains("Action Input:"));
+        // A call made natively before the switch is sent as the protocol's lines, never as an empty
+        // assistant message (#849).
+        assert_eq!(b["messages"][2]["role"], "assistant");
+        assert_eq!(b["messages"][2]["content"], "Action: t\nAction Input: {\"a\":1}");
         assert!(b["messages"][3]["content"].as_str().unwrap().contains("Observation (error): bad"));
     }
 
@@ -978,6 +1066,43 @@ mod tests {
     fn empty_assistant_message_is_omitted() {
         let empty = Msg { role: Speaker::Assistant, blocks: vec![] };
         assert!(messages_json(&empty, false).is_empty(), "empty assistant turn must produce no wire messages");
+    }
+
+    #[test]
+    fn blank_assistant_message_is_omitted_in_both_protocols() {
+        let blank = Msg { role: Speaker::Assistant, blocks: vec![Block::Text { text: " \n".into() }] };
+        let empty = Msg { role: Speaker::Assistant, blocks: vec![] };
+        for react in [false, true] {
+            assert!(messages_json(&blank, react).is_empty(), "react={react}");
+            assert!(messages_json(&empty, react).is_empty(), "react={react}");
+        }
+        // Blank text beside a tool call is left out, the call kept.
+        let tool = Msg {
+            role: Speaker::Assistant,
+            blocks: vec![Block::Text { text: "  ".into() }, Block::ToolUse { id: "c1".into(), name: "look".into(), input: json!({}) }],
+        };
+        let m = messages_json(&tool, false);
+        assert!(m.len() == 1 && m[0].get("content").is_none() && m[0]["tool_calls"].is_array(), "{m:?}");
+        assert_eq!(messages_json(&tool, true)[0]["content"], "Action: look\nAction Input: {}");
+        // A turn written in the protocol already keeps its own lines, once.
+        let written = Msg {
+            role: Speaker::Assistant,
+            blocks: vec![
+                Block::Text { text: "Thought: look\nAction: look\nAction Input: {}".into() },
+                Block::ToolUse { id: "react_0".into(), name: "look".into(), input: json!({}) },
+            ],
+        };
+        assert_eq!(messages_json(&written, true)[0]["content"], "Thought: look\nAction: look\nAction Input: {}");
+        // In a whole request (text protocol), the user turns either side are joined into one.
+        let user = |t: &str| Msg { role: Speaker::User, blocks: vec![Block::Text { text: t.into() }] };
+        let mut o = OpenAi::compatible("Kimi", "http://127.0.0.1:9", Some("sk-test".into()), "kimi");
+        o.react = true;
+        let msgs = [user("first"), blank, user("second")];
+        let b = o.body(&TurnRequest { system: "s", messages: &msgs, tools: &[], effort: Effort::Low, max_tokens: 100 });
+        assert_eq!(b["messages"].as_array().map(Vec::len), Some(2), "system, then the joined user turn");
+        let wire = b["messages"].as_array().unwrap();
+        assert!(wire.iter().all(|m| m["role"] != "assistant"), "{wire:?}");
+        assert!(wire.iter().all(|m| m["content"].as_str().is_some_and(|c| !c.trim().is_empty())), "{wire:?}");
     }
 
     #[test]

@@ -69,6 +69,9 @@ Don't close or rewrite other people's work without asking.
 comments were acted on; the fixes went to its branch and the threads were answered "Fixed", while
 `main` had the code without them. Read `gh pr view --json state,headRefOid` before pushing to a PR's
 branch, and land anything late in a new PR from `main`.
+It happened again with the check in place: `gh pr view 1022 --json state -q .state && … git push`
+printed `MERGED` and went on, because printing a state isn't failing. The check has to stop the
+command: `test "$(gh pr view <n> --json state -q .state)" = OPEN && …`.
 
 **A report checked against main, not the release it ran.** #736 (a build looping on an empty `app/`)
 was read against main, where the stop after two unchanged turns already existed, so it looked fixed.
@@ -77,6 +80,20 @@ merged the day after it shipped. Before calling a report fixed or still open, fi
 names (`git merge-base --is-ancestor <fix> <release tag>`), and check the message text it quotes.
 
 ## Tests
+
+**A heartbeat sampled before shutdown raced a successful stop.** A child could write between
+the baseline read and `stop()`, failing the descendant cleanup test even when cleanup worked.
+Probe for exit instead of timing writes: the child holds a file lock the system releases only
+when it exits, and the test takes it after the stop. Ignored child fixtures also need
+an explicit launch guard so running ignored tests directly cannot write in the working directory.
+The replacement's quoted `cmd /C` script still failed on Windows, and startup assertions skipped
+cleanup. Use a guarded Rust parent instead of shell syntax, and stop before asserting on startup.
+Its child must inherit the watched group/job: another `Process` or `Launch` creates a separate
+Unix group and would no longer test the ancestor's shutdown.
+
+**An isolated PATH still assumed system utilities lived in `/bin`.** The remote setup fixture
+linked `mkdir`, `chmod` and `mv` there, so a host with utilities elsewhere got dangling links.
+Resolve fixture utilities on the host, make their paths absolute, then populate the private PATH.
 
 **Python compilation reused stale bytecode after a fast edit.** The new-project toolchain probe
 changed valid Python to a syntax error within the same mtime second. `compileall` skipped it and
@@ -161,6 +178,10 @@ fast machines and failed in CI on unrelated PRs. When work moves to a worker, gr
 call it and make them `wait` for the result, not `run_steps(n)`.
 
 ## Building and running
+
+**A documentation edit rebuilt dependencies in a separate cache.** A sequential review follow-up
+used another target directory for its commit hook, triggering an unnecessary build. Separate
+build caches are for concurrent work; reuse the current checkout's cache for sequential work.
 
 **A runner's PID isn't the window owner's.** `go run` starts a compiled child, so picturing the
 runner missed the app (or a name fallback found another app). Search only the launched process
@@ -286,6 +307,14 @@ upstream providers, and a provider without tool calling answered 400 "Provider r
 (#369), which said nothing the person could act on. For a service that routes, say in the request
 what the provider must support (`provider.require_parameters` for tools), and show the provider's
 own reason when it still fails (#542).
+
+**A refusal that names a person nobody asks.** Auto mode refused `git push` with "never …
+without the person", but never showed a card, so the person's "yes, push it" in the prompt box
+reached only the builder, which retried and was refused again, five times. Its rule matched
+`gh repo` anywhere, so `gh repo view` was "publishing" too, and "always" on `cd app && npm i` was
+kept as `bash:cd`, which would have let `cd app && git push` through. A refusal says how the
+person can allow it, and a way to allow it exists; read commands word by word; remember a
+dangerous kind whole, never by a command's first word.
 
 **A crash that no code can report.** Three Windows tickets (#33, #104, #74) said the app "does
 nothing": a graphics driver crashed natively as the window opened, so no dialog, panic hook or log
@@ -604,6 +633,11 @@ field what it counts, and test each producer with the case where they differ (he
 Update STATUS, the roadmap and generated docs (`cargo xtask tools`, `cargo xtask schemas`) in the
 same PR as the change.
 
+**A tool's title is a UI string.** A PR that added an engine tool and no UI passed every check run
+for it locally, and CI's `cargo xtask i18n-coverage` failed: the app shows tool titles, so each
+needs a translation in every catalog. Run `cargo xtask i18n-coverage` for any PR that adds a tool
+or changes a title, not only for UI changes.
+
 **A second lock in one statement.** `CliSpec { deep: !engine.session().clean_room(), logs: engine.session().config_dir(), … }`
 looked like two quick reads, but an unbound guard lives to the end of the statement, so the second
 waited on the first forever. Every build froze after studying its target while the card calmly
@@ -746,6 +780,10 @@ command that then wrote and ran a script: 10 minutes lost. Write the script with
 tool and run only `python -I <file>`.
 And twice more in one night, each time a `python -I - <<'X'` with an empty body typed as a
 throwaway step in a longer command. There is no safe use of `python -` here: never type it.
+And again as the first step of a `sed` edit (`python -I - 2>/dev/null; sed …`): the command sat
+for two minutes and the edit after it never ran. Make an edit with the editor tool, not a shell
+line. The same session typed it once more, with `</dev/null` added, and that hung too: the habit
+is the problem, not the input. Every Python step names a script file.
 
 **A search that ran no search.** `timeout 40 find … 2>/dev/null` on a Mac: there's no `timeout` there,
 the error went to `/dev/null`, and the empty result read as "no such files on this computer". Don't

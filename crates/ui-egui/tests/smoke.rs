@@ -716,6 +716,76 @@ fn the_builders_questions_can_come_to_the_person_for_one_project() {
 }
 
 #[test]
+fn approvals_are_chosen_from_the_prompt_box_and_its_menu() {
+    use craft_anything_engine::workspace::{ActionKind, Approval, TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let root = ws.root.clone();
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.workspace = Some(ws);
+        a.state.screen = Screen::Project;
+        a
+    });
+    h.run_steps(2);
+    let saved = |kind| Workspace::open(&root).unwrap().manifest.approvals.get(&kind).copied();
+    let feed_before = h.state().state.feed.len();
+    // /approvals changes one kind and sends nothing to the builder.
+    h.state_mut().state.project_input = "/approvals push ask".into();
+    h.run_steps(1);
+    h.get_by_label("Send (Enter)").click();
+    assert!(wait(&mut h, |_| saved(ActionKind::Publish) == Some(Approval::Ask)), "saved in the project");
+    assert!(h.state().state.project_input.is_empty(), "the box is cleared");
+    assert_eq!(h.state().state.feed.len(), feed_before, "nothing joined the build's conversation");
+    assert!(!h.state().runs.is_busy(&root), "no build started");
+    // One it can't read stays in the box to be fixed.
+    h.state_mut().state.project_input = "/approvals push".into();
+    h.run_steps(1);
+    h.get_by_label("Send (Enter)").click();
+    h.run_steps(2);
+    assert_eq!(h.state().state.project_input, "/approvals push");
+    h.state_mut().state.project_input.clear();
+    // The messages those left sit over the row under the box, where a click lands.
+    h.state_mut().state.toasts.clear();
+    h.run_steps(2);
+    // The menu under the box: one row per kind, and a click saves it.
+    h.get_by_label("Approvals").click();
+    h.run_steps(2);
+    assert!(egui::Popup::is_id_open(&h.ctx, egui::Id::new("project-approvals")), "the menu opened");
+    h.get_by_label("Reading the web");
+    h.get_by_label("Pushing and publishing");
+    let refuse = h.get_all_by_label("Refuse").count();
+    assert_eq!(refuse, craft_anything_engine::workspace::ACTION_KINDS.len(), "a switch for every kind");
+    h.get_all_by_label("Refuse").next().unwrap().click();
+    assert!(wait(&mut h, |_| saved(ActionKind::Web) == Some(Approval::Refuse)), "the first row is the web");
+    assert_eq!(saved(ActionKind::Publish), Some(Approval::Ask), "the other kinds keep theirs");
+}
+
+#[test]
+fn an_approval_that_cant_be_saved_isnt_shown_as_chosen() {
+    use craft_anything_engine::workspace::{TargetRef, Workspace};
+    let d = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    let file = ws.root.join("craft.json");
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.workspace = Some(ws);
+        a.state.screen = Screen::Project;
+        a
+    });
+    h.run_steps(2);
+    // A newer Craft Anything saved it meanwhile: this one only reads it, so the choice is refused.
+    let newer = std::fs::read_to_string(&file).unwrap().replacen("\"version\": 3", "\"version\": 99", 1);
+    assert!(newer.contains("\"version\": 99"));
+    std::fs::write(&file, newer).unwrap();
+    h.state_mut().state.project_input = "/approvals push allow".into();
+    h.run_steps(1);
+    h.get_by_label("Send (Enter)").click();
+    assert!(wait(&mut h, |a| a.state.toasts.iter().any(|(t, _)| t.starts_with("Couldn't change the approvals:"))), "says it wasn't saved");
+    assert!(h.state().workspace.as_ref().unwrap().manifest.approvals.is_empty(), "the menu shows what's kept, not what was asked");
+}
+
+#[test]
 fn a_question_about_the_build_is_answered_without_building() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
     let d = tempfile::tempdir().unwrap();

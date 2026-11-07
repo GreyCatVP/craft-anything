@@ -1444,3 +1444,21 @@ Zoom	Zoom
 Bring all to front	Traer todo al frente
 Drag to give the plan more or less room; double-click to reset	Arrastra para darle al plan más o menos espacio; doble clic para restablecer
 Copy the message	Copiar el mensaje
+Choose what the builder's approvals get	Elegir qué reciben las aprobaciones del constructor
+Reading the web	Leer la web
+Other commands	Otros comandos
+Files outside the project	Archivos fuera del proyecto
+Pushing and publishing	Push y publicación
+Deleting outside the project	Borrar fuera del proyecto
+System changes	Cambios en el sistema
+Other tools	Otras herramientas
+Allow	Permitir
+Ask	Preguntar
+Refuse	Rechazar
+After /approvals, type a kind and allow, ask, refuse or default, like /approvals publish ask. Kinds: {kinds}.	Después de /approvals, escribe un tipo y allow, ask, refuse o default, por ejemplo /approvals publish ask. Tipos: {kinds}.
+There's no kind called {name}. Kinds: {kinds}.	No hay ningún tipo llamado {name}. Tipos: {kinds}.
+Approvals	Aprobaciones
+In this project, {kind}: {choice}.	En este proyecto, {kind}: {choice}.
+Couldn't change the approvals:	No se pudieron cambiar las aprobaciones:
+What the builder may do without asking you, in this project.	Lo que el constructor puede hacer sin preguntarte, en este proyecto.
+Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Predeterminado sigue al modo automático: activado, lo que se puede deshacer se hace y el resto se rechaza; desactivado, el constructor pregunta.

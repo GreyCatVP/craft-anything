@@ -7,7 +7,7 @@ version up to the current one, then turn the document into Rust types. The step 
 
 | File | Owner | Current version | Older files | Newer files |
 |---|---|---|---|---|
-| `<project>/craft.json` | `engine::workspace` (`Manifest`) | `MANIFEST_VERSION` = 2 (`version`; missing = 0) | brought forward, saved as current | opened read-only: saving is refused |
+| `<project>/craft.json` | `engine::workspace` (`Manifest`) | `MANIFEST_VERSION` = 3 (`version`; missing = 0; 3 adds `approvals`) | brought forward, saved as current | opened read-only: saving is refused |
 | `<project>/inbox/build-progress.json` | `engine::workspace::progress` (`BuildProgress`; written only by the rebuild run) | `BUILD_PROGRESS_VERSION` = 1 (`version`; missing = 0) | brought forward; an absent file starts with no counted turns | the build stops and the record is left unchanged |
 | `config.toml` (`settings::config_dir()`) | `engine::settings` (`Settings`) | `SETTINGS_VERSION` = 2 (`version`; missing = 0; 2 moved `[engines.ghidra] enabled` to `deep_mode`) | brought forward | loaded, never saved over |
 | `<name>.cany/project.toml` | `engine::project` (`ProjectMeta`) | `FORMAT_VERSION` = 1 (`format_version`, required) | brought forward | refused, with "update Craft Anything" |

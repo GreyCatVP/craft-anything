@@ -16,6 +16,11 @@ mod process_tree;
 
 /// Largest picture kept inline in the evidence (bigger ones are only written to `output`).
 const MAX_INLINE: usize = 8 * 1024 * 1024;
+/// How much longer to look past `wait_secs` for a window that isn't there yet: a busy computer can
+/// make any program late, and one look decides nothing.
+const LATE_WINDOW: Duration = Duration::from_secs(10);
+/// Pause between those looks.
+const LOOK_AGAIN: Duration = Duration::from_millis(250);
 /// Most UI elements saved to `ui_tree`.
 const UI_TREE_NODES: usize = 1000;
 
@@ -75,6 +80,7 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     if !craft_anything_platform::window::SUPPORTED {
         return Err(craft_anything_platform::window::unsupported());
     }
+    craft_anything_platform::window::check_can_see_windows()?;
     let wait = Duration::from_secs(p.wait_secs.unwrap_or(8).clamp(1, 120));
     let dir = p.working_directory.unwrap_or_else(|| p.program.parent().map(PathBuf::from).unwrap_or_default());
     let cancel = ctx.cancel.clone();
@@ -99,15 +105,23 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
         std::thread::sleep(Duration::from_millis(200));
     }
     let name = p.program.file_stem().map(|s| s.to_string_lossy().into_owned());
-    let shot = process_tree::capture(
-        running.pid(),
-        || process_tree::snapshot(&ctx.cancel),
-        |pid| {
-            if ctx.cancel.is_cancelled() {
-                return Err(ToolError::cancelled());
-            }
-            craft_anything_platform::window::capture_window(pid, None)
+    let pid = running.pid();
+    let late_until = Instant::now() + LATE_WINDOW;
+    let shot = process_tree::keep_looking(
+        || {
+            process_tree::capture(
+                pid,
+                || process_tree::snapshot(&ctx.cancel),
+                |pid| {
+                    if ctx.cancel.is_cancelled() {
+                        return Err(ToolError::cancelled());
+                    }
+                    craft_anything_platform::window::capture_window(pid, None)
+                },
+            )
         },
+        || Instant::now() < late_until && !ctx.cancel.is_cancelled() && !running.is_finished(),
+        LOOK_AGAIN,
     )
     // A launcher hands over to a program that isn't its child: last, its name finds the window.
     .or_else(|e| match e.code {

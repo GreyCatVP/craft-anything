@@ -7,6 +7,7 @@
 //! holding it never freezes a frame; the last snapshot ([`SessionView`]) is shown meanwhile.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod approvals;
 pub mod builders;
 pub mod chat;
 pub mod demo;
@@ -974,6 +975,7 @@ impl CraftApp {
                 }
                 self.toast(tr("Called done. A new message carries on from here."), false);
             }
+            ("project_approvals_set", r) => self.approval_set(r),
             ("project_questions_set", Ok(v)) => {
                 // What was saved (the person's other changes on disk come along).
                 if let Some(ws) = self.workspace.as_mut().filter(|w| v["project"].as_str().is_some_and(|p| w.root == std::path::Path::new(p))) {

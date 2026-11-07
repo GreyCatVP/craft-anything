@@ -223,6 +223,8 @@ pub struct TurnResult {
     pub stop: StopReason,
     pub usage: Usage,
     pub model: String,
+    /// A provider-specific instruction to send to the model before continuing.
+    pub follow_up: Option<String>,
 }
 
 /// Streaming pieces while a turn is generated.

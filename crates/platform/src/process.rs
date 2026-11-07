@@ -980,7 +980,17 @@ impl Launch {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = spawn_retrying(|| cmd.spawn()).map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
+        let mut wrap = process_wrap::std::CommandWrap::from(cmd);
+        #[cfg(unix)]
+        wrap.wrap(process_wrap::std::ProcessGroup::leader());
+        #[cfg(windows)]
+        {
+            wrap.wrap(process_wrap::std::JobObject);
+            if self.hide_console {
+                wrap.wrap(process_wrap::std::CreationFlags(windows::Win32::System::Threading::CREATE_NO_WINDOW));
+            }
+        }
+        let child = spawn_retrying(|| wrap.spawn()).map_err(|e| spawn_error(&name, &self.program, self.cwd.as_deref(), e, self.remediation.as_deref()))?;
         let launched = Launched { pid: child.id(), started: Instant::now(), state: Arc::new(Mutex::new(LaunchState { child: Some(child), ended: None })) };
         // Reap it when it closes. If no thread can be made the child still runs (and `ended`
         // stays unknown); on Unix it stays a zombie until we exit, which is harmless.
@@ -1012,7 +1022,7 @@ pub struct Launched {
 
 #[derive(Debug)]
 struct LaunchState {
-    child: Option<std::process::Child>,
+    child: Option<Box<dyn process_wrap::std::ChildWrapper>>,
     ended: Option<Ended>,
 }
 
@@ -1282,6 +1292,156 @@ mod launch_tests {
         assert!(l.stop());
         assert!(!l.is_running());
         assert!(l.ended().unwrap().after < Duration::from_secs(20));
+    }
+
+    /// Verify that stopping a watched launch stops its descendant on Unix and Windows.
+    ///
+    /// Wait for the child's startup and heartbeat files, then stop even if they are absent. The
+    /// descendant holds an exclusive lock on `descendant-alive` for its whole life, and the system
+    /// releases it only when the process exits: taking that lock after `stop()` is the exit probe,
+    /// with no timing guess. A descendant that outlived the stop instead finishes its bounded loop
+    /// and writes `descendant-survived` before its lock is released.
+    #[test]
+    fn stopping_a_watched_program_stops_its_descendant() {
+        let dir = tempfile::Builder::new().prefix("watched descendant ").tempdir().unwrap();
+        let l = start_descendant_fixture(dir.path(), true);
+        let (started, heartbeat) = stop_after_descendant_startup(&l, dir.path(), Duration::from_secs(5));
+        assert!(started, "descendant never signalled that it started");
+        assert!(heartbeat, "descendant never produced a heartbeat");
+        // Exclusive locks may need write access (e.g. on NFS), so open for reading and writing.
+        let alive = std::fs::OpenOptions::new().read(true).write(true).open(dir.path().join("descendant-alive")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            match alive.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                Err(e) => panic!("descendant still holds its lock after the watched program stopped: {e}"),
+            }
+        }
+        assert!(!dir.path().join("descendant-survived").exists(), "descendant ran to completion after the watched program stopped");
+    }
+
+    /// Wait for bounded startup, snapshot its markers, and stop before callers assert on them.
+    fn stop_after_descendant_startup(launch: &Launched, dir: &std::path::Path, timeout: Duration) -> (bool, bool) {
+        let started = dir.join("descendant-started");
+        let heartbeat = dir.join("descendant-heartbeat");
+        let deadline = Instant::now() + timeout;
+        while (!started.exists() || !heartbeat.exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let markers = (started.exists(), heartbeat.exists());
+        assert!(launch.stop(), "could not stop the watched launch");
+        markers
+    }
+
+    /// Missing startup markers must still stop a live fixture before reporting startup failure.
+    ///
+    /// Wait (bounded) for the parent to say it is waiting, so the stop is proven to end a live
+    /// process; stop before asserting, then require that it never finished on its own.
+    #[test]
+    fn a_descendant_startup_timeout_stops_the_watched_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let l = start_descendant_fixture(dir.path(), false);
+        let ready = dir.path().join("parent-waiting");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !ready.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let parent_ready = ready.exists();
+        let markers = stop_after_descendant_startup(&l, dir.path(), Duration::from_millis(100));
+        assert!(parent_ready, "the waiting parent never signalled that it was ready");
+        assert_eq!(markers, (false, false));
+        assert!(!l.is_running(), "startup failure left the watched launch running");
+        assert!(!dir.path().join("parent-completed").exists(), "the waiting parent finished on its own instead of being stopped");
+    }
+
+    /// Enable the guarded parent in an isolated directory, with or without child startup.
+    fn start_descendant_fixture(dir: &std::path::Path, start_descendant: bool) -> Launched {
+        std::fs::write(dir.join("descendant-fixture"), if start_descendant { "start" } else { "wait" }).unwrap();
+        Launch::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "process::launch_tests::watched_parent_stand_in"])
+            .cwd(dir)
+            .hide_console()
+            .start_watched()
+            .unwrap()
+    }
+
+    /// Start the bounded child in the watched parent's process group and wait for it.
+    ///
+    /// An exact directory-local guard enables this fixture. The `wait` mode simulates a
+    /// parent that stays alive without starting its child, exercising timeout cleanup: it
+    /// writes `parent-waiting` once running and `parent-completed` only if its wait runs out.
+    #[test]
+    #[ignore = "stand-in invoked by watched descendant tests"]
+    fn watched_parent_stand_in() {
+        match std::fs::read("descendant-fixture").ok().as_deref() {
+            Some(b"start") => {}
+            Some(b"wait") => {
+                std::fs::write("parent-waiting", b"ready").unwrap();
+                std::thread::sleep(Duration::from_secs(5));
+                std::fs::write("parent-completed", b"yes").unwrap();
+                return;
+            }
+            _ => return,
+        }
+        // This process-layer fixture must inherit the parent's group/job. Process and
+        // Launch deliberately create new Unix groups, which would invalidate the test.
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--ignored", "--exact", "process::launch_tests::watched_descendant_stand_in"])
+            .env("CRAFT_ANYTHING_TEST_DESCENDANT", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        // The child's heartbeat loop exits after five seconds even if no stop arrives.
+        let mut child = spawn_retrying(|| command.spawn()).unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+
+    /// Provide a child process whose marker files expose whether it survives shutdown.
+    ///
+    /// Return without writing unless `CRAFT_ANYTHING_TEST_DESCENDANT` is exactly `1`, as
+    /// set by the parent test. When enabled, hold an exclusive lock on `descendant-alive` until
+    /// the process exits, write startup and periodic heartbeat files in the working directory,
+    /// then a survival marker (before the lock is released) if the loop reaches its end.
+    #[test]
+    #[ignore = "stand-in invoked by stopping_a_watched_program_stops_its_descendant"]
+    fn watched_descendant_stand_in() {
+        if std::env::var_os("CRAFT_ANYTHING_TEST_DESCENDANT").as_deref() != Some(OsStr::new("1")) {
+            return;
+        }
+        let alive = std::fs::File::create("descendant-alive").unwrap();
+        alive.lock().unwrap();
+        std::fs::write("descendant-started", b"ready").unwrap();
+        for n in 0..100 {
+            std::fs::write("descendant-heartbeat", n.to_string()).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::fs::write("descendant-survived", b"yes").unwrap();
+    }
+
+    /// Verify that directly running the ignored fixture without its guard writes no files.
+    ///
+    /// Start the test executable in an empty temporary directory with the guard removed,
+    /// then require a successful exit and an unchanged directory.
+    #[test]
+    fn a_direct_descendant_stand_in_run_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        for fixture in ["watched_parent_stand_in", "watched_descendant_stand_in"] {
+            let out = Process::new(std::env::current_exe().unwrap())
+                .args(["--ignored", "--exact", &format!("process::launch_tests::{fixture}")])
+                .env_remove("CRAFT_ANYTHING_TEST_DESCENDANT")
+                .cwd(dir.path())
+                .run()
+                .unwrap();
+            assert!(out.success, "{fixture}: {}", out.stderr_text());
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "the unguarded {fixture} wrote files");
+        }
     }
 
     fn exits_with(code: u8) -> Process {

@@ -673,6 +673,8 @@ impl AcpConversation {
             .process(&self.program)
             .args(&self.args)
             .cwd(&self.cwd)
+            // Our own CLI, started from inside the agent, calls tools as an agent (not the person).
+            .env(craft_anything_engine::AGENT_ENV, "1")
             .stdin(StdinMode::Piped)
             // One process serves the whole chat; a builder turn may take hours.
             .timeout(Duration::from_secs(24 * 3600))

@@ -52,6 +52,8 @@ pub fn question_in(text: &str, just_ask: bool) -> Result<Option<String>, String>
     match slash::read(text) {
         Typed::Command(Command::Btw, "") => Err(tr("Type your question after /btw.")),
         Typed::Command(Command::Btw, question) => Ok(Some(question.to_string())),
+        // Not a question: the prompt box hands it to `approvals::command_in` before asking here.
+        Typed::Command(Command::Approvals, _) => Ok(None),
         Typed::Unknown(name) => Err(trf("There's no /{name} command. You can use {commands}.", &[("name", name), ("commands", &slash::names())])),
         Typed::Message => Ok(Some(text.trim()).filter(|t| just_ask && !t.is_empty()).map(str::to_string)),
     }

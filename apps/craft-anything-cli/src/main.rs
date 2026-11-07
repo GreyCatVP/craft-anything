@@ -229,7 +229,13 @@ fn open_or_create_project(dir: &Path) -> Result<Project, ToolError> {
 
 pub fn call_options(cli: &Cli, cancel: &CancelToken) -> CallOptions<'static> {
     let consent = if cli.allow_run { Consent::Granted } else { Consent::NotAsked };
-    CallOptions::new(Caller::Cli).with_consent(consent).with_cancel(cancel.clone())
+    CallOptions::new(caller()).with_consent(consent).with_cancel(cancel.clone())
+}
+
+/// The person, unless a coding agent Craft Anything started is running this CLI (it then calls
+/// tools as an agent, which can't loosen a project's approvals).
+fn caller() -> Caller {
+    if std::env::var_os(craft_anything_engine::AGENT_ENV).is_some() { Caller::Agent } else { Caller::Cli }
 }
 
 /// A cancel token that trips on Ctrl-C.

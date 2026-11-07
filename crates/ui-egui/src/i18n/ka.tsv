@@ -1444,3 +1444,21 @@ Reasoning	მსჯელობა
 Show model options	მოდელის პარამეტრების ჩვენება
 Standard	სტანდარტული
 Where is your project?	სად არის თქვენი პროექტი?
+Choose what the builder's approvals get	აირჩიეთ, რას იღებს ამწყობის ნებართვები
+Reading the web	ვების კითხვა
+Other commands	სხვა ბრძანებები
+Files outside the project	ფაილები პროექტის გარეთ
+Pushing and publishing	Push და გამოქვეყნება
+Deleting outside the project	წაშლა პროექტის გარეთ
+System changes	სისტემის ცვლილებები
+Other tools	სხვა ხელსაწყოები
+Allow	დაშვება
+Ask	კითხვა
+Refuse	უარყოფა
+After /approvals, type a kind and allow, ask, refuse or default, like /approvals publish ask. Kinds: {kinds}.	/approvals-ის შემდეგ აკრიფეთ სახე და allow, ask, refuse ან default, მაგალითად /approvals publish ask. სახეები: {kinds}.
+There's no kind called {name}. Kinds: {kinds}.	სახე {name} არ არსებობს. სახეები: {kinds}.
+Approvals	ნებართვები
+In this project, {kind}: {choice}.	ამ პროექტში {kind}: {choice}.
+Couldn't change the approvals:	ნებართვების შეცვლა ვერ მოხერხდა:
+What the builder may do without asking you, in this project.	რისი გაკეთება შეუძლია ამწყობს ამ პროექტში თქვენი კითხვის გარეშე.
+Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	ნაგულისხმევი ავტორეჟიმს მიჰყვება: როცა ჩართულია, რისი გაუქმებაც შეიძლება, სრულდება, დანარჩენი კი უარყოფილია; როცა გამორთულია, ამწყობი გეკითხებათ.

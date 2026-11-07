@@ -1444,3 +1444,21 @@ Zoom	Yakınlaştır
 Bring all to front	Tümünü öne getir
 Drag to give the plan more or less room; double-click to reset	Plana daha fazla veya daha az yer vermek için sürükleyin; sıfırlamak için çift tıklayın
 Copy the message	Mesajı kopyala
+Choose what the builder's approvals get	Oluşturucunun onaylarına ne olacağını seç
+Reading the web	Web'i okuma
+Other commands	Diğer komutlar
+Files outside the project	Proje dışındaki dosyalar
+Pushing and publishing	Push ve yayınlama
+Deleting outside the project	Proje dışında silme
+System changes	Sistem değişiklikleri
+Other tools	Diğer araçlar
+Allow	İzin ver
+Ask	Sor
+Refuse	Reddet
+After /approvals, type a kind and allow, ask, refuse or default, like /approvals publish ask. Kinds: {kinds}.	/approvals sonrasına bir tür ve allow, ask, refuse ya da default yazın, örneğin /approvals publish ask. Türler: {kinds}.
+There's no kind called {name}. Kinds: {kinds}.	{name} adında bir tür yok. Türler: {kinds}.
+Approvals	Onaylar
+In this project, {kind}: {choice}.	Bu projede {kind}: {choice}.
+Couldn't change the approvals:	Onaylar değiştirilemedi:
+What the builder may do without asking you, in this project.	Oluşturucunun bu projede size sormadan yapabilecekleri.
+Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Varsayılan, otomatik modu izler: açıkken geri alınabilenler yapılır, gerisi reddedilir; kapalıyken oluşturucu sorar.
