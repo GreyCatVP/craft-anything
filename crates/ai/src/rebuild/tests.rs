@@ -1037,7 +1037,7 @@ mod typed_retries {
             &ws,
             "opencode",
             concat!(
-                "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format'; exit 0; fi\n",
+                "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format --standalone'; exit 0; fi\n",
                 "for arg do last=\"$arg\"; done\nprintf '%s\\n' \"$last\" >> prompts\n",
                 "if [ ! -f rate-was-returned ]; then touch rate-was-returned\n",
                 "printf '%s\\n' '{\"type\":\"error\",\"error\":{\"name\":\"APIError\",\"data\":{\"message\":\"Please retry in 19.052906498s.\",\"statusCode\":429,\"isRetryable\":true}}}'\nexit 1\nfi\n",
@@ -1072,7 +1072,7 @@ mod typed_retries {
         let mut cli = executable_cli(
             &ws,
             "opencode",
-            "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf 'old help\\n'; exit 0; fi\nprintf 'attempt\\n' >> attempts\nprintf 'Unknown option: --format. Please retry in 1s.\\n' >&2\nexit 2\n",
+            "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format --standalone'; exit 0; fi\nprintf 'attempt\\n' >> attempts\nprintf 'Unknown option: --model. Please retry in 1s.\\n' >&2\nexit 2\n",
         );
         let mut waits = Vec::new();
         let error = worker
@@ -1812,7 +1812,7 @@ mod picking_up_a_build {
         let agent = b._dir.path().join("agent.sh");
         let works = std::fs::read_to_string(&agent).unwrap().replacen(
             "#!/bin/sh\n",
-            "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format'; exit 0; fi\n",
+            "#!/bin/sh\nif [ \"$2\" = '--help' ]; then printf '%s\\n' '--format --standalone'; exit 0; fi\n",
             1,
         );
         let error = json!({"type":"error","error":{"name":"APIError","data":{"message":"fixture sign in needed","statusCode":401,"isRetryable":false}}});

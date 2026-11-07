@@ -912,6 +912,10 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
             // Forget it before retry chooses between the original request and a continuation.
             *session.lock().unwrap_or_else(PoisonError::into_inner) = None;
         } else if !ok {
+            if let Some((message, remediation)) = adapter.missing_flags_error() {
+                let _ = tx.send(AgentEvent::Error { message: message.into(), remediation: Some(remediation.into()), log: None });
+                return nothing_done(&name);
+            }
             let _ = tx.send(AgentEvent::Status { text: format!("Couldn't confirm that {program} has {}; trying it anyway.", needed.join(" / ")) });
         }
     }
@@ -2671,6 +2675,46 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         }
         let said = |w: &str| all.iter().any(|e| matches!(e, AgentEvent::Status { text } if text.contains(w)));
         assert!(said("trying it anyway") && !said("plain adapter"), "{all:?}");
+    }
+
+    /// #1111: OpenCode 1.x's `run --help` lists no `--standalone` and rejects it, so the turn is
+    /// stopped with the fix before the program runs (it would print its usage and fail).
+    #[cfg(unix)]
+    #[test]
+    fn opencode_1_is_refused_before_it_runs() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("opencode");
+        let ran = dir.path().join("ran");
+        // OpenCode 1.x's help, and a run of it that leaves a mark so the test sees it happened.
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = run ] && [ \"$2\" = --help ]; then printf '%s\\n' '--format --title --auto'; exit 0; fi\ntouch '{}'\nexit 1\n",
+            ran.display()
+        );
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config =
+            BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+        let mut c = CliConversation::new(CliSpec::new(config, options, false, None));
+        c.send("What does this program do?");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut all = Vec::new();
+        while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+            all.extend(c.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            all.iter().any(|e| matches!(
+                e,
+                AgentEvent::Error { message, remediation: Some(fix), .. }
+                    if message.contains("OpenCode 1.x") && fix.contains("@opencode/cli")
+            )),
+            "{all:?}"
+        );
+        let said = |w: &str| all.iter().any(|e| matches!(e, AgentEvent::Status { text } if text.contains(w)));
+        assert!(!said("trying it anyway"), "{all:?}");
+        assert!(!ran.exists(), "OpenCode 1.x ran anyway: {all:?}");
     }
 
     /// A fork's own agent: JSON lines of `{"say": …}`, registered under its id.
