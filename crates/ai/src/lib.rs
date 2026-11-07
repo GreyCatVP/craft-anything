@@ -478,6 +478,20 @@ impl AiHub {
         self.add_backend_with(BackendEntry { config: cfg, options: BackendOptions::default() }, key)
     }
 
+    /// Add a provider from the "Add a provider" picker: its catalogue row becomes a backend, and
+    /// the key (when given) goes to the keychain.
+    pub fn add_provider(&self, choice: &providers::ProviderChoice, key: Option<String>) -> Result<(), ToolError> {
+        let config = BackendConfig {
+            name: choice.name.to_string(),
+            kind: choice.kind,
+            model: choice.default_model.to_string(),
+            base_url: choice.base_url.map(str::to_string),
+            ssh_host: None,
+            enabled: true,
+        };
+        self.add_backend(config, key)
+    }
+
     /// Add an OpenAI-compatible server by its address: Ollama or LM Studio on another computer, or
     /// a hosted service with its key. It's added only when it answers with its models; without a
     /// model, the first one it lists that can chat is used. Returns the model.
@@ -648,7 +662,15 @@ impl AiHub {
         match (e.config.kind, model_in_use(&e.config, Some(&e.options))) {
             (_, None) => Ok(Vec::new()),
             (BackendKind::AgentCli, Some(_)) => cli_agents::adapter_for(&e.config.model).model_choices(&e.config, &e.options),
-            _ => self.list_models(name),
+            // The live list, else a known provider's own models when it can't be listed (GLM (Z.ai)
+            // has no OpenAI `/models` endpoint). An unknown provider keeps its error.
+            _ => match self.list_models(name) {
+                Ok(models) if !models.is_empty() => Ok(models),
+                other => match providers::ProviderChoice::matching(e.config.kind, e.config.base_url.as_deref()) {
+                    Some(c) => Ok(c.models.iter().map(|m| (*m).to_string()).collect()),
+                    None => other,
+                },
+            },
         }
     }
 

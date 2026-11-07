@@ -483,6 +483,23 @@ mod tests {
         assert!(d.iter().all(|x| x.suggestion.name != "DeepSeek"));
     }
 
+    /// The newly added providers are offered under their own names when their key is set.
+    #[test]
+    fn glm_and_minimax_are_offered_when_their_keys_are_set() {
+        let d = env_keys(|v| (v == "ZAI_API_KEY").then(|| "k".to_string()));
+        let g = d.iter().find(|x| x.suggestion.name == "GLM (Z.ai)").expect("GLM offered");
+        assert!(!g.needs_key);
+        assert!(g.reason.contains("ZAI_API_KEY"));
+        assert_eq!(g.suggestion.base_url.as_deref(), Some("https://api.z.ai/api/paas/v4"));
+        assert_eq!(g.suggestion.model.as_str(), "glm-5.3");
+
+        let d = env_keys(|v| (v == "MINIMAX_API_KEY").then(|| "k".to_string()));
+        let m = d.iter().find(|x| x.suggestion.name == "MiniMax").expect("MiniMax offered");
+        assert!(!m.needs_key);
+        assert_eq!(m.suggestion.base_url.as_deref(), Some("https://api.minimax.io/v1"));
+        assert_eq!(m.suggestion.model.as_str(), "MiniMax-M3.1-Flash");
+    }
+
     #[test]
     fn closed_port_is_fast_and_negative() {
         // Binding port 0 chooses a nonzero port, so no listener can take this endpoint.
