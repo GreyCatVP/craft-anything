@@ -654,7 +654,13 @@ pub fn analyse(
         match set_aside(&project_dir) {
             Ok(aside) => break aside,
             Err(e) if !move_may_pass(&e) => {
-                return Err(GhidraError::Launch(format!("moving {} out of the way: {e}", project_dir.display())));
+                // Ending here, so the lock goes back first: left behind it reads to everyone else as
+                // an analysis in progress. The move is still what the person needs to hear about.
+                let why = match release(&lock) {
+                    Ok(()) => format!("moving {} out of the way: {e}", project_dir.display()),
+                    Err(also) => format!("moving {} out of the way: {e}; and {also}", project_dir.display()),
+                };
+                return Err(GhidraError::Launch(why));
             }
             Err(e) => {
                 release(&lock)?;
