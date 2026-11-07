@@ -468,6 +468,28 @@ fn a_second_analysis_waits_for_the_running_one_and_a_dead_ones_lock_is_taken_ove
     assert!(!project.join("half-written.gpr").exists(), "it wrote into the folder the other analysis was filling");
 }
 
+/// Which refusals to move a folder are worth waiting on: Windows reports the live Ghidra this PR
+/// is about as a permission problem, and everything else is the caller's to hear now.
+#[test]
+fn a_move_that_cannot_pass_is_told_apart_from_one_that_might() {
+    use std::io::{Error, ErrorKind};
+    assert!(move_may_pass(&Error::from(ErrorKind::PermissionDenied)), "a folder Windows has open files in reads as a permission problem");
+    assert!(!move_may_pass(&Error::from(ErrorKind::InvalidInput)), "a path we cannot name will not fix itself");
+    assert!(!move_may_pass(&Error::from(ErrorKind::NotFound)), "gone is not a reason to wait");
+}
+
+/// A lock that cannot be released reads to every other process as an analysis in progress, so
+/// releasing it says why instead of failing silently.
+#[test]
+fn giving_back_a_lock_that_is_already_gone_is_not_a_failure() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(release(&d.path().join("never-existed.analysing")).is_ok(), "nothing to release is not an error");
+    let lock = d.path().join("held.analysing");
+    std::fs::write(&lock, "").unwrap();
+    assert!(release(&lock).is_ok());
+    assert!(!lock.exists(), "the lock is gone once it is given back");
+}
+
 /// #951: the folder a stale lock was guarding is moved, not removed, so a Ghidra that outlived the
 /// app that started it keeps writing into its own folder instead of into this analysis's.
 #[test]

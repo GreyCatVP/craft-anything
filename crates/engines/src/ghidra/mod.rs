@@ -521,8 +521,29 @@ fn set_aside(project_dir: &Path) -> std::io::Result<Option<Aside>> {
     }
     let token = random_token();
     let aside = project_dir.with_extension(format!("orphaned-{}", token.get(..8).unwrap_or(&token)));
-    std::fs::rename(project_dir, &aside)?;
-    Ok(Some(Aside(aside)))
+    match std::fs::rename(project_dir, &aside) {
+        Ok(()) => Ok(Some(Aside(aside))),
+        // Gone between the check and the move: nothing to move, not a reason to wait.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether a refused move may pass: Windows reports a folder it has open files in as a permission
+/// or an uncategorised error, and an antivirus holding a handle looks the same for a moment.
+/// Anything else — a path we cannot even name — is the caller's to hear now, not after a timeout.
+fn move_may_pass(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Uncategorized | std::io::ErrorKind::WouldBlock)
+}
+
+/// Give the analysis lock back. A lock this process cannot release would read to everyone else as
+/// an analysis in progress, so it ends the attempt with the reason instead of waiting it out.
+fn release(lock: &Path) -> Result<(), GhidraError> {
+    match std::fs::remove_file(lock) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(GhidraError::Launch(format!("releasing the analysis lock {}: {e}", lock.display()))),
+    }
 }
 
 /// The start of the folder names Ghidra gives this system's native programs (`mac_arm_64`, ...).
@@ -596,6 +617,8 @@ pub fn analyse(
     let lock = lock_path(&project_dir);
     // The lock sits beside the project, in the cache folder a fresh store doesn't have yet.
     make_private_dir(lock.parent().unwrap_or(&root))?;
+    // Why a move was refused last, so a timeout says what actually kept this waiting.
+    let mut held_by: Option<String> = None;
     // The loop ends by handing over what it moved aside, if anything.
     let kept_aside = loop {
         if is_analysed(&project_dir) {
@@ -605,7 +628,11 @@ pub fn analyse(
             return Err(GhidraError::Cancelled);
         }
         if Instant::now() >= deadline {
-            return Err(GhidraError::Timeout(format!("Ghidra's analysis didn't finish within {} s", cfg.startup_timeout.as_secs())));
+            let why = match &held_by {
+                Some(e) => format!(": the folder an earlier analysis left could not be moved out of the way ({e})"),
+                None => String::new(),
+            };
+            return Err(GhidraError::Timeout(format!("Ghidra's analysis didn't finish within {} s{why}", cfg.startup_timeout.as_secs())));
         }
         if lock_is_fresh(&lock) {
             progress(0.05, &format!("waiting for Ghidra's analysis of this program, started earlier ({} min so far)", minutes()));
@@ -613,7 +640,7 @@ pub fn analyse(
             continue;
         }
         // Stale or none: take it (create_new, so only one of two racing processes wins).
-        let _ = std::fs::remove_file(&lock);
+        release(&lock)?;
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
             Ok(_) => {}
             Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
@@ -626,8 +653,12 @@ pub fn analyse(
         // its own folder. A refusal to move it means that Ghidra is still working: wait for it.
         match set_aside(&project_dir) {
             Ok(aside) => break aside,
+            Err(e) if !move_may_pass(&e) => {
+                return Err(GhidraError::Launch(format!("moving {} out of the way: {e}", project_dir.display())));
+            }
             Err(e) => {
-                let _ = std::fs::remove_file(&lock);
+                release(&lock)?;
+                held_by = Some(e.to_string());
                 progress(0.05, &format!("waiting for the analysis of this program already under way ({e})"));
                 std::thread::sleep(Duration::from_secs(2));
             }
