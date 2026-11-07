@@ -70,6 +70,47 @@ impl AgentAdapter for DeepSeekHarness {
         false
     }
 
+    /// The Harness keeps its own account, model and effort: Settings shows only the account.
+    fn shows_options(&self) -> bool {
+        false
+    }
+
+    fn account_service(&self) -> Option<&'static str> {
+        Some("DeepSeek")
+    }
+
+    fn account_tools(&self) -> Option<(&'static str, &'static str)> {
+        Some(("ai_dsh_sign_in", "ai_dsh_sign_out"))
+    }
+
+    fn account_state(&self) -> Option<(bool, Option<String>)> {
+        let home = crate::dsh_auth::home()?;
+        Some(match crate::dsh_auth::status(&home) {
+            crate::dsh_auth::SignIn::SignedIn { account } => (true, account),
+            crate::dsh_auth::SignIn::SignedOut => (false, None),
+        })
+    }
+
+    /// The Harness keeps its own DeepSeek sign-in in `$DSH_HOME/.credentials.yaml`: a DeepSeek API
+    /// key reference, or the account grant a sign-in leaves there. A missing Harness folder says
+    /// nothing, so the run itself reports any problem.
+    fn signed_in(&self, _program: &str) -> Option<bool> {
+        crate::dsh_auth::home().map(|home| matches!(crate::dsh_auth::status(&home), crate::dsh_auth::SignIn::SignedIn { .. }))
+    }
+
+    /// The same file names an account it was signed in to, which tells an expired sign-in apart
+    /// from one that never happened.
+    fn signed_in_before(&self) -> bool {
+        crate::dsh_auth::home().is_some_and(|home| matches!(crate::dsh_auth::status(&home), crate::dsh_auth::SignIn::SignedIn { .. }))
+    }
+
+    fn sign_in_fix(&self) -> Option<String> {
+        Some(
+            "Sign in to DeepSeek Harness in Settings → AI, or give it a DEEPSEEK_API_KEY for the account it should use, then try again. The Harness keeps your credentials; Craft Anything never reads them out."
+                .into(),
+        )
+    }
+
     fn check_tool_server(&self, stop: &CancelToken) -> Result<(), ToolError> {
         cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop)?;
         // The folder and the write a run uses, once, before the build starts: a temporary folder

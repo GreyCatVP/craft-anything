@@ -900,3 +900,19 @@ In this project, {kind}: {choice}.	このプロジェクトでは {kind}: {choic
 Couldn't change the approvals:	承認を変更できませんでした:
 What the builder may do without asking you, in this project.	このプロジェクトでビルダーが確認なしにしてよいこと。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	既定は自動モードに従います。オンのときは元に戻せることは実行し、それ以外は拒否します。オフのときはビルダーが確認します。
+Sign in	ログイン
+Sign out	ログアウト
+Not signed in to DeepSeek	DeepSeek にログインしていません
+Signed in to DeepSeek: {account}	DeepSeek にログイン中: {account}
+Signing in to DeepSeek…	DeepSeek にログインしています…
+Sign in to {name}	{name} にログイン
+Sign out of {name}	{name} からログアウト
+Couldn't find the DeepSeek Harness folder on this computer (DSH_HOME or ~/.dsh).	このコンピューターで DeepSeek Harness のフォルダーが見つかりません (DSH_HOME または ~/.dsh)。
+Sign in to DeepSeek Harness	DeepSeek Harness にログイン
+Sign out of DeepSeek Harness	DeepSeek Harness からログアウト
+Signed in to {service}	{service} にログイン中
+Signed in to {service}: {account}	{service} にログイン中: {account}
+Signing in to {service}…	{service} にログインしています…
+Not signed in to {service}	{service} にログインしていません
+Sign in to Kimi Code	Kimi Code にログイン
+Sign out of Kimi Code	Kimi Code からログアウト

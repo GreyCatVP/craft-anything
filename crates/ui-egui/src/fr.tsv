@@ -1461,3 +1461,19 @@ In this project, {kind}: {choice}.	Dans ce projet, {kind} : {choice}.
 Couldn't change the approvals:	Impossible de modifier les autorisations :
 What the builder may do without asking you, in this project.	Ce que le constructeur peut faire sans vous demander, dans ce projet.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Par défaut suit le mode automatique : activé, ce qui peut être annulé se fait et le reste est refusé ; désactivé, le constructeur demande.
+Sign in	Se connecter
+Sign out	Se déconnecter
+Not signed in to DeepSeek	Non connecté à DeepSeek
+Signed in to DeepSeek: {account}	Connecté à DeepSeek : {account}
+Signing in to DeepSeek…	Connexion à DeepSeek…
+Sign in to {name}	Se connecter à {name}
+Sign out of {name}	Se déconnecter de {name}
+Couldn't find the DeepSeek Harness folder on this computer (DSH_HOME or ~/.dsh).	Le dossier DeepSeek Harness est introuvable sur cet ordinateur (DSH_HOME ou ~/.dsh).
+Sign in to DeepSeek Harness	Se connecter à DeepSeek Harness
+Sign out of DeepSeek Harness	Se déconnecter de DeepSeek Harness
+Signed in to {service}	Connecté à {service}
+Signed in to {service}: {account}	Connecté à {service} : {account}
+Signing in to {service}…	Connexion à {service}…
+Not signed in to {service}	Non connecté à {service}
+Sign in to Kimi Code	Se connecter à Kimi Code
+Sign out of Kimi Code	Se déconnecter de Kimi Code

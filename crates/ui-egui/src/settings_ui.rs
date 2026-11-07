@@ -331,6 +331,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     }
     let (mut pick, mut builds, mut extracts, mut toggle, mut remove) = (None, None, None, None, None);
     let (mut choose_program, mut usual_program) = (None, None);
+    // The account actions on an agent card that shows only its account.
+    let (mut agent_sign_in, mut agent_sign_out) = (None, None);
     let mut save_folder = None;
     // Taken out while the rows borrow the app, and put back after them.
     let mut folder_drafts = std::mem::take(&mut app.folder_inputs);
@@ -342,6 +344,8 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     let confirm_id = egui::Id::new("remove-ai");
     let confirming: Option<String> = ui.data(|d| d.get_temp(confirm_id));
     for b in &app.backends {
+        // An agent that keeps its own model, effort and folders shows only its account.
+        let shows_options = craft_anything_ai::cli_agents::adapter_for(&b.model).shows_options();
         widgets::panel(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
             // The name and model on their own row (shortened, full text on hover), the buttons on a
@@ -358,7 +362,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     ui.add(egui::Label::new(RichText::new(format!("{:?}{what}{ssh}", b.kind)).color(t.text_faint).size(theme::CAPTION)).truncate());
                     // An agent app on this computer: which program runs it, for one installed
                     // where it isn't looked for (#53).
-                    if b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty()) {
+                    if shows_options && b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty()) {
                         let program = app.backend_options.get(&b.name).and_then(|o| o.command.as_ref());
                         ui.horizontal_wrapped(|ui| {
                             // The links at the caption's size, so the line reads as one.
@@ -376,7 +380,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     // The folder it keeps its sign-in in (Claude Code's CLAUDE_CONFIG_DIR), typed
                     // so `~/` and hidden folders work, here or over SSH: another folder is another
                     // account. Saved on Enter or when the field is left; empty is its usual one.
-                    if craft_anything_ai::folder_var(b).is_some() {
+                    if shows_options && craft_anything_ai::folder_var(b).is_some() {
                         let saved = app.backend_options.get(&b.name).and_then(|o| o.config_dir.clone()).unwrap_or_default();
                         let id = egui::Id::new(("agent-folder", &b.name));
                         // What was typed stays until it's saved (or refused, so it can be fixed).
@@ -410,7 +414,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     }
                     // How hard it thinks: the Claude API and Claude Code take every Claude level.
                     let effort = craft_anything_ai::effort_in_use(b, app.backend_options.get(&b.name));
-                    if b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty()) {
+                    if shows_options && b.kind == BackendKind::AgentCli && b.ssh_host.as_deref().is_some_and(|h| !h.trim().is_empty()) {
                         let id = egui::Id::new(("remote-agent-program", &b.name));
                         let mut program = ui
                             .data_mut(|d| d.get_temp::<String>(id))
@@ -425,7 +429,7 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                         ui.data_mut(|d| d.insert_temp(id, program));
                     }
                     // Which model it uses, and the ones it can be set to (#123).
-                    if live_catalog {
+                    if shows_options && live_catalog {
                         let options = app.backend_options.get(&b.name);
                         let current = options
                             .and_then(|o| o.cli_model.as_deref())
@@ -551,6 +555,52 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
                     }
                 });
             });
+            // An agent that keeps its own options shows only its account: a status line and one
+            // button, so the card stays as small as its one setting.
+            let adapter = craft_anything_ai::cli_agents::adapter_for(&b.model);
+            if let (Some(service), Some((sign_in_tool, sign_out_tool))) = (adapter.account_service(), adapter.account_tools()) {
+                ui.add_space(8.0);
+                let account = app.agent_accounts.get(&b.name).cloned().flatten();
+                let signing = app.agent_signing.as_deref() == Some(b.name.as_str());
+                let program = app.backend_options.get(&b.name).and_then(|o| o.command.clone());
+                let (icon, color, text) = if signing {
+                    ("user", t.accent, trf("Signing in to {service}…", &[("service", service)]))
+                } else if let Some(account) = &account {
+                    if account.is_empty() {
+                        ("check", t.success, trf("Signed in to {service}", &[("service", service)]))
+                    } else {
+                        ("check", t.success, trf("Signed in to {service}: {account}", &[("service", service), ("account", account)]))
+                    }
+                } else {
+                    ("user", t.text_faint, trf("Not signed in to {service}", &[("service", service)]))
+                };
+                egui::Frame::new()
+                    .fill(t.field)
+                    .stroke(egui::Stroke::new(1.0, t.field_border))
+                    .corner_radius(t.r())
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            icons::show(ui, icon, 15.0, color);
+                            ui.add_space(2.0);
+                            ui.style_mut().override_font_id = Some(egui::FontId::proportional(theme::BODY));
+                            ui.add(egui::Label::new(RichText::new(text).color(if account.is_some() { t.text } else { t.text_dim })).truncate());
+                            // The one action sits at the row's right edge, whatever the account text.
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if signing {
+                                    ui.add(crate::widgets::Spinner::new().size(14.0).color(t.accent));
+                                } else if account.is_some() {
+                                    if widgets::secondary(ui, None, "Sign out").clicked() {
+                                        agent_sign_out = Some((b.name.clone(), sign_out_tool, program.clone()));
+                                    }
+                                } else if widgets::primary(ui, "Sign in").clicked() {
+                                    agent_sign_in = Some((b.name.clone(), sign_in_tool, program.clone()));
+                                }
+                            });
+                        });
+                    });
+            }
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.add_space(26.0);
@@ -620,6 +670,12 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
     app.folder_inputs = folder_drafts;
     if let Some((name, folder)) = save_folder {
         app.set_agent_folder(&name, Some(folder));
+    }
+    if let Some((name, tool, program)) = agent_sign_in {
+        app.sign_in_agent(&name, tool, program);
+    }
+    if let Some((name, tool, program)) = agent_sign_out {
+        app.sign_out_agent(&name, tool, program);
     }
     if let Some(name) = pick_model {
         app.pick_model(&name);

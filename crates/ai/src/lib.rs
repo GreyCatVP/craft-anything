@@ -12,11 +12,15 @@ pub mod cli_agents;
 pub mod config;
 pub mod context;
 pub mod detect;
+pub mod dsh_auth;
+pub mod dsh_tools;
 mod failure;
 pub mod failure_log;
 pub mod http;
 pub mod key_tools;
 pub mod keys;
+pub mod kimi_auth;
+pub mod kimi_tools;
 pub mod model;
 pub mod model_options;
 pub mod model_tools;
@@ -77,7 +81,7 @@ impl BackendKind {
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::Gemini => openai::GEMINI_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "grok", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "dsh"],
+            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "grok", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "dsh", "kimi"],
         }
     }
 
@@ -363,6 +367,8 @@ impl ChatModel for Tunneled {
 pub fn tools() -> Vec<craft_anything_engine::ToolSpec> {
     let mut v = rebuild::tools::specs();
     v.extend(key_tools::specs());
+    v.extend(dsh_tools::specs());
+    v.extend(kimi_tools::specs());
     v.extend(model_tools::specs());
     v.extend(model_options::specs());
     v

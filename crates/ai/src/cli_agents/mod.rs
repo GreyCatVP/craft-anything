@@ -51,6 +51,7 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("goose", "goose", "Goose"),
     ("maki", "maki", "Maki"),
     ("dsh", "dsh", "DeepSeek Harness"),
+    ("kimi", "kimi", "Kimi Code"),
 ];
 
 pub fn program_for(agent: &str) -> String {
@@ -2503,7 +2504,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         reg.register(Arc::new(EchoAgent));
         assert_eq!(
             format!("{reg:?}"),
-            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "copilot", "grok", "dsh", "echo-agent"]"#
+            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "copilot", "grok", "dsh", "kimi", "echo-agent"]"#
         );
     }
 

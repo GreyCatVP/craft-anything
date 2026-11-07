@@ -1462,3 +1462,19 @@ In this project, {kind}: {choice}.	在这个项目中，{kind}：{choice}。
 Couldn't change the approvals:	无法更改审批：
 What the builder may do without asking you, in this project.	在这个项目中，构建助手无需问你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	默认跟随自动模式：开启时，可撤销的操作会执行，其余的会被拒绝；关闭时，构建助手会询问。
+Sign in	登录
+Sign out	退出登录
+Not signed in to DeepSeek	尚未登录 DeepSeek
+Signed in to DeepSeek: {account}	已登录 DeepSeek：{account}
+Signing in to DeepSeek…	正在登录 DeepSeek…
+Sign in to {name}	登录 {name}
+Sign out of {name}	退出 {name}
+Couldn't find the DeepSeek Harness folder on this computer (DSH_HOME or ~/.dsh).	找不到这台电脑上的 DeepSeek Harness 目录（DSH_HOME 或 ~/.dsh）。
+Sign in to DeepSeek Harness	登录 DeepSeek Harness
+Sign out of DeepSeek Harness	退出 DeepSeek Harness
+Signed in to {service}	已登录 {service}
+Signed in to {service}: {account}	已登录 {service}：{account}
+Signing in to {service}…	正在登录 {service}…
+Not signed in to {service}	尚未登录 {service}
+Sign in to Kimi Code	登录 Kimi Code
+Sign out of Kimi Code	退出 Kimi Code

@@ -1462,3 +1462,19 @@ In this project, {kind}: {choice}.	Bu projede {kind}: {choice}.
 Couldn't change the approvals:	Onaylar değiştirilemedi:
 What the builder may do without asking you, in this project.	Oluşturucunun bu projede size sormadan yapabilecekleri.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Varsayılan, otomatik modu izler: açıkken geri alınabilenler yapılır, gerisi reddedilir; kapalıyken oluşturucu sorar.
+Sign in	Giriş yap
+Sign out	Çıkış yap
+Not signed in to DeepSeek	DeepSeek'te oturum açık değil
+Signed in to DeepSeek: {account}	DeepSeek'te oturum açık: {account}
+Signing in to DeepSeek…	DeepSeek'te oturum açılıyor…
+Sign in to {name}	{name} için giriş yap
+Sign out of {name}	{name} oturumunu kapat
+Couldn't find the DeepSeek Harness folder on this computer (DSH_HOME or ~/.dsh).	DeepSeek Harness klasörü bu bilgisayarda bulunamadı (DSH_HOME veya ~/.dsh).
+Sign in to DeepSeek Harness	DeepSeek Harness'e giriş yap
+Sign out of DeepSeek Harness	DeepSeek Harness oturumunu kapat
+Signed in to {service}	{service} oturumu açık
+Signed in to {service}: {account}	{service} oturumu açık: {account}
+Signing in to {service}…	{service} oturumu açılıyor…
+Not signed in to {service}	{service} oturumu açık değil
+Sign in to Kimi Code	Kimi Code'e giriş yap
+Sign out of Kimi Code	Kimi Code oturumunu kapat

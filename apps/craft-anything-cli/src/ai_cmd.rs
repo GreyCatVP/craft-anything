@@ -80,6 +80,12 @@ pub enum AiCommand {
     Effort { name: String, level: Option<String> },
     /// Send a tiny request and report latency.
     Test { name: String },
+    /// Sign in to the DeepSeek account the Harness should use (the Harness's own sign-in).
+    /// Leave the name out for the DeepSeek Harness backend.
+    Login { name: Option<String> },
+    /// Sign out of the DeepSeek account: the Harness's own grant is removed.
+    /// Leave the name out for the DeepSeek Harness backend.
+    Logout { name: Option<String> },
     /// Choose the backend that builds (leave the name out to go back to automatic).
     Builder { name: Option<String> },
     /// Choose the backend that takes a game's own files out after the study, in Deep mode (an API
@@ -197,6 +203,68 @@ fn read_key(key_env: &Option<String>, key_stdin: bool) -> Result<Option<String>,
         return if k.is_empty() { Err("no key on stdin".into()) } else { Ok(Some(k)) };
     }
     Ok(None)
+}
+
+/// The backend this account action is for, and the tools that sign its own account in and out:
+/// `name` when given, else the only backend that keeps an account of its own.
+fn account_backend(hub: &AiHub, name: Option<&str>) -> Result<(BackendConfig, (&'static str, &'static str)), ToolError> {
+    let accounts: Vec<(BackendConfig, (&'static str, &'static str))> = hub
+        .backends()
+        .into_iter()
+        .filter_map(|b| {
+            let adapter = craft_anything_ai::cli_agents::adapter_for(&b.model);
+            adapter.account_tools().map(|tools| (b, tools))
+        })
+        .collect();
+    if let Some(want) = name {
+        return accounts.into_iter().find(|(b, _)| b.name == want).ok_or_else(|| ToolError::invalid(format!("{want} doesn't keep an account of its own.")));
+    }
+    match accounts.len() {
+        1 => accounts.into_iter().next().ok_or_else(|| ToolError::invalid("No backend keeps an account.")),
+        0 => Err(ToolError::invalid("No backend keeps an account of its own.")
+            .with_remediation("Add the DeepSeek Harness (--kind agent_cli --model dsh) or Kimi Code (--model kimi).")),
+        _ => {
+            Err(ToolError::invalid("More than one backend keeps its own account.").with_remediation("Name the one to use, e.g. ai login \"DeepSeek Harness\"."))
+        }
+    }
+}
+
+/// Sign in to the account a backend keeps itself, through its own tool.
+fn login(hub: &AiHub, name: Option<&str>, f: Format) -> Result<(), ToolError> {
+    let (backend, (sign_in, _)) = account_backend(hub, name)?;
+    let result = run_account_tool(&hub.engine, sign_in)?;
+    emit(
+        &json!({
+            "backend": backend.name,
+            "signed_in": result.get("signed_in").cloned().unwrap_or(json!(true)),
+            "account": result.get("account").cloned().unwrap_or(Value::Null),
+            "detail": result.get("output").cloned().unwrap_or(Value::Null),
+        }),
+        f,
+    );
+    Ok(())
+}
+
+/// Run one of the account tools on this engine, as the app and MCP do, and return its result.
+fn run_account_tool(engine: &std::sync::Arc<craft_anything_engine::Engine>, id: &str) -> Result<Value, ToolError> {
+    use craft_anything_engine::{CallOptions, Caller, Consent};
+    let out = engine.call(id, json!({}), CallOptions::new(Caller::Cli).with_consent(Consent::Granted))?;
+    Ok(out.to_json().get("result").cloned().unwrap_or(Value::Null))
+}
+
+/// Sign out of the account a backend keeps itself, through its own tool.
+fn logout(hub: &AiHub, name: Option<&str>, f: Format) -> Result<(), ToolError> {
+    let (backend, (_, sign_out)) = account_backend(hub, name)?;
+    let result = run_account_tool(&hub.engine, sign_out)?;
+    emit(
+        &json!({
+            "backend": backend.name,
+            "signed_in": false,
+            "detail": result.get("output").cloned().unwrap_or(Value::Null),
+        }),
+        f,
+    );
+    Ok(())
 }
 
 /// Dispatch AI configuration, discovery and model-selection commands through the shared hub.
@@ -363,6 +431,14 @@ pub fn ai(cli: &Cli, c: &AiCommand, f: Format) -> u8 {
                 emit(&json!({"name": name, "folder": path, "found": found}), f);
                 if found { 0 } else { 1 }
             }
+            Err(e) => fail(&e, f),
+        },
+        AiCommand::Login { name } => match login(&hub, name.as_deref(), f) {
+            Ok(()) => 0,
+            Err(e) => fail(&e, f),
+        },
+        AiCommand::Logout { name } => match logout(&hub, name.as_deref(), f) {
+            Ok(()) => 0,
             Err(e) => fail(&e, f),
         },
         AiCommand::Builder { name } => match hub.set_role(craft_anything_ai::Role::Builder, name.as_deref()) {

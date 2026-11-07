@@ -30,6 +30,7 @@ pub const ACP_AGENTS: &[(&str, &[&str])] = &[
     ("goose", &["acp"]),
     ("hermes", &["acp"]),
     ("maki", &["acp"]),
+    ("kimi", &["acp"]),
     ("copilot", &["--acp", "--stdio"]),
     // Flags that belong to this mode (`--model`, `--no-leader`) go between `agent` and `stdio`.
     ("grok", &["agent"]),

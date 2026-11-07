@@ -1462,3 +1462,19 @@ In this project, {kind}: {choice}.	이 프로젝트에서 {kind}: {choice}.
 Couldn't change the approvals:	승인을 바꾸지 못했습니다:
 What the builder may do without asking you, in this project.	이 프로젝트에서 빌더가 묻지 않고 해도 되는 일입니다.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	기본값은 자동 모드를 따릅니다. 켜져 있으면 되돌릴 수 있는 일은 진행하고 나머지는 거부하며, 꺼져 있으면 빌더가 묻습니다.
+Sign in	로그인
+Sign out	로그아웃
+Not signed in to DeepSeek	DeepSeek에 로그인하지 않음
+Signed in to DeepSeek: {account}	DeepSeek에 로그인됨: {account}
+Signing in to DeepSeek…	DeepSeek에 로그인 중…
+Sign in to {name}	{name}에 로그인
+Sign out of {name}	{name}에서 로그아웃
+Couldn't find the DeepSeek Harness folder on this computer (DSH_HOME or ~/.dsh).	이 컴퓨터에서 DeepSeek Harness 폴더를 찾을 수 없습니다(DSH_HOME 또는 ~/.dsh).
+Sign in to DeepSeek Harness	DeepSeek Harness에 로그인
+Sign out of DeepSeek Harness	DeepSeek Harness에서 로그아웃
+Signed in to {service}	{service}에 로그인됨
+Signed in to {service}: {account}	{service}에 로그인됨: {account}
+Signing in to {service}…	{service}에 로그인 중…
+Not signed in to {service}	{service}에 로그인하지 않음
+Sign in to Kimi Code	Kimi Code에 로그인
+Sign out of Kimi Code	Kimi Code에서 로그아웃

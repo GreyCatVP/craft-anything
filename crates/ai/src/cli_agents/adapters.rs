@@ -10,6 +10,7 @@ mod copilot;
 mod dsh;
 mod grok;
 mod hermes;
+mod kimi;
 mod maki;
 mod opencode;
 pub use antigravity::Antigravity;
@@ -17,6 +18,7 @@ pub use copilot::Copilot;
 pub use dsh::DeepSeekHarness;
 pub use grok::Grok;
 pub use hermes::Hermes;
+pub use kimi::KimiCode;
 pub use maki::Maki;
 pub use opencode::OpenCode;
 
@@ -231,6 +233,25 @@ pub trait AgentAdapter: Send + Sync {
     /// The environment variable that moves the agent's own folder (its sign-in, settings and
     /// sessions), for [`BackendOptions::config_dir`]. `None`: it has none, and the setting is
     /// ignored.
+    /// Whether Settings shows this agent's own options (program, folder, model, effort). False for
+    /// an agent that keeps all of them itself and needs only its account shown (sign in / sign out).
+    fn shows_options(&self) -> bool {
+        true
+    }
+    /// The account an agent keeps itself, named as the interface says it ("DeepSeek", "Kimi").
+    /// An agent with one shows that account on its card and nothing else it keeps itself.
+    fn account_service(&self) -> Option<&'static str> {
+        None
+    }
+    /// The tools that sign that account in and out, in that order.
+    fn account_tools(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
+    /// That account now: whether it's signed in, and what it names when the agent says (for the
+    /// card's one line). `None`: this agent has no account of its own.
+    fn account_state(&self) -> Option<(bool, Option<String>)> {
+        None
+    }
     fn folder_var(&self) -> Option<&'static str> {
         None
     }
@@ -274,6 +295,7 @@ impl AgentAdapters {
                 Arc::new(Copilot),
                 Arc::new(Grok),
                 Arc::new(DeepSeekHarness),
+                Arc::new(KimiCode),
             ],
         }
     }

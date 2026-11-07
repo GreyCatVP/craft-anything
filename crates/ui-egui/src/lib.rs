@@ -219,6 +219,11 @@ pub enum Done {
     },
     /// Ghidra and its Java were downloaded and set up for Deep mode.
     GhidraGot,
+    /// A DeepSeek Harness sign-in (account Some) or sign-out (None) finished.
+    SignedIn {
+        name: String,
+        account: Option<String>,
+    },
     /// A tool started by a button finished (see `CraftApp::act`).
     Acted {
         tool: &'static str,
@@ -453,6 +458,10 @@ pub struct CraftApp {
     /// Why an expected coding agent may be missing, from the last scan.
     pub detect_hints: Vec<craft_anything_ai::detect::DetectHint>,
     pub detecting: bool,
+    /// The DeepSeek account each Harness backend is signed in to (None: not signed in).
+    pub agent_accounts: std::collections::BTreeMap<String, Option<String>>,
+    /// The Harness backend whose sign-in is waiting for the browser, if any.
+    pub agent_signing: Option<String>,
     /// Counts AI choices, so an add that finishes later doesn't undo one made meanwhile.
     pub backend_choices: u64,
     pub log: Vec<LogLine>,
@@ -572,6 +581,8 @@ impl CraftApp {
             detected: None,
             detect_hints: Vec::new(),
             detecting: false,
+            agent_accounts: Default::default(),
+            agent_signing: None,
             backend_choices: 0,
             log: Vec::new(),
             key_inputs: Default::default(),
@@ -1201,6 +1212,47 @@ impl CraftApp {
         });
     }
 
+    /// Sign in to the account an agent keeps itself, through that agent's own tool (the browser and
+    /// the wait run on a worker thread). `program` names the CLI when it isn't the usual one.
+    pub fn sign_in_agent(&mut self, name: &str, tool: &'static str, program: Option<String>) {
+        let name = name.to_string();
+        let engine = self.engine.clone();
+        let label = i18n::trf("Sign in to {name}", &[("name", &name)]);
+        self.agent_signing = Some(name.clone());
+        self.jobs.spawn(&label, false, move |j| {
+            let opts = CallOptions::new(Caller::Ui).with_consent(Consent::Granted).with_cancel(j.cancel.clone());
+            let params = match program {
+                Some(program) => json!({ "program": program }),
+                None => json!({}),
+            };
+            let out = engine.call(tool, params, opts).map_err(|e| e.message)?;
+            let value = out.to_json().get("result").cloned().unwrap_or(Value::Null);
+            // Signed in, possibly without a name to show.
+            let account = value
+                .get("signed_in")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                .then(|| value.get("account").and_then(Value::as_str).unwrap_or_default().to_string());
+            Ok(Done::SignedIn { name, account })
+        });
+    }
+
+    /// Sign out of the account an agent keeps itself, through that agent's own tool.
+    pub fn sign_out_agent(&mut self, name: &str, tool: &'static str, program: Option<String>) {
+        let name = name.to_string();
+        let engine = self.engine.clone();
+        let label = i18n::trf("Sign out of {name}", &[("name", &name)]);
+        self.jobs.spawn(&label, false, move |j| {
+            let opts = CallOptions::new(Caller::Ui).with_consent(Consent::Granted).with_cancel(j.cancel.clone());
+            let params = match program {
+                Some(program) => json!({ "program": program }),
+                None => json!({}),
+            };
+            engine.call(tool, params, opts).map_err(|e| e.message)?;
+            Ok(Done::SignedIn { name, account: None })
+        });
+    }
+
     pub fn detect_backends(&mut self) {
         if self.detecting {
             return;
@@ -1401,6 +1453,7 @@ impl CraftApp {
             Ok(d) => d,
             Err(e) => {
                 self.detecting = false;
+                self.agent_signing = None;
                 self.facts_read(job, None);
                 // A failed or cancelled engine download frees the button to try again.
                 if self.engine_flow.job.is_some_and(|(_, id)| id == job) {
@@ -1474,6 +1527,12 @@ impl CraftApp {
                 self.log(false, format!("Found {} AI option(s) on this computer", d.len()));
                 self.detected = Some(d);
             }
+            Done::SignedIn { name, account } => {
+                self.agent_signing = None;
+                let how = if account.is_some() { "signed in" } else { "signed out" };
+                self.log(false, format!("{name}: {how}"));
+                self.agent_accounts.insert(name, account);
+            }
             Done::Backends(b, builder, extractor, options) => {
                 if self.state.backend.as_ref().is_some_and(|n| !b.iter().any(|c| &c.name == n)) {
                     self.state.backend = None;
@@ -1482,6 +1541,17 @@ impl CraftApp {
                 self.builder = builder;
                 self.extractor = extractor;
                 self.backend_options = options;
+                // Agents that keep their own account: read each once per refresh, never while drawing.
+                self.agent_accounts = self
+                    .backends
+                    .iter()
+                    .filter(|b| b.kind == craft_anything_ai::BackendKind::AgentCli)
+                    .filter_map(|b| {
+                        let adapter = craft_anything_ai::cli_agents::adapter_for(&b.model);
+                        let (signed_in, account) = adapter.account_state()?;
+                        Some((b.name.clone(), signed_in.then(|| account.unwrap_or_default())))
+                    })
+                    .collect();
                 self.model_tuning.retain(|name, state| {
                     self.backends.iter().any(|backend| backend.name == *name && craft_anything_ai::model_options::supported(backend))
                         && self.backend_options.get(name).and_then(|options| options.cli_model.as_ref()) == state.cli_model.as_ref()
