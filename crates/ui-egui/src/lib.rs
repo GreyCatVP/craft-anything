@@ -1434,8 +1434,10 @@ impl CraftApp {
             Done::Acted { tool, result } => self.acted(tool, result),
             Done::Opened { path, result } => match result {
                 Ok(v) => {
-                    // Another target: a new conversation, so answers about two things don't mix.
-                    if self.view.active_target().is_some_and(|t| t.path != path) {
+                    // Another target: a new conversation, so answers about two things don't mix. The
+                    // engine keeps one target per content, so compare with the path it kept.
+                    let kept = v.get("path").and_then(Value::as_str).map_or_else(|| path.clone(), PathBuf::from);
+                    if self.view.active_target().is_some_and(|t| t.path != kept) {
                         self.state.chat.clear();
                         if let Some(mut c) = self.conversation.take() {
                             c.stop();
