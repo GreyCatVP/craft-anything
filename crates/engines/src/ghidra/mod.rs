@@ -540,9 +540,12 @@ fn move_may_pass(e: &std::io::Error) -> bool {
 /// to every other process as an analysis in progress. What the person hears is the move, and a
 /// lock that also cannot be released is named beside it rather than hiding it.
 fn refuse_move(lock: &Path, project_dir: &Path, refusal: &std::io::Error) -> GhidraError {
+    let moving = format!("moving {} out of the way: {refusal}", project_dir.display());
     match release(lock) {
-        Ok(()) => GhidraError::Launch(format!("moving {} out of the way: {refusal}", project_dir.display())),
-        Err(also) => GhidraError::Launch(format!("moving {} out of the way: {refusal}; and {also}", project_dir.display())),
+        Ok(()) => GhidraError::Launch(moving),
+        // The second reason without the outer "could not start Ghidra", which would read twice.
+        Err(GhidraError::Launch(also)) => GhidraError::Launch(format!("{moving}; and {also}")),
+        Err(other) => GhidraError::Launch(format!("{moving}; and {other}")),
     }
 }
 
