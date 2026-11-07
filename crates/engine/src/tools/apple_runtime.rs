@@ -471,6 +471,7 @@ mod macos {
         } else {
             format!("Skipped the accessibility tree for pid {pid}, as requested.")
         };
+        let truncated = result.get("truncated").and_then(Value::as_bool).unwrap_or(false);
         let screenshot_limitation = if p.screenshot && result.get("screenshot").is_none() {
             let error = result.get("screenshot_error");
             Some(Limitation::new(
@@ -490,6 +491,11 @@ mod macos {
                 .summary(summary)
                 .confidence(Confidence::Observed)
                 .authority(Authority::OurRun);
+        if truncated {
+            b = b
+                .limitation(Limitation::new("tree_truncated", "The accessibility tree reached the node or output limit; only a prefix is included."))
+                .coverage(Coverage { status: craft_anything_evidence::CoverageStatus::Partial, ..Coverage::default() });
+        }
         if let Some(limitation) = screenshot_limitation {
             b = b.limitation(limitation).coverage(Coverage { status: craft_anything_evidence::CoverageStatus::Partial, ..Coverage::default() });
         }
@@ -650,6 +656,30 @@ mod tests {
             let spec = *e.registry().get(id).unwrap();
             assert!(!e.availability(&spec, &e.session()).available, "{id}");
         }
+    }
+
+    /// Exercise the real serializer with synthetic AX values and image data; no UI permissions.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_budgets_combined_tree_and_screenshot_output() {
+        use craft_anything_platform::process::Process;
+        use std::time::Duration;
+        let root = tempfile::tempdir().unwrap();
+        let source = include_str!("apple_runtime/native_ui_helper.swift").split("let input = FileHandle.standardInput").next().unwrap();
+        let fixture = include_str!("apple_runtime/output_budget_test.swift");
+        let src = root.path().join("budget.swift");
+        let bin = root.path().join("budget");
+        std::fs::write(&src, format!("{source}\n{fixture}")).unwrap();
+        Process::new("xcrun")
+            .args(["swiftc", "-Onone", "-module-cache-path"])
+            .arg(root.path().join("module-cache"))
+            .arg(&src)
+            .arg("-o")
+            .arg(&bin)
+            .timeout(Duration::from_secs(60))
+            .run_checked()
+            .unwrap();
+        Process::new(&bin).timeout(Duration::from_secs(30)).run_checked().unwrap();
     }
 
     /// Run the real Swift helper without reading app UI or requiring Accessibility permission.

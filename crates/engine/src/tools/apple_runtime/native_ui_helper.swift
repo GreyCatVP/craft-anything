@@ -139,6 +139,33 @@ func findElement(_ root: AXUIElement, _ needle: String, _ budget: inout Int) -> 
     return nil
 }
 
+// Match the runner's stdout cap, including the newline added by emit. Measure JSON bytes:
+// base64 slashes and AX strings can expand when escaped by JSONSerialization.
+func boundedObservation(_ observation: [String: Any]) -> [String: Any] {
+    let stdoutCap = 16 * 1024 * 1024
+    var result = observation
+    var nodes = result["nodes"] as? [[String: Any]] ?? []
+    while true {
+        if let data = try? JSONSerialization.data(withJSONObject: result, options: []),
+           data.count < stdoutCap {
+            return result
+        }
+        if !nodes.isEmpty {
+            // Keep a prefix of the tree and the image. Halving bounds serialization attempts
+            // even when one AX value alone is larger than the entire output budget.
+            nodes = Array(nodes.prefix(nodes.count / 2))
+            result["nodes"] = nodes
+            result["truncated"] = true
+        } else if result.removeValue(forKey: "screenshot") != nil {
+            result.merge(screenshotFailure("screenshot_output_limit",
+                "The screenshot exceeded the helper output budget.")) { _, new in new }
+        } else {
+            // Serialization failure must also produce a small, valid response.
+            return ["error": "Could not serialize the observation within the output budget."]
+        }
+    }
+}
+
 func emit(_ obj: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
        let text = String(data: data, encoding: .utf8) {
@@ -168,7 +195,7 @@ case "observe":
     if req.screenshot ?? false {
         result.merge(await captureScreenshot(pid: pid, windowID: req.window_id)) { _, new in new }
     }
-    emit(result)
+    emit(boundedObservation(result))
 case "walkthrough":
     let app = AXUIElementCreateApplication(pid)
     var steps: [[String: Any]] = []

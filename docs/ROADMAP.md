@@ -487,7 +487,9 @@ Golden rule 3: the result is evidence. Each fix needs a Mac to test on.
       — claimed: mavericzz, branch bugfix/r5.6-accessibility-denied; PR #887
 - [x] macOS: `runtime_ui_read` captures a requested screenshot (#248): one on-screen window
       belonging to the pid, restricted by `window_id` when supplied; PNG/base64 up to 2048 px
-      per side. Missing Screen Recording permission, a missing window or a capture failure produces
+      per side. Combined JSON (including escaping and the newline) stays within 16 MiB by
+      trimming the tree with explicit truncation and partial coverage, preserving the image.
+      Missing Screen Recording permission, a missing window or a capture failure produces
       an explicit screenshot limitation and partial evidence. Denied Accessibility permission with
       the tree enabled (the default) returns a tool error before capture; `accessibility: false`
       skips the tree. Requires macOS 14+ and existing Screen Recording permission; opens no dialog
