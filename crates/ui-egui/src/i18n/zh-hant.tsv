@@ -1462,3 +1462,6 @@ In this project, {kind}: {choice}.	在這個專案中，{kind}：{choice}。
 Couldn't change the approvals:	無法變更審核：
 What the builder may do without asking you, in this project.	在這個專案中，建置助手不必問你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	預設跟隨自動模式：開啟時，可復原的操作會執行，其餘會被拒絕；關閉時，建置助手會詢問。
+Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra 正在分析原程式。暫停不會停止它，所以不會遺失任何進度。
+Stop the analysis	停止分析
+The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	下次建置會從頭重新開始分析。在此之前，反編譯使用內建引擎。

@@ -1069,8 +1069,10 @@ Gaps found while using the app for real projects.
       build still waits for it (#948). Run against Ghidra 12.1.4 on Windows: stopped 0.6 s after
       the delete, no `java` left
       — claimed: justinjohn0306, branch bugfix/r2.9-stop-ghidra-analysis
-- [ ] A Stop button for Ghidra's analysis while the project stays (pausing lets it go on, so
-      nothing is lost; today only deleting the project or closing the app stops it) (#948)
+- [x] A Stop button for Ghidra's analysis while the project stays (pausing lets it go on, so
+      nothing is lost; today only deleting the project or closing the app stops it) (#948):
+      "Stop the analysis" on the project, `engines_analysis_stop`. Run against Ghidra 12.1.4 on
+      Windows: stopped 0.7 s after, no `java` left
       — claimed: justinjohn0306, branch feature/r2.9-stop-ghidra-button
 
 ### R2.10 Pinned builds

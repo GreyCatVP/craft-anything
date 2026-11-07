@@ -1462,3 +1462,6 @@ In this project, {kind}: {choice}.	Neste projeto, {kind}: {choice}.
 Couldn't change the approvals:	Não foi possível alterar as aprovações:
 What the builder may do without asking you, in this project.	O que o agente pode fazer sem perguntar a você, neste projeto.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	A opção Padrão segue o Modo automático: com ele ativado, o que pode ser desfeito é executado e o restante é recusado; com ele desativado, o agente pergunta antes.
+Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	O Ghidra está analisando o original. Pausar não o interrompe, então nada se perde.
+Stop the analysis	Parar a análise
+The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	O próximo build a recomeça do início. Até lá, a descompilação usa a engine integrada.

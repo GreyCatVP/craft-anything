@@ -112,7 +112,31 @@ pub fn specs() -> Vec<ToolSpec> {
             input_schema: schema_of::<AppOpenParams>,
             run: engines_app_open,
         },
+        ToolSpec {
+            id: "engines_analysis_stop",
+            title: "Stop Ghidra's analysis",
+            summary: "Stop the Ghidra analysis a project's Deep-mode build started in this process (it goes on when the build is paused, so nothing is lost). If another project's build waits for the same analysis, it goes on for that one. Ghidra's analysis can't be picked up again: the next build starts it from the beginning, and until then decompiling uses the built-in engine.",
+            beginner: "Stops Ghidra studying the program for this project.",
+            toolset: Toolset::Setup,
+            effects: Effects::MAY_DISCARD_DATA.union(Effects::IDEMPOTENT),
+            requires: Requires::Nothing,
+            input_schema: schema_of::<AnalysisStopParams>,
+            run: engines_analysis_stop,
+        },
     ]
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisStopParams {
+    /// The project's folder.
+    pub project: std::path::PathBuf,
+}
+
+fn engines_analysis_stop(_ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolError> {
+    let p: AnalysisStopParams = parse_params(params)?;
+    let stopped = crate::tools::deep::stop_for(&p.project);
+    Ok(ToolOutput::Value(json!({"project": p.project, "stopped": stopped})))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

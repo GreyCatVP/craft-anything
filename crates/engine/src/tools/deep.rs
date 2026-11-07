@@ -18,7 +18,7 @@ use craft_anything_evidence::{Confidence, Environment, EvidenceBuilder, Limitati
 use craft_anything_platform::sync::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
@@ -113,7 +113,7 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
 /// a saved analysis instead of waiting hours for one. Shares the analysis with any other process
 /// doing the same. `progress` gets a line now and then. It goes on when a build is paused, so
 /// nothing is lost, but stops once every project in this process that asked for it (`project`)
-/// has been deleted (#948).
+/// has been deleted or has stopped it ([`stop_for`]) (#948).
 pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, project: &Path, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
     let (cfg, digest) = config(settings, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
     // The analysis is the one Ghidra saves: the program, its settings and the store, not the program alone.
@@ -124,14 +124,14 @@ pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, project: &Path, 
 }
 
 /// One [`prepare`] under way, counted and recorded until it ends, however it ends.
-struct Asked((PathBuf, PathBuf));
+struct Asked(u64);
 
 impl Asked {
     fn new(analysis: &Path, project: &Path) -> Self {
-        let asked = (analysis.to_path_buf(), project.to_path_buf());
-        WANTED.lock().unwrap_or_else(PoisonError::into_inner).push(asked.clone());
+        let id = NEXT_ASKED.fetch_add(1, Ordering::SeqCst);
+        WANTED.lock().unwrap_or_else(PoisonError::into_inner).push((id, analysis.to_path_buf(), project.to_path_buf()));
         ANALYSING.fetch_add(1, Ordering::SeqCst);
-        Asked(asked)
+        Asked(id)
     }
 }
 
@@ -140,25 +140,41 @@ impl Drop for Asked {
         ANALYSING.fetch_sub(1, Ordering::SeqCst);
         // Never `lock`, which may unwind: a drop can run while unwinding already.
         if let Ok(w) = WANTED.lock_unless(&|| false) {
-            let mut w = w.unwrap_or_else(PoisonError::into_inner);
-            if let Some(i) = w.iter().position(|a| *a == self.0) {
-                w.remove(i);
-            }
+            w.unwrap_or_else(PoisonError::into_inner).retain(|(id, _, _)| *id != self.0);
         }
     }
 }
 
-/// Whether a project that asked [`prepare`] for this analysis still exists.
+/// Whether a project that asked [`prepare`] for this analysis, and didn't stop it, still exists.
 fn wanted(analysis: &Path) -> bool {
-    let projects: Vec<PathBuf> = WANTED.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|(a, _)| a == analysis).map(|(_, p)| p.clone()).collect();
+    let projects: Vec<PathBuf> =
+        WANTED.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|(_, a, _)| a == analysis).map(|(_, _, p)| p.clone()).collect();
     projects.iter().any(|p| p.join(MANIFEST).is_file())
+}
+
+/// Whether Ghidra is analysing a program for `project`'s build, in this process. Reads memory
+/// only, so a screen can ask while drawing.
+pub fn analysing_for(project: &Path) -> bool {
+    WANTED.lock().unwrap_or_else(PoisonError::into_inner).iter().any(|(_, _, p)| p == project)
+}
+
+/// Stop the analyses `project`'s builds asked [`prepare`] for, unless another project's build still
+/// waits for one; it then goes on for that one. Ends within moments (Ghidra is asked to stop
+/// within 2 s). Whether there was one to stop.
+pub fn stop_for(project: &Path) -> bool {
+    let mut w = WANTED.lock().unwrap_or_else(PoisonError::into_inner);
+    let before = w.len();
+    w.retain(|(_, _, p)| p != project);
+    w.len() != before
 }
 
 /// Analyses [`prepare`] has under way, and whether they are being stopped.
 static ANALYSING: AtomicUsize = AtomicUsize::new(0);
 static CLOSING: AtomicBool = AtomicBool::new(false);
-/// The analysis (its saved project folder) and the asking project of each [`prepare`] under way.
-static WANTED: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+/// Each [`prepare`] under way: its id, the analysis (its saved project folder) and the project that
+/// asked. [`stop_for`] takes a project's out.
+static WANTED: Mutex<Vec<(u64, PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+static NEXT_ASKED: AtomicU64 = AtomicU64::new(0);
 
 /// The app is closing: stop every analysis [`prepare`] started and wait up to `within` for them to
 /// end, as nothing acts on a process's drop once the app has gone (#946).

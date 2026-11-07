@@ -64,6 +64,25 @@ fn deleting_the_project_stops_its_analysis() {
     assert!(a.join().unwrap().is_err(), "it stopped, it didn't finish");
 }
 
+/// Stopping it for a project (`engines_analysis_stop`, the app's Stop button) ends it within
+/// moments and keeps the project.
+#[test]
+fn stopping_it_for_its_project_ends_it_and_keeps_the_project() {
+    use craft_anything_engine::{CallOptions, Caller, Engine};
+    let d = tempfile::Builder::new().prefix("ca").tempdir().unwrap();
+    let start = waiting_analysis(d.path(), b"a program its project stopped the analysis of");
+    let (root, a) = start("game", "");
+    assert!(deep::analysing_for(&root));
+    let e = Engine::new(craft_anything_engine::testing::session());
+    let stop = || e.call("engines_analysis_stop", serde_json::json!({"project": root}), CallOptions::new(Caller::Cli)).unwrap().to_json();
+    assert_eq!(stop()["result"]["stopped"], true);
+    assert!(!deep::analysing_for(&root), "the screen stops offering Stop at once");
+    assert!(ends_within(&a, Duration::from_secs(30)), "the analysis kept going");
+    assert!(a.join().unwrap().is_err(), "it stopped, it didn't finish");
+    assert!(root.join(MANIFEST).is_file(), "the project is kept");
+    assert_eq!(stop()["result"]["stopped"], false, "nothing left to stop");
+}
+
 /// …unless another project's build still waits for the same analysis.
 #[test]
 fn another_projects_build_keeps_the_analysis_going() {
@@ -78,11 +97,11 @@ fn another_projects_build_keeps_the_analysis_going() {
 }
 
 /// Real Ghidra, only where `CRAFT_ANYTHING_TEST_GHIDRA` names the engine store holding `ghidra/`
-/// and `jdk/` (the app's is `%APPDATA%/craft-anything/engines`): deleting the project while Ghidra
-/// analyses this test program stops it. Its analysis goes to a temp folder. Check afterwards that
-/// no `java` is left running.
-#[test]
-fn live_ghidra_stops_when_its_project_is_deleted() {
+/// and `jdk/` (the app's is `%APPDATA%/craft-anything/engines`): Ghidra analyses this test program
+/// for a project, `stop` is done to the project once Ghidra has run 10 s, and the analysis must
+/// end. Its analysis goes to a temp folder. Run these one at a time (`--test-threads 1`) and check
+/// afterwards that no `java` is left running.
+fn live_ghidra_stops(how: &str, stop: impl FnOnce(&Path)) {
     let Some(store) = std::env::var_os("CRAFT_ANYTHING_TEST_GHIDRA").map(PathBuf::from) else { return };
     // Ghidra rejects project paths with a folder that starts with a dot, as tempdir()'s do.
     let d = tempfile::Builder::new().prefix("ghidra-live").tempdir().unwrap();
@@ -110,12 +129,26 @@ fn live_ghidra_stops_when_its_project_is_deleted() {
         }
         assert!(Instant::now() < until, "Ghidra never got going");
     }
-    let deleted = Instant::now();
-    std::fs::remove_file(root.join(MANIFEST)).unwrap();
+    let asked = Instant::now();
+    stop(&root);
     assert!(ends_within(&h, Duration::from_secs(30)), "Ghidra kept going");
     let stopped = h.join().unwrap();
     assert!(stopped.as_ref().is_err_and(|e| e.contains("cancel")), "{stopped:?}");
-    eprintln!("stopped {:.1} s after the project was deleted", deleted.elapsed().as_secs_f32());
+    eprintln!("stopped {:.1} s after the project was {how}", asked.elapsed().as_secs_f32());
+}
+
+#[test]
+fn live_ghidra_stops_when_its_project_is_deleted() {
+    live_ghidra_stops("deleted", |root| std::fs::remove_file(root.join(MANIFEST)).unwrap());
+}
+
+/// The app's Stop button: the project stays.
+#[test]
+fn live_ghidra_stops_when_its_project_stops_it() {
+    live_ghidra_stops("stopped", |root| {
+        assert!(deep::stop_for(root));
+        assert!(root.join(MANIFEST).is_file());
+    });
 }
 
 /// A project waiting for another analysis of the same program (another Ghidra language) doesn't
