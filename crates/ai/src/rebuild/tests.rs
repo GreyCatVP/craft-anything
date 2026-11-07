@@ -3468,7 +3468,7 @@ fn a_build_says_when_it_waits_for_an_analysis_started_earlier() {
     std::fs::create_dir_all(project.parent().unwrap()).unwrap();
     std::fs::write(project.with_extension("analysing"), "").unwrap();
 
-    let done = w.prepare_ghidra(&program).expect("deep mode with Ghidra prepares the analysis");
+    let done = w.prepare_ghidra(&program, &ws.root).expect("deep mode with Ghidra prepares the analysis");
     let _ = done.recv_timeout(Duration::from_secs(30));
     let said: Vec<String> = rx
         .try_iter()
