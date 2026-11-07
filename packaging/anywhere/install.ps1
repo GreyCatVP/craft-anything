@@ -32,11 +32,20 @@ if (-not $cli) {
 }
 if (-not $cli) {
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-  $url = "https://github.com/storytold/craft-anything/releases/download/v$Version/craft-anything-$Version-windows-$arch-portable.zip"
+  $asset = "craft-anything-$Version-windows-$arch-portable.zip"
+  $url = "https://github.com/storytold/craft-anything/releases/download/v$Version/$asset"
   $tmp = Join-Path $env:TEMP "ca-$Version.zip"
   $dest = "$HOME\Tools\craft-anything"
   Write-Host "Downloading $url"
   Invoke-WebRequest -Uri $url -OutFile $tmp
+  # Integrity: verify against the release SHA256SUMS before extracting or copying.
+  $sums = Join-Path $env:TEMP "ca-$Version-SHA256SUMS.txt"
+  Invoke-WebRequest -Uri "https://github.com/storytold/craft-anything/releases/download/v$Version/SHA256SUMS.txt" -OutFile $sums
+  $line = Get-Content $sums | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1
+  if (-not $line) { throw "No checksum entry for $asset" }
+  $expected = ($line -split '\s+')[0].ToLower()
+  $actual = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash.ToLower()
+  if ($actual -ne $expected) { throw "Checksum mismatch for $asset" }
   New-Item -ItemType Directory -Force -Path $dest | Out-Null
   $extract = Join-Path $env:TEMP "ca-$Version"
   Expand-Archive -Path $tmp -DestinationPath $extract -Force
@@ -49,15 +58,15 @@ Write-Host "CLI: $cli"
 # 2. Connect to detected hosts + install bundled skill.
 & $cli setup --all-detected --yes
 
-# 3. Deep mode + local Ghidra/Java.
+# 3. Deep mode + local Ghidra/Java (paths JSON-encoded so backslashes/quotes are safe).
 & $cli settings_set --key deep_mode --value true | Out-Null
 $ghidra = Find-Ghidra
 if ($ghidra) {
-  & $cli settings_set --key engines.ghidra.install_dir --value ("`"" + $ghidra + "`"") | Out-Null
+  & $cli settings_set --key engines.ghidra.install_dir --value ($ghidra | ConvertTo-Json) | Out-Null
   Write-Host "Ghidra: $ghidra"
 }
 $java = Find-Java
-if ($java) { & $cli settings_set --key engines.ghidra.java_home --value ("`"" + $java + "`"") | Out-Null }
+if ($java) { & $cli settings_set --key engines.ghidra.java_home --value ($java | ConvertTo-Json) | Out-Null }
 
 # 4. Copy the bundled skill into every known host skill dir (ready even if host not installed).
 $src = $null
