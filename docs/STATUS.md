@@ -318,7 +318,10 @@ launch or preview was run for this documentation correction.
 - A failed agent CLI run says what ran and what it printed, and writes a private log to `logs/` in the
   config folder (the newest 50 are kept; the person's message is left out; **Open log** in the app, `log:`
   in the CLI). Checked live against a GitHub ssh alias from the CLI; the button by a UI test, not by
-  clicking it in the desktop app. API backends and MCP start-up don't write these logs yet.
+  clicking it in the desktop app. An API backend's turn that fails for good writes one too, with the backend,
+  model, address, what the service answered and how long the request ran, but not the request or the key; so
+  does `craft-anything-cli mcp` when it can't start. Both are checked by tests (a stand-in server for the API
+  case), not against a real provider or from a real agent app.
 - Live end-to-end runs (2026-10-18, Windows 10, headless CLI): a website clone reached Ready
   at 96% likeness in 1.5 min; a small desktop app rebuilt in Rust + egui reached Ready in 9 min (checked
   only by building); a game rebuild in Rust reached Build and was stopped before Check. The

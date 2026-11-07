@@ -1,7 +1,9 @@
 //! Logs of failed runs, one file each, to open and inspect when something goes wrong: what ran,
 //! what it printed, and what we made of it. They stay on this computer, readable only by its
 //! owner. The person's message is never written, and secret-looking flags are masked
-//! ([`craft_anything_platform::process::printable_command`]).
+//! ([`craft_anything_platform::process::printable_command`]). Agent apps' runs write them, and so
+//! do API backends' turns ([`write_api_failure`], without the request or the key) and a tool
+//! server that can't start (`craft-anything-cli mcp`).
 
 use craft_anything_evidence::{ErrorCode, ToolError};
 use std::path::{Path, PathBuf};
@@ -86,6 +88,52 @@ pub fn write(dir: &Path, report: &Report) -> Result<PathBuf, ToolError> {
     Ok(path)
 }
 
+/// Write the log for an API backend's turn that failed for good: the backend and model, the
+/// address the request went to (without a user name, password or query), the error with what the
+/// service said about it (its HTTP status and error code, in `error`'s details), and how long the
+/// request ran. The request itself, with the person's message and the key, is not written. Returns
+/// the log's path, or what to tell the person when it couldn't be written.
+pub fn write_api_failure(
+    dir: &Path,
+    backend: &str,
+    model: &str,
+    endpoint: Option<&str>,
+    error: &ToolError,
+    ran_for: Duration,
+) -> (Option<PathBuf>, Option<String>) {
+    let report = Report {
+        what: format!("{backend} ({model})"),
+        command: match endpoint {
+            Some(url) => format!("A request to {} for {model}", address(url)),
+            None => format!("A request for {model}"),
+        },
+        check: format!("craft-anything-cli ai test {}", crate::ssh::shell_quote(backend)),
+        diagnosis: error.remediation.clone(),
+        error: Some(match &error.details {
+            Some(d) => format!("{}\n{d}", error.message),
+            None => error.message.clone(),
+        }),
+        duration: Some(ran_for),
+        ..Report::default()
+    };
+    match write(dir, &report) {
+        Ok(path) => {
+            log::warn!("{backend} failed; details in {}", path.display());
+            (Some(path), None)
+        }
+        Err(e) => {
+            log::warn!("couldn't write a failure log: {e}");
+            (None, Some(format!("The details couldn't be saved: {e}")))
+        }
+    }
+}
+
+/// A URL as a log shows it: without a user name, password, query or fragment.
+fn address(url: &str) -> String {
+    let url = craft_anything_engine::tools::web_common::sanitize_url(url);
+    url.split(['?', '#']).next().unwrap_or_default().to_string()
+}
+
 /// Failing to tidy up never fails the run; the next write tries again.
 fn prune(dir: &Path, keep: usize) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -128,6 +176,38 @@ mod tests {
             use std::os::unix::fs::PermissionsExt as _;
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn an_api_failure_log_names_the_backend_and_address_but_not_the_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = ToolError::new(ErrorCode::NoPermission, "invalid x-api-key")
+            .with_remediation("The API key was rejected.")
+            .with_details(serde_json::json!({"status": 401, "provider_error": "authentication_error"}));
+        let url = "https://user:pw@api.example/v1/messages?key=abc";
+        let (path, unsaved) = write_api_failure(&dir.path().join("logs"), "My Claude", "claude-x", Some(url), &error, Duration::from_millis(1500));
+        assert!(unsaved.is_none());
+        let text = std::fs::read_to_string(path.unwrap()).unwrap();
+        for part in [
+            "What: My Claude (claude-x)",
+            "Diagnosis: The API key was rejected.",
+            "Error: invalid x-api-key",
+            "\"status\":401",
+            "Ran for: 1.5 s",
+            "A request to https://api.example/v1/messages for claude-x",
+            "craft-anything-cli ai test 'My Claude'",
+        ] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+        for hidden in ["user:pw", "key=abc"] {
+            assert!(!text.contains(hidden), "{hidden}: {text}");
+        }
+        // A log folder that can't be made: no log, and a note for the person instead.
+        let file = dir.path().join("a file");
+        std::fs::write(&file, "").unwrap();
+        let (path, unsaved) = write_api_failure(&file, "B", "m", None, &error, Duration::ZERO);
+        assert!(path.is_none());
+        assert!(unsaved.is_some_and(|u| u.contains("The details couldn't be saved")));
     }
 
     #[test]

@@ -267,6 +267,9 @@ pub struct LoopConfig {
     /// A builder on a local model is offered the tools for building, not the whole Core set (see
     /// [`lean_for_local`]).
     pub lean_for_local: bool,
+    /// The folder for a failure log when a turn fails for good (the config folder's `logs/`);
+    /// none writes no log.
+    pub logs: Option<std::path::PathBuf>,
 }
 
 /// The Core tools a builder on a local model keeps. The Core set is 25-odd tools for studying a
@@ -623,6 +626,7 @@ impl AgentLoop {
             let stop = self.stop.clone();
             let req = TurnRequest { system, messages: &self.history, tools, effort, max_tokens: crate::anthropic::MAX_TOKENS };
             let slot = self.chain.get_mut(self.current)?;
+            let started = std::time::Instant::now();
             let r = slot.model.turn(
                 &req,
                 &mut |d| {
@@ -641,6 +645,7 @@ impl AgentLoop {
                 }
                 Err(e) => {
                     let name = slot.name.clone();
+                    let (model, endpoint) = (slot.model.model(), slot.model.endpoint());
                     self.host.journal("error", json!({"backend": name, "code": e.code, "message": e.message}));
                     // The request didn't fit the server's context window, and it said how large that
                     // is: make room to fit it, measured with the server's own count, and ask once more.
@@ -665,7 +670,15 @@ impl AgentLoop {
                         continue;
                     }
                     *self.failure.lock().unwrap_or_else(PoisonError::into_inner) = Some(TurnFailure::from_api(&e));
-                    self.emit(AgentEvent::Error { message: format!("{name}: {}", e.message), remediation: e.remediation, log: None });
+                    let (log, unsaved) = match &self.cfg.logs {
+                        Some(dir) => crate::failure_log::write_api_failure(dir, &name, &model, endpoint.as_deref(), &e, started.elapsed()),
+                        None => (None, None),
+                    };
+                    let remediation = match (e.remediation, unsaved) {
+                        (Some(r), Some(u)) => Some(format!("{r}\n\n{u}")),
+                        (r, u) => r.or(u),
+                    };
+                    self.emit(AgentEvent::Error { message: format!("{name}: {}", e.message), remediation, log });
                     return None;
                 }
             }
@@ -1654,6 +1667,42 @@ pub(crate) mod tests {
         let ev = drain_until_done(&mut c, |_, _| {});
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::TextDelta { text } if text == "ok")));
         assert!(!c.is_busy() || c.poll().is_empty());
+    }
+
+    /// A turn that fails for good leaves one failure log, as an agent app's failed run does; a
+    /// backend that fails while the next one in the chain answers leaves none (ROADMAP R5.5).
+    #[test]
+    fn only_a_turn_that_fails_for_good_leaves_a_log() {
+        let host = Arc::new(FakeHost { calls: Mutex::default(), journal: Mutex::default() });
+        let down = || Err(ToolError::new(ErrorCode::EngineMissing, "down"));
+        let first = Scripted { turns: VecDeque::from([down(), down()]), seen: Arc::default() };
+        let second = Scripted { turns: VecDeque::from([turn(vec![Block::Text { text: "ok".into() }], StopReason::EndTurn), down()]), seen: Arc::default() };
+        let chain = vec![
+            ModelSlot { name: "A".into(), model: Box::new(first), local: false, effort: None, max_turns: 5, context_tokens: 0 },
+            ModelSlot { name: "B".into(), model: Box::new(second), local: false, effort: None, max_turns: 5, context_tokens: 0 },
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        let written = || std::fs::read_dir(&logs).map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>()).unwrap_or_default();
+        let mut c = ApiConversation::start(host, chain, LoopConfig { logs: Some(logs.clone()), ..LoopConfig::default() }).unwrap();
+        c.send("a first question, xyzzy");
+        let ev = drain_until_done(&mut c, |_, _| {});
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Status { text } if text.contains("Trying B"))), "{ev:?}");
+        assert!(written().is_empty(), "B answered, so nothing failed for good");
+        c.send("a second question, plugh");
+        let ev = drain_until_done(&mut c, |_, _| {});
+        let logged: Vec<Option<std::path::PathBuf>> =
+            ev.iter().filter_map(|e| if let AgentEvent::Error { log, .. } = e { Some(log.clone()) } else { None }).collect();
+        assert_eq!(logged.len(), 1, "{ev:?}");
+        let path = logged[0].clone().expect("the error names its log");
+        assert_eq!(written(), std::slice::from_ref(&path));
+        let text = std::fs::read_to_string(&path).unwrap();
+        for part in ["What: B (scripted)", "Error: down", "Ran for:", "A request for scripted", "craft-anything-cli ai test B"] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+        for message in ["xyzzy", "plugh"] {
+            assert!(!text.contains(message), "{message}: {text}");
+        }
     }
 
     #[test]

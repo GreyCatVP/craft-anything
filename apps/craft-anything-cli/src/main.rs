@@ -218,6 +218,36 @@ pub fn make_engine(project: Option<&Path>, deep_for_run: Option<bool>) -> Result
     Ok(Engine::shared_with(session, layer_tools, plugins))
 }
 
+/// The tool server couldn't start. Its stderr goes to the agent app that started it, so the reason
+/// is also kept in a failure log in the config folder, where the person can open it (ROADMAP
+/// R5.5). Returns the exit code.
+fn mcp_start_failed(error: &ToolError) -> u8 {
+    use craft_anything_ai::failure_log;
+    use craft_anything_platform::process::printable_command;
+    eprintln!("craft-anything mcp: {}", error.message);
+    let program = std::env::current_exe().map(PathBuf::into_os_string).unwrap_or_else(|_| "craft-anything-cli".into());
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let no_args: [&str; 0] = [];
+    let report = failure_log::Report {
+        what: "Craft Anything's tool server (mcp)".into(),
+        command: printable_command(&program, &args),
+        check: format!("{} doctor", printable_command(&program, &no_args)),
+        diagnosis: Some("The tool server stopped before it answered, so the agent app that started it has no Craft Anything tools.".into()),
+        error: Some(match &error.remediation {
+            Some(r) => format!("{}\n{r}", error.message),
+            None => error.message.clone(),
+        }),
+        cwd: std::env::current_dir().ok(),
+        exit_code: Some(1),
+        ..Default::default()
+    };
+    match failure_log::write(&failure_log::dir_in(&craft_anything_engine::settings::config_dir()), &report) {
+        Ok(path) => eprintln!("craft-anything mcp: the details are in {}", path.display()),
+        Err(e) => eprintln!("craft-anything mcp: the details couldn't be saved: {}", e.message),
+    }
+    1
+}
+
 fn open_or_create_project(dir: &Path) -> Result<Project, ToolError> {
     let dir = std::path::absolute(dir).map_err(|e| ToolError::io(dir.display(), e))?;
     if dir.join("project.toml").is_file() {
@@ -265,10 +295,7 @@ fn run(cli: Cli) -> u8 {
         Command::Mcp { all_tools, restricted, allow_web, allow_capture, inbox, targets } => {
             let engine = match make_engine(cli.project.as_deref(), cli.deep_for_run()) {
                 Ok(e) => e,
-                Err(e) => {
-                    eprintln!("craft-anything mcp: {}", e.message);
-                    return 1;
-                }
+                Err(e) => return mcp_start_failed(&e),
             };
             if let Some(dir) = inbox {
                 engine.session().ext.insert(Arc::new(craft_anything_engine::inbox::InboxDir(dir.clone())));
@@ -286,8 +313,7 @@ fn run(cli: Cli) -> u8 {
                 .map_err(|error| ToolError::invalid(format!("Invalid shared target: {error}")))
                 .and_then(|targets| engine.session().restore_targets(&targets));
             if let Err(error) = restored {
-                eprintln!("craft-anything mcp: {}", error.message);
-                return 1;
+                return mcp_start_failed(&error);
             }
             opts.all_tools |= *all_tools;
             opts.restricted |= *restricted;

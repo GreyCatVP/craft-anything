@@ -858,6 +858,50 @@ fn anthropic_refusal_and_http_errors() {
     );
 }
 
+/// A failed API turn leaves one failure log in the config folder and names it on the error: what
+/// the service answered, but not the key or the person's message. A stream the server closes
+/// early leaves one too (ROADMAP R5.5).
+#[test]
+fn a_failed_api_turn_leaves_a_log_without_the_key_or_the_message() {
+    let half = sse(&[
+        json!({"type":"message_start","message":{"model":"claude-opus-5-5","usage":{"input_tokens":5}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Half an ans"}}),
+    ]);
+    let (url, _seen) = mock(vec![
+        (401, "application/json", r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#.into()),
+        (200, "text/event-stream", half),
+    ]);
+    let (h, _d) = hub();
+    let key = "sk-test-never-in-a-log";
+    add(&h, "Claude", BackendKind::Anthropic, &url, Some(key));
+    let logs = failure_log::dir_in(&h.engine.session().config_dir());
+    let mut c = h.start(Some("Claude"), false).unwrap();
+    let mut texts = Vec::new();
+    for (question, said) in [("a question about xyzzy", "invalid x-api-key"), ("a question about plugh", "The answer stream ended early.")] {
+        let ev = run(&mut c, question);
+        let log = ev.iter().find_map(|e| match e {
+            AgentEvent::Error { message, log, .. } if message.contains(said) => log.clone(),
+            _ => None,
+        });
+        let log = log.unwrap_or_else(|| panic!("no log for {said}: {ev:?}"));
+        assert!(log.starts_with(&logs), "{}", log.display());
+        texts.push(std::fs::read_to_string(&log).unwrap());
+    }
+    let written = std::fs::read_dir(&logs).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("agent-")).count();
+    assert_eq!(written, 2);
+    let address = format!("A request to {url}/v1/messages");
+    for part in ["What: Claude (", "Diagnosis: The API key was rejected", "\"status\":401", "authentication_error", "Ran for:", &address] {
+        assert!(texts[0].contains(part), "{part}: {}", texts[0]);
+    }
+    assert!(texts[1].contains("Error: The answer stream ended early."), "{}", texts[1]);
+    for text in &texts {
+        for hidden in [key, "xyzzy", "plugh", "Half an ans"] {
+            assert!(!text.contains(hidden), "{hidden}: {text}");
+        }
+    }
+}
+
 #[test]
 fn openai_streaming_tool_loop() {
     let t1 = chat_sse(&[

@@ -461,9 +461,11 @@ Owner: open · Status: todo
       the `gemini` backend kind uses Gemini's OpenAI-compatible endpoint and `GEMINI_API_KEY`
 - [ ] Check a Gemini build live with a real Google AI Studio key (tool calls through the
       OpenAI-compatible endpoint)
-- [ ] Failure logs for the other ways an AI stops (API backends, MCP server start-up), like the
+- [x] Failure logs for the other ways an AI stops (API backends, MCP server start-up), like the
       ones agent CLIs write to `logs/` in the config folder
       — claimed: scks1, branch feature/r5.5-api-mcp-failure-logs
+      An API turn that fails for good writes one (a backend that fails over to the next doesn't),
+      and so does `mcp` when it can't start (STATUS).
 
 ### R5.6 Tools report only what they saw
 Owner: open · Status: todo
