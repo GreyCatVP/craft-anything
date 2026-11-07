@@ -487,6 +487,7 @@ yet, and the quick start is how every new person begins.
 
 **A signed-in coding agent:**
 - [ ] A live Clean room build of a website and of an app, checked end to end
+      — claimed: scks1 (website half), branch docs/r5.7-clean-room-website-live-run
 - [ ] A live build in a picked folder each way (edit in place, start from), checked end to end
 - [ ] Thresholds under pressure: a clone that's off by a few pixels (a page with fluid type or
       `clamp()` spacing) to see whether 4 / 2 / 8 px is too strict
