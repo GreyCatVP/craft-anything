@@ -12,11 +12,14 @@
 
 use crate::settings::Settings;
 use crate::tool::{Ctx, ToolOutput};
+use crate::workspace::MANIFEST;
 use craft_anything_engines::ghidra::{self, DeepDecompiler, DeepFunction};
 use craft_anything_evidence::{Confidence, Environment, EvidenceBuilder, Limitation, Location, ToolError, host_triple};
+use craft_anything_platform::sync::Mutex;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 /// The analysis settings hash for the default Deep profile. Part of the project cache key, so a
@@ -108,19 +111,35 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
 
 /// Analyse a program with Ghidra ahead of time (Deep mode), so the builder's first decompile opens
 /// a saved analysis instead of waiting hours for one. Shares the analysis with any other process
-/// doing the same. `progress` gets a line now and then.
-pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
+/// doing the same. `progress` gets a line now and then. It goes on when a build is paused, so
+/// nothing is lost, but stops once every project in this process that asked for it (`project`)
+/// has been deleted (#948).
+pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, project: &Path, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
     let (cfg, digest) = config(settings, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
+    let asked = (sha256.to_string(), project.to_path_buf());
+    WANTED.lock().unwrap_or_else(PoisonError::into_inner).push(asked.clone());
     ANALYSING.fetch_add(1, Ordering::SeqCst);
-    let closing = || CLOSING.load(Ordering::SeqCst);
-    let result = ghidra::analyse(&cfg, bytes, sha256, &digest, &closing, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string());
+    let stop = || CLOSING.load(Ordering::SeqCst) || !wanted(sha256);
+    let result = ghidra::analyse(&cfg, bytes, sha256, &digest, &stop, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string());
     ANALYSING.fetch_sub(1, Ordering::SeqCst);
+    let mut w = WANTED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(i) = w.iter().position(|a| *a == asked) {
+        w.remove(i);
+    }
     result
+}
+
+/// Whether a project that asked [`prepare`] for this program's analysis still exists.
+fn wanted(sha256: &str) -> bool {
+    let projects: Vec<PathBuf> = WANTED.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|(s, _)| s == sha256).map(|(_, p)| p.clone()).collect();
+    projects.iter().any(|p| p.join(MANIFEST).is_file())
 }
 
 /// Analyses [`prepare`] has under way, and whether they are being stopped.
 static ANALYSING: AtomicUsize = AtomicUsize::new(0);
 static CLOSING: AtomicBool = AtomicBool::new(false);
+/// The program (by sha256) and project of each [`prepare`] under way.
+static WANTED: Mutex<Vec<(String, PathBuf)>> = Mutex::new(Vec::new());
 
 /// The app is closing: stop every analysis [`prepare`] started and wait up to `within` for them to
 /// end, as nothing acts on a process's drop once the app has gone (#946).
