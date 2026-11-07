@@ -186,7 +186,7 @@ Owner: maintainers · Status: in progress
       Investigate the fixture separately from the watched descendant shutdown test: macOS refuses
       `setsockopt(SO_RCVTIMEO)` on a socket the listener has already reset, so the fixture now
       treats the refused timeout as that reset, which the test already accepted as a closed outcome
-      — claimed: doubektomas, branch test/r5.2-preview-fixture-reset
+      — claimed: doubektomas, branch test/r5.2-preview-fixture-reset; PR #1114
 Review comes before new work while the queue is long, smallest and clean PRs first. A PR is merged
 only when it's green and a maintainer has fully reviewed it, code as well as wording.
 - [ ] Maintainers: protect `main` (PRs required, squash only); the only ruleset covers `release`
