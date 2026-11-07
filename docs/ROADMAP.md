@@ -482,9 +482,11 @@ Golden rule 3: the result is evidence. Each fix needs a Mac to test on.
       the tree and its permission check, returns no nodes without truncation, and the evidence
       records the flag and says the tree was skipped. Walkthroughs still require Accessibility
       — claimed: Codex, branch bugfix/r5.6-macos-ui-flags
-- [ ] macOS: call observation writes a literal `\n` into its lldb callback, so the Python is
-      invalid and it reports zero calls (#251)
-      — claimed: mavericzz, branch docs/r5.6-stale-251
+- [x] macOS: call observation's lldb callback was a literal `\n` in its Python, so the Python was
+      invalid and it reported zero calls (#251). Fixed under R2.4: the callback is one valid line
+      covering every breakpoint, and a failed lldb run is an error, not "0 calls"; only the live
+      lldb run is still owed (R5.7)
+      — claimed: mavericzz, branch docs/r5.6-stale-251; PR #1070
 
 ### R5.7 Live checks owed
 Owner: open · Status: todo
