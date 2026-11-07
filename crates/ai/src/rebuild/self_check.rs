@@ -8,6 +8,10 @@ use super::*;
 /// The round a builder's own check is run as; real rounds start at 1.
 pub const SELF_CHECK_ROUND: u32 = 0;
 
+/// How long one of the builder's own checks may take. The build waits for it, so a check that's
+/// still going after this is stopped and reported (#981). Longer than a build's own steps need.
+pub const SELF_CHECK_LIMIT: Duration = Duration::from_secs(30 * 60);
+
 /// Where `rebuild_check` asks a project's run for a check.
 pub fn asks_dir(project: &Path) -> PathBuf {
     project.join("checks").join("asks")
@@ -125,7 +129,7 @@ impl Worker {
                 "The builder is checking its work against the original…"
             };
             self.step(ws, Step::Build, Status::Building, checking)?;
-            let (text, line) = match self.run_checks(ws, kind.as_ref(), SELF_CHECK_ROUND) {
+            let (text, line) = match self.run_checks_within(ws, kind.as_ref(), SELF_CHECK_ROUND, Some(SELF_CHECK_LIMIT)) {
                 Ok(checks) => {
                     let line = format!("The builder checked its work: {}.", summary(&checks, good_enough));
                     (report(&checks, good_enough, &open_questions(ws)), line)

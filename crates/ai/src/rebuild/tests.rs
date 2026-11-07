@@ -2994,6 +2994,25 @@ fn a_persons_own_project_is_judged_by_its_own_build_and_tests_whatever_its_kind(
 }
 
 #[test]
+fn a_self_check_round_stops_at_pause_and_at_its_time_limit() {
+    use craft_anything_engine::workspace::ExistingFiles::Edit;
+    let (_d, ws) = own_folder("index.html", Edit);
+    // Past its limit before the first check: that check is reported as not run, and nothing runs.
+    let r = check_worker(&ws, false).run_checks_within(&ws, &GameKind, 0, Some(std::time::Duration::ZERO)).unwrap();
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert!(!r[0].passed && r[0].note.starts_with("Not run:"), "{r:?}");
+    // Paused: the round ends with the cancelled error before any check starts.
+    let paused = check_worker(&ws, false);
+    paused.stop.cancel();
+    let e = paused.run_checks_within(&ws, &GameKind, 0, None).unwrap_err();
+    assert_eq!(e.code, craft_anything_evidence::ErrorCode::Cancelled);
+    // With time left, both checks run as they do without a limit.
+    let r = check_worker(&ws, false).run_checks_within(&ws, &GameKind, 0, Some(std::time::Duration::from_secs(600))).unwrap();
+    assert_eq!(r.len(), 2, "{r:?}");
+    assert!(r.iter().all(|c| c.passed), "{r:?}");
+}
+
+#[test]
 fn a_persons_own_project_is_asked_for_nothing_it_would_add_for_our_sake() {
     use craft_anything_engine::workspace::ExistingFiles::{Edit, StartFrom};
     let (_d, mut own) = own_folder("main.py", Edit);

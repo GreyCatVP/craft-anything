@@ -128,12 +128,30 @@ pub struct CheckCx<'a> {
     worker: &'a Worker,
     pub ws: &'a Workspace,
     pub round: u32,
+    /// When this round must stop, when it has a time limit (the builder's own checks do).
+    until: Option<Instant>,
+}
+
+/// Refuses once a round's time limit has passed. A check still running then gets this error from
+/// its next tool call, so a stuck check can't hold the build for hours (#981).
+fn within_limit(until: Option<Instant>, now: Instant) -> Result<(), ToolError> {
+    match until {
+        Some(t) if now >= t => Err(ToolError::new(craft_anything_evidence::ErrorCode::TimedOut, "The check ran past its time limit, so it was stopped.")),
+        _ => Ok(()),
+    }
 }
 
 impl CheckCx<'_> {
     /// Run an engine tool (the same ones the builder has).
     pub fn call(&self, tool: &str, params: Value) -> Result<ToolOutput, ToolError> {
+        within_limit(self.until, Instant::now())?;
         self.worker.call(tool, params)
+    }
+
+    /// Stopped (the person paused or stopped the run) or past the round's time limit: an error.
+    fn time_left(&self) -> Result<(), ToolError> {
+        self.worker.stop.check()?;
+        within_limit(self.until, Instant::now())
     }
 
     /// Serve a folder on loopback as the run's preview; returns its address.
@@ -178,7 +196,15 @@ impl Worker {
     /// this kind. One that fails stops the rest: a later check needs what an earlier one proved (a
     /// screenshot needs a build).
     pub(super) fn run_checks(&self, ws: &Workspace, kind: &dyn TargetKind, round: u32) -> Result<Vec<CheckResult>, ToolError> {
-        let mut cx = CheckCx { worker: self, ws, round };
+        self.run_checks_within(ws, kind, round, None)
+    }
+
+    /// As [`Worker::run_checks`], with a time limit for the whole round when `limit` is given. Pause
+    /// is looked at before each check; a check that would start past the limit is reported as not
+    /// run, and one still running at the limit ends at its next tool call.
+    pub(super) fn run_checks_within(&self, ws: &Workspace, kind: &dyn TargetKind, round: u32, limit: Option<Duration>) -> Result<Vec<CheckResult>, ToolError> {
+        let until = limit.map(|l| Instant::now() + l);
+        let mut cx = CheckCx { worker: self, ws, round, until };
         let mut out = Vec::new();
         let from_plugins = craft_anything_engine::wasm_plugins::checks(&self.engine.session());
         let plugin_checks = from_plugins
@@ -186,10 +212,21 @@ impl Worker {
             .filter(|c| c.kinds.is_empty() || c.kinds.iter().any(|k| k == kind.id()))
             .map(|check| Box::new(plugin_check::PluginJudge { check, kind: kind.id() }) as Box<dyn Check>);
         let checks = if ws.manifest.own_project() { own::checks() } else { kind.checks(ws) };
-        for c in checks.into_iter().chain(plugin_checks) {
+        let checks: Vec<Box<dyn Check>> = checks.into_iter().chain(plugin_checks).collect();
+        let total = checks.len();
+        for (i, c) in checks.iter().enumerate() {
             if !c.applies(&cx) {
                 continue;
             }
+            // Said before each check, so a stall shows which one it is (#981).
+            if let Err(e) = cx.time_left() {
+                if e.code == craft_anything_evidence::ErrorCode::Cancelled {
+                    return Err(e);
+                }
+                out.push(CheckResult::new(c.id(), round, false, format!("Not run: {}", e.message)));
+                break;
+            }
+            self.emit(RunEvent::Step { step: Step::Build, text: format!("Checking its work ({} of {total}): {}", i + 1, c.id()) });
             let r = c.run(&mut cx)?;
             let failed = !r.passed;
             out.push(r);

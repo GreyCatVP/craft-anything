@@ -431,6 +431,13 @@ systems with `cargo check --target`, with zig as the C compiler for `ring` (a wr
 so #53 merged with a long line rustfmt rewraps. Run `cargo fmt --all --check` last, after every
 edit, right before committing.
 
+**A build's own check that nothing could stop.** The builder's `rebuild_check` checks ran on the
+build's thread with no time limit, Pause was only looked at between tool calls, and the feed said
+only "checking its work against the original" for the whole round, so a check that hung for 6 h
+(#981) showed no step to blame. Give each round of checks a time limit, look at Pause before each
+check, and say which check is running. A check that's cut off is a failed check with its reason,
+never a silent wait.
+
 ## Design
 
 **An early error without a terminal event.** Model validation returned after reporting an error,
