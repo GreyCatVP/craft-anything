@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	在這個專案中，{kind}：{choice}。
 Couldn't change the approvals:	無法變更審核：
 What the builder may do without asking you, in this project.	在這個專案中，建置助手不必問你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	預設跟隨自動模式：開啟時，可復原的操作會執行，其餘會被拒絕；關閉時，建置助手會詢問。
+Context budget (tokens)	上下文預算（權杖）
+Auto	自動
+How much of the conversation is sent before older parts are trimmed. Auto: what the model's server says it has room for, or a safe default when it doesn't say.	在截短較早內容之前傳送多少對話。自動：模型伺服器所說的容量，若它不說則用安全的預設值。
+Set an AI's context budget	設定 AI 的上下文預算

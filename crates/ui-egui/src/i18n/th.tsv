@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	ในโปรเจกต์นี้ {kind
 Couldn't change the approvals:	เปลี่ยนการอนุมัติไม่ได้:
 What the builder may do without asking you, in this project.	สิ่งที่ตัวสร้างทำได้โดยไม่ถามในโปรเจกต์นี้
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	ค่าเริ่มต้นตามโหมดอัตโนมัติ: เปิดไว้จะทำสิ่งที่ย้อนกลับได้ต่อและปฏิเสธที่เหลือ ปิดไว้ตัวสร้างจะถาม
+Context budget (tokens)	งบบริบท (โทเค็น)
+Auto	อัตโนมัติ
+How much of the conversation is sent before older parts are trimmed. Auto: what the model's server says it has room for, or a safe default when it doesn't say.	ปริมาณบทสนทนาที่ส่งก่อนตัดส่วนเก่าออก อัตโนมัติ: เท่าที่เซิร์ฟเวอร์ของโมเดลบอกว่ารับได้ หรือค่าเริ่มต้นที่ปลอดภัยเมื่อไม่บอก
+Set an AI's context budget	ตั้งงบบริบทของ AI
