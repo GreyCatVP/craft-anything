@@ -1465,3 +1465,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra 正在分析原程式。暫停不會停止它，所以不會遺失任何進度。
 Stop the analysis	停止分析
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	下次建置會從頭重新開始分析。在此之前，反編譯使用內建引擎。
+Stop Ghidra's analysis	停止 Ghidra 的分析

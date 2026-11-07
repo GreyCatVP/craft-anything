@@ -903,3 +903,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra がオリジナルを解析中です。一時停止しても止まらないので、何も失われません。
 Stop the analysis	解析を停止
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	次のビルドで最初からやり直します。それまでは内蔵エンジンで逆コンパイルします。
+Stop Ghidra's analysis	Ghidra の解析を停止

@@ -1465,3 +1465,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra กำลังวิเคราะห์ต้นฉบับ การหยุดชั่วคราวไม่ได้หยุดการวิเคราะห์ จึงไม่มีอะไรสูญหาย
 Stop the analysis	หยุดการวิเคราะห์
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	บิลด์ครั้งถัดไปจะเริ่มวิเคราะห์ใหม่ตั้งแต่ต้น ระหว่างนี้การดีคอมไพล์จะใช้เอนจินในตัว
+Stop Ghidra's analysis	หยุดการวิเคราะห์ของ Ghidra

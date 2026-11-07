@@ -1464,3 +1464,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra analyse l'original. La pause ne l'arrête pas, donc rien n'est perdu.
 Stop the analysis	Arrêter l'analyse
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	Le prochain build la relance depuis le début. D'ici là, la décompilation utilise le moteur intégré.
+Stop Ghidra's analysis	Arrêter l'analyse de Ghidra

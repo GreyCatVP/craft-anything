@@ -1465,3 +1465,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra ორიგინალს აანალიზებს. პაუზა მას არ აჩერებს, ასე რომ არაფერი იკარგება.
 Stop the analysis	ანალიზის შეწყვეტა
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	შემდეგი აწყობა მას თავიდან დაიწყებს. მანამდე დეკომპილაციას ჩაშენებული ძრავა აკეთებს.
+Stop Ghidra's analysis	Ghidra-ს ანალიზის შეწყვეტა

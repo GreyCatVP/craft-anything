@@ -1465,3 +1465,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra가 원본을 분석하고 있습니다. 일시 정지해도 멈추지 않으니 잃는 것은 없습니다.
 Stop the analysis	분석 중지
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	다음 빌드에서 처음부터 다시 시작합니다. 그때까지는 내장 엔진으로 디컴파일합니다.
+Stop Ghidra's analysis	Ghidra 분석 중지

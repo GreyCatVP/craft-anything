@@ -1465,3 +1465,4 @@ Default follows Auto mode: with it on, what can be undone goes ahead and the res
 Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra đang phân tích bản gốc. Tạm dừng không làm nó dừng lại, nên không mất gì cả.
 Stop the analysis	Dừng phân tích
 The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	Lần build tiếp theo sẽ bắt đầu lại từ đầu. Đến lúc đó, việc dịch ngược dùng engine tích hợp sẵn.
+Stop Ghidra's analysis	Dừng phân tích của Ghidra
