@@ -1071,6 +1071,7 @@ Gaps found while using the app for real projects.
       — claimed: justinjohn0306, branch bugfix/r2.9-stop-ghidra-analysis
 - [ ] A Stop button for Ghidra's analysis while the project stays (pausing lets it go on, so
       nothing is lost; today only deleting the project or closing the app stops it) (#948)
+      — claimed: justinjohn0306, branch feature/r2.9-stop-ghidra-button
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
