@@ -184,6 +184,7 @@ Owner: maintainers · Status: in progress
 - [ ] `regression_preview_limits_connections_and_releases_listener` (platform) fails on macOS
       with `Invalid argument` in its socket fixture, also reported before PR #1030's review fixes.
       Investigate the fixture separately from the watched descendant shutdown test
+      — claimed: doubektomas, branch test/r5.2-preview-fixture-reset
 Review comes before new work while the queue is long, smallest and clean PRs first. A PR is merged
 only when it's green and a maintainer has fully reviewed it, code as well as wording.
 - [ ] Maintainers: protect `main` (PRs required, squash only); the only ruleset covers `release`
