@@ -375,6 +375,10 @@ And when the shim's Node couldn't be found (nvm for Windows with no version in u
 `C:\Program Files\nodejs` link was gone), we fell back to the `.cmd`, and Rust refused the
 multi-line prompt: "batch file arguments are invalid", which named neither Node nor nvm. Search
 nvm's version folders too, and when a shim's interpreter is missing, say so (`interpreter_missing`).
+The desktop DeepSeek Harness has a custom batch launcher, so npm-shim handling does not unwrap
+it either. Send its task on stdin, with no task argument. A literal `-` is a stdin marker in newer
+Harness versions but is the task itself in older ones; omitting the task makes those older versions
+fail before a model runs. They need an update to a headless profile that supports stdin.
 
 **A first analysis that waited for a lock it could never take.** Ghidra's analysis lock is created
 with `create_new` in `ghidra-cache/`, which only existed on machines that had used it before; on a

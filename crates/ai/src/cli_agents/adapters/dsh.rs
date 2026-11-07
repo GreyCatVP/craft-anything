@@ -1,7 +1,9 @@
-//! DeepSeek Harness (`dsh --profile headless "<task>"`).
+//! DeepSeek Harness (`dsh --profile headless`, with the task on stdin).
 //!
 //! The harness answers one task, streams its reasoning to stderr and prints its last message on
 //! stdout, so its output is the answer text, not JSON lines.
+//! This needs a headless profile that accepts piped input (verified with 0.2.2-rc.1); older
+//! versions without it reject the missing task and must be updated.
 //!
 //! It has no flag for a tool server the way other agents do: servers come from the profile's patch
 //! layers. Our tool server therefore arrives as one generated `--patch` overlay for this run, which
@@ -27,6 +29,16 @@ impl AgentAdapter for DeepSeekHarness {
         &["dsh", "deepseek-harness"]
     }
 
+    /// Keep task text out of Windows batch arguments and their command-line length limit.
+    fn prompt_on_stdin(&self) -> bool {
+        true
+    }
+
+    /// The headless task includes the preamble, with no added or removed whitespace.
+    fn stdin_text(&self, preamble: &str, prompt: &str) -> String {
+        format!("{preamble}{prompt}")
+    }
+
     fn args(&self, cx: &ArgsCx) -> Vec<String> {
         let mut v = cx.options.args.clone();
         v.extend(["--profile".into(), "headless".into()]);
@@ -34,7 +46,8 @@ impl AgentAdapter for DeepSeekHarness {
         if !cx.question {
             v.extend(["--patch".into(), tool_server_patch(cx.mcp)]);
         }
-        v.push(format!("{}{}", cx.preamble, cx.prompt));
+        // No task positional means stdin. Unlike `-`, this fails as a missing task on older
+        // Harness versions without stdin support, rather than submitting a literal dash.
         v
     }
 
@@ -163,15 +176,16 @@ mod tests {
         (DeepSeekHarness.args(&cx), mcp.clone())
     }
 
-    /// The task goes last, after the profile and any extra arguments.
+    /// Only options go in argv; the task arrives on stdin after the profile starts.
     #[test]
-    fn one_task_goes_to_the_headless_profile_last() {
+    fn headless_argv_contains_only_profile_and_patch_options() {
         let (a, _) = args(&BackendOptions::default(), false);
         assert_eq!(a[0..2], ["--profile", "headless"], "{a:?}");
-        assert_eq!(a.last().map(String::as_str), Some("PRE make a game"), "{a:?}");
+        assert_eq!(a.len(), 4, "only the profile and tool-server patch: {a:?}");
         let with_args = BackendOptions { args: vec!["--patch".into(), "extra.yml".into()], ..Default::default() };
         let (a, _) = args(&with_args, false);
         assert_eq!(a[0..4], ["--patch", "extra.yml", "--profile", "headless"], "{a:?}");
+        assert_eq!(a.len(), 6, "custom options and the generated patch: {a:?}");
     }
 
     /// The run's tool server, as an overlay in a folder of its own that only its owner can read.
@@ -223,7 +237,27 @@ mod tests {
     fn a_question_gets_no_tool_server() {
         let (a, _) = args(&BackendOptions::default(), true);
         assert!(!a.iter().any(|x| x == "--patch"), "{a:?}");
-        assert_eq!(a.last().map(String::as_str), Some("PRE make a game"), "{a:?}");
+        assert_eq!(a, ["--profile", "headless"], "{a:?}");
+    }
+
+    /// Batch launchers cannot accept line breaks or long tasks in argv; stdin preserves the text.
+    #[test]
+    fn multiline_and_long_tasks_use_stdin_without_changing_their_bytes() {
+        let preamble = "Instructions:\r\n";
+        let tasks = ["-question?\r\n中文 %PATH% & ^ \"quoted\"\n\n".to_string(), format!("{}\nlast line\n", "x".repeat(40_831))];
+        for id in ["dsh", "deepseek-harness"] {
+            let adapter = AgentAdapters::built_in().for_agent(id);
+            for task in &tasks {
+                for access in [Access::Build, Access::Question] {
+                    let a = build_args(adapter.as_ref(), &BackendOptions::default(), task, preamble, &mcp(), None, access);
+                    assert!(adapter.prompt_on_stdin(), "{id} must send task text on stdin");
+                    assert_eq!(a.len(), if matches!(access, Access::Question) { 2 } else { 4 }, "only options: {a:?}");
+                    assert!(!a.iter().any(|arg| arg.contains(task) || arg.contains(preamble)), "{a:?}");
+                    assert!(a.iter().map(|arg| arg.len() + 1).sum::<usize>() < 8191, "the task must not grow argv");
+                    assert_eq!(adapter.stdin_text(preamble, task), format!("{preamble}{task}"), "{id}");
+                }
+            }
+        }
     }
 
     /// The agent is registered under both ids, not handed to the plain adapter.

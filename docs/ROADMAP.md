@@ -781,7 +781,7 @@ Owner: open · Status: in progress
       own profile is left untouched. Verified with adapter and overlay tests and a live follow-up
       website build whose journal shows `rebuild_check`, `core_unknown_add` and `core_handoff_write`
       going through our server — claimed: 0231071, branch `feature/dsh-agent-adapter`
-- [ ] DeepSeek Harness: send tasks on stdin so multiline and long messages can start through the
+- [x] DeepSeek Harness: send tasks on stdin so multiline and long messages can start through the
       Windows desktop launcher (see the argv note above)
       — claimed: gtxy27, branch `bugfix/r2.2-dsh-stdin`
 - [ ] DeepSeek Harness: no resume (its headless profile keeps no session), and a build on the harness's

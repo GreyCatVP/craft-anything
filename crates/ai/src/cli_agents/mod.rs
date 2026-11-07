@@ -2255,6 +2255,58 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         }
     }
 
+    /// The desktop Harness uses a custom batch launcher rather than an npm shim. Exercise the
+    /// real conversation runner through such a launcher, with no installed agent or network.
+    #[cfg(windows)]
+    #[test]
+    fn dsh_cmd_receives_multiline_and_long_tasks_on_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("dsh.cmd");
+        let exe = std::env::current_exe().unwrap().display().to_string().replace('%', "%%");
+        let script = format!(
+            "@echo off\r\nsetlocal DisableDelayedExpansion\r\n\
+             if \"%~1\"==\"--help\" (echo --profile& exit /b 0)\r\n\
+             if not \"%~5\"==\"\" exit /b 2\r\n\
+             echo %*> \"%~dp0argv\"\r\n\
+             set \"{STDIN_ECHO_ENV}=%~dp0stdin\"\r\n\
+             \"{exe}\" --exact --test-threads=1 cli_agents::tests::stdin_echo_child >nul\r\n\
+             if errorlevel 1 exit /b 1\r\n\
+             echo DSH_STDIN_FIXTURE_OK\r\n"
+        );
+        std::fs::write(&program, script).unwrap();
+        let cases = [
+            ("Instructions:\r\n", "-question?\r\n中文 %PATH% & ^ \"quoted\"\n\n".to_string()),
+            ("", "--not-a-flag\n".to_string()),
+            ("Instructions:\n", format!("{}\nlast line\n", "x".repeat(40_831))),
+        ];
+        for (preamble, prompt) in cases {
+            let _ = std::fs::remove_file(dir.path().join("stdin"));
+            let config =
+                BackendConfig { name: "DSH fixture".into(), kind: BackendKind::AgentCli, model: "dsh".into(), base_url: None, ssh_host: None, enabled: true };
+            let options = BackendOptions { command: Some(program.display().to_string()), timeout_secs: Some(20), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, Some(dir.path().to_path_buf()));
+            spec.preamble = Some(preamble.into());
+            spec.builder = Some(Builder { investigation: None, inbox: dir.path().join("inbox") });
+            let mut c = CliConversation::new(spec);
+            c.send(&prompt);
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            let mut events = Vec::new();
+            while std::time::Instant::now() < deadline && !events.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                events.extend(c.poll());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            c.stop();
+            assert!(events.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })), "{events:?}");
+            assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "{events:?}");
+            assert!(events.iter().any(|e| matches!(e, AgentEvent::TextDelta { text } if text.contains("DSH_STDIN_FIXTURE_OK"))), "{events:?}");
+            assert_eq!(std::fs::read(dir.path().join("stdin")).unwrap(), format!("{preamble}{prompt}").as_bytes());
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+            assert!(argv.starts_with("--profile headless --patch "), "{argv}");
+            assert!(!argv.trim_end().ends_with(" -"), "old Harness versions would run a literal dash: {argv}");
+            assert!(!argv.contains(&prompt), "task text must not appear in argv");
+        }
+    }
+
     const STDIN_ECHO_ENV: &str = "CRAFT_ANYTHING_TEST_STDIN_ECHO";
 
     /// Not a test on its own: when run as the child of the test above, writes its stdin to the
