@@ -235,9 +235,12 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       — claimed: SoldierPePe, branch test/r5.2-console-capture-flake
 - [ ] A console program that exits by itself and leaves programs attached to its console: closing
       it can still hang the console host on Windows Server 2022 (only a timeout ends the tree)
-- [ ] `process::launch_tests::a_watched_program_can_be_stopped` leaves its `sleep 30` (Windows:
+- [x] `process::launch_tests::a_watched_program_can_be_stopped` leaves its `sleep 30` (Windows:
       `ping -n 30`) running, on `main` too: `stop` ends the shell but not what the shell started
-      — in PR #1027
+      (#1027). Verified on Windows 11: after the test (5 runs) and after the whole
+      `craft-anything-platform` suite plus a 35 s wait, `tasklist` showed no `PING.EXE`. Not
+      checked: a panic before `stop`, dropping the handle without `stop`, Windows 10 or Server
+      — claimed: yashpatadiya1724-cmyk, branch docs/r5.2-watched-stop-windows-check
 - [x] `a_helper_is_judged_by_whether_it_runs` (ai crate) sometimes failed when several crates'
       tests ran at once: a script just written can't start while another thread's child still
       holds it open ("Text file busy"). #787 tries again: on Linux 4 of 72 runs failed before
