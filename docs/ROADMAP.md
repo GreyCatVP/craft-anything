@@ -484,6 +484,7 @@ Golden rule 3: the result is evidence. Each fix needs a Mac to test on.
       — claimed: Codex, branch bugfix/r5.6-macos-ui-flags
 - [ ] macOS: call observation writes a literal `\n` into its lldb callback, so the Python is
       invalid and it reports zero calls (#251)
+      — claimed: mavericzz, branch docs/r5.6-stale-251
 
 ### R5.7 Live checks owed
 Owner: open · Status: todo
