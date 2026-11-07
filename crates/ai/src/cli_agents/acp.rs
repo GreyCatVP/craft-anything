@@ -1350,6 +1350,13 @@ printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt
         assert!(asked.access_error.as_ref().is_some_and(|error| error.message.contains("question")));
         assert_eq!(asked.session_config, [("model".into(), "grok-4.5".into()), ("reasoning_effort".into(), "medium".into())]);
 
+        // Deep chat is analysis only. Grok can still edit when it never asks, so that run is refused too.
+        let mut chat = super::super::CliSpec::new(grok_config(), crate::BackendOptions::default(), false, None);
+        chat.deep = true;
+        let Some(analyse) = super::super::acp_for(&chat) else { panic!("Grok speaks ACP") };
+        assert!(analyse.access_error.as_ref().is_some_and(|error| error.message.contains("deep chat")));
+        assert_eq!(analyse.args, ["agent", "--no-leader", "stdio"]);
+
         let mut deep = super::super::CliSpec::new(grok_config(), quiet, false, None);
         deep.deep = true;
         deep.builder = Some(super::super::Builder { investigation: None, inbox: std::env::temp_dir() });

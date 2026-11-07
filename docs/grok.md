@@ -1,6 +1,6 @@
 # Grok Build
 
-Craft Anything can use the installed Grok Build CLI for analysis and building through the
+Craft Anything can use the installed Grok Build CLI for a deep build through the
 Agent Client Protocol (ACP). This is separate from the xAI API. When `XAI_API_KEY` is set,
 Settings → AI also offers **xAI (Grok)** as an OpenAI-compatible server for questions.
 
@@ -8,13 +8,16 @@ Settings → AI also offers **xAI (Grok)** as an OpenAI-compatible server for qu
 
 1. Install Grok Build. Its program is `grok`, usually in `~/.grok/bin` (or `%USERPROFILE%\.grok\bin`).
    Craft Anything looks there even when a desktop launch left that folder off `PATH`.
-2. Sign in with `grok login`, or set `XAI_API_KEY`. Grok keeps the credentials. Craft Anything
-   does not read them, collect a key, or sign in for you. When `auth.json` exists under
+2. Sign in with `grok login`. Grok keeps that login in `auth.json`. Craft Anything checks
+   whether the file exists and does not read it or sign in for you. When `auth.json` exists under
    `GROK_HOME`, or under `~/.grok` when that variable is unset, the app treats Grok as signed
    in. A missing file is unknown, so a build still starts and Grok reports an authentication
-   problem itself.
-3. In Settings → AI, detect and add **Grok Build**, then choose it for chat or **Build with this**.
-   If `grok` is installed somewhere else, use **Choose...** and pick the program.
+   problem itself. `XAI_API_KEY` is separate. Grok can use it when there is no `auth.json`.
+   Settings → AI detection reads that variable, and the xAI API backend can use it. The Grok
+   Build adapter does not read the key.
+3. In Settings → AI, detect and add **Grok Build**, then choose it for **Build with this**.
+   A chat and a question are refused. If `grok` is installed somewhere else, use **Choose...**
+   and pick the program.
 
 The equivalent backend entry in `config.toml` is:
 
@@ -34,7 +37,7 @@ already has on this computer.
 
 ## What runs
 
-A build or a question starts:
+A deep build starts:
 
 ```sh
 grok agent --model <cli_model> --no-leader --reasoning-effort <level> stdio
@@ -77,14 +80,15 @@ has no type. That field is sent only for Grok. Grok also keeps the MCP servers f
 Grok config. Craft Anything does not edit that config and cannot turn those servers off for
 one run.
 
-Clean room and questions are refused before Grok starts. `grok agent` does not accept
-`--permission-mode`, `--deny`, or `--disallowed-tools`, and those flags do not constrain the
-agent when they are placed before `agent`. A native read does not ask permission, so Clean
-room cannot keep the original out of reach. A question must not change files, and a saved
-permission or an always-approve setting can edit without a request. A deep build is allowed:
-it may read, and an edit is gated only when Grok sends `session/request_permission`. Deep
-chat uses that same ask path. A Grok config that approves every tool will still edit without
-asking. Craft Anything does not pass `--always-approve`.
+Clean room, deep chat, and questions are refused before Grok starts. `grok agent` does not
+accept `--permission-mode`, `--deny`, or `--disallowed-tools`, and those flags do not
+constrain the agent when they are placed before `agent`. A native read does not ask
+permission, so Clean room cannot keep the original out of reach. A question must not change
+files. Deep chat is only analysis, and a saved permission or an always-approve setting can
+edit without a request, so that limit cannot be held either. A deep build is allowed: it may
+read, and an edit is gated only when Grok sends `session/request_permission`. A Grok config
+that approves every tool will still edit without asking. Craft Anything does not pass
+`--always-approve`, and it does not replace the person's Grok config to force a prompt.
 
 ## What was checked
 
@@ -100,5 +104,5 @@ permission request was answered with allow. That run used a temporary `GROK_HOME
 `ui.permission_mode` was `ask`, and a symlink to the existing auth file. The file was not
 read, and the person's own Grok config was not changed. A config that approves every tool
 does not send that request. Copilot, Gemini, and Maki were not checked live with
-`"type": "stdio"`; the field is still sent only for Grok. Clean room was not run live,
-because those runs are refused.
+`"type": "stdio"`; the field is still sent only for Grok. Clean room and deep chat were
+not run live, because those runs are refused.

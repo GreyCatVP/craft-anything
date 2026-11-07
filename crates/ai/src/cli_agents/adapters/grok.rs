@@ -97,16 +97,17 @@ impl AgentAdapter for Grok {
         }
     }
 
-    /// `grok agent` accepts no flag that stops native reads, and a read does not ask permission.
-    /// Saved permissions can also edit without a request. Clean room and questions are refused
-    /// rather than started under limits this agent cannot keep. A deep build may read, and an
-    /// edit is gated only when Grok sends `session/request_permission`. Deep chat uses that same
-    /// ask path.
+    /// `grok agent` accepts no flag that stops native reads or writes, and a read does not ask
+    /// permission. A saved permission or an always-approve setting can also edit without
+    /// `session/request_permission`. Clean room, deep chat, and questions promise limits this
+    /// agent cannot keep, so they are refused. A deep build may read, and an edit is gated only
+    /// when Grok sends that request. Nothing here can force the request: the flags do not
+    /// constrain `grok agent`, and replacing the person's Grok config would drop their servers.
     fn validate_access(&self, access: Access) -> Result<(), ToolError> {
         match access {
-            Access::Build | Access::Analyse => Ok(()),
-            Access::CleanRoomAnalyse | Access::CleanRoomBuild | Access::CleanRoomQuestion | Access::Question => {
-                Err(ToolError::invalid("Grok Build reads and edits without asking, so a Clean room run or a question can't hold it back.")
+            Access::Build => Ok(()),
+            Access::Analyse | Access::CleanRoomAnalyse | Access::CleanRoomBuild | Access::CleanRoomQuestion | Access::Question => {
+                Err(ToolError::invalid("Grok Build reads and edits without asking, so a Clean room run, a deep chat, or a question can't hold it back.")
                     .with_remediation("Use a deep build. Grok asks before an edit only when its own permission mode sends a request."))
             }
         }
@@ -237,13 +238,12 @@ mod tests {
         assert_eq!(Grok.acp_mode_options(&options, Access::Build), ["--no-leader", "--reasoning-effort", "low"]);
         assert_eq!(Grok.acp_session_config(&options), [("model".into(), "grok-4.6".into()), ("reasoning_effort".into(), "low".into())]);
         assert!(!Grok.acp_mode_options(&options, Access::CleanRoomBuild).iter().any(|arg| arg.contains("always-approve")));
-        for access in [Access::CleanRoomAnalyse, Access::CleanRoomBuild, Access::CleanRoomQuestion, Access::Question] {
-            let error = Grok.validate_access(access).expect_err("clean room and questions are refused");
-            assert!(error.message.contains("Clean room") && error.message.contains("question"));
+        for access in [Access::Analyse, Access::CleanRoomAnalyse, Access::CleanRoomBuild, Access::CleanRoomQuestion, Access::Question] {
+            let error = Grok.validate_access(access).expect_err("clean room, deep chat, and questions are refused");
+            assert!(error.message.contains("Clean room") && error.message.contains("deep chat") && error.message.contains("question"), "{}", error.message);
             assert!(error.remediation.as_deref().is_some_and(|fix| fix.contains("deep build")));
         }
         assert!(Grok.validate_access(Access::Build).is_ok());
-        assert!(Grok.validate_access(Access::Analyse).is_ok());
         let named =
             BackendOptions { cli_reasoning_effort: Some(crate::config::CliReasoningEffort::Xhigh), effort: Some(crate::Effort::Low), ..Default::default() };
         assert_eq!(Grok.acp_session_config(&named), [("reasoning_effort".into(), "xhigh".into())]);
@@ -349,7 +349,7 @@ mod tests {
         std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = std::process::Command::new("git").arg("-C").arg(&root).arg("init").output();
 
-        let permissions = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let permissions = std::sync::Arc::new(craft_anything_platform::sync::Mutex::new(Vec::<String>::new()));
         let record = permissions.clone();
         let approver: super::super::acp::Approver = std::sync::Arc::new(move |tool: &str, _input: &serde_json::Value| {
             record.lock().unwrap().push(tool.to_string());
