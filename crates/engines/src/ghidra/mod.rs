@@ -530,10 +530,10 @@ fn set_aside(project_dir: &Path) -> std::io::Result<Option<Aside>> {
 }
 
 /// Whether a refused move may pass: Windows reports a folder it has open files in as a permission
-/// or an uncategorised error, and an antivirus holding a handle looks the same for a moment.
+/// and an antivirus holding a handle looks the same for a moment.
 /// Anything else — a path we cannot even name — is the caller's to hear now, not after a timeout.
 fn move_may_pass(e: &std::io::Error) -> bool {
-    matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Uncategorized | std::io::ErrorKind::WouldBlock)
+    matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock)
 }
 
 /// Give the analysis lock back. A lock this process cannot release would read to everyone else as
