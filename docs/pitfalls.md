@@ -161,6 +161,13 @@ Negative probes use loopback port zero so another fixture cannot acquire a relea
 A controlled fragmented request reproduced the fixture defect; the old CI log did not preserve
 the probe's underlying error, so it does not establish that failure's cause.
 
+**A read timeout set on a socket the listener already reset.** The preview connection regression
+test set a read timeout with `unwrap()` on connections it expected the listener to close. macOS
+refuses `setsockopt(SO_RCVTIMEO)` with `Invalid argument` once the socket is reset, so the test
+failed there although a reset is one of the closed outcomes it accepts. When a fixture allows a
+reset or a close, set timeouts fallibly and treat the refusal as that outcome (`take_error` still
+reports `ConnectionReset`); don't assume `set_read_timeout` succeeds on a dead socket.
+
 **A script written and run at once.** Tests that write a stand-in program and start it failed now
 and then on Linux with "Text file busy": another test thread was starting a child at that moment,
 and the child still held the new file open for writing. Starting a program goes through
