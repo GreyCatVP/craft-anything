@@ -143,18 +143,18 @@ impl TargetKind for GameKind {
     fn brief_sections(&self, cx: &BriefCx) -> Vec<String> {
         let target = &cx.ws.manifest.target;
         if matches!(target, TargetRef::Website { .. }) {
-            return vec![screenshot::contract(), self_test::SELF_TEST_CONTRACT.to_string()];
+            return vec![screenshot::contract(cx.sees_pictures), self_test::SELF_TEST_CONTRACT.to_string()];
         }
         // Paid, so only when the person turned it on for this project and a key is set up.
         let generated = cx.assets && cx.ws.manifest.generate_assets;
         if cx.ws.manifest.own_project() {
             return generated.then(|| assets_note(cx.ws, cx.image_model)).into_iter().collect();
         }
-        let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
+        let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated, cx.sees_pictures)];
         if generated {
             s.push(assets_note(cx.ws, cx.image_model));
         }
-        s.push(screenshot::contract());
+        s.push(screenshot::contract(cx.sees_pictures));
         s.push(self_test::SELF_TEST_CONTRACT.to_string());
         s
     }

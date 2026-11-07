@@ -187,6 +187,10 @@ Owner: maintainers · Status: in progress
 Review comes before new work while the queue is long, smallest and clean PRs first. A PR is merged
 only when it's green and a maintainer has fully reviewed it, code as well as wording.
 - [ ] Maintainers: protect `main` (PRs required, squash only); the only ruleset covers `release`
+- [ ] `cargo xtask secrets` treats every environment variable whose name contains `AUTH` as a
+      secret, git's `GIT_AUTHOR_NAME` among them, so the pre-commit hook refuses any added line with
+      the committer's own name when it's 12 characters or more (a roadmap claim by a contributor
+      whose git name is their handle). Leave git's identity variables out of `env_values`
 - [x] Auto mode's delete check is a safety bug that shows up as Mac test failures. It splits a
       command on spaces, so `rm -rf "C:/x/Game Backup/y"` from a project at `C:/x/Game` goes ahead
       unasked, and it lower-cases paths, so on a Mac or Linux a delete inside a project with
@@ -414,12 +418,17 @@ been run live.
 - [ ] Find how each local server is told its context size and set it, or stop with a plain message
       when the prompt won't fit. We assume 24k and send no `num_ctx`, which an OpenAI-style endpoint
       may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73)
-- [ ] A builder that can't see pictures (the API loop) is told it can't, then sent to open
+- [x] A builder that can't see pictures (the API loop) is told it can't, then sent to open
       screenshots with Read: the website capture lines and the `--screenshot` and reference-picture
       lines in `brief.rs`, the website check's "Open each pair", the reminder after each round, the
       `--screenshot` contract and `capture/README.md`'s window picture. Give it only what it can
-      use, and say what the check measures instead
+      use, and say what the check measures instead. `BriefCx::sees_pictures` (today: not the API
+      loop) picks the wording: a website's `layouts` and each round's `capture.json`, a program's
+      `ui-tree.json` and the check's likeness, and asking the person what their pictures show
       — claimed: youkaicountry, branch bugfix/r5.4-blind-builder-prompts
+- [ ] The carry-on and follow-up prompts (`continue_prompt`, `follow_up`) ask an API-loop builder
+      to check its work with rebuild_check, which the loop refuses while it builds; only its first
+      message says so. Say "Craft Anything checks it after your turn" there instead
 - [x] When a server refuses a request for its context window and says the size (Ollama, llama.cpp,
       OpenAI-style), fit the conversation to that window and ask once more, else say how to raise it (#962)
 - [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
