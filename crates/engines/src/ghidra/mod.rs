@@ -549,6 +549,31 @@ fn check_decompiler(analyze_headless: &Path) -> Result<(), GhidraError> {
     )))
 }
 
+/// A project folder a stale lock was guarding, moved out of the way instead of removed: a Ghidra
+/// that outlived the app that started it keeps writing into its own folder, not into the one this
+/// analysis is about to fill (#951). Dropping it frees the room once this analysis has its own.
+struct Aside(PathBuf);
+
+impl Drop for Aside {
+    /// Free the room once this analysis has a folder of its own.
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Move `project_dir` aside if anything is there, and say where. Fails where the folder cannot be
+/// moved — Windows refuses while a process has files open in it — which is exactly the case a
+/// caller must read as *another analysis is still going* rather than as *nothing to do*.
+fn set_aside(project_dir: &Path) -> std::io::Result<Option<Aside>> {
+    if !project_dir.exists() {
+        return Ok(None);
+    }
+    let token = random_token();
+    let aside = project_dir.with_extension(format!("orphaned-{}", token.get(..8).unwrap_or(&token)));
+    std::fs::rename(project_dir, &aside)?;
+    Ok(Some(Aside(aside)))
+}
+
 /// Make sure the target is analysed and saved in its cached project, analysing it now if no one
 /// has (a big program can take hours; it happens once). If another process is already analysing
 /// it, wait for that instead of starting over. Returns the cached project folder, as the path to
@@ -571,7 +596,8 @@ pub fn analyse(
     let lock = lock_path(&project_dir);
     // The lock sits beside the project, in the cache folder a fresh store doesn't have yet.
     make_private_dir(lock.parent().unwrap_or(&root))?;
-    loop {
+    // The loop ends by handing over what it moved aside, if anything.
+    let kept_aside = loop {
         if is_analysed(&project_dir) {
             return Ok(project_dir);
         }
@@ -589,19 +615,30 @@ pub fn analyse(
         // Stale or none: take it (create_new, so only one of two racing processes wins).
         let _ = std::fs::remove_file(&lock);
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
-            Ok(_) => break,
+            Ok(_) => {}
             Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
                 return Err(GhidraError::Launch(format!("taking the analysis lock {}: {e}", lock.display())));
             }
-            Err(_) => {}
+            // Another process won the race: look at the folder again.
+            Err(_) => continue,
         }
-    }
+        // Whatever the dead process left is moved, not removed, so a Ghidra that outlived it keeps
+        // its own folder. A refusal to move it means that Ghidra is still working: wait for it.
+        match set_aside(&project_dir) {
+            Ok(aside) => break aside,
+            Err(e) => {
+                let _ = std::fs::remove_file(&lock);
+                progress(0.05, &format!("waiting for the analysis of this program already under way ({e})"));
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        }
+    };
     let held = HeldLock(lock.clone());
+    let _aside = kept_aside;
     let scratch = Scratch::new(&root, "ghidra-analysis")?;
     let program = format!("target-{}", target_sha256.get(..12).unwrap_or(target_sha256));
     // Beside the saved analysis, so it can be read after a failure.
     let log = project_dir.with_extension("log");
-    remove_soon(&project_dir);
     make_private_dir(&project_dir)?;
     let script_dir = scratch.0.join("scripts");
     make_private_dir(&script_dir)?;
