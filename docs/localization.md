@@ -1,7 +1,7 @@
 # UI localisation
 
 The desktop app offers **Čeština** (`cs`), **Deutsch** (`de`), **Español** (`es`), **Italiano** (`it`), **ქართული** (`ka`),
-**한국어** (`ko`), **Русский** (`ru`), **Tiếng Việt** (`vi`), **Português (Brasil)** (`pt-br`), **Türkçe** (`tr`), **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`), alongside
+**한국어** (`ko`), **Русский** (`ru`), **Tiếng Việt** (`vi`), **Português (Brasil)** (`pt-br`), **Türkçe** (`tr`), **ไทย** (`th`), **简体中文** (`zh-hans`) and **繁體中文** (`zh-hant`), alongside
 English, French and Japanese, in **Settings → General → Language**. The choice is saved in the
 existing `language` setting. **System** uses the operating system's preferred
 supported language; if none matches, it uses English. An explicit choice takes
@@ -52,15 +52,24 @@ engine names, tool ids and shortcuts keep their spelling. The glossary: *Phòng 
 The kind detection that reads a request also knows *trò chơi* for a game and *trang web* for a
 website, so a translated suggestion keeps its project kind.
 
-## Brazilian Portuguese and Turkish
+## Turkish and Thai
 
-**Português (Brasil)** (`pt-br`) is selected by any `pt` tag, and **Türkçe** (`tr`) by `tr` and `tr-TR`. Both have the
-same keys as the other catalogs. A request's project kind also knows *jogo*, and *oyun* with its endings as whole
-words (so *oyuncak*, a toy, stays an app), and *web sitesi* and *internet sitesi*.
+**Türkçe** (`tr`) is selected by `tr` and `tr-TR`, and **ไทย** (`th`) by `th` and
+`th-TH`. Both have the same keys as the other catalogs. A request's project kind also knows *jogo*,
+and *oyun* with its endings as whole words (so *oyuncak*, a toy, stays an app), and *web sitesi* and
+*internet sitesi*; the Thai catalog adds *เกม* for a game and *เว็บไซต์* and *หน้าเว็บ* for a website,
+so a translated suggestion keeps its project kind.
+
+The Thai catalog addresses the person as *คุณ* and keeps **Clean room** and **Deep** in English, as
+the title bar does. The glossary: *หลักฐาน* (Evidence), *สิ่งที่พบ* (finding), *โปรเจกต์* (Project),
+*เป้าหมาย* (target), *เครื่องมือ* (tool), *เวิร์กเบนช์* (workbench), *ตัวสร้าง* (builder),
+*การตั้งค่า* (Settings) and *ศึกษา / สร้าง / ตรวจ / พร้อม* for Study / Build / Check / Ready.
+It was drafted with an AI and not yet reviewed by a native speaker; corrections are welcome.
+Thai glyphs come from Noto Sans Thai in craft-fonts, which the script test in `theme.rs` checks.
 
 ## Scope and format
 
-`crates/ui-egui/src/i18n/cs.tsv`, `de.tsv`, `es.tsv`, `it.tsv`, `ka.tsv`, `ko.tsv`, `pt-br.tsv`, `ru.tsv`, `tr.tsv`, `vi.tsv`, `zh-hans.tsv` and
+`crates/ui-egui/src/i18n/cs.tsv`, `de.tsv`, `es.tsv`, `it.tsv`, `ka.tsv`, `ko.tsv`, `pt-br.tsv`, `ru.tsv`, `th.tsv`, `tr.tsv`, `vi.tsv`, `zh-hans.tsv` and
 `zh-hant.tsv` contain original
 translations under the repository's MIT OR Apache-2.0 licence. Each UTF-8 line
 has two columns: `English source<TAB>translation`. Comments begin with `#`;
@@ -77,7 +86,7 @@ descriptions, logs and exported reports retain their original text. The CLI,
 MCP, tool IDs, stored project data and the separate browser viewer are unchanged.
 
 Keep placeholders such as `{name}` and `{n}` intact, along with command IDs,
-shortcuts, escapes and trailing `…`. Update every catalog (`cs`, `de`, `es`, `it`, `ka`, `ko`, `pt-br`, `ru`, `tr`, `vi`, `zh-hans`, `zh-hant`)
+shortcuts, escapes and trailing `…`. Update every catalog (`cs`, `de`, `es`, `it`, `ka`, `ko`, `pt-br`, `ru`, `th`, `tr`, `vi`, `zh-hans`, `zh-hant`)
 when English source keys change; the tests require matching key sets. Common terms include 净室 / 淨室 (Clean room), 深度 (Deep),
 构建 / 建置 (Build), 证据 / 證據 (Evidence), and 项目 / 專案 (Project).
 The Korean catalog `ko.tsv` uses 클린룸 (Clean room), 심층 (Deep), 분석 / 만들기 / 검사 / 완성

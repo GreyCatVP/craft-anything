@@ -161,6 +161,8 @@ impl TargetKind for WebsiteKind {
             " web sitesi",
             " internet sitesi",
             " trang web",
+            "เว็บไซต์",
+            "หน้าเว็บ",
             "网站",
             "網站",
             "网页",

@@ -162,6 +162,19 @@ fn vietnamese_requests_keep_their_project_kind() {
 }
 
 #[test]
+fn thai_requests_keep_their_project_kind() {
+    for request in ["เกมงูกินหางง่าย ๆ", "เกมเดิม แต่มีตารางคะแนนสูงสุด"]
+    {
+        assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
+    }
+    for request in ["เว็บไซต์ร้านเบเกอรีของฉัน", "สร้างเว็บไซต์นี้ใหม่"]
+    {
+        assert_eq!(choose(request, &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "{request}");
+    }
+    assert_eq!(choose("แอปเครื่องคิดเลข", &TargetRef::None).0, "app", "แอปเครื่องคิดเลข");
+}
+
+#[test]
 fn chinese_requests_keep_their_project_kind() {
     for request in ["一个简单的贪吃蛇游戏", "簡單的貪食蛇遊戲", "复刻它的玩法"] {
         assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
