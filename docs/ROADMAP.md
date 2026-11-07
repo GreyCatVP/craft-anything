@@ -1068,9 +1068,9 @@ Gaps found while using the app for real projects.
 - [x] Deleting a project stops the Ghidra analysis its build started, unless another project's
       build still waits for it (#948). Run against Ghidra 12.1.4 on Windows: stopped 0.6 s after
       the delete, no `java` left
+      — claimed: justinjohn0306, branch bugfix/r2.9-stop-ghidra-analysis
 - [ ] A Stop button for Ghidra's analysis while the project stays (pausing lets it go on, so
       nothing is lost; today only deleting the project or closing the app stops it) (#948)
-      — claimed: justinjohn0306, branch bugfix/r2.9-stop-ghidra-analysis
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
