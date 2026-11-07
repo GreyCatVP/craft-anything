@@ -26,9 +26,10 @@ fn regression_preview_limits_connections_and_releases_listener() {
     assert!(stopping.elapsed() < Duration::from_secs(2), "refusal cleanup must not grow with the number of excess clients");
     assert!(TcpStream::connect(("127.0.0.1", port)).is_err(), "the listener is gone when drop returns");
     for stream in excess {
+        let mut response = Vec::new();
         // macOS refuses `setsockopt(SO_RCVTIMEO)` with `Invalid argument` on a socket the
         // listener has already reset. A reset is one of the closed outcomes accepted below,
-        // so treat the refused timeout as that outcome rather than panicking on it.
+        // so drain any buffered bytes without waiting rather than panicking on the timeout.
         if let Err(error) = stream.set_read_timeout(Some(Duration::from_secs(1))) {
             assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "setting a read timeout failed: {error}");
             let pending = stream.take_error();
@@ -36,10 +37,15 @@ fn regression_preview_limits_connections_and_releases_listener() {
                 matches!(&pending, Ok(Some(error)) if error.kind() == std::io::ErrorKind::ConnectionReset),
                 "a refused read timeout should mean the excess connection was reset: {pending:?}"
             );
-            continue;
-        }
-        let mut response = Vec::new();
-        if let Err(error) = (&stream).take(1024).read_to_end(&mut response) {
+            stream.set_nonblocking(true).expect("a reset socket accepts non-blocking mode");
+            if let Err(error) = (&stream).take(1024).read_to_end(&mut response) {
+                // A reset, or no more bytes buffered, is the closed outcome accepted here.
+                assert!(
+                    matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::WouldBlock),
+                    "excess connection did not close: {error}"
+                );
+            }
+        } else if let Err(error) = (&stream).take(1024).read_to_end(&mut response) {
             // Closing the listener may reset connections still in its accept backlog.
             assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset, "excess connection did not close: {error}");
         }
