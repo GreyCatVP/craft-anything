@@ -343,7 +343,11 @@ pub fn verify_flags(program: &str, help_args: &[&str], needed: &[&str]) -> Optio
     match Process::new(program).args(help_args).timeout(Duration::from_secs(10)).stdout_cap(256 * 1024).run() {
         Ok(out) => {
             let text = format!("{}{}", out.stdout_text(), out.stderr_text());
-            Some(needed.iter().all(|f| text.contains(f)))
+            if needed.iter().all(|f| text.contains(f)) {
+                return Some(true);
+            }
+            // A failed probe that printed no usage (a broken launcher) says nothing about the version.
+            (out.code == Some(0) || text.to_ascii_lowercase().contains("usage")).then_some(false)
         }
         Err(_) => None,
     }
@@ -900,9 +904,10 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         let checked = match remote {
             Some(_) => Some(true), // can't cheaply check a remote CLI; its errors are streamed back
             None => {
-                // Only a help that was read is kept: a probe that couldn't run is tried next turn.
+                // Only a help with the flags is kept: anything else is checked again next turn, so
+                // a program updated in place is seen.
                 let mut v = verified.lock().unwrap_or_else(PoisonError::into_inner);
-                if v.is_none() {
+                if *v != Some(true) {
                     *v = verify_flags(&program, help, needed);
                 }
                 *v
@@ -2698,7 +2703,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
             "#!/bin/sh\nif [ \"$1\" = run ] && [ \"$2\" = --help ]; then printf '%s\\n' '--format --title --auto'; exit 0; fi\ntouch '{}'\nexit 1\n",
             ran.display()
         );
-        std::fs::write(&program, script).unwrap();
+        std::fs::write(&program, &script).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         let config =
             BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
@@ -2722,6 +2727,46 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         let said = |w: &str| all.iter().any(|e| matches!(e, AgentEvent::Status { text } if text.contains(w)));
         assert!(!said("trying it anyway"), "{all:?}");
         assert!(!ran.exists(), "OpenCode 1.x ran anyway: {all:?}");
+
+        // Updated in place to OpenCode 2: the next turn checks again and runs it.
+        let v2 = dir.path().join("opencode-v2");
+        std::fs::write(&v2, script.replace("--format --title --auto", "--format --standalone")).unwrap();
+        std::fs::set_permissions(&v2, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(&v2, &program).unwrap();
+        let all = one_turn(&mut c, "And now?");
+        assert!(!all.iter().any(|e| matches!(e, AgentEvent::Error { message, .. } if message.contains("1.x"))), "{all:?}");
+        assert!(ran.exists(), "OpenCode 2 didn't run: {all:?}");
+    }
+
+    /// A help probe that fails without printing usage (a broken launcher) isn't taken for
+    /// OpenCode 1.x: the run goes on and shows its own failure.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_help_probe_is_not_called_version_1() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("opencode");
+        std::fs::write(&program, "#!/bin/sh\necho 'env: node: No such file or directory' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config =
+            BackendConfig { name: "OpenCode".into(), kind: BackendKind::AgentCli, model: "opencode".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+        let mut c = CliConversation::new(CliSpec::new(config, options, false, None));
+        let all = one_turn(&mut c, "What does this program do?");
+        assert!(!all.iter().any(|e| matches!(e, AgentEvent::Error { message, .. } if message.contains("1.x"))), "{all:?}");
+        assert!(all.iter().any(|e| matches!(e, AgentEvent::Status { text } if text.contains("trying it anyway"))), "{all:?}");
+    }
+
+    /// Sends `text` and collects the turn's events up to its end.
+    fn one_turn(c: &mut CliConversation, text: &str) -> Vec<AgentEvent> {
+        c.send(text);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut all = Vec::new();
+        while std::time::Instant::now() < deadline && !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+            all.extend(c.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        all
     }
 
     /// A help that couldn't be read (here, no program) isn't taken for OpenCode 1.x: the run goes
