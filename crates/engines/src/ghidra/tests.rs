@@ -490,6 +490,31 @@ fn giving_back_a_lock_that_is_already_gone_is_not_a_failure() {
     assert!(!lock.exists(), "the lock is gone once it is given back");
 }
 
+/// A move that cannot pass ends the attempt, so the lock goes back with it. Both outcomes are
+/// checked here by making the release itself fail, which is a folder named as the lock file:
+/// `remove_file` refuses that on every system, and no rename has to fail for the test to run.
+#[test]
+fn a_move_that_cannot_pass_gives_the_lock_back_and_says_why() {
+    let d = tempfile::tempdir().unwrap();
+    let project = d.path().join("target-abcd");
+    let lock = d.path().join("held.analysing");
+    std::fs::write(&lock, "").unwrap();
+
+    let refusal = std::io::Error::from(std::io::ErrorKind::InvalidInput);
+    let err = refuse_move(&lock, &project, &refusal);
+    assert!(err.to_string().contains("out of the way"), "{err}");
+    assert!(!err.to_string().contains("and releasing"), "a clean release is not worth mentioning: {err}");
+    assert!(!lock.exists(), "the lock is gone");
+
+    // Now the lock cannot be released: a folder where the lock file should be.
+    let stuck = d.path().join("stuck.analysing");
+    std::fs::create_dir(&stuck).unwrap();
+    let err = refuse_move(&stuck, &project, &refusal);
+    let text = err.to_string();
+    assert!(text.contains("out of the way"), "the move is still what is reported: {text}");
+    assert!(text.contains("and releasing the analysis lock"), "and the lock that could not be freed: {text}");
+}
+
 /// #951: the folder a stale lock was guarding is moved, not removed, so a Ghidra that outlived the
 /// app that started it keeps writing into its own folder instead of into this analysis's.
 #[test]
