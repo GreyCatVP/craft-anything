@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	ในโปรเจกต์นี้ {kind
 Couldn't change the approvals:	เปลี่ยนการอนุมัติไม่ได้:
 What the builder may do without asking you, in this project.	สิ่งที่ตัวสร้างทำได้โดยไม่ถามในโปรเจกต์นี้
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	ค่าเริ่มต้นตามโหมดอัตโนมัติ: เปิดไว้จะทำสิ่งที่ย้อนกลับได้ต่อและปฏิเสธที่เหลือ ปิดไว้ตัวสร้างจะถาม
+Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra กำลังวิเคราะห์ต้นฉบับ การหยุดชั่วคราวไม่ได้หยุดการวิเคราะห์ จึงไม่มีอะไรสูญหาย
+Stop the analysis	หยุดการวิเคราะห์
+The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	บิลด์ครั้งถัดไปจะเริ่มวิเคราะห์ใหม่ตั้งแต่ต้น ระหว่างนี้การดีคอมไพล์จะใช้เอนจินในตัว
+Stop Ghidra's analysis	หยุดการวิเคราะห์ของ Ghidra

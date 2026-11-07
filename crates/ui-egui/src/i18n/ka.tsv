@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	ამ პროექტში {kind}: {choi
 Couldn't change the approvals:	ნებართვების შეცვლა ვერ მოხერხდა:
 What the builder may do without asking you, in this project.	რისი გაკეთება შეუძლია ამწყობს ამ პროექტში თქვენი კითხვის გარეშე.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	ნაგულისხმევი ავტორეჟიმს მიჰყვება: როცა ჩართულია, რისი გაუქმებაც შეიძლება, სრულდება, დანარჩენი კი უარყოფილია; როცა გამორთულია, ამწყობი გეკითხებათ.
+Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra ორიგინალს აანალიზებს. პაუზა მას არ აჩერებს, ასე რომ არაფერი იკარგება.
+Stop the analysis	ანალიზის შეწყვეტა
+The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	შემდეგი აწყობა მას თავიდან დაიწყებს. მანამდე დეკომპილაციას ჩაშენებული ძრავა აკეთებს.
+Stop Ghidra's analysis	Ghidra-ს ანალიზის შეწყვეტა

@@ -900,3 +900,7 @@ In this project, {kind}: {choice}.	このプロジェクトでは {kind}: {choic
 Couldn't change the approvals:	承認を変更できませんでした:
 What the builder may do without asking you, in this project.	このプロジェクトでビルダーが確認なしにしてよいこと。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	既定は自動モードに従います。オンのときは元に戻せることは実行し、それ以外は拒否します。オフのときはビルダーが確認します。
+Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra がオリジナルを解析中です。一時停止しても止まらないので、何も失われません。
+Stop the analysis	解析を停止
+The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	次のビルドで最初からやり直します。それまでは内蔵エンジンで逆コンパイルします。
+Stop Ghidra's analysis	Ghidra の解析を停止

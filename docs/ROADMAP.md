@@ -1065,6 +1065,15 @@ Gaps found while using the app for real projects.
       default fonts: without craft-fonts they show as boxes, and with it each such letter comes from
       Noto Sans CJK while the rest of the word is DM Sans. Bundle a DM Sans build that has the
       Vietnamese set (with its OFL notice) so Tiếng Việt renders in one face
+- [x] Deleting a project stops the Ghidra analysis its build started, unless another project's
+      build still waits for it (#948). Run against Ghidra 12.1.4 on Windows: stopped 0.6 s after
+      the delete, no `java` left
+      — claimed: justinjohn0306, branch bugfix/r2.9-stop-ghidra-analysis
+- [x] A Stop button for Ghidra's analysis while the project stays (pausing lets it go on, so
+      nothing is lost; today only deleting the project or closing the app stops it) (#948):
+      "Stop the analysis" on the project, `engines_analysis_stop`. Run against Ghidra 12.1.4 on
+      Windows: stopped 0.7 s after, no `java` left
+      — claimed: justinjohn0306, branch feature/r2.9-stop-ghidra-button
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

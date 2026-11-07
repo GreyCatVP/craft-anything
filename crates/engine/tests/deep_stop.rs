@@ -22,9 +22,12 @@ fn closing_stops_an_analysis() {
     std::fs::create_dir_all(project.parent().unwrap()).unwrap();
     std::fs::write(project.with_extension("analysing"), "").unwrap();
 
+    let root = d.path().join("project");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join(craft_anything_engine::workspace::MANIFEST), "{}").unwrap();
     let waiting = {
         let sha = sha.clone();
-        std::thread::spawn(move || deep::prepare(&settings, bytes, &sha, &|_| {}))
+        std::thread::spawn(move || deep::prepare(&settings, bytes, &sha, &root, &|_| {}))
     };
     let until = Instant::now() + Duration::from_secs(30);
     while !waiting.is_finished() {

@@ -1462,3 +1462,7 @@ In this project, {kind}: {choice}.	Bu projede {kind}: {choice}.
 Couldn't change the approvals:	Onaylar değiştirilemedi:
 What the builder may do without asking you, in this project.	Oluşturucunun bu projede size sormadan yapabilecekleri.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Varsayılan, otomatik modu izler: açıkken geri alınabilenler yapılır, gerisi reddedilir; kapalıyken oluşturucu sorar.
+Ghidra is analysing the original. Pausing doesn't stop it, so nothing is lost.	Ghidra orijinali analiz ediyor. Duraklatmak onu durdurmaz, böylece hiçbir şey kaybolmaz.
+Stop the analysis	Analizi durdur
+The next build starts it again from the beginning. Until then, decompiling uses the built-in engine.	Bir sonraki derleme onu baştan başlatır. O zamana kadar kaynak koda çevirme yerleşik motorla yapılır.
+Stop Ghidra's analysis	Ghidra analizini durdur
