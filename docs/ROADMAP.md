@@ -463,6 +463,7 @@ Owner: open · Status: todo
       OpenAI-compatible endpoint)
 - [ ] Failure logs for the other ways an AI stops (API backends, MCP server start-up), like the
       ones agent CLIs write to `logs/` in the config folder
+      — claimed: scks1, branch feature/r5.5-api-mcp-failure-logs
 
 ### R5.6 Tools report only what they saw
 Owner: open · Status: todo
