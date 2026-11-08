@@ -72,6 +72,11 @@ pub struct Tokens {
     pub accent_soft: Color32,
     /// Text drawn on an `accent` fill.
     pub on_accent: Color32,
+    /// The person's own messages in a conversation: a solid fill, so they're told apart from the
+    /// builder's (plain text on the page) at a glance.
+    pub user_bubble: Color32,
+    /// Text drawn on `user_bubble`.
+    pub on_user_bubble: Color32,
     pub separator: Color32,
     pub shadow: Color32,
     pub danger: Color32,
@@ -131,6 +136,8 @@ impl Tokens {
                 accent_ink: Color32::from_rgb(0x74, 0xaa, 0xff),
                 accent_soft: Color32::from_rgba_unmultiplied(0x2d, 0x81, 0xff, 44),
                 on_accent: Color32::WHITE,
+                user_bubble: BRAND,
+                on_user_bubble: Color32::WHITE,
                 separator: Color32::from_rgb(0x24, 0x25, 0x27),
                 shadow: Color32::from_black_alpha(120),
                 danger: Color32::from_rgb(0xff, 0x62, 0x59),
@@ -163,6 +170,8 @@ impl Tokens {
                 accent_ink: BRAND,
                 accent_soft: Color32::from_rgba_unmultiplied(0x2d, 0x81, 0xff, 28),
                 on_accent: Color32::WHITE,
+                user_bubble: BRAND,
+                on_user_bubble: Color32::WHITE,
                 separator: Color32::from_rgb(0xdb, 0xda, 0xd8),
                 shadow: Color32::from_black_alpha(20),
                 danger: Color32::from_rgb(0xb3, 0x26, 0x1e),
@@ -705,6 +714,20 @@ mod tests {
                 let (l1, l2) = (luminance(thumb), luminance(surface));
                 let ratio = (l1.max(l2) + 0.05) / (l1.min(l2) + 0.05);
                 assert!(ratio >= 3.0, "{k:?} {name}: the thumb at rest is only {ratio:.2}:1");
+            }
+        }
+    }
+
+    /// The person's messages were a faint tint, hard to tell from the builder's card at a glance.
+    #[test]
+    fn the_persons_message_stands_out_and_its_text_reads_in_every_theme() {
+        for k in ThemeKind::ALL {
+            let t = Tokens::for_kind(k);
+            let text = contrast(t.on_user_bubble, t.user_bubble);
+            assert!(text >= 4.5, "{k:?}: the person's text on their bubble is only {text:.2}:1");
+            for (name, surface) in [("canvas", t.canvas), ("card", t.card)] {
+                let edge = contrast(t.user_bubble, surface);
+                assert!(edge >= 1.5, "{k:?}: the person's bubble on the {name} is only {edge:.2}:1");
             }
         }
     }
