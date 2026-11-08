@@ -580,8 +580,8 @@ mod context_budget_tests {
     #[test]
     fn opening_settings_forgets_only_the_answers_without_a_window() {
         use craft_anything_ai::{ServerWindow, window::Window};
-        let known = ServerWindow { window: Some(Window { tokens: 524_288, source: "llama.cpp" }), local: true };
-        let unknown = ServerWindow { window: None, local: true };
+        let known = ServerWindow { window: Some(Window { tokens: 524_288, source: "llama.cpp" }), local: true, sight: None };
+        let unknown = ServerWindow { window: None, local: true, sight: None };
         let mut windows: std::collections::BTreeMap<String, (String, Option<Option<ServerWindow>>)> =
             [("known", Some(Some(known))), ("unknown", Some(Some(unknown))), ("unreachable", Some(None)), ("asking", None)]
                 .into_iter()
