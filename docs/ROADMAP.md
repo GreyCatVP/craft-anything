@@ -453,7 +453,10 @@ been run live.
       parts (OpenAI-style) and `image` blocks (Anthropic), for the check's screenshots beside the
       original's, the pictures in `reference/` and a PNG the builder reads. Each AI's Pictures
       setting is Auto, On or Off; Auto follows what the server reports (Ollama's capabilities,
-      LM Studio's model type, `input_modalities` in a model list)
+      LM Studio's model type, `input_modalities` in a model list). The image block and the setting
+      are in; what's left is attaching the pictures to a builder whose model sees, and treating it
+      as sighted (`BriefCx::sees_pictures`), with the setting in Settings → AI
+      — claimed: youkaicountry, branch feature/r5.4-pictures-to-builders
 - [x] When a server refuses a request for its context window and says the size (Ollama, llama.cpp,
       OpenAI-style), fit the conversation to that window and ask once more, else say how to raise it (#962)
 - [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
@@ -488,8 +491,6 @@ been run live.
 - [ ] Ask whether a model sees again after its first reply when the server didn't say before it:
       llama-swap answers only for a loaded model, and asking about an unloaded one would start it,
       so under Auto a model it hasn't loaded yet reads as blind for the whole conversation
-- [ ] The vision setting in Settings → AI (a dropdown beside "Tools for building", with what Auto
-      works out to), added with the attachment step so the choice does something when it lands
 - [ ] Shrink a picture larger than `MAX_IMAGE_BYTES` (3.75 MB) before it's shown to a model,
       instead of refusing it (a 4K screenshot as PNG can be larger)
 
