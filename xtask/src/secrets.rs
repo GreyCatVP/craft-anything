@@ -128,7 +128,11 @@ fn leak_values(vars: impl IntoIterator<Item = (String, String)>) -> Vec<(String,
     for (k, home) in homes {
         // Only a real person's folder: "/root" or "C:\" aren't personal.
         if home.len() > 6 {
-            v.push((k.clone(), home.replace('\\', "/")));
+            let forward = home.replace('\\', "/");
+            // A Unix home is the same both ways: one entry, or each line is reported twice.
+            if forward != home {
+                v.push((k.clone(), forward));
+            }
             v.push((k, home));
         }
     }
@@ -254,5 +258,7 @@ mod tests {
         let env = leak_values(vars(&[("USERPROFILE", "C:\\Users\\someone"), ("HOME", "/root")]));
         let values: Vec<&str> = env.iter().map(|(_, v)| v.as_str()).collect();
         assert_eq!(values, ["C:/Users/someone", "C:\\Users\\someone"], "\"/root\" isn't personal");
+        let env = leak_values(vars(&[("HOME", "/home/someone")]));
+        assert_eq!(env, [("HOME".to_string(), "/home/someone".to_string())], "a Unix home is listed once");
     }
 }
