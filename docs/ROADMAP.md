@@ -368,7 +368,7 @@ been run live.
 - [x] Keep the retry condition when `Action:` or `Final Answer:` appears between fenced
       calls, without rejecting ordinary words between calls (PR #1031 review)
       — claimed: Codex, branch bugfix/r5.4-fenced-call-followup
-- [ ] A call to a tool that isn't offered comes back from a llama.cpp server as text in Qwen's
+- [x] A call to a tool that isn't offered comes back from a llama.cpp server as text in Qwen's
       markup (`<tool_call><function=web_search><parameter=query>…`), and the loop takes it as the
       final answer: a live build on a 512k-window Qwen model stopped at its second check in 3
       minutes. Read that markup as a call when it names an offered tool; when it names one that

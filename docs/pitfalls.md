@@ -858,6 +858,14 @@ least that long, and reject an earlier matching close followed by more text. Sho
 lines inside a longer fence are content. Test both paths and the next HTTP request, including
 malformed suffixes and non-call JSON examples whose strings contain protocol markers.
 
+**A call the server couldn't read, taken for the answer.** A llama.cpp server turns a Qwen
+model's `<tool_call><function=…>` markup into a real call only when it names an offered tool;
+otherwise it hands the markup back as text. The loop read text with no call as the final
+answer, so a 512k-window build that called `web_search` stopped its turn after 3 minutes and
+failed its check. Text recovery that only knows the formats seen so far ends a turn silently on
+the next one: read a model's own call format, and when it names a tool it doesn't have, tell it
+so and name the ones it has, rather than ending.
+
 **A view that asked to be scrolled on every frame.** The command palette called `scroll_to_me` on
 the selected row each frame, so the wheel's scroll was pulled back to it at once and the list
 kept jumping to the top (#584). Scroll something into view on the frame it changed (a key, a new

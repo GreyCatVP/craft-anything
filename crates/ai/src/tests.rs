@@ -1162,6 +1162,40 @@ fn fenced_legacy_react_calls_still_execute() {
 }
 
 #[test]
+fn a_qwen_markup_call_to_a_missing_tool_is_answered_and_the_build_goes_on() {
+    // A live build stopped here: the server handed back a call to a tool it wasn't offered as
+    // text, and the loop took the text for the final answer.
+    let missing = "<tool_call>\n<function=web_search>\n<parameter=query>\neframe screenshot example\n</parameter>\n</function>\n</tool_call>";
+    let real = "<tool_call>\n<function=core_session_show>\n</function>\n</tool_call>";
+    let replies = [missing, real, "Nothing open."]
+        .map(|text| (200, "text/event-stream", chat_sse(&[json!({"choices":[{"delta":{"content":text},"finish_reason":"stop"}]})])));
+    let (url, seen) = mock(replies.into());
+    let (hub, _dir) = hub();
+    let config = BackendConfig {
+        name: "Local".into(),
+        kind: BackendKind::OpenaiCompatible,
+        model: "scripted".into(),
+        base_url: Some(url),
+        ssh_host: None,
+        enabled: true,
+    };
+    hub.add_backend_with(BackendEntry { config, options: BackendOptions::default() }, None).unwrap();
+    let mut conversation = hub.start(Some("Local"), true).unwrap();
+    let events = run(&mut conversation, "status?");
+    assert_eq!(events.iter().filter(|e| matches!(e, AgentEvent::ToolFinished { tool, ok: true, .. } if tool == "core_session_show")).count(), 1, "{events:?}");
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::ToolStarted { tool, .. } if tool == "web_search")), "{events:?}");
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 3, "the turn must go on after the missing tool");
+    let told = seen[1].body["messages"].as_array().unwrap().last().unwrap();
+    assert_eq!(told["role"], "user");
+    let told = told["content"].as_str().unwrap();
+    assert!(told.contains("`web_search` isn't a tool you can use here") && told.contains("core_session_show"), "{told}");
+    // The call that ran is paired with its result in the next request.
+    let last = seen[2].body["messages"].as_array().unwrap().last().unwrap();
+    assert_eq!(last["role"], "tool", "{last}");
+}
+
+#[test]
 fn json_text_recovery_preserves_non_actions_and_stop_reasons() {
     use crate::model::{Effort, Msg, Stop, StopReason, ToolDef, TurnRequest};
     let tools = [ToolDef { name: "look".into(), description: "Look at a file".into(), schema: json!({"type":"object"}) }];

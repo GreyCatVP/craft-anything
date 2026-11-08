@@ -624,6 +624,117 @@ fn fenced_calls(text: &str) -> Option<Vec<(String, Value)>> {
     (!words_after).then_some(calls)
 }
 
+/// One call written in Qwen's tool-call markup, its parameters as written.
+#[derive(Debug, Clone, PartialEq)]
+struct MarkupCall {
+    tool: String,
+    params: Vec<(String, String)>,
+}
+
+/// The calls in a reply written in the markup Qwen's chat template teaches:
+///
+/// ```text
+/// <tool_call>
+/// <function=name>
+/// <parameter=key>
+/// value
+/// </parameter>
+/// </function>
+/// </tool_call>
+/// ```
+///
+/// A llama.cpp server turns this into a real call, but hands it back as text when it names a
+/// tool the model wasn't offered, and the loop then took it for the final answer. Words may
+/// come before the first call; the flag is true when anything but blank lines follows the
+/// last one. The last `</tool_call>` may be missing (the server may stop on it). Anything
+/// else (a call inside a code fence, `<tool_call>` in the middle of a line, a missing
+/// `</parameter>`) means the reply is text.
+fn parse_markup_calls(text: &str) -> Option<(Vec<MarkupCall>, bool)> {
+    const OPEN: &str = "<tool_call>";
+    const CLOSE: &str = "</tool_call>";
+    // The first call starts a line, and no code fence comes before it.
+    let mut start = None;
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            return None;
+        }
+        if trimmed.starts_with(OPEN) {
+            start = Some(offset.checked_add(line.len().checked_sub(trimmed.len())?)?);
+            break;
+        }
+        offset = offset.checked_add(line.len())?;
+    }
+    let mut rest = text.get(start?..)?;
+    let mut calls = Vec::new();
+    loop {
+        rest = rest.trim_start().strip_prefix(OPEN)?.trim_start();
+        let after_name = rest.strip_prefix("<function=")?;
+        let (tool, after) = after_name.split_once('>')?;
+        let tool = tool.trim();
+        if tool.is_empty() || tool.contains(['<', '\n']) {
+            return None;
+        }
+        rest = after;
+        let mut params = Vec::new();
+        loop {
+            rest = rest.trim_start();
+            if let Some(after) = rest.strip_prefix("</function>") {
+                rest = after;
+                break;
+            }
+            let (key, after) = rest.strip_prefix("<parameter=")?.split_once('>')?;
+            let key = key.trim();
+            if key.is_empty() || key.contains(['<', '\n']) {
+                return None;
+            }
+            let (value, after) = after.split_once("</parameter>")?;
+            // The template puts the value on its own lines; the text inside is kept as written.
+            let value = value.strip_prefix('\n').unwrap_or(value);
+            let value = value.strip_suffix('\n').unwrap_or(value);
+            params.push((key.to_string(), value.to_string()));
+            rest = after;
+        }
+        calls.push(MarkupCall { tool: tool.to_string(), params });
+        rest = rest.trim_start();
+        rest = rest.strip_prefix(CLOSE).unwrap_or(rest);
+        let next = rest.trim_start();
+        if next.starts_with(OPEN) {
+            continue;
+        }
+        return Some((calls, !next.is_empty()));
+    }
+}
+
+/// A markup call's arguments as JSON: a parameter the tool's schema says is a string stays as
+/// written; any other is read as JSON when it parses (numbers, booleans, lists, objects), as
+/// the template writes them, and stays a string when it doesn't, for the tool to refuse.
+fn markup_input(call: &MarkupCall, tool: Option<&ToolDef>) -> Value {
+    let mut input = serde_json::Map::new();
+    for (key, raw) in &call.params {
+        let kind = tool.and_then(|t| t.schema.get("properties")).and_then(|p| p.get(key)).and_then(|p| p.get("type"));
+        let is_string = match kind {
+            Some(Value::String(kind)) => kind == "string",
+            Some(Value::Array(kinds)) => kinds.iter().any(|k| k == "string"),
+            _ => false,
+        };
+        let value = if is_string { None } else { serde_json::from_str::<Value>(raw.trim()).ok() };
+        input.insert(key.clone(), value.unwrap_or_else(|| Value::String(raw.clone())));
+    }
+    Value::Object(input)
+}
+
+/// What the model is told when its markup names tools it doesn't have.
+fn not_offered_message(missing: &[&str], tools: &[ToolDef]) -> String {
+    let names = missing.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ");
+    let (verb, noun) = if missing.len() == 1 { ("isn't", "a tool") } else { ("aren't", "tools") };
+    let offered = tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ");
+    format!(
+        "Nothing in your previous response ran: {names} {verb} {noun} you can use here. Your tools are: {offered}. Call one of these instead, or if you're finished, answer in plain text."
+    )
+}
+
 /// The first balanced `{…}` in `s`, parsed.
 fn extract_json_object(s: &str) -> Option<Value> {
     let start = s.find('{')?;
@@ -667,6 +778,32 @@ fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
     let from_json = json_call.is_some();
     // Calls after a sentence run only when every one names a tool the model was offered.
     let offered = |tool: &str| tools.iter().any(|definition| definition.name == tool);
+    if !from_json && let Some((calls, words_after)) = parse_markup_calls(&text) {
+        let missing = calls.iter().map(|call| call.tool.as_str()).filter(|tool| !offered(tool)).collect::<Vec<_>>();
+        if !missing.is_empty() {
+            let mut unique = Vec::new();
+            for tool in missing {
+                if !unique.contains(&tool) {
+                    unique.push(tool);
+                }
+            }
+            r.follow_up = Some(not_offered_message(&unique, tools));
+            r.stop = StopReason::PauseTurn;
+            return;
+        }
+        if words_after {
+            r.follow_up = Some("The tool call in your previous response was not run because text followed it. Send the tool call again without adding a summary or other text after it.".into());
+            r.stop = StopReason::PauseTurn;
+            return;
+        }
+        for call in calls {
+            let n = REACT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let input = markup_input(&call, tools.iter().find(|definition| definition.name == call.tool));
+            r.message.blocks.push(Block::ToolUse { id: format!("react_{n}"), name: call.tool, input });
+        }
+        r.stop = StopReason::ToolUse;
+        return;
+    }
     if !from_json && let Some(calls) = fenced_calls(&text).filter(|calls| calls.iter().all(|(tool, _)| offered(tool))) {
         for (tool, input) in calls {
             let n = REACT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -699,6 +836,121 @@ fn react_postprocess(r: &mut TurnResult, tools: &[ToolDef], react: bool) {
 mod tests {
     use super::*;
     use crate::model::Effort;
+
+    #[test]
+    fn qwen_markup_calls_are_read_and_examples_are_not() {
+        let names = |text: &str| parse_markup_calls(text).map(|(calls, after)| (calls.into_iter().map(|c| c.tool).collect::<Vec<_>>(), after));
+        // What a 512k-window Qwen model wrote in live builds, as the server handed it back.
+        let read = "<tool_call>\n<function=build_command_read>\n<parameter=path>\napp/src/main.rs\n</parameter>\n<parameter=offset>\n1580\n</parameter>\n<parameter=limit>\n45\n</parameter>\n</function>\n</tool_call>";
+        let (calls, after) = parse_markup_calls(read).unwrap();
+        assert!(!after);
+        assert_eq!(
+            calls,
+            [MarkupCall {
+                tool: "build_command_read".into(),
+                params: vec![("path".into(), "app/src/main.rs".into()), ("offset".into(), "1580".into()), ("limit".into(), "45".into())],
+            }]
+        );
+        let two = "<tool_call>\n<function=web_doc_fetch>\n<parameter=url>\nhttps://docs.rs/eframe\n</parameter>\n</function>\n</tool_call>\n<tool_call>\n<function=web_search>\n<parameter=query>\neframe screenshot example\n</parameter>\n</function>\n</tool_call>";
+        assert_eq!(names(two), Some((vec!["web_doc_fetch".into(), "web_search".into()], false)));
+        let after_words = "Now I'll rewrite main.rs with all API fixes.\n\n<tool_call>\n<function=write_output>\n</function>\n</tool_call>";
+        assert_eq!(names(after_words), Some((vec!["write_output".into()], false)));
+        // The server may stop on the closing tag, so it can be missing at the end.
+        assert_eq!(names("<tool_call>\n<function=look>\n</function>\n"), Some((vec!["look".into()], false)));
+        assert_eq!(names("<tool_call>\n<function=look>\n</function>\n</tool_call>\nDone."), Some((vec!["look".into()], true)));
+        // A value keeps its own lines and markup-like text; only the template's newlines go.
+        let (calls, _) =
+            parse_markup_calls("<tool_call>\n<function=write>\n<parameter=text>\n\nfn a() {}\n<b>\n\n</parameter>\n</function>\n</tool_call>").unwrap();
+        assert_eq!(calls[0].params, [("text".to_string(), "\nfn a() {}\n<b>\n".to_string())]);
+        for text in [
+            "No calls here.",
+            "Use <tool_call><function=look></function></tool_call> like this.",
+            "```xml\n<tool_call>\n<function=look>\n</function>\n</tool_call>\n```",
+            "~~~\n<tool_call>\n<function=look>\n</function>\n</tool_call>\n~~~",
+            "<tool_call>\n<function=look>\n<parameter=path>\napp\n</function>\n</tool_call>",
+            "<tool_call>\n<function=>\n</function>\n</tool_call>",
+            "<tool_call>\n<function=look>\nsome words\n</function>\n</tool_call>",
+            "<tool_call>\n{\"name\":\"look\",\"arguments\":{}}\n</tool_call>",
+        ] {
+            assert_eq!(names(text), None, "{text}");
+        }
+
+        // Arguments follow the schema: strings as written, everything else as JSON.
+        let schema = json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer"},"tags":{"type":["array","null"]},"note":{"type":["string","null"]}}});
+        let tool = ToolDef { name: "build_command_read".into(), description: String::new(), schema };
+        let call = MarkupCall {
+            tool: tool.name.clone(),
+            params: vec![
+                ("path".into(), "123".into()),
+                ("offset".into(), "1580".into()),
+                ("tags".into(), "[\"a\"]".into()),
+                ("note".into(), "true".into()),
+                ("other".into(), "false".into()),
+                ("bad".into(), "{not json".into()),
+            ],
+        };
+        assert_eq!(markup_input(&call, Some(&tool)), json!({"path":"123","offset":1580,"tags":["a"],"note":"true","other":false,"bad":"{not json"}));
+        assert_eq!(markup_input(&call, None)["path"], json!(123));
+    }
+
+    #[test]
+    fn a_markup_call_to_a_tool_that_isnt_offered_is_answered_not_ended() {
+        let tool = |name: &str| ToolDef {
+            name: name.into(),
+            description: String::new(),
+            schema: json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer"}}}),
+        };
+        let tools = [tool("build_file_read"), tool("build_file_write")];
+        let turn = |text: &str| TurnResult {
+            message: Msg { role: Speaker::Assistant, blocks: vec![Block::Text { text: text.into() }] },
+            stop: StopReason::EndTurn,
+            usage: Usage::default(),
+            model: String::new(),
+            follow_up: None,
+        };
+        let call = |name: &str| {
+            format!(
+                "<tool_call>\n<function={name}>\n<parameter=path>\napp/src/main.rs\n</parameter>\n<parameter=offset>\n10\n</parameter>\n</function>\n</tool_call>"
+            )
+        };
+        for react in [false, true] {
+            // Offered: it runs, with typed arguments.
+            let mut r = turn(&format!("Reading it.\n{}\n{}", call("build_file_read"), call("build_file_write")));
+            react_postprocess(&mut r, &tools, react);
+            assert_eq!(r.stop, StopReason::ToolUse, "react={react}");
+            let uses = r.message.tool_uses();
+            assert_eq!(uses.iter().map(|(_, name, _)| name.to_string()).collect::<Vec<_>>(), ["build_file_read", "build_file_write"]);
+            assert_eq!(uses[0].2, json!({"path":"app/src/main.rs","offset":10}));
+
+            // Not offered (alone, twice, or beside one that is): nothing runs, and the model is
+            // told which names it got wrong and which it has, once each.
+            for text in [
+                call("build_command_read"),
+                format!("{}\n{}", call("web_search"), call("web_search")),
+                format!("{}\n{}", call("build_file_read"), call("web_fetch")),
+            ] {
+                let mut r = turn(&text);
+                react_postprocess(&mut r, &tools, react);
+                assert_eq!(r.stop, StopReason::PauseTurn, "react={react}: {text}");
+                assert!(r.message.tool_uses().is_empty(), "react={react}: {text}");
+                let told = r.follow_up.unwrap();
+                let wrong = ["build_command_read", "web_search", "web_fetch"].into_iter().find(|name| text.contains(name)).unwrap();
+                assert_eq!(told.matches(&format!("`{wrong}`")).count(), 1, "{told}");
+                assert!(told.contains("isn't a tool you can use here") && told.contains("Your tools are: build_file_read, build_file_write."), "{told}");
+                assert!(!told.contains("`build_file_read`"), "{told}");
+            }
+            let mut r = turn(&format!("{}\n{}", call("web_search"), call("web_fetch")));
+            react_postprocess(&mut r, &tools, react);
+            assert!(r.follow_up.unwrap().contains("`web_search`, `web_fetch` aren't tools"));
+
+            // Words after the call: not run, and asked again without them.
+            let mut r = turn(&format!("{}\nThat should show the file.", call("build_file_read")));
+            react_postprocess(&mut r, &tools, react);
+            assert_eq!(r.stop, StopReason::PauseTurn, "react={react}");
+            assert!(r.message.tool_uses().is_empty());
+            assert!(r.follow_up.unwrap().contains("text followed it"));
+        }
+    }
 
     #[test]
     fn calls_after_a_sentence_are_read_and_examples_are_not() {

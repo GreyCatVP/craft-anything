@@ -272,6 +272,19 @@ Checked with parser fixtures, HTTP/SSE stand-ins exercising real engine tool exe
 protocols, and non-action, stop-reason and duplicate-call controls. No live local-model build
 was run; other text-call formats remain unsupported.
 
+Calls in Qwen's markup (`<tool_call>`, `<function=name>`, `<parameter=key>` value `</parameter>`)
+are read too: a llama.cpp server hands one back as text when it names a tool the model wasn't
+offered, and a live build on a 512k-window Qwen model stopped in 3 minutes when the loop took
+`web_search` and `web_fetch` calls for its final answer. Words may come before the first call; the
+last `</tool_call>` may be missing. When every name is offered the calls run, a parameter the
+schema says is a string staying as written and any other read as JSON when it parses. When any
+isn't, nothing runs and the next message names the wrong ones and the tools the model has; words
+after the last call ask for it again without them, as with fenced calls. A call in a code fence
+or in the middle of a line, or one missing `</parameter>`, stays text. Checked with the live
+runs' texts, an HTTP/SSE stand-in where the model calls a missing tool, is told, runs a real one
+and answers, and two mutations (the reader off, names not de-duplicated) that the tests caught.
+Not yet run live after the change. Hermes-style `<tool_call>{json}</tool_call>` is still text.
+
 ### Linux graphics card choice
 
 On Linux the desktop app draws on the GPU that drives the screen (#571), read from the connected
