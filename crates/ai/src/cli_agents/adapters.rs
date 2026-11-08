@@ -243,9 +243,9 @@ pub trait AgentAdapter: Send + Sync {
     }
     /// Remove session `id` that a turn run with `program` left unfinished (stopped, failed or timed
     /// out), so nothing the agent keeps running in the background picks it up again and goes on
-    /// working after we stopped it (#1115). Only for runs on this computer. Default: this agent
-    /// leaves nothing that resumes by itself.
-    fn discard_unfinished(&self, _program: &str, _id: &str) -> Result<(), ToolError> {
+    /// working after we stopped it (#1115). `host`: the SSH host it ran on, None for this computer.
+    /// Default: this agent leaves nothing that resumes by itself.
+    fn discard_unfinished(&self, _program: &str, _id: &str, _host: Option<&str>) -> Result<(), ToolError> {
         Ok(())
     }
 }

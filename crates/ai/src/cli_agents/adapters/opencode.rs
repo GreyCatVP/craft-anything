@@ -103,7 +103,7 @@ impl AgentAdapter for OpenCode {
     /// A turn stopped part-way stays `running` in OpenCode's storage, and its shared service picks
     /// it up the next time it starts and runs the builder's commands again (#1115, seen with 2.2.5).
     /// A private server deletes it without resuming it. Short: the turn waits for it before it ends.
-    fn discard_unfinished(&self, program: &str, id: &str) -> Result<(), ToolError> {
+    fn discard_unfinished(&self, program: &str, id: &str, host: Option<&str>) -> Result<(), ToolError> {
         // From the agent's output: one read as a flag would delete nothing, or something else.
         if id.is_empty() || id.starts_with('-') {
             return Err(ToolError::invalid(format!("OpenCode named its session {id:?}, which can't be passed to `opencode session delete`."))
@@ -111,14 +111,14 @@ impl AgentAdapter for OpenCode {
         }
         // With --standalone, as here: without it, the command may start the shared service, which resumes it.
         // Said for every failure (a time limit here isn't a setting the person can raise).
-        let by_hand = format!("Delete it yourself with `opencode session delete --standalone {id}`, so OpenCode doesn't pick it up again.");
-        let out = self
-            .process(program)
-            .args(["session", "delete", "--standalone", id])
-            .timeout(std::time::Duration::from_secs(30))
-            .stdout_cap(64 * 1024)
-            .run()
-            .map_err(|e| e.with_remediation(by_hand.clone()))?;
+        let on = host.map(|h| format!(" on {h}")).unwrap_or_default();
+        let by_hand = format!("Delete it yourself{on} with `opencode session delete --standalone {id}`, so OpenCode doesn't pick it up again.");
+        let args = ["session", "delete", "--standalone", id].map(String::from);
+        let proc = match host {
+            Some(h) => Process::new("ssh").args(crate::ssh::ssh_line_args(h, crate::cli_agents::remote_command(program, args.to_vec(), &[]))),
+            None => self.process(program).args(args),
+        };
+        let out = proc.timeout(std::time::Duration::from_secs(30)).stdout_cap(64 * 1024).run().map_err(|e| e.with_remediation(by_hand.clone()))?;
         if out.success {
             Ok(())
         } else {
@@ -513,13 +513,13 @@ mod tests {
     #[test]
     fn a_session_id_that_reads_as_a_flag_is_refused_before_anything_runs() {
         // No such program: had it been started, the error would say it wasn't found.
-        for id in ["", "-h", "--all"] {
-            let e = OpenCode.discard_unfinished("no-such-opencode-here", id).unwrap_err();
+        for (id, host) in [("", None), ("-h", None), ("--all", Some("studio"))] {
+            let e = OpenCode.discard_unfinished("no-such-opencode-here", id, host).unwrap_err();
             assert_eq!(e.code, ErrorCode::BadInput, "{id:?}: {e:?}");
             assert!(e.remediation.unwrap_or_default().contains("--standalone"), "the manual command doesn't wake the shared service");
         }
         // A delete that couldn't run says how to do it by hand, not the process runner's own advice.
-        let e = OpenCode.discard_unfinished("no-such-opencode-here", "ses_1").unwrap_err();
+        let e = OpenCode.discard_unfinished("no-such-opencode-here", "ses_1", None).unwrap_err();
         assert_ne!(e.code, ErrorCode::BadInput, "{e:?}");
         assert!(e.remediation.as_deref().unwrap_or_default().contains("opencode session delete --standalone ses_1"), "{e:?}");
     }

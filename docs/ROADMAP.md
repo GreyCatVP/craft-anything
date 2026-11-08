@@ -700,11 +700,15 @@ Owner: open · Status: in progress
       OpenCode 2.2.5 on Windows: a killed `run --standalone` session stays `running` and the
       service resumes it; `session delete --standalone` removes it without resuming it
       — claimed: justinjohn0306, branch bugfix/r2.2-opencode-interrupted-sessions
-- [ ] When Craft Anything itself is killed mid-turn (uninstalled, a crash; closing the app during a
+- [x] When Craft Anything itself is killed mid-turn (uninstalled, a crash; closing the app during a
       build isn't known to wait for the delete either), no turn is left to delete the OpenCode
-      session, and the service still resumes it (#1115): record each session as the turn starts
-      and delete leftovers at the next start or in `craft-anything-cli uninstall`. Over SSH,
-      delete it on the host too — claimed: justinjohn0306, branch bugfix/r2.2-opencode-leftover-sessions
+      session, and the service still resumes it (#1115): each turn records its session under a
+      lock the system drops when the process ends; the next agent turn and
+      `craft-anything-cli uninstall` delete the sessions of records nobody holds. Over SSH, the
+      delete runs on the host too
+      — claimed: justinjohn0306, branch bugfix/r2.2-opencode-leftover-sessions
+- [ ] Sweep leftover agent sessions when the desktop app starts, not only at the next agent turn
+      or `craft-anything-cli uninstall` (#1115)
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
