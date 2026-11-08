@@ -54,7 +54,9 @@ impl Held {
     pub fn record(dir: &Path, entry: &Entry) -> std::io::Result<Held> {
         std::fs::create_dir_all(dir)?;
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = dir.join(format!("{}-{}.json", std::process::id(), n));
+        // The time too: a dead process's leftover may carry a pid the system has handed out again.
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
+        let path = dir.join(format!("{}-{now}-{n}.json", std::process::id()));
         let mut file = OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
         file.lock()?;
         file.write_all(&serde_json::to_vec(entry).map_err(std::io::Error::other)?)?;
