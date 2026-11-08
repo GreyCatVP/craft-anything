@@ -195,11 +195,13 @@ fn python_package_script(app: &Path, bin: &Path) -> Option<PathBuf> {
 
 /// Whether `java -jar` can start `jar`: its manifest names a main class. Only the archive's
 /// directory and manifest are read, whatever the jar's size. A jar that can't be read this way
-/// (a central directory over 16 MB, a damaged archive) doesn't count.
+/// (a central directory over 16 MB, a damaged archive) doesn't count. Attribute names are
+/// case-insensitive, as the JAR specification has them.
 fn runnable_jar(jar: &Path) -> bool {
     let Ok(mut file) = std::fs::File::open(jar) else { return false };
     let manifest = craft_anything_formats::zip_file::read_named_entry(&mut file, "META-INF/MANIFEST.MF", 1 << 20);
-    manifest.ok().flatten().is_some_and(|m| crate::tools::java_tools::parse_manifest(&m).get("Main-Class").is_some_and(|c| !c.is_empty()))
+    let manifest = manifest.ok().flatten().map(|m| crate::tools::java_tools::parse_manifest(&m)).unwrap_or_default();
+    manifest.iter().any(|(name, class)| name.eq_ignore_ascii_case("Main-Class") && !class.is_empty())
 }
 
 #[cfg(test)]
@@ -294,7 +296,8 @@ mod tests {
             let tool = found_in(app).unwrap();
             let command = tool.launch[0].command.clone();
             assert_eq!(tool.command_for(app, &command, true).unwrap().0, PathBuf::from("java"), "{marker}: not the Windows wrapper");
-            std::fs::write(app.join(folder).join("app-all.jar"), &runnable).unwrap();
+            // A second runnable jar, its attribute written in lower case.
+            std::fs::write(app.join(folder).join("app-all.jar"), jar("Manifest-Version: 1.0\r\nmain-class: app.Main\r\n\r\n")).unwrap();
             assert!(launch().is_none(), "{marker}: never choose between runnable jars");
         }
     }
