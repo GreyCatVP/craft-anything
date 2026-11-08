@@ -115,7 +115,11 @@ impl AgentAdapter for Aider {
 
     /// Refuse before Aider starts when it would stop at a sign-in nobody can finish (#72).
     fn check_native_options(&self, options: &BackendOptions, cwd: Option<&Path>) -> Result<(), ToolError> {
-        check_setup(options, &|name| std::env::var(name).ok(), &Files::for_run(cwd, dirs::home_dir().as_deref()))
+        check_setup(
+            options,
+            &|name| std::env::var(name).ok(),
+            &Files::for_run(cwd, dirs::home_dir().as_deref(), flag_value(&options.args, "--env-file").as_deref()),
+        )
     }
 
     /// Nothing Aider offers to open is worth a page during a run, offline or not.
@@ -134,38 +138,55 @@ struct Files {
 impl Files {
     /// Aider looks in the folder it runs in, the top of its git repository (found from there even
     /// with `--no-git`), then the home folder. Its saved OpenRouter key loads before any `.env`.
-    fn for_run(cwd: Option<&Path>, home: Option<&Path>) -> Files {
-        let cwd = cwd.and_then(|d| std::path::absolute(d).ok());
-        let git_top = cwd.as_deref().and_then(|d| d.ancestors().find(|a| a.join(".git").exists()));
+    /// The folder is taken as Aider sees it, links resolved, so the repository is the same one.
+    /// An `--env-file` in its arguments loads last of all, relative to that folder.
+    fn for_run(cwd: Option<&Path>, home: Option<&Path>, env_file: Option<&str>) -> Files {
+        let cwd = cwd.and_then(|d| d.canonicalize().or_else(|_| std::path::absolute(d)).ok());
+        let git_top = cwd.as_deref().and_then(|d| d.ancestors().find(|a| is_repository_top(a)));
         let mut folders: Vec<&Path> = Vec::new();
         for folder in [cwd.as_deref(), git_top, home].into_iter().flatten() {
             if !folders.contains(&folder) {
                 folders.push(folder);
             }
         }
-        let mut env: Vec<PathBuf> = folders.iter().map(|f| f.join(".env")).collect();
+        let named = env_file.map(Path::new).and_then(|f| if f.is_absolute() { Some(f.to_path_buf()) } else { cwd.as_deref().map(|c| c.join(f)) });
+        let mut env: Vec<PathBuf> = named.into_iter().chain(folders.iter().map(|f| f.join(".env"))).collect();
         env.extend(home.map(|h| h.join(SIGN_IN_KEYS)));
         Files { conf: folders.iter().map(|f| f.join(".aider.conf.yml")).collect(), env }
     }
 }
 
+/// Whether `dir` is a git repository's top as GitPython finds it: a `.git` folder that holds a
+/// `HEAD`, or a worktree's `.git` file.
+fn is_repository_top(dir: &Path) -> bool {
+    let git = dir.join(".git");
+    git.is_file() || git.join("HEAD").is_file()
+}
+
 /// The model Aider will run: ours if chosen, else one its own arguments, environment or config
-/// name. `None` means Aider would pick one from whichever key it finds, or offer a sign-in.
+/// name. `None` means Aider would pick one from whichever key it finds, or offer a sign-in. A
+/// `.env` comes before the environment, as Aider loads its `.env` files over it.
 fn configured_model(options: &BackendOptions, env: &dyn Fn(&str) -> Option<String>, files: &Files) -> Option<String> {
     model_in_args(&options.args)
         .or_else(|| options.args.iter().find(|a| MODEL_SHORTCUTS.contains(&a.as_str())).cloned())
         .or_else(|| options.cli_model.as_deref().map(str::trim).filter(|m| !m.is_empty()).map(str::to_string))
-        .or_else(|| env("AIDER_MODEL").map(|m| m.trim().to_string()).filter(|m| !m.is_empty()))
         .or_else(|| files.env.iter().find_map(|file| env_file_value(&read_small(file)?, "AIDER_MODEL")))
+        .or_else(|| env("AIDER_MODEL").map(|m| m.trim().to_string()).filter(|m| !m.is_empty()))
         .or_else(|| files.conf.iter().find_map(|file| model_in_conf(&read_small(file)?)))
 }
 
 /// The last `--model` in the extra arguments, since Aider's parser keeps the last one.
 fn model_in_args(args: &[String]) -> Option<String> {
+    flag_value(args, "--model")
+}
+
+/// The last value of `flag` in the extra arguments, as `flag value` or `flag=value`.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let joined = format!("{flag}=");
     let mut found = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
-        let value = if arg == "--model" { rest.next().map(String::as_str) } else { arg.strip_prefix("--model=") };
+        let value = if arg == flag { rest.next().map(String::as_str) } else { arg.strip_prefix(joined.as_str()) };
         if let Some(value) = value {
             let value = value.trim();
             found = (!value.is_empty()).then(|| value.to_string());
@@ -287,7 +308,7 @@ mod tests {
 
     /// The files of a run outside any project, with this home folder.
     fn at_home(home: Option<&Path>) -> Files {
-        Files::for_run(None, home)
+        Files::for_run(None, home, None)
     }
 
     #[test]
@@ -406,7 +427,7 @@ mod tests {
         let (home, project) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let app = project.path().join("app");
         std::fs::create_dir_all(&app).unwrap();
-        let check = |options: &BackendOptions| check_setup(options, &|_| None, &Files::for_run(Some(&app), Some(home.path())));
+        let check = |options: &BackendOptions| check_setup(options, &|_| None, &Files::for_run(Some(&app), Some(home.path()), None));
         assert!(check(&BackendOptions::default()).is_err(), "nothing set up anywhere");
         std::fs::write(app.join(".aider.conf.yml"), "model: gpt-4o\n").unwrap();
         assert!(check(&BackendOptions::default()).is_ok(), "a model in the run's folder");
@@ -416,7 +437,12 @@ mod tests {
         std::fs::write(project.path().join(".env"), "OPENROUTER_API_KEY=sk-test\n").unwrap();
         assert!(check(&openrouter).is_err(), "not a git repository, so Aider doesn't read its top");
         std::fs::create_dir(project.path().join(".git")).unwrap();
+        assert!(check(&openrouter).is_err(), "an empty .git folder isn't a repository to GitPython");
+        std::fs::write(project.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
         assert!(check(&openrouter).is_ok(), "a key at the top of the git repository");
+        std::fs::remove_dir_all(project.path().join(".git")).unwrap();
+        std::fs::write(project.path().join(".git"), "gitdir: /elsewhere/.git/worktrees/app\n").unwrap();
+        assert!(check(&openrouter).is_ok(), "a worktree's .git file marks its top too");
         assert!(check_setup(&openrouter, &|_| None, &at_home(Some(home.path()))).is_err(), "a run without a folder reads only the home folder");
     }
 
@@ -424,13 +450,54 @@ mod tests {
     #[test]
     fn the_projects_model_wins_over_the_home_folders() {
         let (home, app) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let check = || check_setup(&BackendOptions::default(), &|_| None, &Files::for_run(Some(app.path()), Some(home.path())));
+        let check = || check_setup(&BackendOptions::default(), &|_| None, &Files::for_run(Some(app.path()), Some(home.path()), None));
         std::fs::write(home.path().join(".aider.conf.yml"), "model: openrouter/anthropic/claude-sonnet-4\n").unwrap();
         std::fs::write(app.path().join(".aider.conf.yml"), "model: gpt-4o\n").unwrap();
         assert!(check().is_ok(), "the project's model needs no OpenRouter key");
         std::fs::write(home.path().join(".aider.conf.yml"), "model: gpt-4o\n").unwrap();
         std::fs::write(app.path().join(".aider.conf.yml"), "model: openrouter/anthropic/claude-sonnet-4\n").unwrap();
         assert!(check().unwrap_err().message.contains("OpenRouter API key"), "the project's OpenRouter model needs its key");
+    }
+
+    /// Aider loads its `.env` files over the environment, so a model there wins over one set
+    /// outside it.
+    #[test]
+    fn a_dotenv_model_wins_over_the_environments() {
+        let app = tempfile::tempdir().unwrap();
+        std::fs::write(app.path().join(".env"), "AIDER_MODEL=openrouter/anthropic/claude-sonnet-4\n").unwrap();
+        let env = |name: &str| match name {
+            "AIDER_MODEL" => Some("gpt-4o".to_string()),
+            "OPENAI_API_KEY" => Some("sk-test".to_string()),
+            _ => None,
+        };
+        let err = check_setup(&BackendOptions::default(), &env, &Files::for_run(Some(app.path()), None, None)).unwrap_err();
+        assert!(err.message.contains("OpenRouter API key"), "{}", err.message);
+    }
+
+    /// An `--env-file` in Aider's arguments loads after every default `.env`, so it wins.
+    #[test]
+    fn a_named_env_file_wins_over_the_default_ones() {
+        let app = tempfile::tempdir().unwrap();
+        std::fs::write(app.path().join(".env"), "AIDER_MODEL=gpt-4o\n").unwrap();
+        std::fs::write(app.path().join(".env.aider"), "AIDER_MODEL=openrouter/anthropic/claude-sonnet-4\n").unwrap();
+        let options = BackendOptions { args: vec!["--env-file".into(), ".env.aider".into()], ..Default::default() };
+        let files = Files::for_run(Some(app.path()), None, flag_value(&options.args, "--env-file").as_deref());
+        assert!(check_setup(&options, &|_| None, &files).unwrap_err().message.contains("OpenRouter API key"));
+        assert!(check_setup(&options, &|_| None, &Files::for_run(Some(app.path()), None, None)).is_ok(), "without it the project's .env decides");
+    }
+
+    /// A project reached through a link is read where it really is, with its real repository.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_project_finds_its_real_repository() {
+        let (real, links) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let app = real.path().join("app");
+        std::fs::create_dir_all(real.path().join(".git")).unwrap();
+        std::fs::write(real.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::create_dir(&app).unwrap();
+        std::fs::write(real.path().join(".aider.conf.yml"), "model: gpt-4o\n").unwrap();
+        std::os::unix::fs::symlink(&app, links.path().join("app")).unwrap();
+        assert!(check_setup(&BackendOptions::default(), &|_| None, &Files::for_run(Some(&links.path().join("app")), None, None)).is_ok());
     }
 
     #[test]

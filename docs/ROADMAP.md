@@ -726,6 +726,8 @@ Owner: open · Status: in progress
 - [x] Aider: read project-folder `.aider.conf.yml` and `.env` in `check_setup`, which needs the working directory passed into `check_native_options`.
       It reads the run's folder, the top of its git repository, then the home folder, as Aider
       does — PR #1210; claimed: rmsff, branch feature/r2.2-aider-project-settings
+- [ ] Aider over SSH: its setup check still reads this computer's environment and home folder.
+      Read the remote host's `~/.env`, `~/.aider.conf.yml` and `~/.aider/oauth-keys.env` there
 - [ ] Every adapter but Claude Code's still takes the message in argv (`prompt_on_stdin`), so a long
       one can pass Windows' command-line limit as Claude Code's did (#402); hand each its message on
       stdin or in a file where its CLI reads one
