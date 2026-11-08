@@ -294,7 +294,7 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       models and thinking (three copies that disagree about SSH), Claude desktop app without Claude
       Code, Websites as targets, Desktop app and CLI; `docs/opencode.md` has a paragraph twice.
       Keep the newest complete copy of each
-      — claimed: youkaicountry, branch docs/r5.2-doubled-status-rows
+      — claimed: youkaicountry, branch docs/r5.2-doubled-status-rows — PR #1226
 - [ ] Have `cargo xtask` refuse a STATUS.md table with two rows of the same name, so a merge
       that keeps both copies of an edited row fails CI instead of reaching `main`
 
