@@ -2549,6 +2549,35 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         assert!(acp_for(&spec).is_some());
     }
 
+    /// A remote host runs whichever craft-anything-cli it has, of any release. Every release, from
+    /// 0.1.0 on, knows the global `--deep` and `--clean-room` and applies them in `mcp`, and has
+    /// `mcp --all-tools`, so a remote tool server gets only those (R2.8). A flag outside them needs
+    /// the remote CLI's version checked first, or an older one stops the build at its first tool.
+    #[test]
+    fn a_remote_tool_server_gets_only_flags_every_release_knows() {
+        use craft_anything_engine::{TargetKind, target::TargetContext};
+        for deep in [false, true] {
+            for builder in [false, true] {
+                let config = BackendConfig {
+                    name: "Remote".into(),
+                    kind: BackendKind::AgentCli,
+                    model: "claude-code".into(),
+                    base_url: None,
+                    ssh_host: Some("build-box".into()),
+                    enabled: true,
+                };
+                let mut spec = CliSpec::new(config, BackendOptions::default(), false, Some(PathBuf::from("/p/investigation")));
+                spec.deep = deep;
+                spec.builder = builder.then(|| Builder { investigation: Some(PathBuf::from("/p/investigation")), inbox: PathBuf::from("/p/inbox") });
+                spec.targets = vec![TargetContext { path: PathBuf::from("/p/original.bin"), sha256: "0".repeat(64), kind: TargetKind::Elf, raw: None }];
+                let mcp = mcp_for(&spec, true);
+                assert_eq!(mcp.command, "craft-anything-cli", "the remote PATH's");
+                assert!(mcp.args.iter().all(|a| ["mcp", "--deep", "--clean-room", "--all-tools"].contains(&a.as_str())), "{deep} {builder}: {:?}", mcp.args);
+                assert!(mcp.args.contains(&if deep { "--deep" } else { "--clean-room" }.to_string()), "the run's mode, whatever the remote settings say");
+            }
+        }
+    }
+
     #[test]
     fn mcp_target_handoff_is_bounded_and_keeps_the_active_target_last() {
         use craft_anything_engine::{TargetKind, target::TargetContext};

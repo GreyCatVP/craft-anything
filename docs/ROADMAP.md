@@ -899,9 +899,11 @@ Owner: open · Status: in progress
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
-- [ ] A remote (SSH) builder needs a craft-anything-cli that knows `--deep` and `--clean-room`:
-      check its version first and say so when it's older
-      — claimed: rmsff, branch test/r2.8-remote-cli-flags
+- [x] A remote (SSH) builder needs a craft-anything-cli that knows `--deep` and `--clean-room`:
+      check its version first and say so when it's older. Not needed: every release from 0.1.0
+      declares both as global flags, applies them in `mcp`, and has `mcp --all-tools`, the only
+      flags a remote tool server gets. A test now fails when one outside them is added, which is
+      when the version check is due — PR #1211; claimed: rmsff, branch test/r2.8-remote-cli-flags
 
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
