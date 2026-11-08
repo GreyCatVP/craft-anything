@@ -388,8 +388,14 @@ fn decode_entities(s: &str) -> String {
             "amp" => Some('&'),
             "quot" => Some('"'),
             "apos" => Some('\''),
-            e if e.starts_with("#x") || e.starts_with("#X") => u32::from_str_radix(e.get(2..).unwrap_or(""), 16).ok().and_then(char::from_u32),
-            e if e.starts_with('#') => e.get(1..).and_then(|d| d.parse::<u32>().ok()).and_then(char::from_u32),
+            e if e.starts_with("#x") || e.starts_with("#X") => {
+                let d = e.get(2..).unwrap_or("");
+                if d.bytes().all(|b| b.is_ascii_hexdigit()) { u32::from_str_radix(d, 16).ok().and_then(char::from_u32) } else { None }
+            }
+            e if e.starts_with('#') => {
+                let d = e.get(1..).unwrap_or("");
+                if d.bytes().all(|b| b.is_ascii_digit()) { d.parse::<u32>().ok().and_then(char::from_u32) } else { None }
+            }
             _ => None,
         };
         match rep {
@@ -626,6 +632,17 @@ pub fn parse_xml(data: &[u8]) -> Result<Value, FormatError> {
 mod tests {
     use super::*;
     use craft_anything_testkit::apple as fx;
+
+    #[test]
+    fn xml_char_refs_require_plain_digits() {
+        let text = |s: &str| {
+            let doc = format!("<plist version=\"1.0\"><string>{s}</string></plist>");
+            parse_xml(doc.as_bytes()).unwrap().as_str().map(str::to_string)
+        };
+        assert_eq!(text("a&#+65;b&#x+41;").as_deref(), Some("a&#+65;b&#x+41;"));
+        assert_eq!(text("&#65;&#x41;").as_deref(), Some("AA"));
+        assert_eq!(text("&#;&#x;").as_deref(), Some("&#;&#x;"));
+    }
 
     #[test]
     fn xml_and_binary_agree() {
