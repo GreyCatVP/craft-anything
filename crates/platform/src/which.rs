@@ -255,11 +255,16 @@ pub fn cli_file_name() -> String {
 /// Absolute path of the installed `craft-anything-cli`: this executable when it is the CLI, else
 /// a sibling of this executable (the desktop app ships next to it), else the first one on `PATH`.
 pub fn self_cli_path() -> Option<PathBuf> {
+    // The prefix is dropped from the path found, not from this executable's: a sibling is longer,
+    // and only its own length says whether it still fits without the prefix.
+    find_cli().map(plain)
+}
+
+fn find_cli() -> Option<PathBuf> {
     let name = cli_file_name();
-    let exe = std::env::current_exe().ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
-    if let Some(exe) = &exe {
+    if let Some(exe) = std::env::current_exe().ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p)) {
         if exe.file_name().is_some_and(|n| n == name.as_str()) {
-            return Some(exe.clone());
+            return Some(exe);
         }
         if let Some(dir) = exe.parent() {
             let sib = dir.join(&name);
@@ -275,6 +280,45 @@ pub fn self_cli_path() -> Option<PathBuf> {
         }
     }
     which("craft-anything-cli")
+}
+
+/// `path` without the `\\?\` prefix `canonicalize` adds on Windows, so clients that can't start
+/// a program from the extended-length form (Hermes, #1167) get a path they can. Elsewhere, and
+/// whenever the plain form could name another file (see [`plain_form`]), the path is unchanged.
+fn plain(path: PathBuf) -> PathBuf {
+    if !cfg!(windows) {
+        return path;
+    }
+    path.to_str().and_then(plain_form).map_or(path, PathBuf::from)
+}
+
+/// The plain form of an extended-length path: `\\?\C:\x` is `C:\x` and `\\?\UNC\server\share\x`
+/// is `\\server\share\x`. `None` (keep the prefix) for any other text, or when dropping it would
+/// change what the path names: it is 260 characters or longer (MAX_PATH), or a component ends
+/// with a dot or space, is `.` or `..`, holds a `/`, `?` or `:`, or is a device name (`CON`,
+/// `NUL`, `CONOUT$`, `COM0`, `LPT²`…), all of which only the prefixed form keeps literally.
+fn plain_form(path: &str) -> Option<String> {
+    let (plain, rest) = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        (format!(r"\\{rest}"), rest)
+    } else {
+        let rest = path.strip_prefix(r"\\?\")?;
+        let b = rest.as_bytes();
+        let drive = b.first().is_some_and(u8::is_ascii_alphabetic) && b.get(1) == Some(&b':') && b.get(2) == Some(&b'\\');
+        if !drive {
+            return None;
+        }
+        (rest.to_string(), rest.get(3..)?)
+    };
+    let device = |c: &str| {
+        let stem = c.split('.').next().unwrap_or(c).trim_end().to_ascii_uppercase();
+        let numbered = |p: &str| stem.strip_prefix(p).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"));
+        matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
+    };
+    let odd = |c: &str| c.is_empty() || c == "." || c == ".." || c.ends_with('.') || c.ends_with(' ') || c.contains(['/', '?', ':']) || device(c);
+    if rest.is_empty() || rest.split('\\').any(odd) || plain.encode_utf16().count() >= 260 {
+        return None;
+    }
+    Some(plain)
 }
 
 #[cfg(windows)]
@@ -315,6 +359,83 @@ fn is_executable(p: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_form_drops_the_extended_length_prefix_only_when_it_names_the_same_file() {
+        assert_eq!(plain_form(r"\\?\C:\Apps\craft-anything-cli.exe").as_deref(), Some(r"C:\Apps\craft-anything-cli.exe"));
+        assert_eq!(plain_form(r"\\?\UNC\server\share\bin\cli.exe").as_deref(), Some(r"\\server\share\bin\cli.exe"));
+        // Not extended-length, or not a drive or UNC path behind the prefix: left alone.
+        for p in [
+            r"C:\Apps\cli.exe",
+            r"\\server\share\cli.exe",
+            "/opt/bin/cli",
+            r"\\.\pipe\x",
+            r"\\?\Volume{1234}\x.exe",
+            "",
+            r"\\?\",
+            r"\\?\C:",
+            r"\\?\C:\",
+            r"\\?\UNC\",
+        ] {
+            assert_eq!(plain_form(p), None, "{p}");
+        }
+        // Components only the prefixed form keeps literally.
+        for p in [
+            r"\\?\C:\Tools.\cli.exe",
+            r"\\?\C:\Tools \cli.exe",
+            r"\\?\C:\a\..\cli.exe",
+            r"\\?\C:\a\.\cli.exe",
+            r"\\?\C:\a\\cli.exe",
+            r"\\?\C:\a/b\cli.exe",
+            r"\\?\C:\NUL\cli.exe",
+            r"\\?\C:\x\con.txt",
+            r"\\?\C:\x\COM1",
+            r"\\?\C:\x\lpt9.exe",
+            r"\\?\UNC\srv\share\aux",
+            r"\\?\C:\x\COM¹",
+            r"\\?\C:\x\lpt³.txt",
+            r"\\?\C:\x\CONOUT$",
+            r"\\?\C:\x\conin$.log",
+            r"\\?\UNC\?\C:\x.exe",
+            r"\\?\C:\a?b\x.exe",
+            r"\\?\C:\x\LPT0",
+            r"\\?\C:\x\com0.exe",
+            r"\\?\C:\x\NUL:s",
+            r"\\?\C:\x\cli.exe:stream",
+        ] {
+            assert_eq!(plain_form(p), None, "{p}");
+        }
+        assert_eq!(plain_form(r"\\?\C:\x\COM10\console.exe").as_deref(), Some(r"C:\x\COM10\console.exe"));
+        // Long paths need the prefix (MAX_PATH is 260 with its terminator).
+        let at = |n: usize| format!(r"\\?\C:\{}", "a".repeat(n - 3));
+        assert_eq!(plain_form(&at(259)).map(|p| p.len()), Some(259));
+        assert_eq!(plain_form(&at(260)), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn this_executable_comes_back_plain_and_still_names_itself() {
+        let exe = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        assert!(exe.to_string_lossy().starts_with(r"\\?\"), "canonicalize adds the prefix: {exe:?}");
+        let p = plain(exe.clone());
+        if exe.to_str().and_then(plain_form).is_none() {
+            assert_eq!(p, exe, "a checkout only the prefixed form names keeps it");
+            return;
+        }
+        assert!(!p.to_string_lossy().starts_with(r"\\?\"), "{p:?}");
+        assert!(p.is_file() && std::fs::canonicalize(&p).unwrap() == exe, "{p:?}");
+    }
+
+    /// #1167: what setup registers is the plain path whenever that names the same file.
+    #[cfg(windows)]
+    #[test]
+    fn self_cli_path_is_plain_when_it_can_be() {
+        let Some(p) = self_cli_path() else { return };
+        let canon = std::fs::canonicalize(&p).unwrap();
+        if canon.to_str().and_then(plain_form).is_some() {
+            assert!(!p.to_string_lossy().starts_with(r"\\?\"), "{p:?}");
+        }
+    }
 
     #[test]
     fn finds_sh_and_misses_nonsense() {
