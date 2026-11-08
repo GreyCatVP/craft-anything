@@ -1147,6 +1147,9 @@ Gaps found while using the app for real projects.
 - [x] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
       not "update the pinned URL", which nobody installing an engine can do (#1193)
       — claimed: justinjohn0306, branch bugfix/r2.9-download-server-errors
+- [x] "Open in the workbench" on a project opens the project's own target (a local app or file) and
+      loads the workbench list in Deep mode; it used to only switch screens, so the workbench showed nothing (#1107)
+      — claimed: Agapenordev, branch bugfix/r2.9-workbench-opens-project-target
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

@@ -1133,7 +1133,9 @@ impl CraftApp {
     /// Load the current rail list if it hasn't been.
     pub fn ensure_rail_loaded(&mut self) {
         let kind = self.state.rail;
-        if kind == RailKind::Targets || self.view.active.is_none() {
+        // A stale snapshot (the session was busy) would pick the old target's tool; the
+        // workbench asks again each frame while the list is idle.
+        if kind == RailKind::Targets || self.view.active.is_none() || self.view_dirty {
             return;
         }
         if matches!(self.state.lists.get(&kind), None | Some(Fill::Idle)) {
@@ -1434,8 +1436,10 @@ impl CraftApp {
             Done::Acted { tool, result } => self.acted(tool, result),
             Done::Opened { path, result } => match result {
                 Ok(v) => {
-                    // Another target: a new conversation, so answers about two things don't mix.
-                    if self.view.active_target().is_some_and(|t| t.path != path) {
+                    // Another target: a new conversation, so answers about two things don't mix. The
+                    // engine keeps one target per content, so compare with the path it kept.
+                    let kept = v.get("path").and_then(Value::as_str).map_or_else(|| path.clone(), PathBuf::from);
+                    if self.view.active_target().is_some_and(|t| t.path != kept) {
                         self.state.chat.clear();
                         if let Some(mut c) = self.conversation.take() {
                             c.stop();
@@ -1459,7 +1463,9 @@ impl CraftApp {
                     } else {
                         self.state.screen = Screen::Workbench;
                         self.state.rail = if self.state.rail == RailKind::Targets { RailKind::Functions } else { self.state.rail };
-                        self.load_rail(self.state.rail);
+                        // The list's tool depends on the new target's kind, not the one shown before.
+                        self.refresh_view();
+                        self.ensure_rail_loaded();
                     }
                 }
                 Err(e) if clean_room::is_refusal(&e) => self.state.modal = Some(state::Modal::DeepMode),

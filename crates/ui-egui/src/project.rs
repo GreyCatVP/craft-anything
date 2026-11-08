@@ -987,6 +987,13 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
             && widgets::secondary(ui, Some("microscope"), "Open in the workbench").on_hover_text(tr("The full toolset, evidence and logs.")).clicked()
         {
             app.state.screen = Screen::Workbench;
+            // The workbench shows the target that's open, so open the project's own one first, unless
+            // it already is (#1107). A website keeps what's open: it isn't looked inside like this,
+            // and nor is anything in Clean room.
+            match &ws.manifest.target {
+                TargetRef::Local { path } if app.settings.deep_mode && app.view.active_target().is_none_or(|t| t.path != *path) => app.open_path(path.clone()),
+                _ => app.ensure_rail_loaded(),
+            }
         }
     });
 }
