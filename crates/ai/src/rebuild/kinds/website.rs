@@ -515,15 +515,6 @@ fn rgba(c: &str) -> Option<[u8; 4]> {
 }
 
 /// The same colour to the eye: each channel within 3 (rounding in the browser), or the same text.
-/// Estonian website words: *veebileht*, *koduleht* and *veebisait* with their inflected forms.
-/// `DetectCx::words` turns punctuation and newlines into spaces, so a cue after them still counts;
-/// *veebilehitseja* (a browser) is not a website.
-fn says_site_in_estonian(cx: &DetectCx) -> bool {
-    cx.words
-        .split_whitespace()
-        .any(|w| (w.starts_with("veebileh") || w.starts_with("koduleh") || w.starts_with("veebisai")) && !w.starts_with("veebilehitseja"))
-}
-
 fn same_colour(a: &str, b: &str) -> bool {
     match (rgba(a), rgba(b)) {
         (Some(x), Some(y)) => x.iter().zip(y).all(|(p, q)| p.abs_diff(q) <= 3),

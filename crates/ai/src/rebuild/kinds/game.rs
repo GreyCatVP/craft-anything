@@ -215,6 +215,10 @@ fn says_game_in_spanish(cx: &DetectCx) -> bool {
 /// verb *mängima* ("to play") and its forms begin with *mängi* (*mängiv*, *mängib*), so suffix
 /// matching keeps an app that plays music an app.
 fn says_game_in_estonian(cx: &DetectCx) -> bool {
+    // A website that sells or lists games is a website: the games are its content, not the build.
+    if says_site_in_estonian(cx) {
+        return false;
+    }
     const FORMS: &[&str] = &[
         "mäng",
         "mängu",

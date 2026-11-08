@@ -50,6 +50,16 @@ impl<'a> DetectCx<'a> {
     }
 }
 
+/// Estonian website words: *veebileht*, *koduleht* and *veebisait* with their inflected forms.
+/// `DetectCx::words` turns punctuation and newlines into spaces, so a cue after them still counts;
+/// *veebilehitseja* (a browser) is not a website. Shared with the game kind, so a website that
+/// sells or lists games stays a website.
+fn says_site_in_estonian(cx: &DetectCx) -> bool {
+    cx.words
+        .split_whitespace()
+        .any(|w| (w.starts_with("veebileh") || w.starts_with("koduleh") || w.starts_with("veebisai")) && !w.starts_with("veebilehitseja"))
+}
+
 /// What the brief is written from.
 pub struct BriefCx<'a> {
     pub ws: &'a Workspace,
