@@ -140,6 +140,10 @@ pub fn message_json(m: &Msg) -> Value {
                 Block::ToolResult { tool_use_id, content, is_error } => {
                     json!({"type": "tool_result", "tool_use_id": tool_use_id, "content": content, "is_error": is_error})
                 }
+                Block::Image { name, data, .. } if data.is_empty() => json!({"type": "text", "text": Block::image_note(name)}),
+                Block::Image { media_type, data, .. } => {
+                    json!({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
+                }
             })
         })
         .collect();
@@ -333,6 +337,12 @@ impl ChatModel for Anthropic {
 
     fn model(&self) -> String {
         self.model.clone()
+    }
+
+    /// Every Claude model reads pictures. Another model behind an Anthropic-style endpoint says
+    /// nothing, and is treated as one that can't unless the person says it can.
+    fn sees_pictures(&self) -> Option<crate::sight::Sight> {
+        self.model.starts_with("claude-").then_some(crate::sight::Sight { sees: true, source: "Claude" })
     }
 }
 
