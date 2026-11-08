@@ -68,6 +68,13 @@ pub fn program_of(config: &BackendConfig, options: &BackendOptions) -> Result<St
     program_in(config, options, craft_anything_platform::which::search_path())
 }
 
+/// The saved program path `program` stands in for, when [`program_of`] chose another one (#721).
+/// A bare name (`claude.exe`) found as the same agent elsewhere isn't a replacement.
+pub fn replaced_program(options: &BackendOptions, program: &str) -> Option<String> {
+    let saved = options.command.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != program)?;
+    Path::new(saved).parent().is_some_and(|p| !p.as_os_str().is_empty()).then(|| saved.to_string())
+}
+
 fn program_in(config: &BackendConfig, options: &BackendOptions, search: Option<std::ffi::OsString>) -> Result<String, ToolError> {
     let usual = program_for(&config.model);
     let local = config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
@@ -1222,6 +1229,12 @@ mod tests {
         let chosen = |p: &Path| BackendOptions { command: Some(p.display().to_string()), ..Default::default() };
         assert_eq!(program_of(&config(None), &chosen(&gone)).unwrap(), new.display().to_string(), "the same file in the newer build folder");
         assert_eq!(program_of(&config(None), &chosen(&new)).unwrap(), new.display().to_string(), "a path that's there is used as it is");
+        let program = program_of(&config(None), &chosen(&gone)).unwrap();
+        assert_eq!(replaced_program(&chosen(&gone), &program), Some(gone.display().to_string()), "the gone path is named");
+        assert_eq!(replaced_program(&chosen(&new), &new.display().to_string()), None, "nothing replaced");
+        assert_eq!(replaced_program(&BackendOptions::default(), "codex"), None, "nothing saved");
+        let bare = BackendOptions { command: Some("claude.exe".into()), ..Default::default() };
+        assert_eq!(replaced_program(&bare, "claude"), None, "a bare name found as the same agent");
         assert_eq!(program_of(&config(Some("box")), &chosen(&gone)).unwrap(), gone.display().to_string(), "another computer's path isn't checked here");
         assert_eq!(program_of(&config(None), &BackendOptions::default()).unwrap(), "codex", "nothing chosen: the usual name");
         // #467: a saved app bundle is never started; the usual name is looked up instead.

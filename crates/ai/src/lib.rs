@@ -1099,7 +1099,7 @@ impl AiHub {
                 latency_ms: start.elapsed().as_millis() as u64,
                 reply: out.stdout_text().lines().next().unwrap_or_default().trim().to_string(),
                 version_only: true,
-                saved_program_replaced: e.options.command.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != program).map(str::to_string),
+                saved_program_replaced: crate::cli_agents::replaced_program(&e.options, &program),
                 program: Some(program),
             });
         }

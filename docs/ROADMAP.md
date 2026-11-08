@@ -473,6 +473,12 @@ been run live.
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
       — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
+- [x] A builder on an API backend can't be shown a picture: the model layer has no image block, so
+      the check's screenshot and the person's pictures of the original never reach the model, local
+      or paid, and every API builder is treated as blind. Add an image block that each API sends
+      the way it expects (OpenAI-style `image_url` data URIs, Anthropic's image source), capped in
+      size, kept out of saved transcripts as bytes, and counted toward the context budget
+      — claimed: youkaicountry, branch feature/r5.4-pictures-to-models
 - [x] Say per AI whether its model sees pictures (`vision = auto | yes | no` in `[[ai.backends]]`,
       `ai vision`), Auto asking the server: a model list's `input_modalities`, llama.cpp's `/props`
       `modalities` (through llama-swap's upstream route for a loaded model), LM Studio's model
@@ -484,6 +490,8 @@ been run live.
       so under Auto a model it hasn't loaded yet reads as blind for the whole conversation
 - [ ] The vision setting in Settings → AI (a dropdown beside "Tools for building", with what Auto
       works out to), added with the attachment step so the choice does something when it lands
+- [ ] Shrink a picture larger than `MAX_IMAGE_BYTES` (3.75 MB) before it's shown to a model,
+      instead of refusing it (a 4K screenshot as PNG can be larger)
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
@@ -670,6 +678,8 @@ Owner: open · Status: in progress
 - [ ] Settings says when a saved agent program is gone and which one runs in its place; today a
       build moves to the newest build folder or the usual program without saying so, and the
       setting keeps the old path (read on a worker, not while drawing) (#721)
+- [x] A build says in its feed when it runs another program than the one saved in Settings → AI
+      (#721) — claimed: Agapenordev, branch bugfix/r2.2-build-says-replaced-program
 - [x] GitHub Copilot through its own CLI login and ACP, without credential import:
       discovery, MCP-only tool restrictions, model selection and fresh read-only questions;
       unit tests and CLI 1.0.105 with an isolated home and loopback model, all five access modes
