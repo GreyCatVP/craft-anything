@@ -184,26 +184,6 @@ fn octal_escape(bytes: &[u8]) -> String {
     out
 }
 
-/// One `ssh` run for a remote set-up step. Never interactive (`BatchMode`, stdin closed).
-fn ssh_run(host: &str, line: &str, timeout: std::time::Duration, stop: Option<&CancelToken>) -> Result<craft_anything_platform::Output, ToolError> {
-    let argv = crate::ssh::ssh_line_args(host, line.to_string());
-    let mut proc = craft_anything_platform::process::Process::new("ssh").args(&argv).timeout(timeout).stdout_cap(64 * 1024);
-    if let Some(stop) = stop {
-        let stop = stop.clone();
-        proc = proc.cancel_when(move || stop.is_cancelled());
-    }
-    proc.run()
-}
-
-/// The remote helper is on PATH, checked before a build starts (the remote server runs it).
-fn remote_check(host: &str, stop: Option<&CancelToken>) -> Result<(), ToolError> {
-    let out = ssh_run(host, "command -v craft-anything-cli >/dev/null", std::time::Duration::from_secs(15), stop)?;
-    if out.success {
-        return Ok(());
-    }
-    Err(remote_failure(host, &out))
-}
-
 /// The remote shell line: the helper is on PATH, then the config file goes in atomically and
 /// private (`printf` with octal escapes; no byte ends the quoted string). One line, no input.
 fn remote_prepare_line(name: &str, content: &str) -> String {
@@ -211,23 +191,6 @@ fn remote_prepare_line(name: &str, content: &str) -> String {
     format!(
         "command -v craft-anything-cli >/dev/null && mkdir -p \"$HOME/.cache/craft-anything\" && printf '{escaped}' > \"$HOME/.cache/craft-anything/{name}.tmp.$$\" && chmod 600 \"$HOME/.cache/craft-anything/{name}.tmp.$$\" && mv \"$HOME/.cache/craft-anything/{name}.tmp.$$\" \"$HOME/.cache/craft-anything/{name}\""
     )
-}
-
-/// Map the remote failure onto the fix, reusing the ssh failure wording other remote runs use.
-fn remote_failure(host: &str, out: &craft_anything_platform::Output) -> ToolError {
-    if let Some(failure) = crate::ssh::diagnose(host, "craft-anything-cli", crate::ssh::is_git_server(host), out.code, out.stderr_text().as_str()) {
-        return ToolError::new(ErrorCode::EngineMissing, format!("Craft Anything can't set up its tools on {host}: {}.", failure.what))
-            .with_remediation(failure.fix);
-    }
-    let stderr = out.stderr_text();
-    let snippet: String = stderr.trim().chars().take(200).collect();
-    let exit = out.code.map_or_else(|| "it was stopped".to_string(), |code| format!("exit {code}"));
-    ToolError::new(ErrorCode::EngineMissing, format!("Craft Anything couldn't set up its tools on {host}: ssh didn't come back as expected ({exit})."))
-        .with_remediation(if snippet.is_empty() {
-            "Check that craft-anything-cli is on the PATH this ssh session uses, and that the host lets you run programs over ssh.".to_string()
-        } else {
-            format!("ssh said: {snippet}")
-        })
 }
 
 /// OpenCode's JSON error carries the provider status and its own retry decision. In particular,

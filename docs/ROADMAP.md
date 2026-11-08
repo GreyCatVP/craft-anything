@@ -899,11 +899,17 @@ Owner: open · Status: in progress
 
 ### R2.8 Clean room means clean room
 Owner: maintainers · Status: in progress
-- [x] A remote (SSH) builder needs a craft-anything-cli that knows `--deep` and `--clean-room`:
-      check its version first and say so when it's older. Not needed: every release from 0.1.0
-      declares both as global flags, applies them in `mcp`, and has `mcp --all-tools`, the only
-      flags a remote tool server gets. A test now fails when one outside them is added, which is
-      when the version check is due — PR #1211; claimed: rmsff, branch test/r2.8-remote-cli-flags
+- [x] A remote (SSH) builder needs a craft-anything-cli that knows `--deep` and `--clean-room`.
+      Every release from 0.1.0 declares both as global flags and applies them in `mcp`, and has
+      `mcp --all-tools`, the only flags a remote tool server gets; a test fails when `mcp_for`
+      gives it another. Claude Code and Codex builds over SSH now check the host has
+      `craft-anything-cli` before starting, as OpenCode's did — PR #1211; claimed: rmsff, branch
+      test/r2.8-remote-cli-flags
+- [ ] A remote builder's `craft-anything-cli` should know `CRAFT_ANYTHING_AGENT` (#1022), which no
+      release up to 0.5.0 reads: there, a CLI the builder starts calls tools as the person. Today
+      that loosens nothing of the build's (the remote tool server has no project or inbox). Check
+      it before a build once a release has it: version numbers can't tell (`main` says 0.4.0), so
+      ask the CLI itself
 
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress

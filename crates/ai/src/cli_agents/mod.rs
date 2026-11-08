@@ -2551,8 +2551,10 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
 
     /// A remote host runs whichever craft-anything-cli it has, of any release. Every release, from
     /// 0.1.0 on, knows the global `--deep` and `--clean-room` and applies them in `mcp`, and has
-    /// `mcp --all-tools`, so a remote tool server gets only those (R2.8). A flag outside them needs
-    /// the remote CLI's version checked first, or an older one stops the build at its first tool.
+    /// `mcp --all-tools`, so a remote tool server gets only those (adapters add nothing else, Codex
+    /// only `--all-tools`). A flag outside them needs the remote CLI checked first, or an older one
+    /// stops the build at its first tool. Of our own variables the remote side gets only
+    /// `CRAFT_ANYTHING_AGENT`, which no release up to 0.5.0 reads (R2.8 keeps that open).
     #[test]
     fn a_remote_tool_server_gets_only_flags_every_release_knows() {
         use craft_anything_engine::{TargetKind, target::TargetContext};
@@ -2575,6 +2577,22 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
                 assert!(mcp.args.iter().all(|a| ["mcp", "--deep", "--clean-room", "--all-tools"].contains(&a.as_str())), "{deep} {builder}: {:?}", mcp.args);
                 assert!(mcp.args.contains(&if deep { "--deep" } else { "--clean-room" }.to_string()), "the run's mode, whatever the remote settings say");
             }
+        }
+        for builder in [false, true] {
+            let ours: Vec<&str> = agent_env(builder, None).iter().map(|(name, _)| *name).filter(|name| name.starts_with("CRAFT_")).collect();
+            assert_eq!(ours, [craft_anything_engine::AGENT_ENV]);
+        }
+    }
+
+    /// Claude Code and Codex hand a remote host's own craft-anything-cli the tool server, so a build
+    /// over SSH asks the host for it first, as one here checks this computer's.
+    #[cfg(unix)]
+    #[test]
+    fn a_remote_builder_checks_the_hosts_tool_server_first() {
+        for agent in ["claude-code", "codex"] {
+            let err = adapter_for(agent).check_remote_tool_server("no-such-host.invalid", &CancelToken::default()).expect_err(agent);
+            assert_eq!(err.code, ErrorCode::EngineMissing, "{agent}: {}", err.message);
+            assert!(err.message.contains("no-such-host.invalid"), "{agent}: {}", err.message);
         }
     }
 
