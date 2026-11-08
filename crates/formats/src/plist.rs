@@ -703,4 +703,27 @@ mod tests {
             assert_eq!(v.get("Message").and_then(Value::as_str), Some("hello"));
         }
     }
+
+    #[test]
+    fn arrays_may_name_one_stored_value_many_times() {
+        // Writers store equal values once: Python's plistlib writes `[0] * 17` as two objects,
+        // an array of 17 references to one integer. Sets share the array branch.
+        for marker in [0xaf_u8, 0xcf] {
+            let mut b = b"bplist00".to_vec();
+            b.extend_from_slice(&[marker, 0x10, 17]);
+            b.extend_from_slice(&[1; 17]);
+            let zero = b.len();
+            b.extend_from_slice(&[0x10, 0x00]);
+            let table = b.len();
+            b.extend_from_slice(&[8, zero as u8]);
+            b.extend_from_slice(&[0, 0, 0, 0, 0, 0, 1, 1]);
+            b.extend_from_slice(&2u64.to_be_bytes());
+            b.extend_from_slice(&0u64.to_be_bytes());
+            b.extend_from_slice(&(table as u64).to_be_bytes());
+            let v = parse(&b).unwrap_or_else(|e| panic!("marker {marker:#04x}: {e}"));
+            let items = v.as_array().unwrap();
+            assert_eq!(items.len(), 17);
+            assert!(items.iter().all(|i| i.as_int() == Some(0)));
+        }
+    }
 }
