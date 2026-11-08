@@ -193,20 +193,26 @@ fn python_package_script(app: &Path, bin: &Path) -> Option<PathBuf> {
     metadata.is_file().then_some(file)
 }
 
-/// Whether `java -jar` can start `jar`: its manifest names a main class. One too big to read while
-/// looking counts as runnable, as a jar that size is usually an application bundled to be run.
+/// Whether `java -jar` can start `jar`: its manifest names a main class. Only the archive's
+/// directory and manifest are read, whatever the jar's size. A ZIP64 jar is read whole up to 64 MB;
+/// a bigger one counts as runnable, as a jar that size is usually an application bundle.
 fn runnable_jar(jar: &Path) -> bool {
+    use craft_anything_formats::{zip, zip_file};
+    const MANIFEST: &str = "META-INF/MANIFEST.MF";
     const READ_CAP: u64 = 64 << 20;
-    let Ok(meta) = std::fs::metadata(jar) else { return false };
-    if meta.len() > READ_CAP {
-        return true;
-    }
-    let Ok(bytes) = std::fs::read(jar) else { return false };
-    let Ok(archive) = craft_anything_formats::zip::parse(&bytes, 500_000) else { return false };
-    let manifest = archive.entries.iter().find(|e| e.name == "META-INF/MANIFEST.MF");
-    manifest
-        .and_then(|e| craft_anything_formats::zip::read_entry(&bytes, e, 1 << 20).ok())
-        .is_some_and(|m| crate::tools::java_tools::parse_manifest(&m).get("Main-Class").is_some_and(|c| !c.is_empty()))
+    let Ok(mut file) = std::fs::File::open(jar) else { return false };
+    let manifest = match zip_file::read_named_entry(&mut file, MANIFEST, 1 << 20) {
+        Err(zip::ZipError::Unsupported(_)) => {
+            if std::fs::metadata(jar).is_ok_and(|m| m.len() > READ_CAP) {
+                return true;
+            }
+            let Ok(bytes) = std::fs::read(jar) else { return false };
+            let Ok(archive) = zip::parse(&bytes, 500_000) else { return false };
+            archive.entries.iter().find(|e| e.name == MANIFEST).and_then(|e| zip::read_entry(&bytes, e, 1 << 20).ok())
+        }
+        other => other.ok().flatten(),
+    };
+    manifest.is_some_and(|m| crate::tools::java_tools::parse_manifest(&m).get("Main-Class").is_some_and(|c| !c.is_empty()))
 }
 
 #[cfg(test)]

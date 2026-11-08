@@ -7,7 +7,7 @@
 use crate::bytes::Reader;
 
 /// Biggest tail we search for the end-of-central-directory record (64 KiB comment + record).
-const EOCD_SEARCH: usize = 22 + 0xffff;
+pub(crate) const EOCD_SEARCH: usize = 22 + 0xffff;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ZipError {
@@ -265,7 +265,7 @@ fn decode_name(bytes: &[u8], flags: u16) -> String {
     bytes.iter().map(|&byte| if byte.is_ascii() { char::from(byte) } else { CP437.get(usize::from(byte - 0x80)).copied().unwrap_or('\u{fffd}') }).collect()
 }
 
-fn find_eocd(data: &[u8]) -> Option<usize> {
+pub(crate) fn find_eocd(data: &[u8]) -> Option<usize> {
     if data.len() < 22 {
         return None;
     }

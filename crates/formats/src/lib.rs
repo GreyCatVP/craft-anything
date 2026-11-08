@@ -66,6 +66,7 @@ pub mod unreal_texture;
 pub mod verify;
 pub mod wasm;
 pub mod zip;
+pub mod zip_file;
 
 // Native executable formats (ELF, PE, Mach-O, DOS) and their shared helpers.
 pub use binary::{Arch, Binary, Export, Format, Import, ImportSlot, Mitigations, Relocation, Section, Segment, Symbol, SymbolKind, parse_binary};
