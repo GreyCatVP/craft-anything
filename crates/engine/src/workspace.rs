@@ -17,7 +17,7 @@
 //! already has their files, they're either the app itself (`app_in_root`: the builder edits them in
 //! place and the folders above sit beside them) or material to start from, with the app in app/.
 
-use crate::inbox::now_ms;
+use crate::inbox::{next_counter, now_ms};
 use crate::project::write_atomic;
 use crate::versioned::{self, upgrade};
 use craft_anything_evidence::{ErrorCode, ToolError};
@@ -78,10 +78,10 @@ fn copy_tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool, depth: usize)
 }
 
 /// The current `craft.json` format version. Bumping it means appending a step to [`MANIFEST_STEPS`].
-pub const MANIFEST_VERSION: u32 = 2;
+pub const MANIFEST_VERSION: u32 = 4;
 
 /// The steps that bring an older `craft.json` forward; step `i` goes from version `i` to `i + 1`.
-const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2];
+const MANIFEST_STEPS: &[versioned::Step<Value>] = &[manifest_v0_to_v1, manifest_v1_to_v2, manifest_v2_to_v3, manifest_v3_to_v4];
 const _: () = assert!(MANIFEST_STEPS.len() == MANIFEST_VERSION as usize, "one step per craft.json version");
 
 /// Version 0 (no `version` field) has the same shape as version 1; only the number is new.
@@ -94,6 +94,25 @@ fn manifest_v0_to_v1(doc: &mut Value) -> Result<(), String> {
 /// look for the app in app/, opens such a project read-only instead of saving over it.
 fn manifest_v1_to_v2(doc: &mut Value) -> Result<(), String> {
     if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
+}
+
+/// Version 3 adds the person's approval choices (`approvals`), none by default. The number is new
+/// so an older build, which would drop them when it saves (a refused kind would then follow Auto
+/// mode again), opens such a project read-only instead.
+fn manifest_v2_to_v3(doc: &mut Value) -> Result<(), String> {
+    if doc.is_object() { Ok(()) } else { Err("the manifest isn't a JSON object".into()) }
+}
+
+/// Version 4 adds the mode a saved builder session ran in (`agent_session_deep`). A version-3
+/// manifest predates the field; a session it saved is the legacy case this build treats as Deep,
+/// so the step fills `true` for it. A mode an early build of this change already wrote is kept.
+fn manifest_v3_to_v4(doc: &mut Value) -> Result<(), String> {
+    let obj = doc.as_object_mut().ok_or("the manifest isn't a JSON object")?;
+    let has_session = obj.get("agent_session").and_then(Value::as_str).is_some_and(|s| !s.is_empty());
+    if has_session && !obj.contains_key("agent_session_deep") {
+        obj.insert("agent_session_deep".into(), Value::Bool(true));
+    }
+    Ok(())
 }
 
 /// Read a `craft.json` document of any version this build understands. A newer manifest is read
@@ -336,6 +355,7 @@ struct CheckRecord {
 }
 
 impl From<CheckRecord> for CheckResult {
+    /// Turn a stored check record into the result the manifest keeps.
     fn from(r: CheckRecord) -> CheckResult {
         let compared = r.similarity.is_some();
         CheckResult {
@@ -384,6 +404,10 @@ pub struct Manifest {
     /// this was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_by: Option<String>,
+    /// The mode `agent_session` was saved in (`true`: Deep); none: saved before the mode was
+    /// kept, so it is only resumed in Deep (it may have read the original there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_deep: Option<bool>,
     /// Kinds of agent action the person allowed for this workspace ("bash:npm", "web_fetch"…).
     #[serde(default)]
     pub allowed_actions: Vec<String>,
@@ -413,6 +437,11 @@ pub struct Manifest {
     /// (`Settings::questions`). The person's, like the budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub questions: Option<Questions>,
+    /// What the builder's approvals get in this project, by kind of action; a kind that isn't here
+    /// follows Auto mode ([`ActionKind::default_in`]). The person's, like the budget.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    #[schemars(schema_with = "approvals_schema")]
+    pub approvals: std::collections::BTreeMap<ActionKind, Approval>,
     /// The builder finished its turn and the run's checks haven't reported on it yet, so a run
     /// that picks this up only needs to check: nothing is left to build.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -434,6 +463,7 @@ impl Manifest {
         self.app_in_root && self.target == TargetRef::None
     }
 
+    /// The manifest for a new project, at the current format version.
     fn new(name: &str, request: &str, target: TargetRef) -> Manifest {
         let now = now_ms();
         Manifest {
@@ -449,6 +479,7 @@ impl Manifest {
             checks: Vec::new(),
             agent_session: None,
             agent_session_by: None,
+            agent_session_deep: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
             asset_budget_usd: ASSET_BUDGET_USD,
@@ -457,6 +488,7 @@ impl Manifest {
             start_files: Vec::new(),
             builder: None,
             questions: None,
+            approvals: Default::default(),
             awaiting_check: false,
             not_working_checks: 0,
         }
@@ -468,6 +500,12 @@ impl Manifest {
         self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
     }
 
+    /// The session `agent` saved in this mode. One saved before the mode was kept counts as
+    /// Deep: resuming it in Clean room could carry what it read there.
+    pub fn agent_session_for_mode(&self, agent: &str, deep: bool) -> Option<&str> {
+        self.agent_session_for(agent).filter(|_| self.agent_session_deep.unwrap_or(true) == deep)
+    }
+
     /// Take the fields the person owns from `other` (what's on disk).
     fn take_person_fields(&mut self, other: &Manifest) {
         self.asset_budget_usd = other.asset_budget_usd;
@@ -475,6 +513,7 @@ impl Manifest {
         self.allowed_actions = other.allowed_actions.clone();
         self.builder.clone_from(&other.builder);
         self.questions = other.questions;
+        self.approvals.clone_from(&other.approvals);
         self.name.clone_from(&other.name);
     }
 }
@@ -668,14 +707,15 @@ impl Workspace {
         // Ready stays ready; anything else can carry on (with a new conversation).
         copy.manifest.status = if m.status == Status::Ready { Status::Ready } else { Status::Stopped };
         copy.save()?;
-        let (budget, generate, builder, allowed, questions) =
-            (m.asset_budget_usd, m.generate_assets, m.builder.clone(), m.allowed_actions.clone(), m.questions);
+        let (budget, generate, builder, allowed, questions, approvals) =
+            (m.asset_budget_usd, m.generate_assets, m.builder.clone(), m.allowed_actions.clone(), m.questions, m.approvals.clone());
         copy.set_person(|c| {
             c.asset_budget_usd = budget;
             c.generate_assets = generate;
             c.builder = builder;
             c.allowed_actions = allowed;
             c.questions = questions;
+            c.approvals = approvals;
         })?;
         Ok(copy)
     }
@@ -1028,6 +1068,137 @@ pub enum Questions {
     Decide,
 }
 
+/// A kind of builder action that asks for approval, which a project can decide about ahead of time
+/// (`Manifest::approvals`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionKind {
+    /// Reading websites and searching the web.
+    Web,
+    /// Commands outside the usual build commands.
+    Commands,
+    /// Changing files outside the project.
+    OutsideFiles,
+    /// Pushing to a git server or publishing anywhere (`git push`, `npm publish`, `gh pr create`…).
+    Publish,
+    /// Deleting anything outside the project or the temp folder.
+    DeleteOutside,
+    /// Changing the system, its settings or users, system files, or Craft Anything's own records.
+    System,
+    /// Tools with no rule of their own.
+    OtherTools,
+}
+
+/// What an action of one [`ActionKind`] gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Approval {
+    /// Done without asking.
+    Allow,
+    /// A card for the person, and the builder waits for the answer.
+    Ask,
+    /// Not done, without asking: the builder is told to find another way.
+    Refuse,
+}
+
+/// `Manifest::approvals` in the published schema: only the kinds' names as keys, which a map's
+/// own schema leaves open.
+fn approvals_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let names: Vec<&str> = ACTION_KINDS.iter().map(|r| r.name).collect();
+    schemars::json_schema!({
+        "type": "object",
+        "propertyNames": { "enum": names },
+        "additionalProperties": generator.subschema_for::<Approval>(),
+    })
+}
+
+/// One row of [`ACTION_KINDS`].
+#[derive(Debug, Clone, Copy)]
+pub struct KindRow {
+    pub kind: ActionKind,
+    /// Its name in tools and slash commands.
+    pub name: &'static str,
+    /// What it covers, as the builder is told when it's refused ("pushing or publishing anything").
+    pub what: &'static str,
+    /// What it gets when the project hasn't chosen, with Auto mode on and off.
+    pub auto: Approval,
+    pub manual: Approval,
+}
+
+/// Every kind. Auto mode lets through what can be undone and refuses the rest; without it,
+/// everything but reading the web asks.
+pub const ACTION_KINDS: &[KindRow] = &[
+    KindRow { kind: ActionKind::Web, name: "web", what: "reading the web", auto: Approval::Allow, manual: Approval::Allow },
+    KindRow { kind: ActionKind::Commands, name: "commands", what: "commands outside the usual build commands", auto: Approval::Allow, manual: Approval::Ask },
+    KindRow { kind: ActionKind::OutsideFiles, name: "outside_files", what: "changing files outside the project", auto: Approval::Allow, manual: Approval::Ask },
+    KindRow { kind: ActionKind::Publish, name: "publish", what: "pushing or publishing anything", auto: Approval::Refuse, manual: Approval::Ask },
+    KindRow {
+        kind: ActionKind::DeleteOutside,
+        name: "delete_outside",
+        what: "deleting anything outside the project or the temp folder",
+        auto: Approval::Refuse,
+        manual: Approval::Ask,
+    },
+    KindRow {
+        kind: ActionKind::System,
+        name: "system",
+        what: "changing the system, its settings or users, system files, or Craft Anything's own records",
+        auto: Approval::Refuse,
+        manual: Approval::Ask,
+    },
+    KindRow {
+        kind: ActionKind::OtherTools,
+        name: "other_tools",
+        what: "tools with no approval rule of their own",
+        auto: Approval::Refuse,
+        manual: Approval::Ask,
+    },
+];
+
+impl ActionKind {
+    fn row(self) -> Option<&'static KindRow> {
+        ACTION_KINDS.iter().find(|r| r.kind == self)
+    }
+
+    /// Its name in tools and slash commands (`publish`).
+    pub fn name(self) -> &'static str {
+        self.row().map_or("", |r| r.name)
+    }
+
+    /// What it covers, in words for the builder.
+    pub fn what(self) -> &'static str {
+        self.row().map_or("", |r| r.what)
+    }
+
+    /// The kind named `name`, in any case.
+    pub fn named(name: &str) -> Option<ActionKind> {
+        ACTION_KINDS.iter().find(|r| r.name.eq_ignore_ascii_case(name)).map(|r| r.kind)
+    }
+
+    /// What it gets when the project hasn't chosen.
+    pub fn default_in(self, auto_mode: bool) -> Approval {
+        self.row().map_or(Approval::Ask, |r| if auto_mode { r.auto } else { r.manual })
+    }
+}
+
+impl Approval {
+    /// How much it holds back: allow, then ask, then refuse.
+    pub fn strictness(self) -> u8 {
+        match self {
+            Approval::Allow => 0,
+            Approval::Ask => 1,
+            Approval::Refuse => 2,
+        }
+    }
+}
+
+impl Manifest {
+    /// What an action of `kind` gets in this project.
+    pub fn approval(&self, kind: ActionKind, auto_mode: bool) -> Approval {
+        self.approvals.get(&kind).copied().unwrap_or_else(|| kind.default_in(auto_mode))
+    }
+}
+
 /// What the files already in a picked folder are to a new project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1147,7 +1318,7 @@ pub fn pasted_dir() -> PathBuf {
     dirs::cache_dir().or_else(|| dirs::home_dir().map(|h| h.join(".cache"))).unwrap_or_else(std::env::temp_dir).join("Craft Anything").join("pasted")
 }
 
-/// Save a picture pasted from the clipboard (8-bit RGBA, `width`×`height`) as `pasted-<time>.png`
+/// Save a picture pasted from the clipboard (8-bit RGBA, `width`×`height`) as `pasted-<time>-<n>.png`
 /// in `dir`, readable only by this person, where it waits until its message is sent (which
 /// copies it into the project). Pastes from earlier days are cleared out first, except those in
 /// `keep` (still attached to a draft or a message).
@@ -1173,11 +1344,13 @@ pub fn save_pasted_picture(dir: &Path, width: u32, height: u32, rgba: Vec<u8>, k
         let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
     }
     forget_old_pastes(dir, keep);
-    // The name is taken with create_new, so two pastes (or two copies of the app) never share one.
+    // The counter makes the name unique within this process, so a paste never reuses a name that
+    // forget_old_pastes just freed in the same millisecond; create_new still guards two app copies.
     let ms = now_ms();
+    let c = next_counter();
     let mut n = 1u32;
     let path = loop {
-        let path = if n == 1 { dir.join(format!("pasted-{ms}.png")) } else { dir.join(format!("pasted-{ms}-{n}.png")) };
+        let path = if n == 1 { dir.join(format!("pasted-{ms}-{c}.png")) } else { dir.join(format!("pasted-{ms}-{c}-{n}.png")) };
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(_) => break path,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 1000 => n = n.saturating_add(1),
@@ -1421,6 +1594,7 @@ mod tests {
         assert!(!copy.join("managed/obj").exists());
     }
 
+    /// Older check records are judged by the fields they have.
     #[test]
     fn checks_from_older_projects_are_judged_as_they_were() {
         let old = |json: &str| serde_json::from_str::<CheckResult>(json).unwrap();
@@ -1456,12 +1630,15 @@ mod tests {
   "last_reply": "Done."
 }"#;
 
+    /// A version-0 manifest opens as current, with its legacy session counting as Deep.
     #[test]
     fn manifests_from_before_versions_open_and_are_saved_as_current() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(MANIFEST), MANIFEST_V0).unwrap();
         let ws = Workspace::open(dir.path()).unwrap();
         assert_eq!(ws.manifest.version, MANIFEST_VERSION);
+        assert_eq!(ws.manifest.agent_session_deep, Some(true), "a session from before the mode was kept counts as Deep");
+        assert_eq!(ws.manifest.agent_session_for_mode("claude-code", false), None);
         assert_eq!(ws.manifest.status, Status::Ready);
         assert_eq!(ws.manifest.asset_budget_usd, ASSET_BUDGET_USD);
         assert!(!ws.manifest.generate_assets, "assets are generated only once the person turns it on");
@@ -1470,6 +1647,42 @@ mod tests {
         let saved: Value = serde_json::from_slice(&std::fs::read(dir.path().join(MANIFEST)).unwrap()).unwrap();
         assert_eq!(saved["version"], MANIFEST_VERSION);
         assert_eq!(Workspace::open(dir.path()).unwrap().manifest, ws.manifest);
+    }
+
+    /// Approval choices survive an old manifest, a stale save and a copy.
+    #[test]
+    fn approval_choices_survive_an_old_manifest_a_stale_save_and_a_copy() {
+        // A version-2 craft.json (before approvals) opens with none chosen and is saved as current.
+        let dir = tempfile::tempdir().unwrap();
+        let v2 = MANIFEST_V0.replacen('{', r#"{ "version": 2,"#, 1);
+        std::fs::write(dir.path().join(MANIFEST), &v2).unwrap();
+        let mut run = Workspace::open(dir.path()).unwrap();
+        assert_eq!((run.manifest.version, run.manifest.approvals.is_empty(), run.is_read_only()), (MANIFEST_VERSION, true, false));
+        run.save().unwrap();
+        let saved: Value = serde_json::from_slice(&std::fs::read(dir.path().join(MANIFEST)).unwrap()).unwrap();
+        assert_eq!(saved["version"], MANIFEST_VERSION);
+        assert!(saved.get("approvals").is_none(), "nothing chosen, nothing written");
+        // The person chooses while a run holds an older copy; the run's save keeps the choice.
+        Workspace::open(dir.path())
+            .unwrap()
+            .set_person(|m| {
+                m.approvals.insert(ActionKind::Publish, Approval::Ask);
+                m.approvals.insert(ActionKind::Commands, Approval::Refuse);
+            })
+            .unwrap();
+        run.manifest.note = "Building".into();
+        run.save().unwrap();
+        let disk = Workspace::open(dir.path()).unwrap().manifest;
+        assert_eq!(disk.approvals.get(&ActionKind::Publish), Some(&Approval::Ask));
+        assert_eq!(disk.approval(ActionKind::Commands, true), Approval::Refuse);
+        let saved: Value = serde_json::from_slice(&std::fs::read(dir.path().join(MANIFEST)).unwrap()).unwrap();
+        assert_eq!(saved["approvals"], serde_json::json!({"commands": "refuse", "publish": "ask"}));
+        // A copy keeps them.
+        let copy = Workspace::open(dir.path()).unwrap().duplicate("Example copy").unwrap();
+        assert_eq!(Workspace::open(&copy.root).unwrap().manifest.approvals, disk.approvals);
+        // An unknown kind isn't read as something else.
+        let unknown = MANIFEST_V0.replacen('{', r#"{ "version": 3, "approvals": {"everything": "allow"},"#, 1);
+        assert!(read_manifest(unknown.as_bytes()).is_err());
     }
 
     #[test]
@@ -1630,6 +1843,7 @@ mod tests {
         assert!(saved.get("app_in_root").is_none() && saved.get("start_files").is_none(), "a usual project's craft.json is unchanged");
     }
 
+    /// A project's own records are recognized even when the app is the folder.
     #[test]
     fn craft_anythings_records_are_its_own_even_when_the_app_is_the_folder() {
         let d = tempfile::tempdir().unwrap();
@@ -1646,6 +1860,31 @@ mod tests {
         }
     }
 
+    /// R2.9: version 3 predates the saved session's mode; a session is migrated as Deep, while a
+    /// mode an early build of the change already wrote is kept.
+    #[test]
+    fn a_version_3_session_is_migrated_as_deep_without_overwriting_a_recorded_mode() {
+        let v3 = MANIFEST_V0.replacen('{', r#"{ "version": 3,"#, 1);
+        assert_session_migrated(&v3, Some(true));
+        let recorded = v3.replace(r#""agent_session": "abc","#, r#""agent_session": "abc", "agent_session_deep": false,"#);
+        assert_session_migrated(&recorded, Some(false));
+    }
+
+    /// Read a literal `craft.json` sample, check both modes and the saved document.
+    fn assert_session_migrated(doc: &str, want: Option<bool>) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(MANIFEST), doc).unwrap();
+        let ws = Workspace::open(dir.path()).unwrap();
+        assert_eq!((ws.manifest.version, ws.manifest.agent_session_deep), (MANIFEST_VERSION, want));
+        let deep = ws.manifest.agent_session_for_mode("claude-code", true);
+        let clean = ws.manifest.agent_session_for_mode("claude-code", false);
+        assert_eq!((deep, clean), if want == Some(false) { (None, Some("abc")) } else { (Some("abc"), None) });
+        ws.save().unwrap();
+        let saved: Value = serde_json::from_slice(&std::fs::read(dir.path().join(MANIFEST)).unwrap()).unwrap();
+        assert_eq!(saved["version"], MANIFEST_VERSION);
+        assert_eq!(saved["agent_session_deep"], want == Some(true));
+    }
+
     /// #469: a saved session is only for the agent that saved it.
     #[test]
     fn a_session_is_only_for_the_agent_that_saved_it() {
@@ -1656,8 +1895,17 @@ mod tests {
         m.agent_session_by = Some("claude-code".into());
         assert_eq!(m.agent_session_for("claude-code"), Some("s1"));
         assert_eq!(m.agent_session_for("codex"), None);
+        assert_eq!(m.agent_session_for_mode("claude-code", true), Some("s1"), "one saved before the mode was kept counts as Deep");
+        assert_eq!(m.agent_session_for_mode("claude-code", false), None, "Deep may have read the original, so Clean room starts fresh");
+        m.agent_session_deep = Some(false);
+        assert_eq!(m.agent_session_for_mode("claude-code", false), Some("s1"));
+        assert_eq!(m.agent_session_for_mode("claude-code", true), None);
+        m.agent_session_deep = Some(true);
+        assert_eq!(m.agent_session_for_mode("claude-code", true), Some("s1"));
+        m.agent_session_deep = None;
         let text = serde_json::to_string(&m).unwrap();
-        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap().agent_session_by.as_deref(), Some("claude-code"));
+        let back: Manifest = serde_json::from_str(&text).unwrap();
+        assert_eq!((back.agent_session_by.as_deref(), back.agent_session_deep), (Some("claude-code"), None));
     }
 
     /// A rename survives a stale save, a copy takes the build but not the conversation (nor its

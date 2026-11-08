@@ -779,20 +779,48 @@ fn text_value(slice: &[u8]) -> CellValue {
     encoded_text_value(slice, "utf-8")
 }
 
+/// Decode a TEXT value, cutting at [`MAX_TEXT`] bytes. A truncated value ends at a character
+/// boundary, so its shown prefix never gains a replacement character it didn't have; the flag
+/// still says the value was cut.
 fn encoded_text_value(slice: &[u8], encoding: &str) -> CellValue {
     let truncated = slice.len() > MAX_TEXT;
-    let take = slice.get(..MAX_TEXT.min(slice.len())).unwrap_or(slice);
+    let cut = MAX_TEXT.min(slice.len());
     let text = match encoding {
         "utf-16le" | "utf-16be" => {
+            let mut bytes = cut;
+            if truncated && !bytes.is_multiple_of(2) {
+                bytes -= 1; // a cut inside a code unit drops the half unit
+            }
+            let take = slice.get(..bytes).unwrap_or_default();
             let (pairs, _) = take.as_chunks::<2>();
-            let units: Vec<u16> = pairs.iter().map(|&pair| if encoding == "utf-16le" { u16::from_le_bytes(pair) } else { u16::from_be_bytes(pair) }).collect();
+            let mut units: Vec<u16> =
+                pairs.iter().map(|&pair| if encoding == "utf-16le" { u16::from_le_bytes(pair) } else { u16::from_be_bytes(pair) }).collect();
+            // A cut inside a surrogate pair leaves the high half alone: drop it rather than
+            // render a replacement character that wasn't in the value.
+            if truncated && units.last().is_some_and(|u| (0xD800..=0xDBFF).contains(u)) {
+                units.pop();
+            }
             let mut text = String::from_utf16_lossy(&units);
-            if !take.len().is_multiple_of(2) {
+            if !truncated && !bytes.is_multiple_of(2) {
                 text.push(char::REPLACEMENT_CHARACTER);
             }
             text
         }
-        _ => String::from_utf8_lossy(take).into_owned(),
+        _ => {
+            let take = slice.get(..cut).unwrap_or_default();
+            // A cut can land inside a character: `from_utf8` reports an incomplete trailing
+            // sequence (not an invalid byte), and its `valid_up_to` is the boundary to keep.
+            // Genuinely invalid bytes keep the lossy prefix they had before.
+            let end = if truncated {
+                match std::str::from_utf8(take) {
+                    Err(e) if e.error_len().is_none() => e.valid_up_to(),
+                    _ => cut,
+                }
+            } else {
+                cut
+            };
+            String::from_utf8_lossy(slice.get(..end).unwrap_or_default()).into_owned()
+        }
     };
     CellValue::Text { text, truncated }
 }
@@ -885,8 +913,8 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
             continue;
         }
         // Skip table-level constraints.
-        let first_word = seg.split([' ', '\t', '\n', '(']).next().unwrap_or("").to_ascii_uppercase();
-        if matches!(first_word.as_str(), "CONSTRAINT" | "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN" | "KEY") {
+        let first_word = seg.split(|c: char| c.is_whitespace() || c == '(').next().unwrap_or("").to_ascii_uppercase();
+        if matches!(first_word.as_str(), "CONSTRAINT" | "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN") {
             continue;
         }
         let (name, rest) = take_identifier(seg);
@@ -1169,6 +1197,77 @@ fn extract_type(rest: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A TEXT value cut inside a character drops the incomplete character, not a U+FFFD that
+    /// wasn't in the database.
+    #[test]
+    fn a_truncated_text_value_ends_at_a_character_boundary() {
+        let mut bytes = vec![b'a'; MAX_TEXT - 1];
+        bytes.extend_from_slice("é".as_bytes());
+        bytes.extend_from_slice(b"tail");
+        let CellValue::Text { text, truncated } = encoded_text_value(&bytes, "utf-8") else {
+            panic!("a TEXT value");
+        };
+        assert!(truncated);
+        assert_eq!(text, "a".repeat(MAX_TEXT - 1));
+        assert!(!text.contains(char::REPLACEMENT_CHARACTER));
+    }
+
+    /// The UTF-16 branch drops a split surrogate pair the same way.
+    #[test]
+    fn a_truncated_utf16_text_value_drops_a_split_surrogate() {
+        let mut bytes = Vec::new();
+        for _ in 0..(MAX_TEXT / 2 - 1) {
+            bytes.extend_from_slice(&0x0061u16.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0xD83Du16.to_le_bytes());
+        bytes.extend_from_slice(&0xDE00u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0062u16.to_le_bytes());
+        let CellValue::Text { text, truncated } = encoded_text_value(&bytes, "utf-16le") else {
+            panic!("a TEXT value");
+        };
+        assert!(truncated);
+        assert_eq!(text, "a".repeat(MAX_TEXT / 2 - 1));
+        assert!(!text.contains(char::REPLACEMENT_CHARACTER));
+    }
+
+    /// Invalid bytes before the cut keep their lossy prefix; only an incomplete trailing character
+    /// is dropped.
+    #[test]
+    fn an_invalid_utf8_prefix_is_not_over_trimmed() {
+        let bytes = vec![0x80; MAX_TEXT + 1];
+        let CellValue::Text { text, truncated } = encoded_text_value(&bytes, "utf-8") else {
+            panic!("a TEXT value");
+        };
+        assert!(truncated);
+        assert_eq!(text.chars().count(), MAX_TEXT);
+        assert!(text.chars().all(|c| c == char::REPLACEMENT_CHARACTER));
+    }
+
+    /// A UTF-16 cut is not a UTF-8 cut: a byte in the continuation range after the cut must not
+    /// shorten the take.
+    #[test]
+    fn a_utf16_cut_is_not_walked_back_as_utf8() {
+        let mut bytes = Vec::new();
+        for _ in 0..(MAX_TEXT / 2 - 1) {
+            bytes.extend_from_slice(&0x0061u16.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0x80E9u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0080u16.to_le_bytes());
+        let CellValue::Text { text, truncated } = encoded_text_value(&bytes, "utf-16le") else {
+            panic!("a TEXT value");
+        };
+        assert!(truncated);
+        assert_eq!(text.chars().count(), MAX_TEXT / 2);
+        assert_eq!(text.chars().last(), Some('\u{80E9}'));
+    }
+
+    #[test]
+    fn create_table_column_named_key_is_kept() {
+        let names = |sql: &str| parse_create_columns(sql).into_iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names("CREATE TABLE kv (key TEXT, value TEXT)"), ["key", "value"]);
+        assert_eq!(names("CREATE TABLE kv (key TEXT, value TEXT, PRIMARY KEY(key))"), ["key", "value"]);
+    }
+
     fn payload_cap_case(case: u8) {
         use craft_anything_testkit::sqlite::{Val, overflow_row_db};
         use sha2::Digest as _;
@@ -1383,6 +1482,15 @@ mod tests {
         assert_eq!(cols[0].type_name, "VARCHAR(50)");
         assert_eq!(cols[1].name, "odd");
         assert_eq!(cols[1].type_name, "NUMERIC");
+    }
+
+    #[test]
+    fn column_parsing_crlf_constraints() {
+        for kw in ["UNIQUE", "CHECK", "PRIMARY", "FOREIGN", "CONSTRAINT"] {
+            let sql = format!("CREATE TABLE t (a INT,\r\n {kw}\r\n (a))");
+            let names: Vec<String> = parse_create_columns(&sql).into_iter().map(|c| c.name).collect();
+            assert_eq!(names, vec!["a".to_string()], "{kw}");
+        }
     }
 
     #[test]

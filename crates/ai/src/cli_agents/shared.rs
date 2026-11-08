@@ -44,7 +44,7 @@ impl SharedConversation {
                                     Ok(mut spec) => {
                                         let next = json!({"project": spec.project, "targets": spec.targets, "deep": spec.deep, "options": spec.options});
                                         if context.as_ref() != Some(&next) {
-                                            if context.as_ref().and_then(|context| context.get("project")) == next.get("project") {
+                                            if continues(context.as_ref(), &next) {
                                                 spec.resume = conversation.as_ref().and_then(|conversation| conversation.session_id());
                                             }
                                             conversation = Some(super::conversation(spec));
@@ -124,6 +124,14 @@ impl SharedConversation {
     }
 }
 
+/// Whether a chat prepared as `next` continues the one prepared as `previous`: the same project,
+/// and not a Clean room chat after a Deep one, which would carry what Deep mode read.
+fn continues(previous: Option<&Value>, next: &Value) -> bool {
+    let Some(previous) = previous else { return false };
+    let deep = |context: &Value| context.get("deep").and_then(Value::as_bool) != Some(false);
+    previous.get("project") == next.get("project") && (deep(next) || !deep(previous))
+}
+
 fn prepare(engine: &Engine, entry: &BackendEntry, beginner: bool) -> Result<CliSpec, ToolError> {
     let mut session = engine.session();
     let config = crate::AiConfig::from_settings(&session.settings);
@@ -186,6 +194,18 @@ mod tests {
     use super::*;
     use crate::{BackendConfig, BackendKind};
     use craft_anything_engine::target::Target;
+
+    #[test]
+    fn a_clean_room_chat_does_not_continue_a_deep_one() {
+        let context = |project: &str, deep: bool| json!({"project": project, "targets": [], "deep": deep, "options": {}});
+        assert!(!continues(None, &context("p", false)), "nothing to continue");
+        assert!(!continues(Some(&context("p", true)), &context("p", false)), "Deep, then Clean room");
+        assert!(!continues(Some(&json!({"project": "p"})), &context("p", false)), "a context without a mode counts as Deep");
+        assert!(!continues(Some(&context("p", false)), &context("q", false)), "another project");
+        for (before, after) in [(false, false), (false, true), (true, true)] {
+            assert!(continues(Some(&context("p", before)), &context("p", after)), "{before} then {after}");
+        }
+    }
 
     #[test]
     fn preparation_shares_the_project_and_keeps_the_active_target_last() {

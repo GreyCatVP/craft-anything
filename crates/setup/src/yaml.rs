@@ -188,35 +188,66 @@ fn child_indent(lines: &[&str], block: &Block) -> usize {
     lines.iter().take(block.end).skip(block.header + 1).find(|l| !is_blank_or_comment(l)).map(|l| indent_of(l)).unwrap_or(2)
 }
 
-fn join(lines: &[String], had_trailing_newline: bool) -> String {
-    let mut s = lines.join("\n");
-    if had_trailing_newline || !s.is_empty() {
-        s.push('\n');
+/// One line of the file and the line ending it came with (`"\r\n"` or `"\n"`).
+type Line = (String, &'static str);
+
+/// Split into lines, remembering each line's own ending, so lines we don't touch come back
+/// byte for byte. The last line always gets an ending (as before), the file's usual one.
+/// Returns the lines and the ending to use for lines we add: CRLF when most lines have it.
+fn split(text: &str) -> (Vec<Line>, &'static str) {
+    let mut lines: Vec<Line> = Vec::new();
+    let (mut crlf, mut lf) = (0usize, 0usize);
+    for seg in text.split_inclusive('\n') {
+        if let Some(c) = seg.strip_suffix("\r\n") {
+            crlf += 1;
+            lines.push((c.to_string(), "\r\n"));
+        } else if let Some(c) = seg.strip_suffix('\n') {
+            lf += 1;
+            lines.push((c.to_string(), "\n"));
+        } else if let Some(c) = seg.strip_suffix('\r') {
+            // A last CRLF line cut off after its CR: it gets its LF back, not a second ending.
+            crlf += 1;
+            lines.push((c.to_string(), "\r\n"));
+        } else {
+            lines.push((seg.to_string(), ""));
+        }
     }
-    s
+    let eol = if crlf > lf { "\r\n" } else { "\n" };
+    if let Some(last) = lines.last_mut()
+        && last.1.is_empty()
+    {
+        last.1 = eol;
+    }
+    (lines, eol)
+}
+
+fn join(lines: &[Line]) -> String {
+    lines.iter().flat_map(|(t, eol)| [t.as_str(), eol]).collect()
 }
 
 /// Set `table.name` to `value` (a mapping). Returns the new text.
 pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String, String> {
     parse(text)?;
-    let trailing = text.ends_with('\n');
-    let lines: Vec<&str> = text.lines().collect();
-    let mut out: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-    match find_table(&lines, table)? {
+    let (mut out, eol) = split(text);
+    let lines: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
+    let new_lines = |rendered: String| -> Vec<Line> { rendered.lines().map(|l| (l.to_string(), eol)).collect() };
+    let found = find_table(&lines, table)?;
+    match found {
         None => {
-            out.push(format!("{table}:"));
-            out.extend(render_entry(name, value, 2).lines().map(str::to_string));
+            out.push((format!("{table}:"), eol));
+            out.extend(new_lines(render_entry(name, value, 2)));
         }
         Some(block) => {
+            let indent = child_indent(&lines, &block);
+            let rendered = new_lines(render_entry(name, value, indent));
+            let child = find_child(&lines, &block, name);
             if block.end == block.header + 1
                 && let Some(h) = out.get_mut(block.header)
-                && key_line(h, table).is_some_and(|r| r.trim().starts_with("{}"))
+                && key_line(&h.0, table).is_some_and(|r| r.trim().starts_with("{}"))
             {
-                *h = format!("{table}:");
+                h.0 = format!("{table}:");
             }
-            let indent = child_indent(&lines, &block);
-            let rendered: Vec<String> = render_entry(name, value, indent).lines().map(str::to_string).collect();
-            match find_child(&lines, &block, name) {
+            match child {
                 Some((s, e)) => {
                     out.splice(s..e, rendered);
                 }
@@ -227,19 +258,19 @@ pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String,
             }
         }
     }
-    let new = join(&out, trailing);
+    let new = join(&out);
     parse(&new).map_err(|e| format!("the edited file would not parse: {e}"))?;
     Ok(new)
 }
 
 /// Remove `table.name`. Returns `None` when it was not there.
 pub fn remove(text: &str, table: &str, name: &str) -> Option<String> {
-    let lines: Vec<&str> = text.lines().collect();
+    let (mut out, _) = split(text);
+    let lines: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
     let block = find_table(&lines, table).ok()??;
     let (s, e) = find_child(&lines, &block, name)?;
-    let mut out: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
     out.drain(s..e);
-    let new = join(&out, text.ends_with('\n'));
+    let new = join(&out);
     parse(&new).ok()?;
     Some(new)
 }
@@ -281,5 +312,46 @@ mod tests {
         assert!(set("mcp_servers: {a: 1}\n", "mcp_servers", "craft-anything", &e).is_err());
         assert!(set("a: [", "mcp_servers", "x", &e).is_err());
         assert!(parse("- 1\n").is_err());
+    }
+
+    fn crlf(s: &str) -> String {
+        s.replace('\n', "\r\n")
+    }
+
+    #[test]
+    fn a_crlf_file_stays_crlf_and_unrelated_lines_are_byte_identical() {
+        let entry = json!({"command": "/opt/craft-anything-cli", "args": ["mcp"], "enabled": true});
+        let text = crlf(FIXTURE);
+        let new = set(&text, "mcp_servers", "craft-anything", &entry).unwrap();
+        // No bare LF anywhere: every line ends CRLF, ours included.
+        assert_eq!(new.matches('\n').count(), new.matches("\r\n").count(), "{new:?}");
+        // Without our block the file is exactly what it was.
+        assert_eq!(remove(&new, "mcp_servers", "craft-anything").unwrap(), text);
+        // Every original line is still there, unchanged.
+        for l in text.split_inclusive('\n') {
+            assert!(new.contains(l), "{l:?} lost in {new:?}");
+        }
+        assert_eq!(parse(&new).unwrap()["mcp_servers"]["craft-anything"], entry);
+        // A second run changes nothing.
+        assert_eq!(set(&new, "mcp_servers", "craft-anything", &entry).unwrap(), new);
+        // A new table in a CRLF file, and a file with no final newline.
+        let added = set("a: 1\r\nb: 2", "mcp_servers", "craft-anything", &entry).unwrap();
+        assert_eq!(added.matches('\n').count(), added.matches("\r\n").count(), "{added:?}");
+        assert!(added.starts_with("a: 1\r\nb: 2\r\nmcp_servers:\r\n"), "{added:?}");
+        // A last line cut off after its CR gets its LF back, not "\r\r\n".
+        let cut = set("a: 1\r\nb: 2\r", "mcp_servers", "craft-anything", &entry).unwrap();
+        assert!(cut.starts_with("a: 1\r\nb: 2\r\nmcp_servers:\r\n"), "{cut:?}");
+        assert!(!cut.contains("\r\r"), "{cut:?}");
+    }
+
+    #[test]
+    fn an_lf_file_stays_lf_and_mixed_endings_are_kept_per_line() {
+        let entry = json!({"command": "c", "args": ["mcp"], "enabled": true});
+        let new = set(FIXTURE, "mcp_servers", "craft-anything", &entry).unwrap();
+        assert!(!new.contains('\r'), "{new:?}");
+        let mixed = "# top\r\nmodel: big\nmcp_servers:\r\n  other:\n    command: x\r\n";
+        let new = set(mixed, "mcp_servers", "craft-anything", &entry).unwrap();
+        assert!(new.starts_with("# top\r\nmodel: big\nmcp_servers:\r\n  other:\n    command: x\r\n  craft-anything:"), "{new:?}");
+        assert_eq!(remove(&new, "mcp_servers", "craft-anything").unwrap(), mixed);
     }
 }

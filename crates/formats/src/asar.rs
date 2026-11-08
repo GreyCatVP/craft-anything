@@ -108,7 +108,7 @@ fn walk(files: &Value, prefix: &str, depth: usize, max: usize, out: &mut AsarArc
         return;
     }
     for (name, node) in map {
-        if out.entries.len() >= max {
+        if out.entries.len() + out.rejected_names.len() >= max {
             out.truncated = true;
             return;
         }
@@ -222,6 +222,16 @@ pub fn build(files: &[(&str, &[u8])]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_names_consume_the_listing_budget() {
+        let files = serde_json::json!({"../a": {}, "../b": {}, "ok": {"size": 0, "offset": "0"}});
+        let mut archive = AsarArchive::default();
+        walk(&files, "", 0, 1, &mut archive);
+        assert_eq!(archive.rejected_names.len(), 1);
+        assert!(archive.entries.is_empty());
+        assert!(archive.truncated);
+    }
 
     #[test]
     fn round_trip() {

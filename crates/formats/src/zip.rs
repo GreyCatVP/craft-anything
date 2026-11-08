@@ -7,7 +7,7 @@
 use crate::bytes::Reader;
 
 /// Biggest tail we search for the end-of-central-directory record (64 KiB comment + record).
-const EOCD_SEARCH: usize = 22 + 0xffff;
+pub(crate) const EOCD_SEARCH: usize = 22 + 0xffff;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ZipError {
@@ -96,31 +96,61 @@ pub fn looks_like_zip(data: &[u8]) -> bool {
 pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
     let r = Reader::new(data);
     let eocd = find_eocd(data).ok_or(ZipError::NotZip)?;
+    let mut disk = u32::from(r.u16_le(eocd + 4).ok_or(ZipError::Truncated("end record"))?);
+    let mut directory_disk = u32::from(r.u16_le(eocd + 6).ok_or(ZipError::Truncated("end record"))?);
+    let mut disk_entries = u64::from(r.u16_le(eocd + 8).ok_or(ZipError::Truncated("end record"))?);
+    if !matches!(disk, 0 | 0xffff) || !matches!(directory_disk, 0 | 0xffff) {
+        return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
+    }
     let mut total = u64::from(r.u16_le(eocd + 10).ok_or(ZipError::Truncated("end record"))?);
     let mut cd_size = u64::from(r.u32_le(eocd + 12).ok_or(ZipError::Truncated("end record"))?);
     let mut cd_offset = u64::from(r.u32_le(eocd + 16).ok_or(ZipError::Truncated("end record"))?);
     let mut zip64 = false;
     let mut eocd_record_start = eocd as u64;
-    if total == 0xffff || cd_size == 0xffff_ffff || cd_offset == 0xffff_ffff {
+    if total == 0xffff || disk_entries == 0xffff || disk == 0xffff || directory_disk == 0xffff || cd_size == 0xffff_ffff || cd_offset == 0xffff_ffff {
         // ZIP64 locator sits right before the classic record.
         if let Some(loc) = eocd.checked_sub(20)
             && r.slice(loc, 4) == Some(b"PK\x06\x07")
         {
+            if r.u32_le(loc + 4) != Some(0) || r.u32_le(loc + 16) != Some(1) {
+                return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
+            }
             let rec = r.u64_le(loc + 8).ok_or(ZipError::Truncated("zip64 locator"))?;
             let rec = usize::try_from(rec).map_err(|_| ZipError::Corrupt("zip64 record offset".into()))?;
             if r.slice(rec, 4) == Some(b"PK\x06\x06") {
-                total = r.u64_le(rec + 32).ok_or(ZipError::Truncated("zip64 record"))?;
-                cd_size = r.u64_le(rec + 40).ok_or(ZipError::Truncated("zip64 record"))?;
-                cd_offset = r.u64_le(rec + 48).ok_or(ZipError::Truncated("zip64 record"))?;
+                disk = r.u32_le(rec + 16).ok_or(ZipError::Truncated("zip64 record"))?;
+                directory_disk = r.u32_le(rec + 20).ok_or(ZipError::Truncated("zip64 record"))?;
+                let zip64_disk_entries = r.u64_le(rec + 24).ok_or(ZipError::Truncated("zip64 record"))?;
+                let zip64_total = r.u64_le(rec + 32).ok_or(ZipError::Truncated("zip64 record"))?;
+                if (disk_entries != 0xffff && disk_entries != zip64_disk_entries) || (total != 0xffff && total != zip64_total) {
+                    return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
+                }
+                disk_entries = zip64_disk_entries;
+                total = zip64_total;
+                let zip64_cd_size = r.u64_le(rec + 40).ok_or(ZipError::Truncated("zip64 record"))?;
+                let zip64_cd_offset = r.u64_le(rec + 48).ok_or(ZipError::Truncated("zip64 record"))?;
+                if (cd_size != 0xffff_ffff && cd_size != zip64_cd_size) || (cd_offset != 0xffff_ffff && cd_offset != zip64_cd_offset) {
+                    return Err(ZipError::Corrupt("ZIP64 and classic directory bounds disagree".into()));
+                }
+                cd_size = zip64_cd_size;
+                cd_offset = zip64_cd_offset;
                 zip64 = true;
                 eocd_record_start = rec as u64;
             }
         }
     }
+    if disk != 0 || directory_disk != 0 || disk_entries != total {
+        return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
+    }
     // Self-extracting archives: the directory sits later than it claims by the stub length.
     let expected_end = cd_offset.checked_add(cd_size).ok_or_else(|| ZipError::Corrupt("directory bounds overflow".into()))?;
     let prefix = eocd_record_start.saturating_sub(expected_end);
     let start = usize::try_from(cd_offset.saturating_add(prefix)).map_err(|_| ZipError::Corrupt("directory offset".into()))?;
+    let directory_end = (start as u64)
+        .checked_add(cd_size)
+        .filter(|&end| end <= eocd_record_start)
+        .and_then(|end| usize::try_from(end).ok())
+        .ok_or_else(|| ZipError::Corrupt("directory extends into its end record".into()))?;
     let mut entries = Vec::new();
     let mut pos = start;
     let mut truncated = false;
@@ -129,6 +159,9 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         if entries.len() >= max_entries {
             truncated = true;
             break;
+        }
+        if pos.checked_add(46).is_none_or(|end| end > directory_end) {
+            return Err(ZipError::Truncated("directory entry"));
         }
         if r.slice(pos, 4) != Some(b"PK\x01\x02") {
             if entries.is_empty() {
@@ -145,17 +178,24 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         let name_len = usize::from(r.u16_le(pos + 28).ok_or(ZipError::Truncated("directory entry"))?);
         let extra_len = usize::from(r.u16_le(pos + 30).ok_or(ZipError::Truncated("directory entry"))?);
         let comment_len = usize::from(r.u16_le(pos + 32).ok_or(ZipError::Truncated("directory entry"))?);
+        let entry_end = pos
+            .checked_add(46 + name_len + extra_len + comment_len)
+            .filter(|&end| end <= directory_end)
+            .ok_or(ZipError::Truncated("directory entry fields"))?;
         let host = r.slice(pos + 5, 1).and_then(|b| b.first().copied()).unwrap_or(0);
-        let unix_mode = if host == 3 { r.u32_le(pos + 38).map(|a| a >> 16) } else { None };
+        let attrs = r.u32_le(pos + 38).ok_or(ZipError::Truncated("entry attributes"))?;
+        let unix_mode = (host == 3).then_some(attrs >> 16);
         let mut local = u64::from(r.u32_le(pos + 42).ok_or(ZipError::Truncated("directory entry"))?);
+        let mut entry_disk = u32::from(r.u16_le(pos + 34).ok_or(ZipError::Truncated("directory entry"))?);
         let name_bytes = r.slice(pos + 46, name_len).ok_or(ZipError::Truncated("entry name"))?;
         let extra = r.slice(pos + 46 + name_len, extra_len).ok_or(ZipError::Truncated("entry extra fields"))?;
         // Each extra field owns its payload: ZIP64 values cannot borrow a following field's bytes.
-        let needs_zip64 = usize_ == 0xffff_ffff || csize == 0xffff_ffff || local == 0xffff_ffff;
+        let needs_zip64 = usize_ == 0xffff_ffff || csize == 0xffff_ffff || local == 0xffff_ffff || entry_disk == 0xffff;
         let mut found_zip64 = false;
         let mut x = 0usize;
         let er = Reader::new(extra);
-        while x < extra.len() {
+        // Trailing bytes too short for a field header are padding, not truncation.
+        while x.saturating_add(4) <= extra.len() {
             let id = er.u16_le(x).ok_or(ZipError::Truncated("extra field header"))?;
             let len = usize::from(er.u16_le(x + 2).ok_or(ZipError::Truncated("extra field header"))?);
             let body = x + 4;
@@ -173,6 +213,10 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
                 }
                 if local == 0xffff_ffff {
                     local = values.u64_le(f).ok_or(ZipError::Truncated("zip64 local header offset"))?;
+                    f += 8;
+                }
+                if entry_disk == 0xffff {
+                    entry_disk = values.u32_le(f).ok_or(ZipError::Truncated("zip64 entry disk"))?;
                 }
                 found_zip64 = true;
                 break;
@@ -182,9 +226,12 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         if needs_zip64 && !found_zip64 {
             return Err(ZipError::Corrupt("missing ZIP64 extended information".into()));
         }
+        if entry_disk != 0 {
+            return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
+        }
         let name = decode_name(name_bytes, flags).replace('\\', "/");
         entries.push(ZipEntry {
-            is_dir: name.ends_with('/'),
+            is_dir: name.ends_with('/') || unix_mode.is_some_and(|m| m & 0o170000 == 0o040000) || (matches!(host, 0 | 10) && attrs & 0x10 != 0),
             name,
             method,
             flags,
@@ -196,7 +243,7 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
             unix_mode,
         });
         seen += 1;
-        pos = pos.checked_add(46 + name_len + extra_len + comment_len).ok_or_else(|| ZipError::Corrupt("directory overflow".into()))?;
+        pos = entry_end;
     }
     Ok(ZipArchive { entries, declared_entries: total, truncated, zip64, prefix_bytes: prefix })
 }
@@ -218,7 +265,7 @@ fn decode_name(bytes: &[u8], flags: u16) -> String {
     bytes.iter().map(|&byte| if byte.is_ascii() { char::from(byte) } else { CP437.get(usize::from(byte - 0x80)).copied().unwrap_or('\u{fffd}') }).collect()
 }
 
-fn find_eocd(data: &[u8]) -> Option<usize> {
+pub(crate) fn find_eocd(data: &[u8]) -> Option<usize> {
     if data.len() < 22 {
         return None;
     }
@@ -356,6 +403,18 @@ mod tests {
         zip[central + 8..central + 10].copy_from_slice(&flags.to_le_bytes());
         zip[central + 46..central + 46 + name.len()].copy_from_slice(name);
         zip
+    }
+
+    #[test]
+    fn directory_markers_do_not_require_a_trailing_slash() {
+        let sample = build(&[("folder", b"")]);
+        let central = 30 + "folder".len();
+        for (host, attrs, directory) in [(0, 0x10u32, true), (10, 0x10, true), (3, 0o040755 << 16, true), (3, 0o120777 << 16, false), (0, 0x20, false)] {
+            let mut file = sample.clone();
+            file[central + 5] = host;
+            file[central + 38..central + 42].copy_from_slice(&attrs.to_le_bytes());
+            assert_eq!(parse(&file, 1).unwrap().entries[0].is_dir, directory);
+        }
     }
 
     #[test]

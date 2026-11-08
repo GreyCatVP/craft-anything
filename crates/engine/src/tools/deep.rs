@@ -16,6 +16,7 @@ use craft_anything_engines::ghidra::{self, DeepDecompiler, DeepFunction};
 use craft_anything_evidence::{Confidence, Environment, EvidenceBuilder, Limitation, Location, ToolError, host_triple};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// The analysis settings hash for the default Deep profile. Part of the project cache key, so a
@@ -110,8 +111,29 @@ fn config(settings: &Settings, language_override: Option<String>) -> Option<(ghi
 /// doing the same. `progress` gets a line now and then.
 pub fn prepare(settings: &Settings, bytes: &[u8], sha256: &str, progress: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
     let (cfg, digest) = config(settings, None).ok_or_else(|| NOT_INSTALLED.to_string())?;
-    let never = || false;
-    ghidra::analyse(&cfg, bytes, sha256, &digest, &never, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string())
+    ANALYSING.fetch_add(1, Ordering::SeqCst);
+    let closing = || CLOSING.load(Ordering::SeqCst);
+    let result = ghidra::analyse(&cfg, bytes, sha256, &digest, &closing, &|_, m: &str| progress(m)).map(|_| ()).map_err(|e| e.to_string());
+    ANALYSING.fetch_sub(1, Ordering::SeqCst);
+    result
+}
+
+/// Analyses [`prepare`] has under way, and whether they are being stopped.
+static ANALYSING: AtomicUsize = AtomicUsize::new(0);
+static CLOSING: AtomicBool = AtomicBool::new(false);
+
+/// The app is closing: stop every analysis [`prepare`] started and wait up to `within` for them to
+/// end, as nothing acts on a process's drop once the app has gone (#946).
+pub fn stop_analyses(within: Duration) {
+    if ANALYSING.load(Ordering::SeqCst) == 0 {
+        return;
+    }
+    CLOSING.store(true, Ordering::SeqCst);
+    let until = std::time::Instant::now() + within;
+    while ANALYSING.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    CLOSING.store(false, Ordering::SeqCst);
 }
 
 fn remember(ctx: &mut Ctx<'_>, provider: Result<Arc<dyn DeepDecompiler>, String>) -> Result<Arc<dyn DeepDecompiler>, Option<String>> {

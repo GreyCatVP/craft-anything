@@ -32,7 +32,7 @@ const SCAN_DEPTH: usize = 12;
 /// Folders a build makes again, never listed.
 const SKIPPED: &[&str] = &["node_modules", "target", ".godot", "Library", "Temp", "obj", ".venv", "__pycache__", ".next", ".turbo", ".git"];
 
-const PREAMBLE: &str = "You're answering a question the person asked about the project you built inside Craft Anything. This isn't a task: answer it and stop. Don't create, change or delete any file, don't run anything, and don't carry on the build; if the answer is that something should change, say what you'd change and that they can ask for it as a change. Answer in plain words for someone who doesn't code, briefly, with full paths when they ask where something is.\n\n";
+const PREAMBLE: &str = "You're answering a question the person asked about the project you built inside Craft Anything. This isn't a task: answer it and stop. Don't create, change or delete any file, don't run anything, and don't carry on the build; if the answer is that something should change, say what you'd change and that they can ask for it as a change. Answer in plain words for someone who doesn't code, briefly, with full paths when they ask where something is. You're a short-lived copy with fewer tools than the builder, and the build may still be running beside you. So a tool you can't see here is not a tool the build has lost, and a call with no result here may still be running: never report tools as disconnected or work as cut off because of what you see from here.\n\n";
 
 /// How a question was answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -52,6 +52,15 @@ pub struct Answered {
     /// The AI that answered.
     pub backend: String,
     pub cost_usd: Option<f64>,
+    /// The saved builder that was off or gone, when another AI answered in its place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub builder_notice: Option<String>,
+}
+
+/// Where a question's answer comes from: the builder's session only when the project has one for
+/// this mode (the caller filters it) and the adapter can continue it; otherwise the files.
+fn answered_from(session: Option<&str>, resumes: bool) -> AnsweredFrom {
+    if session.is_some() && resumes { AnsweredFrom::BuildersSession } else { AnsweredFrom::TheFiles }
 }
 
 /// Answer `question` about `ws` (see the module docs), with the person's `settings` (taken from
@@ -71,6 +80,7 @@ pub fn ask(
         return Err(ToolError::invalid(format!("A question is 1 to {MAX_QUESTION} characters.")));
     }
     let cfg = crate::AiConfig::from_settings(settings);
+    let builder_notice = super::builder_replacement(&cfg, ws, None).map(|r| super::replaced_builder_notice(&r.saved, &r.used));
     let entry = builder_backend(&cfg, project_builder(&cfg, ws))?;
     let deep = settings.deep_mode;
     let cli = |resume: Option<String>| -> Box<dyn Conversation> {
@@ -86,14 +96,14 @@ pub fn ask(
     };
     let (mut conv, mut from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
         BackendKind::AgentCli => {
-            let session = ws.manifest.agent_session_for(&entry.config.model).map(str::to_string);
+            let session = ws.manifest.agent_session_for_mode(&entry.config.model, deep).map(str::to_string);
             if let Some(id) = session.as_deref() {
                 bring_back_session(ws, &entry, id);
             }
             // Only a native adapter that resumes can answer from a copy of the builder's chat.
             // Copilot's ACP question starts fresh, even when the project has a saved session id.
             let native_session = crate::cli_agents::adapter_for(&entry.config.model).resumes();
-            let from = if session.is_some() && native_session { AnsweredFrom::BuildersSession } else { AnsweredFrom::TheFiles };
+            let from = answered_from(session.as_deref(), native_session);
             let spec = CliSpec {
                 question: true,
                 deep,
@@ -139,7 +149,7 @@ pub fn ask(
     // A copy of a session reports the whole session's running cost, not this question's (a
     // live run said $22.67 for a few cents of cache reads): say nothing rather than that.
     let cost_usd = cost_usd.filter(|_| from != AnsweredFrom::BuildersSession);
-    Ok(Answered { answer, from, backend: entry.config.name.clone(), cost_usd })
+    Ok(Answered { answer, from, backend: entry.config.name.clone(), cost_usd, builder_notice })
 }
 
 /// The builder's session, kept in the project, put back where its agent looks when this computer
@@ -166,6 +176,7 @@ fn forget_lost_session(root: &Path, lost: &str) -> Result<bool, ToolError> {
         return Ok(false);
     }
     now.manifest.agent_session = None;
+    now.manifest.agent_session_deep = None;
     now.save()?;
     Ok(true)
 }
@@ -277,6 +288,29 @@ fn ago(d: Duration) -> String {
 mod tests {
     use super::*;
 
+    /// A copy of the builder's session has no tool server, and saw the build's tools as gone.
+    #[test]
+    fn a_question_is_told_its_missing_tools_are_not_the_builds() {
+        assert!(PREAMBLE.contains("never report tools as disconnected"));
+        assert!(PREAMBLE.contains("may still be running"));
+    }
+
+    /// The user-visible half of R2.9: a Deep session isn't used for a Clean room question, and an
+    /// adapter that can't resume answers from the files even when the mode matches.
+    #[test]
+    fn a_question_answers_from_the_session_only_in_the_mode_it_was_saved_in() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+        ws.manifest.agent_session = Some("s1".into());
+        ws.manifest.agent_session_by = Some("claude-code".into());
+        ws.manifest.agent_session_deep = Some(true);
+        let deep = ws.manifest.agent_session_for_mode("claude-code", true);
+        assert_eq!(answered_from(deep, true), AnsweredFrom::BuildersSession);
+        let clean = ws.manifest.agent_session_for_mode("claude-code", false);
+        assert_eq!(answered_from(clean, true), AnsweredFrom::TheFiles, "a Deep session isn't used in Clean room");
+        assert_eq!(answered_from(deep, false), AnsweredFrom::TheFiles, "an adapter that can't resume answers from the files");
+    }
+
     /// A question that finds the builder's session missing forgets it, unless a build has saved
     /// another meanwhile: then that one stays.
     #[test]
@@ -284,17 +318,22 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
         ws.manifest.agent_session = Some("gone".into());
+        ws.manifest.agent_session_deep = Some(true);
         ws.manifest.last_reply = "Built it.".into();
         ws.save().unwrap();
         assert!(forget_lost_session(&ws.root, "gone").unwrap());
         let now = Workspace::open(&ws.root).unwrap();
         assert_eq!(now.manifest.agent_session, None);
+        assert_eq!(now.manifest.agent_session_deep, None, "the mode goes with the session");
         assert_eq!(now.manifest.last_reply, "Built it.", "nothing else changes");
 
         ws.manifest.agent_session = Some("new-from-a-build".into());
+        ws.manifest.agent_session_deep = Some(false);
         ws.save().unwrap();
         assert!(!forget_lost_session(&ws.root, "gone").unwrap());
-        assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("new-from-a-build"));
+        let kept = Workspace::open(&ws.root).unwrap();
+        assert_eq!(kept.manifest.agent_session.as_deref(), Some("new-from-a-build"));
+        assert_eq!(kept.manifest.agent_session_deep, Some(false), "a session a build saved since keeps its mode");
 
         assert!(forget_lost_session(&d.path().join("no-such-project"), "gone").is_err(), "an error, never a panic");
     }

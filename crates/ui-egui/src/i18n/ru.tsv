@@ -1444,3 +1444,21 @@ Zoom	Изменить масштаб
 Bring all to front	Все окна — на передний план
 Drag to give the plan more or less room; double-click to reset	Перетащите, чтобы дать плану больше или меньше места; двойной щелчок возвращает как было
 Copy the message	Скопировать сообщение
+Choose what the builder's approvals get	Выбрать, что получают разрешения конструктора
+Reading the web	Чтение веба
+Other commands	Другие команды
+Files outside the project	Файлы вне проекта
+Pushing and publishing	Push и публикация
+Deleting outside the project	Удаление вне проекта
+System changes	Изменения системы
+Other tools	Другие инструменты
+Allow	Разрешать
+Ask	Спрашивать
+Refuse	Отказывать
+After /approvals, type a kind and allow, ask, refuse or default, like /approvals publish ask. Kinds: {kinds}.	После /approvals введите вид и allow, ask, refuse или default, например /approvals publish ask. Виды: {kinds}.
+There's no kind called {name}. Kinds: {kinds}.	Вида {name} нет. Виды: {kinds}.
+Approvals	Разрешения
+In this project, {kind}: {choice}.	В этом проекте {kind}: {choice}.
+Couldn't change the approvals:	Не удалось изменить разрешения:
+What the builder may do without asking you, in this project.	Что конструктор может делать в этом проекте, не спрашивая вас.
+Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	«По умолчанию» следует авторежиму: когда он включён, то, что можно отменить, выполняется, а остальное отклоняется; когда выключен, конструктор спрашивает.

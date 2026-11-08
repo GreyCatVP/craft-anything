@@ -58,11 +58,21 @@ pub struct Browser {
 
 struct BrowserProfile(std::path::PathBuf);
 
+fn remove_profile_with(mut remove: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let started = std::time::Instant::now();
+    loop {
+        match remove() {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if started.elapsed() >= Duration::from_secs(5) => return Err(e),
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
 impl Drop for BrowserProfile {
     fn drop(&mut self) {
-        if let Err(e) = std::fs::remove_dir_all(&self.0)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
+        if let Err(e) = remove_profile_with(|| std::fs::remove_dir_all(&self.0)) {
             log::warn!("couldn't remove the private browser profile {}: {e}", self.0.display());
         }
     }
@@ -86,7 +96,7 @@ pub fn runtime_of(product: &str, user_agent: &str) -> &'static str {
 /// The error returned when no browser is available and none was asked to launch.
 pub fn engine_missing(detail: impl std::fmt::Display) -> ToolError {
     ToolError::new(ErrorCode::EngineMissing, format!("no browser is available: {detail}")).with_remediation(
-        "Give a loopback CDP endpoint (start a browser with --remote-debugging-port), or install a browser from Settings → Engines so one can be launched.",
+        "Give a loopback CDP endpoint (start a browser with --remote-debugging-port), or install a Chromium-based browser so one can be launched (set its path in Settings → Engines if it isn't found).",
     )
 }
 
@@ -101,6 +111,28 @@ fn profile_base(exe: &std::path::Path, home: Option<std::path::PathBuf>) -> std:
         (Some(app), Some(home)) if parent == std::path::Path::new("/snap/bin") => home.join("snap").join(app).join("common"),
         _ => std::env::temp_dir(),
     }
+}
+
+/// The snap a small launcher script hands over to, when it does and that snap is there: Ubuntu's
+/// `/usr/bin/chromium-browser` ends in `exec /snap/bin/chromium "$@"` and comes first on the search
+/// path (#1054). The snap is what runs, so it's what to start, with a snap's profile.
+fn snap_behind(exe: &std::path::Path) -> Option<std::path::PathBuf> {
+    const LARGEST_SCRIPT: u64 = 64 * 1024;
+    if std::fs::metadata(exe).ok()?.len() > LARGEST_SCRIPT {
+        return None;
+    }
+    snap_in_script(&std::fs::read(exe).ok()?).filter(|snap| snap.exists())
+}
+
+fn snap_in_script(script: &[u8]) -> Option<std::path::PathBuf> {
+    if !script.starts_with(b"#!") {
+        return None;
+    }
+    String::from_utf8_lossy(script).lines().find_map(|line| {
+        let mut words = line.split_whitespace();
+        let target = words.next().filter(|w| *w == "exec").and(words.next())?.trim_matches(['"', '\'']);
+        target.starts_with("/snap/bin/").then(|| std::path::PathBuf::from(target))
+    })
 }
 
 impl Browser {
@@ -145,8 +177,14 @@ impl Browser {
     }
 
     pub(crate) fn launch(ctx: &Ctx<'_>, opts: &LaunchOptions, dl: &Deadline) -> Result<Browser, ToolError> {
-        let exe = craft_anything_engines::locate("chromium", &ctx.session.settings.engines.tools, &ctx.session.settings.engine_store_dir())
-            .ok_or_else(|| engine_missing("no Chromium-based browser was found"))?;
+        let exe =
+            craft_anything_engines::locate("chromium", &ctx.session.settings.engines.tools, &ctx.session.settings.engine_store_dir()).ok_or_else(|| {
+                // Browser tools that take an endpoint come here without `Requires::Engine`'s check.
+                let (reason, fix) = ctx.session.settings.engine_not_found("chromium");
+                ToolError::new(ErrorCode::EngineMissing, reason)
+                    .with_remediation(format!("{fix} Or give a loopback CDP endpoint (start a browser with --remote-debugging-port)."))
+            })?;
+        let exe = snap_behind(&exe).unwrap_or(exe);
         let profile = BrowserProfile(super::artifact_tools::fresh_dir_in(&profile_base(&exe, dirs::home_dir()), "craft-browser")?);
         let mut args: Vec<String> = vec![
             format!("--user-data-dir={}", profile.0.display()),
@@ -1081,6 +1119,21 @@ mod tests {
         assert!(!profile.exists(), "the private browser profile survived its owner");
     }
 
+    #[test]
+    fn profile_cleanup_retries_while_the_browser_releases_files() {
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("private-profile");
+        std::fs::create_dir(&profile).unwrap();
+        let mut attempts = 0;
+        super::remove_profile_with(|| {
+            attempts += 1;
+            if attempts < 3 { Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "still locked")) } else { std::fs::remove_dir_all(&profile) }
+        })
+        .unwrap();
+        assert_eq!(attempts, 3);
+        assert!(!profile.exists());
+    }
+
     /// #747: a Flatpak or Snap browser keeps its profile where its sandbox can reach it and we can
     /// read its port; any other browser uses the temp folder.
     #[test]
@@ -1093,6 +1146,19 @@ mod tests {
         assert_eq!(base("/snap/bin/chromium"), Path::new("/home/me/snap/chromium/common"));
         assert_eq!(base("/usr/bin/google-chrome"), std::env::temp_dir());
         assert_eq!(super::profile_base(Path::new("/var/lib/flatpak/exports/bin/com.google.Chrome"), None), std::env::temp_dir(), "no home folder");
+    }
+
+    /// #1054: Ubuntu's `/usr/bin/chromium-browser` is a script that hands over to the snap.
+    #[test]
+    fn a_script_that_hands_over_to_a_snap_is_read_and_nothing_else_is() {
+        use std::path::Path;
+        let ubuntu = b"#! /bin/sh\n# transitional package\nif ! [ -x /snap/bin/chromium ]; then\n  exit 1\nfi\nexec /snap/bin/chromium \"$@\"\n";
+        assert_eq!(super::snap_in_script(ubuntu).as_deref(), Some(Path::new("/snap/bin/chromium")));
+        assert_eq!(super::snap_in_script(b"#!/bin/sh\nexec \"/snap/bin/brave\" \"$@\"\n").as_deref(), Some(Path::new("/snap/bin/brave")));
+        assert_eq!(super::snap_in_script(b"#!/bin/sh\nexec /opt/chrome/chrome \"$@\"\n"), None, "not a snap");
+        assert_eq!(super::snap_in_script(b"#!/bin/sh\necho exec /snap/bin/chromium\n"), None, "only a line that runs it");
+        assert_eq!(super::snap_in_script(b"\x7fELF exec /snap/bin/chromium"), None, "a program, not a script");
+        assert_eq!(super::snap_behind(Path::new("no-such-browser")), None);
     }
 
     /// The capped encoder gives a PNG of the same pixels when it fits, and stops without one when

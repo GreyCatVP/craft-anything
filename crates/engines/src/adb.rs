@@ -276,7 +276,7 @@ impl Device {
 pub fn parse_devices(text: &str) -> Vec<Device> {
     let mut out = Vec::new();
     for line in text.lines().take(MAX_LINES) {
-        let line = line.get(..MAX_LINE.min(line.len())).unwrap_or(line).trim();
+        let line = crate::capped_line(line, MAX_LINE).trim();
         if line.is_empty() || line.starts_with("List of devices") || line.starts_with('*') || line.starts_with("adb ") {
             continue;
         }
@@ -311,7 +311,7 @@ pub struct Property {
 pub fn parse_getprop(text: &str) -> Vec<Property> {
     let mut out = Vec::new();
     for line in text.lines().take(MAX_LINES) {
-        let line = line.get(..MAX_LINE.min(line.len())).unwrap_or(line);
+        let line = crate::capped_line(line, MAX_LINE);
         // [key]: [value]
         let Some(rest) = line.trim().strip_prefix('[') else { continue };
         let Some((key, rest)) = rest.split_once("]:") else { continue };
@@ -347,7 +347,7 @@ pub const DEVICE_PROP_WHITELIST: &[&str] = &[
 pub fn parse_packages(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines().take(MAX_LINES) {
-        let line = line.get(..MAX_LINE.min(line.len())).unwrap_or(line).trim();
+        let line = crate::capped_line(line, MAX_LINE).trim();
         if let Some(name) = line.strip_prefix("package:") {
             let name = name.split_whitespace().next().unwrap_or(name);
             let name = name.split('=').next().unwrap_or(name);
@@ -363,7 +363,7 @@ pub fn parse_packages(text: &str) -> Vec<String> {
 pub fn parse_features(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines().take(MAX_LINES) {
-        let line = line.get(..MAX_LINE.min(line.len())).unwrap_or(line).trim();
+        let line = crate::capped_line(line, MAX_LINE).trim();
         if let Some(name) = line.strip_prefix("feature:")
             && !name.is_empty()
         {
@@ -385,7 +385,7 @@ pub struct Service {
 pub fn parse_services(text: &str) -> Vec<Service> {
     let mut out = Vec::new();
     for line in text.lines().take(MAX_LINES) {
-        let line = line.get(..MAX_LINE.min(line.len())).unwrap_or(line).trim();
+        let line = crate::capped_line(line, MAX_LINE).trim();
         if line.is_empty() || line.starts_with("Found ") {
             continue;
         }
@@ -421,7 +421,7 @@ pub fn parse_ps(text: &str) -> Vec<ProcessRow> {
     let name_i = find("NAME").or_else(|| find("CMD")).or_else(|| find("ARGS")).unwrap_or(cols.len().saturating_sub(1));
     let mut out = Vec::new();
     for line in lines {
-        let line = line.get(..MAX_LINE.min(line.len())).unwrap_or(line);
+        let line = crate::capped_line(line, MAX_LINE);
         let fields: Vec<&str> = line.split_whitespace().collect();
         if fields.is_empty() {
             continue;
@@ -454,7 +454,7 @@ pub struct LogLine {
 pub fn parse_logcat(text: &str) -> Vec<LogLine> {
     let mut out = Vec::new();
     for raw in text.lines().take(MAX_LINES) {
-        let raw = raw.get(..MAX_LINE.min(raw.len())).unwrap_or(raw);
+        let raw = crate::capped_line(raw, MAX_LINE);
         if raw.trim().is_empty() || raw.starts_with("--------- beginning") {
             continue;
         }
@@ -491,6 +491,31 @@ fn parse_logcat_line(raw: &str) -> LogLine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cut that lands inside a multibyte character still returns at most `MAX_LINE` bytes.
+    #[test]
+    fn the_line_cap_lands_on_a_character_boundary() {
+        let mut line = "a".repeat(MAX_LINE - 1);
+        line.push('é');
+        line.push_str("tail");
+        let cut = crate::capped_line(&line, MAX_LINE);
+        assert_eq!(cut.len(), MAX_LINE - 1);
+        assert!(cut.is_char_boundary(cut.len()));
+    }
+
+    /// #1095 follow-up: a device line with a multibyte character at the boundary is cut, not kept
+    /// whole.
+    #[test]
+    fn a_multibyte_character_at_the_cap_does_not_keep_the_whole_device_line() {
+        let prefix = "serial\tdevice\tmodel:";
+        let mut line = format!("{prefix}{}", "n".repeat(MAX_LINE - prefix.len() - 1));
+        line.push('é');
+        line.push_str(&"x".repeat(64));
+        let d = parse_devices(&format!("{line}\n"));
+        assert_eq!(d.len(), 1);
+        let model = d[0].model.as_deref().unwrap_or_default();
+        assert!(model.len() < MAX_LINE, "the line cap is kept: {}", model.len());
+    }
 
     #[test]
     fn serials_and_packages_are_validated() {

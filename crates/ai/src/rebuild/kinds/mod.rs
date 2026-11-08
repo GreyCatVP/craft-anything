@@ -50,6 +50,21 @@ impl<'a> DetectCx<'a> {
     }
 }
 
+/// Estonian website words: *veebileht*, *koduleht* and *veebisait* with their inflected forms.
+/// *veebilehitseja* (a browser) is not a website.
+fn is_site_word(w: &str) -> bool {
+    (w.starts_with("veebileh") || w.starts_with("koduleh") || w.starts_with("veebisai")) && !w.starts_with("veebilehitseja")
+}
+
+/// Whether an Estonian word is in a case that marks a complement (source, means, place or topic)
+/// rather than the head of a noun phrase: elative (-st), comitative (-ga), adessive (-l),
+/// allative (-le), ablative (-lt), inessive (-s), illative (-sse), translative (-ks),
+/// terminative (-ni), abessive (-ta) or essive (-na). The longer endings come first.
+fn is_complement_case(w: &str) -> bool {
+    const ENDINGS: &[&str] = &["sse", "st", "ga", "le", "lt", "ks", "ni", "ta", "na", "l", "s"];
+    ENDINGS.iter().any(|e| w.ends_with(e))
+}
+
 /// What the brief is written from.
 pub struct BriefCx<'a> {
     pub ws: &'a Workspace,
@@ -64,6 +79,9 @@ pub struct BriefCx<'a> {
     pub assets: bool,
     /// The picture model chosen in Settings (an asset-table id); `None` = the table's default.
     pub image_model: Option<&'a str>,
+    /// The builder can look at pictures (an agent app opens them with its Read tool). One that
+    /// can't (the API loop) is never sent to open a screenshot; it's told what to use instead.
+    pub sees_pictures: bool,
 }
 
 /// The words the app uses for a kind's result.
@@ -114,8 +132,9 @@ pub trait TargetKind: Send + Sync {
     }
     /// The checks that judge a build of this kind for this project, in order.
     fn checks(&self, ws: &Workspace) -> Vec<Box<dyn Check>>;
-    /// The next round's message after a check that wasn't good enough.
-    fn refine(&self, check: &CheckResult) -> String {
+    /// The next round's message after a check that wasn't good enough, for a builder that can
+    /// look at pictures or one that can't ([`BriefCx::sees_pictures`]).
+    fn refine(&self, check: &CheckResult, _sees_pictures: bool) -> String {
         format!(
             "Check {}: {}\n\nFix this in app/, build again until it succeeds, and reply with 1-2 plain sentences on what you changed.",
             check.round, check.note

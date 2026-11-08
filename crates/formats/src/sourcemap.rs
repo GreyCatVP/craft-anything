@@ -295,7 +295,11 @@ pub fn find_source_mapping_url(js: &str) -> Option<String> {
 
 /// Decode a `data:` URL, including percent escapes and optional base64 content.
 pub fn decode_data_url(url: &str) -> Option<Vec<u8>> {
-    let rest = url.strip_prefix("data:")?;
+    let (scheme, rest) = url.split_once(':')?;
+    if !scheme.eq_ignore_ascii_case("data") {
+        return None;
+    }
+    let rest = rest.split_once('#').map_or(rest, |(body, _)| body);
     let (meta, payload) = rest.split_once(',')?;
     let decoded: std::borrow::Cow<'_, [u8]> = if payload.contains('%') {
         let hex = |b: u8| match b {
@@ -313,7 +317,11 @@ pub fn decode_data_url(url: &str) -> Option<Vec<u8>> {
     } else {
         std::borrow::Cow::Borrowed(payload.as_bytes())
     };
-    if meta.ends_with(";base64") { base64_decode(std::str::from_utf8(&decoded).ok()?) } else { Some(decoded.into_owned()) }
+    if meta.rsplit_once(';').is_some_and(|(_, flag)| flag.trim_matches(|c: char| c.is_ascii_whitespace()).eq_ignore_ascii_case("base64")) {
+        base64_decode(std::str::from_utf8(&decoded).ok()?)
+    } else {
+        Some(decoded.into_owned())
+    }
 }
 
 /// Standard or URL-safe base64, padding optional. `None` on any invalid character.
@@ -341,6 +349,14 @@ mod tests {
         assert_eq!(r[0].line, 1);
         assert!(map.original_positions(5, 0).is_empty());
         assert_eq!(map.source_content(0), Some("x\ny"));
+    }
+
+    #[test]
+    fn data_url_fragments_are_not_part_of_the_source_map() {
+        assert_eq!(decode_data_url("DATA:application/json;BASE64,e30=#section"), Some(b"{}".to_vec()));
+        assert_eq!(decode_data_url("data:text/plain,one%23two#ignored%"), Some(b"one#two".to_vec()));
+        assert_eq!(decode_data_url("data:,body?query#fragment"), Some(b"body?query".to_vec()));
+        assert!(decode_data_url("http:,payload").is_none());
     }
 
     #[test]
