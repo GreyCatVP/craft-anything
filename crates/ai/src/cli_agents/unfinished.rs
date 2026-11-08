@@ -95,6 +95,9 @@ pub fn sweep(dir: &Path, adapters: &AgentAdapters) -> Vec<String> {
 fn sweep_one(path: &Path, mut file: File, adapters: &AgentAdapters) -> Option<String> {
     // Held by a running turn.
     file.try_lock().ok()?;
+    // Removed while we waited, its emptying failed or not: its owner finished it. (On Windows a
+    // file waiting to be deleted can't be looked up either.)
+    std::fs::symlink_metadata(path).ok()?;
     let mut text = String::new();
     file.read_to_string(&mut text).ok()?;
     if text.is_empty() {
@@ -264,5 +267,14 @@ mod tests {
         assert_eq!(sweep_one(&path, early, &a), None);
         assert!(asked.lock().unwrap_or_else(PoisonError::into_inner).is_empty(), "a finished session isn't deleted");
         assert_eq!(records(d.path()), 0);
+
+        // The same when emptying it failed and the record was only removed.
+        let held = Held::record(d.path(), &Entry::new("test-sweep", "agent-cli", None, "ses_done2")).unwrap();
+        let early = OpenOptions::new().read(true).write(true).open(&held.path).unwrap();
+        let path = held.path.clone();
+        std::fs::remove_file(&held.path).unwrap();
+        drop(held);
+        assert_eq!(sweep_one(&path, early, &a), None);
+        assert!(asked.lock().unwrap_or_else(PoisonError::into_inner).is_empty(), "a removed record isn't acted on");
     }
 }
