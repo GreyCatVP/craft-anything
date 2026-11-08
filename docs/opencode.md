@@ -4,9 +4,6 @@ Craft Anything can run OpenCode V2 locally or on an SSH host. OpenCode owns its 
 connections and sign-in. Set these up in OpenCode on the computer where it will run.
 
 Model and thinking choices can be discovered, validated and saved. A run with an explicit
-selection goes through the native adapter (`opencode run --standalone`), which hands a local run
-the Craft Anything MCP server in a config file named by `OPENCODE_CONFIG`; the person's own
-settings stay unchanged. Over SSH the native run has no Craft Anything tools yet.
 selection goes through the native adapter (`opencode run --standalone`), which hands the run
 the Craft Anything MCP server in a config file named by `OPENCODE_CONFIG`; the person's own
 settings stay unchanged. Over SSH one `ssh` run checks that `craft-anything-cli` is on the

@@ -56,6 +56,12 @@ added an app the new rule rejected; both were green on their own branch.
   #664, merged next, tested a button on that list without picking the tab. Checking that two PRs
   merge cleanly isn't checking that their tests pass together: run the UI tests on the merge.
 
+**A table row kept twice by a merge.** Two PRs edited the same STATUS.md row; resolving the
+conflict kept both versions, so five rows reached `main` twice, each copy with a different
+update, and the three OpenCode rows disagreed on whether SSH runs get the tools. When a
+conflict is in a table row, merge the edits into one row, and after merging look for a row
+name that appears twice.
+
 **A dependency change merged without its lockfile.** Changes were staged with
 `git add -A crates apps docs`, which leaves out the root `Cargo.lock`, so a new dependency reached
 `main` without its lock entry. Stage by `git add -A` (then review `git status`), or list `Cargo.lock`
