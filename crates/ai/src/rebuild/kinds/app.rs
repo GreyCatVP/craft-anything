@@ -51,7 +51,7 @@ impl TargetKind for AppKind {
         if cx.ws.manifest.own_project() {
             return s;
         }
-        if cx.deep && matches!(cx.ws.manifest.target, TargetRef::Local { .. }) {
+        if cx.deep && locate::is_decompileable_program(&cx.ws.manifest.target, self) {
             s.push(decompile_note(false, cx.ghidra).trim_start().to_string());
             s.push(mechanics::MECHANICS_CONTRACT.to_string());
         }

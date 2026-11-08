@@ -8,6 +8,53 @@ pub fn game_folder(path: &Path) -> Option<PathBuf> {
     locate(path, true).1
 }
 
+/// Whether the target contains a binary program that can be decompiled in Deep mode.
+/// Non-binary files (such as markdown documents, text files, or images) cannot be decompiled.
+pub fn is_decompileable_program(target: &TargetRef, kind: &dyn kinds::TargetKind) -> bool {
+    let TargetRef::Local { path } = target else { return false };
+    let (program, _) = locate(path, kind.studies_folder());
+    // Known non-binary / documentation file extensions can never be decompiled.
+    if let Some(ext) = program.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        if matches!(
+            ext.as_str(),
+            "md" | "markdown" | "txt" | "json" | "toml" | "yaml" | "yml" | "xml" | "csv" | "pdf" | "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "zip" | "tar" | "gz"
+        ) {
+            return false;
+        }
+    }
+    // If the file exists on disk, check if it is an executable or native binary format.
+    if program.is_file() {
+        if is_program(&program) {
+            return true;
+        }
+        let Ok(mut file) = std::fs::File::open(&program) else { return false };
+        use std::io::Read;
+        let mut head = [0u8; 4096];
+        let Ok(n) = file.read(&mut head) else { return false };
+        let data = &head[..n];
+        if data.starts_with(b"MZ")
+            || data.starts_with(b"\x7fELF")
+            || data.starts_with(&[0xca, 0xfe, 0xba, 0xbe])
+            || data.starts_with(&[0xca, 0xfe, 0xba, 0xbf])
+            || data.starts_with(&[0xce, 0xfa, 0xed, 0xfe])
+            || data.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+            || data.starts_with(b"\0asm")
+            || data.starts_with(b"dex\n")
+        {
+            return true;
+        }
+        return craft_anything_formats::parse_binary(data).is_ok();
+    }
+    // If it does not exist on disk (such as in unit tests), rely on extension or absence of extension.
+    if let Some(ext) = program.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        matches!(ext.as_str(), "exe" | "dll" | "so" | "dylib" | "bin" | "elf" | "wasm" | "dex")
+    } else {
+        true
+    }
+}
+
 /// The game's own folder when the person picked one of its inner folders (Unreal's Engine/, a
 /// Binaries/Win64, Content/Paks…): up to two levels, never further, so a pick can't widen to a
 /// whole game library.

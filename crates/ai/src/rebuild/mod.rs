@@ -812,7 +812,7 @@ impl Worker {
         }
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
-        let must_decompile = !self.engine.session().clean_room() && matches!(ws.manifest.target, TargetRef::Local { .. });
+        let must_decompile = !self.engine.session().clean_room() && locate::is_decompileable_program(&ws.manifest.target, kind);
         let mut reminded = false;
         // The builder finished and only the check didn't: the build is there to check.
         let mut only_check = carrying_on && !first && opts.message.is_none() && ws.manifest.awaiting_check;
@@ -944,7 +944,7 @@ impl Worker {
             refinements += 1;
             // Nothing written yet: a fix for a build that doesn't exist sends the builder looking for one.
             // It is asked to write the project and to show its build output (#736).
-            let refined = if app_is_empty(ws) { NO_PROJECT_PROMPT.to_string() } else { kind.refine(check) };
+            let refined = if app_is_empty(ws) { no_project_prompt(ws, &cx) } else { kind.refine(check) };
             prompt = refined + &pictures_reminder(ws);
             if !api_loop {
                 prompt.push_str(CHECK_BEFORE_REPLYING);
@@ -1282,16 +1282,48 @@ fn not_working(ws: &Workspace) -> ToolError {
         .with_remediation("Send a new request with a concrete correction to start again. The last check's note in the feed says what it found.")
 }
 
+/// What files a builder is expected to create for its stack.
+pub fn expected_project_files(stack: &str, ws: &Workspace) -> &'static str {
+    match stack {
+        "Unity" => "Assets/, Packages/manifest.json, and ProjectSettings/ProjectVersion.txt",
+        "Godot" => "project.godot, scenes as .tscn, and scripts as .gd",
+        "Unreal Engine" => "Game.uproject and Source/Game/",
+        s if s.starts_with("Rust") => "Cargo.toml and src/main.rs",
+        "Electron" => "package.json and main process scripts",
+        "Python" => "pyproject.toml or requirements.txt and Python scripts",
+        "Plain HTML and CSS" => "index.html and style.css",
+        s if s.contains("Next.js") || s.contains("React") || s.contains("Vite") => "package.json and index.html or the source files",
+        _ => {
+            if ws.manifest.target == TargetRef::None || stack.is_empty() || stack == stacks::BUILDERS_CHOICE {
+                "for a website, a package.json and an index.html or the source files"
+            } else {
+                "package.json and index.html, Cargo.toml, or the project's configuration files"
+            }
+        }
+    }
+}
+
 /// The builder's next request when app/ holds no files: write the project first, then say what the
 /// build printed. The reporter's agent claimed `npm run build` had passed while app/ was empty (#736).
-const NO_PROJECT_PROMPT: &str = "The check found no project: app/ has no files, so nothing has been written yet and nothing can be built. Create the project's files in app/ now (for a website, a package.json and an index.html or the source files), then build it. Reply with the exact command you ran and the last lines of its output. Say something is built only when that output says so.";
+fn no_project_prompt(ws: &Workspace, cx: &BriefCx) -> String {
+    let files = expected_project_files(&ws.manifest.stack, ws);
+    let steps = stack_and_library_steps(&ws.manifest, cx.editor);
+    format!(
+        "The check found no project: {place} has no files, so nothing has been written yet and nothing can be built. Create the project's files in {place} now ({files}).\n\nHow to build it: {steps}\n\nWrite the files into {place} now, then build it. Reply with the exact command you ran and the last lines of its output. Say something is built only when that output says so.",
+        place = ws.app_place()
+    )
+}
 
 fn no_build_progress(ws: &Workspace) -> ToolError {
     let stop = format!("The build stopped after two builder turns changed no files in {}.", ws.app_place());
     // #736: an empty app/ means the builder never wrote the project, whatever its replies said.
     if app_is_empty(ws) {
+        let files = expected_project_files(&ws.manifest.stack, ws);
         ToolError::new(ErrorCode::OverLimit, format!("{stop} {}", no_files_yet(ws)))
-            .with_remediation("Send a new request that asks for the project's files in app/ (such as package.json and index.html), or try another builder.")
+            .with_remediation(format!(
+                "Send a new request that asks for the project's files in {} (such as {files}), or try another builder.",
+                ws.app_place()
+            ))
     } else {
         ToolError::new(ErrorCode::OverLimit, stop)
             .with_remediation("Send a new request with a concrete correction, or edit the app's files before trying again.")
@@ -1342,7 +1374,7 @@ fn kept_session(ws: &Workspace) -> Option<String> {
 }
 
 /// What an API-backend builder is told first: its tools differ from an agent app's.
-const API_BUILDER: &str = "Your tools: build_files_list, build_file_read, build_file_write and build_file_edit for the project's files (paths relative to the project folder, e.g. app/src/main.rs), and build_command_run for commands, which run in app/ (never start dev servers or watchers). Where the steps below mention Read, Write, Edit or Bash, use these. For the checklist step use build_checklist (the same shape as TodoWrite: todos with content, activeForm and status) and call it again as you go. You can't look at pictures: use capture/README.md, capture/capture.json and the evidence instead. Ask the person with core_person_ask only when a choice really changes the result. Other Craft Anything tools are available too; enable a toolset with enable_toolset when you need it. rebuild_check isn't available in this loop: Craft Anything checks your build after each turn instead.";
+const API_BUILDER: &str = "Your tools: build_files_list, build_file_read, build_file_write and build_file_edit for the project's files (paths relative to the project folder, e.g. app/src/main.rs), and build_command_run for commands, which run in app/ (never start dev servers or watchers). Where the steps below mention Read, Write, Edit or Bash, use these. For the checklist step use build_checklist (the same shape as TodoWrite: todos with content, activeForm and status) and call it again as you go. You can't look at pictures: use capture/README.md, capture/capture.json and the evidence instead. Ask the person with core_person_ask only when a choice really changes the result. Other Craft Anything tools are available too; enable a toolset with enable_toolset when you need it. rebuild_check isn't available in this loop: Craft Anything checks your build after each turn instead. Create the project's initial files in app/ in your first turn: do not finish your turn having only planned or made a checklist without writing files into app/.";
 
 /// Added to a refinement for a builder that can check its own work.
 const CHECK_BEFORE_REPLYING: &str = " Before you reply, check your build again with rebuild_check and fix what it still lists.";

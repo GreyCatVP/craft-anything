@@ -51,16 +51,24 @@ impl Worker {
                     Ok(out) => notes.push_str(&describe(&out)),
                     Err(e) => notes.push_str(&format!("A first look failed: {}\n", e.message)),
                 }
-                if !program.is_file() && !self.engine.session().clean_room() {
-                    self.step(
-                        ws,
-                        Step::Study,
-                        Status::Inspecting,
-                        "Couldn't find the program to decompile, so Ghidra can't be used. Pick the game's or app's main folder or its program.",
-                    )?;
-                    notes.push_str(&format!("\n## Ghidra\n\nNo program was found in {}, so Ghidra couldn't be used.\n", path.display()));
+                let has_program = locate::is_decompileable_program(&TargetRef::Local { path: program.clone() }, kind);
+                if !has_program && !self.engine.session().clean_room() {
+                    let is_doc = program.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                        matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt" | "pdf" | "json" | "yaml" | "toml")
+                    });
+                    if is_doc {
+                        notes.push_str(&format!("\n## Documentation\n\nTarget is documentation or specifications ({}); notes and requirements were read.\n", path.display()));
+                    } else {
+                        self.step(
+                            ws,
+                            Step::Study,
+                            Status::Inspecting,
+                            "Couldn't find the program to decompile, so Ghidra can't be used. Pick the game's or app's main folder or its program.",
+                        )?;
+                        notes.push_str(&format!("\n## Ghidra\n\nNo program was found in {}, so Ghidra couldn't be used.\n", path.display()));
+                    }
                 }
-                if let Some(done) = self.prepare_ghidra(&program) {
+                if let Some(done) = self.prepare_ghidra(&program, kind) {
                     // Deep mode always waits for Ghidra: the builder then decompiles with it straight away.
                     let started = std::time::Instant::now();
                     // One line: the app's progress card shows how long it has been going.
@@ -242,9 +250,9 @@ impl Worker {
     /// Deep mode with Ghidra installed: run Ghidra's one-time analysis of `program` on its own
     /// thread; the receiver gets its result. The builder's tools share the analysis (waiting for it
     /// rather than starting another), and it carries on if the person pauses, so nothing is lost.
-    pub(super) fn prepare_ghidra(&self, program: &Path) -> Option<Receiver<Result<(), String>>> {
-        // A folder (nothing in it recognised as the program) isn't something Ghidra can open.
-        if !program.is_file() || is_electron_runtime(program) {
+    pub(super) fn prepare_ghidra(&self, program: &Path, kind: &dyn kinds::TargetKind) -> Option<Receiver<Result<(), String>>> {
+        // A folder or non-binary file (markdown, text, etc.) isn't something Ghidra can open.
+        if !program.is_file() || !locate::is_decompileable_program(&TargetRef::Local { path: program.to_path_buf() }, kind) || is_electron_runtime(program) {
             return None;
         }
         let settings = {

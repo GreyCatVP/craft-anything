@@ -332,6 +332,10 @@ Every round spends the person's money or quota. One that can't do anything shoul
       write the project and show its build's output, not to fix a build (`NO_PROJECT_PROMPT`). — claimed: fabox-os, branch bugfix/736-stop-empty-build-loop
 - [ ] Live-check #736 on Windows with gemini-cli: an empty app/ and a builder that claims `npm run build`
       stops after two turns (or 10 checks) with the "no files yet" note, and Try again doesn't restart it
+- [x] #1169: tailored empty `app/` prompt and remediation to the project's stack (e.g. Unity, Godot, Rust)
+      instead of hardcoding website `package.json and index.html`, instructed builders to create project files
+      in turn 1, and don't require decompilation for non-binary local targets (such as `.md` specs) in Deep mode
+      — claimed: Dev-0710, branch bugfix/1169-no-files-in-app-loop
 
 ### R5.4 Local models can build
 Owner: open · Status: todo

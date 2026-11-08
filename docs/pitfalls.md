@@ -900,3 +900,13 @@ different branches reused the same package output path and one saw the other bra
 Give every worktree its own `CARGO_TARGET_DIR`, even when one agent manages both. Cleaning
 the shared engine cache then removed 11.6 GiB of compiled artifacts: avoid shared-cache
 cleanup as a recovery shortcut; use an isolated target directory for further verification.
+
+**Assuming every local target is a program that must be decompiled in Deep mode.** Pointing Craft Anything
+at a local file (such as `spec.md` or a design document) created a `TargetRef::Local` target. In Deep mode,
+the rebuild loop unconditionally set `must_decompile = true`, demanding decompilation with `DECOMPILE_FIRST`
+after turn 1. Because documents cannot be decompiled, the builder changed no files in `app/` and stalled (#1169).
+Check whether a local target is actually a binary program before requiring decompilation.
+
+**Hardcoding website file names into generic rebuild stall prompts.** When `app/` was empty, the refinement
+prompt and remediation hardcoded `(such as package.json and index.html)`, confusing builders working on game
+engines (Unity, Godot) or native apps (Rust). Tailor the expected project files to the workspace's stack (#1169).

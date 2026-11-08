@@ -150,7 +150,8 @@ impl TargetKind for GameKind {
         if cx.ws.manifest.own_project() {
             return generated.then(|| assets_note(cx.ws, cx.image_model)).into_iter().collect();
         }
-        let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated)];
+        let is_program = locate::is_decompileable_program(target, self);
+        let mut s = vec![game_steps(cx.deep, cx.ghidra, matches!(target, TargetRef::Local { .. }), generated, is_program)];
         if generated {
             s.push(assets_note(cx.ws, cx.image_model));
         }
@@ -193,6 +194,10 @@ impl CreditsCheck {
 impl Check for CreditsCheck {
     fn id(&self) -> &'static str {
         Self::ID
+    }
+
+    fn applies(&self, cx: &CheckCx) -> bool {
+        locate::is_decompileable_program(&cx.ws.manifest.target, &Game)
     }
 
     fn run(&self, cx: &mut CheckCx) -> Result<CheckResult, ToolError> {

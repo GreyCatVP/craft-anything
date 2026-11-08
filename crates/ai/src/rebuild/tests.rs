@@ -2191,6 +2191,65 @@ mod picking_up_a_build {
         assert!(!written.message.contains("has no files"), "{written:?}");
         assert_eq!(written.message, "The build stopped after two builder turns changed no files in app/.");
     }
+
+    /// #1169: an empty app/ names expected project files for the chosen stack (not hardcoded package.json/index.html).
+    #[test]
+    fn empty_app_stop_and_prompt_are_tailored_to_the_stack() {
+        let b = bench();
+        let mut ws = worked_on(&b);
+
+        // Unity stack
+        ws.manifest.stack = "Unity".into();
+        let empty_unity = no_build_progress(&ws);
+        let rem_unity = empty_unity.remediation.as_deref().unwrap_or_default();
+        assert!(rem_unity.contains("Assets/, Packages/manifest.json"), "Unity remediation: {rem_unity}");
+        assert!(!rem_unity.contains("package.json and index.html"), "Unity must not name package.json: {rem_unity}");
+
+        let cx = BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None };
+        let prompt_unity = no_project_prompt(&ws, &cx);
+        assert!(prompt_unity.contains("Assets/, Packages/manifest.json"), "Unity prompt: {prompt_unity}");
+        assert!(!prompt_unity.contains("(for a website, a package.json and an index.html"), "Unity prompt must not name website files: {prompt_unity}");
+
+        // Godot stack
+        ws.manifest.stack = "Godot".into();
+        let empty_godot = no_build_progress(&ws);
+        let rem_godot = empty_godot.remediation.as_deref().unwrap_or_default();
+        assert!(rem_godot.contains("project.godot"), "Godot remediation: {rem_godot}");
+        assert!(!rem_godot.contains("package.json"), "Godot must not name package.json: {rem_godot}");
+
+        let prompt_godot = no_project_prompt(&ws, &cx);
+        assert!(prompt_godot.contains("project.godot"), "Godot prompt: {prompt_godot}");
+
+        // Rust stack
+        ws.manifest.stack = "Rust + egui (eframe)".into();
+        let empty_rust = no_build_progress(&ws);
+        let rem_rust = empty_rust.remediation.as_deref().unwrap_or_default();
+        assert!(rem_rust.contains("Cargo.toml and src/main.rs"), "Rust remediation: {rem_rust}");
+    }
+
+    /// #1169: a non-binary local target (such as a .md specification) does not require decompilation in Deep mode.
+    #[test]
+    fn non_binary_local_target_does_not_require_decompilation() {
+        let d = tempfile::tempdir().unwrap();
+        let md_file = d.path().join("level_editor_spec.md");
+        std::fs::write(&md_file, "# Sega Genesis Level Editor\nRules and tile formats.\n").unwrap();
+
+        let ws_md = Workspace::create(d.path(), "Editor", "Build level editor", TargetRef::Local { path: md_file.clone() }).unwrap();
+        let game_kind = crate::rebuild::kinds::game::Game;
+        assert!(!locate::is_decompileable_program(&ws_md.manifest.target, &game_kind), "spec.md is not a program");
+
+        let b = brief(&ws_md, "game", true, false, None, false, None);
+        assert!(!b.contains("decompile the program before you estimate anything"), "markdown target must not require decompiling: {b}");
+        assert!(!b.contains("CREDITS.md"), "markdown target has no game files to credit: {b}");
+        assert!(b.contains("The target is documentation or specification material"), "instructed to study doc: {b}");
+
+        // Contrast with actual program target
+        let exe_file = d.path().join("game.exe");
+        let ws_exe = Workspace::create(d.path(), "ExeGame", "Rebuild game", TargetRef::Local { path: exe_file }).unwrap();
+        assert!(locate::is_decompileable_program(&ws_exe.manifest.target, &game_kind), "game.exe is a program");
+        let b_exe = brief(&ws_exe, "game", true, false, None, false, None);
+        assert!(b_exe.contains("decompile the program before you estimate anything"), "exe target requires decompiling: {b_exe}");
+    }
 }
 
 #[test]

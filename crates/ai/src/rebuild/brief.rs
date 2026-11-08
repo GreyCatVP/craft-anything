@@ -28,7 +28,7 @@ pub(super) fn steps(deep: bool) -> String {
         "How to work: you lead the investigation and the craft-anything tools answer your questions with evidence.
 1) Study the evidence, overview first (the README and summaries before the details). Where it leaves a gap that matters to the result, ask a focused follow-up with the craft-anything tools instead of guessing: {follow_up} Don't repeat a call that already answered. Record each question the evidence doesn't answer yet with core_unknown_add (the question, what would settle it as probes, and how much it matters as severity), and when a later look answers it, close it with core_unknown_edit (status resolved, the resolution and the evidence ids that settle it); until then say in it what you did instead (an estimate, a placeholder or a question for the person). Missing evidence is never proof, so mark what you estimated.
 2) Make a short checklist with TodoWrite: 3-7 steps in plain words the person can follow (no file names or jargon), each with a short activeForm such as \"Drawing the map\"; the person watches it live, so keep it updated as you go.
-3) Build it in app/ and fix errors until the build succeeds.
+3) Build it in app/: create the project's files in app/ in your first turn, and fix errors until the build succeeds. Never finish a turn having only planned or made a checklist without writing files into app/.
 4) Test it against the original with rebuild_check: it runs the same checks Craft Anything runs after your turn and lists what differs and what couldn't be compared. Fix those, build and check again until it says it would pass.
 5) Before you reply, go through your checklist and core_unknowns_show once more: settle what one more look can settle, and say what's left in your summary."
     )
@@ -211,7 +211,7 @@ pub(super) const PRIVATE_USE_NOTE: &str = "This build contains the original game
 /// Clean room copies none of its files. `generated`: the person chose generated assets, so new
 /// models and pictures replace the original's art (in Deep mode its sounds, music, fonts,
 /// animations and maps are still used).
-pub(super) fn game_steps(deep: bool, ghidra: bool, has_target: bool, generated: bool) -> String {
+pub(super) fn game_steps(deep: bool, ghidra: bool, has_target: bool, generated: bool, is_program: bool) -> String {
     let mut s = String::from(
         "Making it play like the original:\n\
          - Start app/MECHANICS.md: every number that shapes how it plays. Movement (walk and run speed, acceleration, friction, air control, jump height, gravity, crouch), camera (field of view, mouse sensitivity), each weapon (damage, fire rate, magazine, reload time, spread, recoil, range), health and armour, respawn, scoring, modes, timers, and how computer players behave. Next to each value say where it came from (a file in the game's folder, a function address or evidence id) or mark it \"estimated\". Build from that sheet and keep it up to date.\n\
@@ -220,8 +220,10 @@ pub(super) fn game_steps(deep: bool, ghidra: bool, has_target: bool, generated: 
     s.push_str("\n- ");
     s.push_str(super::kinds::mechanics::MECHANICS_CONTRACT);
     if has_target {
-        if deep {
+        if deep && is_program {
             s.push_str(&decompile_note(true, ghidra));
+        } else if deep {
+            s.push_str("\n- The target is documentation or specification material. Study its requirements, rules and numbers, and mark any numbers you estimate.");
         } else {
             s.push_str("\n- Clean room is on: don't open, read, list or decompile the game's files or code. Work from the person's description, the pictures and any documentation they give, and mark the numbers you estimate. If exact values matter, tell the person they can switch on Deep mode.");
         }
@@ -235,6 +237,9 @@ pub(super) fn game_steps(deep: bool, ghidra: bool, has_target: bool, generated: 
             s.push_str(&format!(
                 "\n- Art, sounds, models, animations, maps and UI: Clean room is on, so take nothing from the original game's files. {make} in the original's style: the same role, size, palette and feel, from the pictures and how it plays, without reproducing logos or trademarks. If the person wants the original's own art, tell them it needs Deep mode."
             ));
+            return s;
+        }
+        if !is_program {
             return s;
         }
         let (lead, bring) = if generated {
