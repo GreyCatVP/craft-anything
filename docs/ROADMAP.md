@@ -457,7 +457,7 @@ been run live.
       are in; what's left is attaching the pictures to a builder whose model sees, and treating it
       as sighted (`BriefCx::sees_pictures`), with the setting in Settings → AI
       — claimed: youkaicountry, branch feature/r5.4-pictures-to-builders
-- [ ] Let an API builder whose model sees open a picture itself: `build_file_read` refuses
+- [x] Let an API builder whose model sees open a picture itself: `build_file_read` refuses
       pictures, so it sees only what the run attaches (the original's with the first message, each
       check's after it), not a screenshot it takes of its own build mid-turn or one in reference/
       that went past the six a message carries
