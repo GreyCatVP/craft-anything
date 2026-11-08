@@ -189,6 +189,7 @@ pub fn parse_binary(data: &[u8]) -> Result<Value, FormatError> {
     parse_binary_within(data, MAX_EXPANDED_BYTES.max(data.len().saturating_mul(3)))
 }
 
+/// Parse a binary property list, producing at most `byte_budget` bytes of data and decoded text.
 fn parse_binary_within(data: &[u8], byte_budget: usize) -> Result<Value, FormatError> {
     if !data.starts_with(b"bplist") {
         return Err(FormatError::Malformed("not a binary plist".into()));
@@ -292,6 +293,7 @@ impl Bin<'_> {
         Ok(())
     }
 
+    /// Read object `idx`. `stack` holds the containers on the current path, so a cycle is refused.
     fn object(&mut self, idx: usize, stack: &mut Vec<usize>) -> Result<Value, FormatError> {
         self.nodes += 1;
         if self.nodes > MAX_NODES {
