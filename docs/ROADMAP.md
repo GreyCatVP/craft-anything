@@ -967,6 +967,9 @@ Gaps found while using the app for real projects.
       `craft.json` keeps `agent_session_deep`; a Clean room build drops a Deep or unknown session and
       starts from the brief, and a Clean room question answers from the files — PR #1208; claimed:
       rmsff, branch feature/r2.9-session-mode
+- [ ] An API-backend builder's conversation (`transcript.json`) is continued by a follow-up in
+      either mode, so a Clean room follow-up carries what a Deep build read. Its mode is fixed when
+      the run starts (`start_builder`); record it there and start over in Clean room after Deep
 - [x] #504: the builder's plan card can be folded away with its X, or with `project_plan_fold`
       (between builds: a fold during a build can be overwritten by its next save). The steps stay
       in the conversation (`FEED_VERSION` 4, `FeedItem::PlanDismissed`), and a later run's

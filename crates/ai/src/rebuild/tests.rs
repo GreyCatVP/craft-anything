@@ -2116,10 +2116,12 @@ mod picking_up_a_build {
             let mut ws = worked_on(&b);
             ws.manifest.agent_session_deep = mode;
             ws.save().unwrap();
+            std::fs::write(ws.agent_session_path(), "{\"read\":\"what Deep mode read\"}\n").unwrap();
             let (ok, feed) = try_it(&b, &ws);
             assert!(ok, "{feed:?}");
             let told = std::fs::read_to_string(&b.prompts).unwrap();
             assert!(told.contains("Their request") && !told.contains("Pick up where you left off"), "{mode:?}: {told}");
+            assert!(!told.contains("what Deep mode read") && !ws.agent_session_path().exists(), "{mode:?}: its kept copy goes too");
             let m = Workspace::open(&ws.root).unwrap().manifest;
             assert_eq!((m.agent_session, m.agent_session_deep), (None, Some(false)), "{mode:?}");
         }
@@ -2129,9 +2131,11 @@ mod picking_up_a_build {
         let mut ws = worked_on(&b);
         ws.manifest.agent_session_deep = Some(false);
         ws.save().unwrap();
+        std::fs::write(ws.agent_session_path(), "{}\n").unwrap();
         let (ok, feed) = try_it(&b, &ws);
         assert!(ok, "{feed:?}");
         assert!(std::fs::read_to_string(&b.prompts).unwrap().contains("Pick up where you left off"));
+        assert!(ws.agent_session_path().exists(), "a Clean room session's copy is kept");
         let m = Workspace::open(&ws.root).unwrap().manifest;
         assert_eq!((m.agent_session.as_deref(), m.agent_session_deep), (Some("session-1"), Some(false)));
 

@@ -753,13 +753,18 @@ impl Worker {
             ws.save()?;
         }
         // Clean room doesn't continue a session that ran in Deep mode, or one whose mode wasn't
-        // kept: it may carry what Deep mode read. The builder starts from the brief instead, and
-        // whatever session this run keeps ran in this run's mode. The agent is started in the mode
-        // read here, so what's recorded can't differ from it.
+        // kept: it may carry what Deep mode read. Its copy in the project goes too, as a session
+        // that can't be brought back hands the next one its text. The builder starts from the
+        // brief instead, and whatever session this run keeps ran in this run's mode. The whole run
+        // uses the mode read here, so what's recorded can't differ from how the agent ran.
         let deep = !self.engine.session().clean_room();
         if !api_loop {
-            if ws.manifest.agent_session.is_some() && ws.manifest.agent_session_in(&entry.config.model, deep).is_none() {
+            if !deep && ws.manifest.agent_session_deep != Some(false) {
                 ws.manifest.agent_session = None;
+                match std::fs::remove_file(ws.agent_session_path()) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(ToolError::io(ws.agent_session_path().display(), e)),
+                    _ => {}
+                }
             }
             ws.manifest.agent_session_deep = Some(deep);
             ws.save()?;
@@ -779,7 +784,7 @@ impl Worker {
         };
         // The builder's tool server is started in this run's mode (`--deep` or `--clean-room`).
         let s = self.engine.session();
-        let (deep, ghidra) = (!s.clean_room(), s.settings.ghidra_launcher().is_some());
+        let ghidra = s.settings.ghidra_launcher().is_some();
         let image_model = s.settings.assets.image_model.clone();
         drop(s);
         let cx = BriefCx { ws, deep, ghidra, editor: self.editor.as_deref(), assets: self.assets, image_model: image_model.as_deref() };
@@ -825,7 +830,7 @@ impl Worker {
         }
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
-        let must_decompile = !self.engine.session().clean_room() && matches!(ws.manifest.target, TargetRef::Local { .. });
+        let must_decompile = deep && matches!(ws.manifest.target, TargetRef::Local { .. });
         let mut reminded = false;
         // The builder finished and only the check didn't: the build is there to check.
         let mut only_check = carrying_on && !first && opts.message.is_none() && ws.manifest.awaiting_check;
