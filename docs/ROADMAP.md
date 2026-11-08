@@ -915,6 +915,13 @@ Gaps found while using the app for real projects.
       — claimed: tanish2k09, branch feature/r2.9-project-approvals
 - [ ] Agents that don't ask our approval tool (OpenCode `--auto`, Hermes `-z`, Maki's `-p`) aren't
       held to a project's approval choices either; part of R2.2's approval decision
+- [ ] Carry the first-run answer about why you're examining software into each project: every
+      production `Project::create` passes `Purpose::default()` ("It's mine, or I'm allowed to
+      look"), and the answer stays a UI preference (`Prefs`). Show it on the approval card for
+      publishing and in the build's README, as Deep-mode game builds that use the original's files
+      carry `app/CREDITS.md` and a private-use line. It is the person's word, not proof
+- [ ] **decision** What a project's stated purpose changes, if anything (publishing, credits).
+      Agents that don't ask our approval tool can skip the card (the approval-tool line above)
 - [ ] While "commands" are allowed (Auto mode's default), a builder can run any program. Commands
       that name `craft.json`, the inbox or the approvals tool count as system changes, and our CLI
       started inside an agent calls tools as an agent, but a script that builds the path, or
