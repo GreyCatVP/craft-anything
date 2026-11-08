@@ -90,7 +90,8 @@ pub fn ask(
     };
     let (mut conv, mut from): (Box<dyn Conversation>, AnsweredFrom) = match entry.config.kind {
         BackendKind::AgentCli => {
-            let session = ws.manifest.agent_session_for(&entry.config.model).map(str::to_string);
+            // In Clean room, only a session known to have run in Clean room (a Deep one may carry what Deep mode read).
+            let session = ws.manifest.agent_session_in(&entry.config.model, deep).map(str::to_string);
             if let Some(id) = session.as_deref() {
                 bring_back_session(ws, &entry, id);
             }

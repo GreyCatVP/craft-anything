@@ -391,6 +391,11 @@ pub struct Manifest {
     /// this was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_by: Option<String>,
+    /// Whether `agent_session` ran in Deep mode; none: not known (saved before this was kept). A
+    /// Clean room build or question continues only a session known to have run in Clean room: a
+    /// Deep one may carry what Deep mode read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_deep: Option<bool>,
     /// Kinds of agent action the person allowed for this workspace ("bash:npm", "web_fetch"…).
     #[serde(default)]
     pub allowed_actions: Vec<String>,
@@ -461,6 +466,7 @@ impl Manifest {
             checks: Vec::new(),
             agent_session: None,
             agent_session_by: None,
+            agent_session_deep: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
             asset_budget_usd: ASSET_BUDGET_USD,
@@ -479,6 +485,12 @@ impl Manifest {
     /// continue it (#469). One saved before the agent was kept counts.
     pub fn agent_session_for(&self, agent: &str) -> Option<&str> {
         self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
+    }
+
+    /// The saved session `agent` may continue in a run in Deep mode (`deep`) or Clean room: as
+    /// [`Self::agent_session_for`], and in Clean room only one known to have run in Clean room.
+    pub fn agent_session_in(&self, agent: &str, deep: bool) -> Option<&str> {
+        self.agent_session_for(agent).filter(|_| deep || self.agent_session_deep == Some(false))
     }
 
     /// Take the fields the person owns from `other` (what's on disk).
@@ -1827,6 +1839,26 @@ mod tests {
         if cfg!(windows) {
             assert!(ws.is_own_record(&ws.root.join("CRAFT.JSON")), "paths on Windows ignore case");
         }
+    }
+
+    /// R2.9: in Clean room a saved session is continued only when it's known to have run in Clean
+    /// room; Deep mode continues any, and the mode is kept with the project.
+    #[test]
+    fn clean_room_continues_only_a_session_known_to_be_clean_room() {
+        let mut m = Manifest::new("x", "A thing", TargetRef::None);
+        m.agent_session = Some("s1".into());
+        m.agent_session_by = Some("claude-code".into());
+        for (mode, clean_room, deep) in [(None, None, Some("s1")), (Some(true), None, Some("s1")), (Some(false), Some("s1"), Some("s1"))] {
+            m.agent_session_deep = mode;
+            assert_eq!(m.agent_session_in("claude-code", false), clean_room, "{mode:?} in Clean room");
+            assert_eq!(m.agent_session_in("claude-code", true), deep, "{mode:?} in Deep mode");
+            assert_eq!(m.agent_session_in("codex", true), None, "{mode:?}: still only the agent that saved it");
+        }
+        m.agent_session_deep = Some(false);
+        let text = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap().agent_session_deep, Some(false));
+        m.agent_session_deep = None;
+        assert!(!serde_json::to_string(&m).unwrap().contains("agent_session_deep"), "unknown isn't written");
     }
 
     /// #469: a saved session is only for the agent that saved it.

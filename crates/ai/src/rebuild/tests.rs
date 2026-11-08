@@ -2105,6 +2105,47 @@ mod picking_up_a_build {
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("session-1"));
     }
 
+    /// R2.9: a Clean room build doesn't continue a session that ran in Deep mode, or one whose mode
+    /// wasn't kept, and starts from the brief; one that ran in Clean room carries on. A run keeps
+    /// the mode it ran in, so a Deep build makes the session Deep.
+    #[test]
+    fn clean_room_does_not_continue_a_deep_session() {
+        for mode in [Some(true), None] {
+            let b = bench();
+            b.hub.engine.session().settings.deep_mode = false;
+            let mut ws = worked_on(&b);
+            ws.manifest.agent_session_deep = mode;
+            ws.save().unwrap();
+            let (ok, feed) = try_it(&b, &ws);
+            assert!(ok, "{feed:?}");
+            let told = std::fs::read_to_string(&b.prompts).unwrap();
+            assert!(told.contains("Their request") && !told.contains("Pick up where you left off"), "{mode:?}: {told}");
+            let m = Workspace::open(&ws.root).unwrap().manifest;
+            assert_eq!((m.agent_session, m.agent_session_deep), (None, Some(false)), "{mode:?}");
+        }
+
+        let b = bench();
+        b.hub.engine.session().settings.deep_mode = false;
+        let mut ws = worked_on(&b);
+        ws.manifest.agent_session_deep = Some(false);
+        ws.save().unwrap();
+        let (ok, feed) = try_it(&b, &ws);
+        assert!(ok, "{feed:?}");
+        assert!(std::fs::read_to_string(&b.prompts).unwrap().contains("Pick up where you left off"));
+        let m = Workspace::open(&ws.root).unwrap().manifest;
+        assert_eq!((m.agent_session.as_deref(), m.agent_session_deep), (Some("session-1"), Some(false)));
+
+        let b = bench();
+        let mut ws = worked_on(&b);
+        ws.manifest.agent_session_deep = Some(false);
+        ws.save().unwrap();
+        let (ok, feed) = try_it(&b, &ws);
+        assert!(ok, "{feed:?}");
+        assert!(std::fs::read_to_string(&b.prompts).unwrap().contains("Pick up where you left off"), "Deep mode carries on a Clean room session");
+        let m = Workspace::open(&ws.root).unwrap().manifest;
+        assert_eq!((m.agent_session.as_deref(), m.agent_session_deep), (Some("session-1"), Some(true)), "and it has run in Deep mode now");
+    }
+
     #[test]
     fn a_new_project_still_starts_from_the_top() {
         let b = bench();

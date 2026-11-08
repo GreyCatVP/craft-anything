@@ -961,10 +961,12 @@ Gaps found while using the app for real projects.
       note's hand-over file carries the answers, and the after-turn path puts them before the
       notes; only answers the run's mode may show, marked told when read or sent
       — claimed: AlexJoaquimPereira, branch bugfix/r2.9-note-just-ask; commit 78d3963
-- [ ] Record which mode a builder's session ran in: `agent_session` is kept across modes, so a Clean
+- [x] Record which mode a builder's session ran in: `agent_session` is kept across modes, so a Clean
       room build or question can resume a session from a Deep build and carry what it read, and such
-      a question's answer is recorded as asked in Clean room. Don't resume one for Clean room
-      — claimed: rmsff, branch feature/r2.9-session-mode
+      a question's answer is recorded as asked in Clean room. Don't resume one for Clean room.
+      `craft.json` keeps `agent_session_deep`; a Clean room build drops a Deep or unknown session and
+      starts from the brief, and a Clean room question answers from the files — PR #1208; claimed:
+      rmsff, branch feature/r2.9-session-mode
 - [x] #504: the builder's plan card can be folded away with its X, or with `project_plan_fold`
       (between builds: a fold during a build can be overwritten by its next save). The steps stay
       in the conversation (`FEED_VERSION` 4, `FeedItem::PlanDismissed`), and a later run's

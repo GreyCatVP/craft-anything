@@ -751,6 +751,17 @@ impl Worker {
             ws.manifest.agent_session_by = Some(entry.config.model.clone());
             ws.save()?;
         }
+        // Clean room doesn't continue a session that ran in Deep mode, or one whose mode wasn't
+        // kept: it may carry what Deep mode read. The builder starts from the brief instead, and
+        // whatever session this run keeps ran in this run's mode.
+        if !api_loop {
+            let deep = !self.engine.session().clean_room();
+            if ws.manifest.agent_session.is_some() && ws.manifest.agent_session_in(&entry.config.model, deep).is_none() {
+                ws.manifest.agent_session = None;
+            }
+            ws.manifest.agent_session_deep = Some(deep);
+            ws.save()?;
+        }
         // A coding agent on this computer whose session the project keeps a copy of (#451).
         let keeper = (!api_loop && !remote).then(|| opts.adapters.for_backend(&entry.config.model, &entry.options));
         if let Some(a) = &keeper {
