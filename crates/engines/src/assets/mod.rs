@@ -7,6 +7,7 @@
 pub mod aliyun;
 pub mod fal;
 pub mod minimax;
+pub mod openai;
 pub mod volcengine;
 pub mod zhipu;
 
@@ -119,6 +120,36 @@ pub enum SizeBy {
     Pixels,
 }
 
+/// How much work a picture model with levels is asked to spend, where it has them (OpenAI's
+/// `quality`). A provider that has no such knob ignores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Quality {
+    Low,
+    #[default]
+    Medium,
+    High,
+    /// OpenAI's `xhigh`.
+    Xhigh,
+    Max,
+    /// The provider's own choice.
+    Auto,
+}
+
+impl Quality {
+    /// The word the provider's API takes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Quality::Low => "low",
+            Quality::Medium => "medium",
+            Quality::High => "high",
+            Quality::Xhigh => "xhigh",
+            Quality::Max => "max",
+            Quality::Auto => "auto",
+        }
+    }
+}
+
 /// A picture model from the table.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ImageModel {
@@ -138,6 +169,9 @@ pub struct ImageModel {
     pub usd_per_image: f64,
     #[serde(default)]
     pub size_by: SizeBy,
+    /// How hard the model should work, where it has levels (OpenAI's quality).
+    #[serde(default)]
+    pub quality: Quality,
     /// The model weights' licence, for the person choosing one.
     #[serde(default)]
     pub licence: String,
@@ -236,6 +270,7 @@ impl Catalogue {
                 usd_per_megapixel: 0.0,
                 usd_per_image: 0.15,
                 size_by: SizeBy::AspectRatio,
+                quality: Quality::Medium,
                 licence: "Commercial use enabled through fal.ai".into(),
             }],
             model_3d: vec![Model3d {
@@ -381,6 +416,7 @@ impl AssetProviders {
                 Arc::new(minimax::Minimax::default()),
                 Arc::new(aliyun::Aliyun::default()),
                 Arc::new(volcengine::Volcengine::default()),
+                Arc::new(openai::OpenAi::default()),
             ],
         }
     }
@@ -507,7 +543,7 @@ mod tests {
             }
         }
         let mut r = AssetProviders::built_in();
-        assert_eq!(r.ids(), vec!["fal", "zhipu", "minimax", "aliyun", "volcengine"]);
+        assert_eq!(r.ids(), vec!["fal", "zhipu", "minimax", "aliyun", "volcengine", "openai"]);
         let mut m = Catalogue::fallback().image_model(None).unwrap().clone();
         m.provider = "stub".into();
         let req = AssetRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };

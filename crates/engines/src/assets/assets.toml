@@ -96,6 +96,41 @@ usd_per_image = 0.03
 size_by = "pixels"
 licence = "火山方舟服务条款"
 
+# OpenAI's GPT Image 2.5 (2026-09-08) in its two API models: Flare is the faster default, Sunburst
+# spends longer on intricate detail. Both take a quality level (`quality`), and the price is OpenAI's
+# token calculator's per-picture estimate for 1024×1024: low ≈ $0.006, medium ≈ $0.053, high/max up
+# to ≈ $0.211; the high entry is priced at that upper bound so a budget is never under-counted.
+# Check the invoice for a large batch.
+[[image]]
+id = "gpt-image-2.5-flare-low"
+provider = "openai"
+name = "GPT Image 2.5 Flare (low)"
+endpoint = "gpt-image-2.5-flare"
+usd_per_image = 0.006
+size_by = "pixels"
+quality = "low"
+licence = "OpenAI 服务条款"
+
+[[image]]
+id = "gpt-image-2.5-flare-medium"
+provider = "openai"
+name = "GPT Image 2.5 Flare (medium)"
+endpoint = "gpt-image-2.5-flare"
+usd_per_image = 0.053
+size_by = "pixels"
+quality = "medium"
+licence = "OpenAI 服务条款"
+
+[[image]]
+id = "gpt-image-2.5-sunburst-high"
+provider = "openai"
+name = "GPT Image 2.5 Sunburst (high)"
+endpoint = "gpt-image-2.5-sunburst"
+usd_per_image = 0.211
+size_by = "pixels"
+quality = "high"
+licence = "OpenAI 服务条款"
+
 # Game-ready 3D models (GLB) from a picture, billed per model; `faces` is the face-count range the
 # model accepts.
 [[model_3d]]

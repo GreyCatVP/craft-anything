@@ -464,6 +464,10 @@ Owner: open · Status: todo
       "400: Provider returned error" (#369): a request with tools now sets
       `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
       text protocol like any server that rejects tools
+- [x] OpenAI's GPT Image 2.5 as a picture provider: its two API models (Flare and Sunburst) in the
+      asset table with a `quality` level on each entry (the level, not the model, sets the price), the
+      answer's base64 picture decoded as it arrives, and `OPENAI_API_KEY` as its own key
+      — claimed: lead, branch `feature/r5.5-domestic-image-providers`
 - [x] Domestic picture providers: Zhipu's open platform (智谱开放平台), MiniMax, Alibaba Cloud's
       Model Studio (阿里云百炼) and Volcengine's Ark (火山方舟) are asset providers beside fal.ai, with
       CogView-4, the free CogView-3-Flash, MiniMax image-01, Z-Image-Turbo and Seedream 4.0 in the
