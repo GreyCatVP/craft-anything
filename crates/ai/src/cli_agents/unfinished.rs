@@ -89,7 +89,12 @@ pub fn sweep(dir: &Path, adapters: &AgentAdapters) -> Vec<String> {
             continue;
         };
         let on = entry.host.as_ref().map(|h| format!(" on {h}")).unwrap_or_default();
-        match adapters.for_agent(&entry.agent).discard_unfinished(&entry.program, &entry.id, entry.host.as_deref()) {
+        let adapter = adapters.for_agent(&entry.agent);
+        // No adapter here knows this agent (one a fork added): keep the record for a build that does.
+        if adapter.ids().is_empty() {
+            continue;
+        }
+        match adapter.discard_unfinished(&entry.program, &entry.id, entry.host.as_deref()) {
             Ok(()) => {
                 let _ = std::fs::remove_file(&path);
                 said.push(format!("Removed session {}{on}, left unfinished by a build Craft Anything didn't get to stop.", entry.id));
@@ -210,13 +215,15 @@ mod tests {
     }
 
     #[test]
-    fn a_record_it_cant_read_is_left_as_it_is() {
+    fn a_record_it_cant_read_or_act_on_is_left_as_it_is() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("x.json"), "{\"version\":99}").unwrap();
         std::fs::write(d.path().join("y.json"), "not json").unwrap();
+        // An agent no adapter here knows would get the plain adapter, which deletes nothing.
+        drop(Held::record(d.path(), &Entry::new("no-such-agent", "agent-cli", None, "ses_other")).unwrap());
         let (a, asked) = adapters(false);
         assert!(sweep(d.path(), &a).is_empty());
         assert!(asked.lock().unwrap_or_else(PoisonError::into_inner).is_empty());
-        assert_eq!(records(d.path()), 2);
+        assert_eq!(records(d.path()), 3);
     }
 }
