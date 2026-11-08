@@ -310,6 +310,18 @@ impl CraftApp {
         });
     }
 
+    /// Add the provider chosen in Settings → AI's "Add a provider" dropdown. Its key goes to the
+    /// keychain; the form keeps what was typed until it's added, so a mistake can be fixed.
+    pub fn add_provider(&mut self, choice: craft_anything_ai::providers::ProviderChoice) {
+        let hub = self.hub.clone();
+        let (name, key) = (choice.name.to_string(), Some(self.provider_form.key.clone()));
+        let choices = self.backend_choices;
+        self.jobs.spawn(trf("Connect {name}", &[("name", &name)]), true, move |_| {
+            let result = hub.add_provider(&choice, key).map(|_| ());
+            Ok(crate::Done::BackendAdded { name, result, choices })
+        });
+    }
+
     /// Run an agent app from this program (`None`: find it by its usual name again).
     pub fn set_agent_program(&mut self, name: &str, program: Option<String>) {
         self.agent_model_picker = None;

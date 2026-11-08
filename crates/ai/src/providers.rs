@@ -97,7 +97,112 @@ pub const PROVIDERS: &[Provider] = &[
         default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
         catalog_id: "deepinfra",
     },
+    Provider {
+        name: "GLM (Z.ai)",
+        kind: BackendKind::OpenaiCompatible,
+        base_url: "https://api.z.ai/api/paas/v4",
+        key_env: "ZAI_API_KEY",
+        alt_key_env: None,
+        default_model: "glm-5.3",
+        catalog_id: "z-ai",
+    },
+    Provider {
+        name: "MiniMax",
+        kind: BackendKind::OpenaiCompatible,
+        base_url: "https://api.minimax.io/v1",
+        key_env: "MINIMAX_API_KEY",
+        alt_key_env: None,
+        default_model: "MiniMax-M3.1-Flash",
+        catalog_id: "minimax",
+    },
 ];
+
+/// One provider offered in the "Add a provider" picker: the hosted APIs a person can connect with
+/// an API key, native Anthropic and OpenAI kinds included alongside OpenAI-compatible services.
+/// A row of data, not a match arm, so the dropdown, detection and key lookup agree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderChoice {
+    /// The name a backend is added under.
+    pub name: &'static str,
+    pub kind: BackendKind,
+    /// The OpenAI-compatible base URL, or `None` for a native API (its own default base is used).
+    pub base_url: Option<&'static str>,
+    /// The environment variable that conventionally holds its key.
+    pub key_env: &'static str,
+    /// The model a new backend starts on, before the provider's own list is fetched.
+    pub default_model: &'static str,
+    /// The models currently offered, for the picker when the provider's live list can't be fetched
+    /// (for example GLM (Z.ai), which has no OpenAI `/models` endpoint).
+    pub models: &'static [&'static str],
+}
+
+/// The providers offered in Settings → AI's dropdown, in the order they're shown.
+pub const PROVIDER_CHOICES: &[ProviderChoice] = &[
+    ProviderChoice {
+        name: "Kimi (Moonshot)",
+        kind: BackendKind::OpenaiCompatible,
+        base_url: Some("https://api.moonshot.ai/v1"),
+        key_env: "MOONSHOT_API_KEY",
+        default_model: "kimi-k3.1-pro",
+        models: &["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
+    },
+    ProviderChoice {
+        name: "DeepSeek",
+        kind: BackendKind::OpenaiCompatible,
+        base_url: Some("https://api.deepseek.com/v1"),
+        key_env: "DEEPSEEK_API_KEY",
+        default_model: "deepseek-flash",
+        models: &["deepseek-flash", "deepseek-v4-pro"],
+    },
+    ProviderChoice {
+        name: "Claude (Anthropic)",
+        kind: BackendKind::Anthropic,
+        base_url: None,
+        key_env: "ANTHROPIC_API_KEY",
+        default_model: crate::anthropic::DEFAULT_MODEL,
+        models: crate::anthropic::MODELS,
+    },
+    ProviderChoice {
+        name: "ChatGPT (OpenAI)",
+        kind: BackendKind::Openai,
+        base_url: None,
+        key_env: "OPENAI_API_KEY",
+        default_model: crate::openai::OPENAI_DEFAULT_MODEL,
+        models: &["gpt-5"],
+    },
+    ProviderChoice {
+        name: "GLM (Z.ai)",
+        kind: BackendKind::OpenaiCompatible,
+        base_url: Some("https://api.z.ai/api/paas/v4"),
+        key_env: "ZAI_API_KEY",
+        default_model: "glm-5.3",
+        models: &["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-5.2", "glm-5.1"],
+    },
+    ProviderChoice {
+        name: "MiniMax",
+        kind: BackendKind::OpenaiCompatible,
+        base_url: Some("https://api.minimax.io/v1"),
+        key_env: "MINIMAX_API_KEY",
+        default_model: "MiniMax-M3.1-Flash",
+        models: &["MiniMax-M3.1-Flash", "MiniMax-M3"],
+    },
+];
+
+impl ProviderChoice {
+    /// The choice a configured backend matches: by kind and (for OpenAI-compatible services) its
+    /// base URL, so a backend added by detection ("Moonshot", "Claude") finds the same row as the
+    /// picker's ("Kimi (Moonshot)", "Claude (Anthropic)").
+    pub fn matching(kind: BackendKind, base: Option<&str>) -> Option<&'static ProviderChoice> {
+        PROVIDER_CHOICES.iter().find(|c| {
+            c.kind == kind
+                && match (c.base_url, base) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.trim_end_matches('/') == b.trim_end_matches('/'),
+                    _ => false,
+                }
+        })
+    }
+}
 
 impl Provider {
     /// The key names this provider accepts, in order.
@@ -181,6 +286,53 @@ mod tests {
         catalog.sort_unstable();
         catalog.dedup();
         assert_eq!(catalog.len(), PROVIDERS.len(), "two providers share a catalogue id");
+    }
+
+    /// Every dropdown choice has what an add needs, names and keys are unique, and the OpenAI-compatible
+    /// ones also appear in [`PROVIDERS`] so detection and key lookup stay in step.
+    #[test]
+    fn every_provider_choice_is_complete_and_unique() {
+        let mut names: Vec<&str> = PROVIDER_CHOICES.iter().map(|c| c.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), PROVIDER_CHOICES.len(), "two choices share a name");
+        let mut keys: Vec<&str> = PROVIDER_CHOICES.iter().map(|c| c.key_env).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), PROVIDER_CHOICES.len(), "two choices share a key variable");
+        for c in PROVIDER_CHOICES {
+            assert!(!c.name.trim().is_empty());
+            assert!(!c.key_env.trim().is_empty(), "{} has no key variable", c.name);
+            assert!(!c.default_model.trim().is_empty(), "{} has no default model", c.name);
+            assert!(!c.models.is_empty(), "{} has no models", c.name);
+            assert!(c.models.contains(&c.default_model), "{}'s default model isn't in its list", c.name);
+            if c.kind == BackendKind::OpenaiCompatible {
+                let base = c.base_url.expect("an OpenAI-compatible choice has a base URL");
+                assert!(base.starts_with("https://"), "{} is not https", c.name);
+                assert!(PROVIDERS.iter().any(|p| p.base_url == base), "{} isn't in PROVIDERS", c.name);
+            } else {
+                assert!(c.base_url.is_none(), "a native {} has no base URL", c.name);
+            }
+        }
+        // The exact six the picker offers.
+        assert_eq!(
+            PROVIDER_CHOICES.iter().map(|c| c.name).collect::<Vec<_>>(),
+            ["Kimi (Moonshot)", "DeepSeek", "Claude (Anthropic)", "ChatGPT (OpenAI)", "GLM (Z.ai)", "MiniMax"]
+        );
+    }
+
+    /// A backend configured by detection ("Moonshot", "Claude") finds the same picker row as the
+    /// dropdown's names ("Kimi (Moonshot)", "Claude (Anthropic)"), by kind and base URL.
+    #[test]
+    fn a_backend_matches_its_provider_choice_by_kind_and_base() {
+        assert_eq!(ProviderChoice::matching(BackendKind::OpenaiCompatible, Some("https://api.moonshot.ai/v1")).unwrap().name, "Kimi (Moonshot)");
+        assert_eq!(ProviderChoice::matching(BackendKind::OpenaiCompatible, Some("https://api.deepseek.com/v1/")).unwrap().name, "DeepSeek");
+        assert_eq!(ProviderChoice::matching(BackendKind::Anthropic, None).unwrap().name, "Claude (Anthropic)");
+        assert_eq!(ProviderChoice::matching(BackendKind::Openai, None).unwrap().name, "ChatGPT (OpenAI)");
+        assert_eq!(ProviderChoice::matching(BackendKind::OpenaiCompatible, Some("https://api.z.ai/api/paas/v4")).unwrap().name, "GLM (Z.ai)");
+        assert_eq!(ProviderChoice::matching(BackendKind::OpenaiCompatible, Some("https://api.minimax.io/v1")).unwrap().name, "MiniMax");
+        assert!(ProviderChoice::matching(BackendKind::OpenaiCompatible, Some("http://127.0.0.1:11434/v1")).is_none());
+        assert!(ProviderChoice::matching(BackendKind::Anthropic, Some("https://example.com")).is_none());
     }
 
     /// A plain-HTTP base never receives a key, and a base missing `/v1` still finds its row.

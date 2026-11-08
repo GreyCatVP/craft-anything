@@ -1434,6 +1434,32 @@ fn a_claude_ais_effort_is_set_in_settings() {
     h.get_by_value("max");
 }
 
+/// Settings → AI's "Add a provider" dropdown offers the known providers and adds one with a key.
+#[test]
+fn a_provider_is_added_from_the_dropdown() {
+    let mut h = harness(|| demo::app(demo::engine(Mode::Experienced, true)));
+    h.run_steps(3);
+    h.state_mut().state.settings_open = true;
+    h.state_mut().state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+    h.run_steps(2);
+    h.get_by_label("Add a provider");
+    // The dropdown shows the first provider; a choice is picked from the six it offers.
+    h.get_by_value("Kimi (Moonshot)").click();
+    h.run();
+    h.get_by_label("MiniMax").click();
+    h.run_steps(2);
+    assert_eq!(h.state().provider_form.selected, Some(5), "MiniMax is the sixth choice");
+    // Paste the key and add: the backend lands in Settings → AI with the provider's model.
+    h.get_all_by_label("API key").next().expect("provider key field").focus();
+    h.run_steps(2);
+    h.get_all_by_label("API key").next().expect("provider key field").type_text("sk-test-minimax");
+    h.run_steps(2);
+    h.get_all_by_label("Add").next().expect("provider Add button").click();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "MiniMax")));
+    let added = h.state().backends.iter().find(|b| b.name == "MiniMax").expect("MiniMax added");
+    assert_eq!(added.model, "MiniMax-M3.1-Flash");
+}
+
 /// The picker exposes only the chosen model's depths and clears an old depth when changing models.
 #[test]
 fn opencode_picker_offers_only_the_selected_models_thinking_depths() {

@@ -281,6 +281,15 @@ pub struct ServerForm {
     pub key: String,
 }
 
+/// Settings → AI's "Add a provider" form: a known provider chosen from the dropdown, and the key
+/// pasted for it. The key goes only to the keychain; nothing here is kept with the UI state.
+#[derive(Debug, Clone, Default)]
+pub struct ProviderForm {
+    /// Index into `craft_anything_ai::providers::PROVIDER_CHOICES`.
+    pub selected: Option<usize>,
+    pub key: String,
+}
+
 /// What a file dialog was for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
@@ -460,6 +469,8 @@ pub struct CraftApp {
     /// Settings → AI's "Add an AI by its address" form. Not kept with the UI state: its key goes
     /// only to the keychain.
     pub server_form: ServerForm,
+    /// Settings → AI's "Add a provider" form (a known provider + pasted key).
+    pub provider_form: ProviderForm,
     /// Every project's rebuild in this window: working, waiting their turn, or finished.
     pub runs: craft_anything_ai::rebuild::RunSet,
     /// What was typed for each note still waiting for a builder, by note id, to put back in the
@@ -576,6 +587,7 @@ impl CraftApp {
             log: Vec::new(),
             key_inputs: Default::default(),
             server_form: ServerForm::default(),
+            provider_form: ProviderForm::default(),
             runs: craft_anything_ai::rebuild::RunSet::new(craft_anything_engine::settings::BuildSettings::default().parallel),
             drafts: Default::default(),
             pending_paste: None,
@@ -1566,6 +1578,11 @@ impl CraftApp {
                 Ok(()) => {
                     if self.server_form.name.trim() == name {
                         self.server_form = ServerForm::default();
+                    }
+                    let provider_added =
+                        self.provider_form.selected.and_then(|i| craft_anything_ai::providers::PROVIDER_CHOICES.get(i)).is_some_and(|c| c.name == name);
+                    if provider_added {
+                        self.provider_form.key.clear();
                     }
                     self.toast(i18n::trf("{name} is ready", &[("name", &name)]), false);
                     // Picking another AI (or none) while this one connected wins.

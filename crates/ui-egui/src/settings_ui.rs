@@ -741,7 +741,47 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         });
         ui.add_space(6.0);
     }
+    provider_form(app, ui);
     server_form(app, ui);
+}
+
+/// A known provider with a pasted key: Settings → AI's "Add a provider" dropdown. Choosing one and
+/// pasting its key adds it; its model list then comes from its own live list ("Change…" below).
+pub(crate) fn provider_form(app: &mut CraftApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(14.0);
+    widgets::caption(ui, "Add a provider");
+    ui.label(RichText::new(tr("Choose a provider and paste its API key.")).color(t.text_faint).size(theme::CAPTION));
+    ui.add_space(4.0);
+    let choices = craft_anything_ai::providers::PROVIDER_CHOICES;
+    let selected = app.provider_form.selected.unwrap_or(0);
+    let current = choices.get(selected).map_or(choices[0].name, |c| c.name);
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("add-provider").icon(widgets::combo_icon).selected_text(current).show_ui(ui, |ui| {
+            for (i, c) in choices.iter().enumerate() {
+                if ui.selectable_label(i == selected, c.name).clicked() && i != selected {
+                    app.provider_form.selected = Some(i);
+                }
+            }
+        });
+    });
+    ui.add_space(4.0);
+    let mut add = false;
+    ui.horizontal(|ui| {
+        let key = &mut app.provider_form.key;
+        let r = ui.add(
+            egui::TextEdit::singleline(key)
+                .password(true)
+                .hint_text(tr("API key (stored in your system keychain)"))
+                .desired_width(260.0)
+                .frame(widgets::text_field_frame_compact(&t)),
+        );
+        widgets::named(r, &tr("API key"));
+        add = widgets::primary_icon(ui, Some("plus"), "Add", !key.trim().is_empty()).clicked() && !key.trim().is_empty();
+    });
+    if add {
+        app.add_provider(choices[app.provider_form.selected.unwrap_or(0)]);
+    }
 }
 
 /// An AI that "Look for AI" can't find: a server on another computer or a hosted service, added by

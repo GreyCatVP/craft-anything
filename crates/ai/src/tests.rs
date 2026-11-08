@@ -228,6 +228,27 @@ fn disabled_backends_are_refused_on_either_side_of_compare() {
     assert!(unknown.message.contains("No AI backend named"), "{unknown:?}");
 }
 
+/// The "Add a provider" picker's rows build the right backends and store their key, including the
+/// native Anthropic/OpenAI kinds alongside the OpenAI-compatible services.
+#[test]
+fn each_provider_choice_builds_its_backend_and_stores_its_key() {
+    let (h, _dir) = hub();
+    for choice in crate::providers::PROVIDER_CHOICES {
+        h.add_provider(choice, Some("sk-test".into())).unwrap();
+        let config = h.config();
+        let e = config.get(choice.name).unwrap_or_else(|| panic!("{} added", choice.name));
+        assert_eq!(e.config.kind, choice.kind, "{}", choice.name);
+        assert_eq!(e.config.model, choice.default_model, "{}", choice.name);
+        assert_eq!(e.config.base_url.as_deref(), choice.base_url, "{}", choice.name);
+        assert!(h.has_key(choice.name), "{} has a key", choice.name);
+    }
+    // The two native kinds land with the kind their row names, not as compatible servers.
+    let config = h.config();
+    assert_eq!(config.get("Claude (Anthropic)").unwrap().config.kind, BackendKind::Anthropic);
+    assert_eq!(config.get("ChatGPT (OpenAI)").unwrap().config.kind, BackendKind::Openai);
+    assert_eq!(config.get("MiniMax").unwrap().config.kind, BackendKind::OpenaiCompatible);
+}
+
 /// A CLI stand-in checks saved selections, and an explicit one runs natively with our MCP server.
 #[cfg(unix)]
 #[test]

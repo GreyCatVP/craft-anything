@@ -1,13 +1,14 @@
 # Status
 
 What works today and how it was checked. The plan, owners and order of work are in
-[ROADMAP.md](ROADMAP.md). Last updated 2026-11-05. The baseline audit on 2026-10-23 from `main` had 923 tests passing;
+[ROADMAP.md](ROADMAP.md). Last updated 2026-11-07. The baseline audit on 2026-10-23 from `main` had 923 tests passing;
 workspace clippy, layers, fmt and the secret scan of all history were clean. Chinese UI checks are listed separately below.
 
 ## What works, and how it was checked
 
 | Area | State | Verified by |
 |---|---|---|
+| Add-a-provider dropdown | Settings → AI gains an "Add a provider" dropdown of six known providers — Kimi (Moonshot), DeepSeek, Claude (Anthropic), ChatGPT (OpenAI), GLM (Z.ai) and MiniMax — each with a pasted API key. The added backend keeps the provider's default model and lists its models through the existing picker: the live `/models` list, else the provider's own table (GLM (Z.ai) has no `/models` endpoint). GLM (Z.ai) and MiniMax join the provider catalogue and env-key detection | Unit tests cover the two new provider rows, the unified picker table (including the static model lists), `AiHub::add_provider`, the kind-and-base match, and env-key detection of GLM/MiniMax; a UI smoke test drives the dropdown and adds MiniMax with a key. No live provider key was used |
 | Watched descendant regression | A guarded Rust parent starts the heartbeat child in its inherited process group/job. No shell quoting is involved. The watched launch is stopped before missing startup markers can fail an assertion | macOS regressions pass for descendant shutdown, startup-timeout cleanup and direct ignored-fixture runs without guards. Windows execution of this replacement remains pending; the prior shell fixture failed there. The platform suite still has the separately tracked preview-connection fixture failure |
 | Disabled chat backends | Naming a backend that is off refuses chat and either side of compare with a settings error and guidance, before API or coding-agent setup | Isolated hub regressions for disabled API and agent backends, both compare positions, and enabled/automatic controls. Invalid tunnel settings detect API setup before the guard. No live provider or agent was used |
 | Request-based project kinds | Low-level tools and media players keep the app target when “level” or “player” describes the tool. Explicit game requests and game engines still select the game target | Request-classification regression cases |
