@@ -297,6 +297,9 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       — claimed: youkaicountry, branch docs/r5.2-doubled-status-rows — PR #1226
 - [ ] Have `cargo xtask` refuse a STATUS.md table with two rows of the same name, so a merge
       that keeps both copies of an edited row fails CI instead of reaching `main`
+- [ ] `docs/opencode.md` still has one passage twice, missed by #1226: in "Configuration and
+      execution", the older copy of the standalone-server sentence, cut off after "both"
+      — claimed: youkaicountry, branch docs/r5.2-opencode-doubled-passage
 
 ### R5.3 A builder that can't make progress stops
 Owner: open · Status: todo
