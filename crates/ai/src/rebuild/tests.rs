@@ -206,9 +206,13 @@ fn estonian_requests_keep_their_project_kind() {
         assert_eq!(choose(request, &TargetRef::None).0, "website", "{request}");
     }
     assert_eq!(choose("Ava veebilehitseja", &TargetRef::None).0, "app");
-    // A website that mentions games is a website; the games are its content.
-    for request in ["Loo veebileht, kus müüakse mänge", "Mängude veebileht"] {
+    // The head of the main clause decides when both are named: a game used as the source or
+    // topic is not the build.
+    for request in ["Tee sellest mängust veebileht", "Mängude veebileht", "Loo veebileht, kus müüakse mänge", "Veebileht mängust"] {
         assert_eq!(choose(request, &TargetRef::None).0, "website", "{request}");
+    }
+    for request in ["Tee sellest veebilehest mäng", "Loo mäng nimega Veebileht", "Mäng veebilehega"] {
+        assert_eq!(choose(request, &TargetRef::None).0, "game", "{request}");
     }
 }
 

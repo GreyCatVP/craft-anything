@@ -33,7 +33,10 @@ Ready), *Tõendid* (Evidence), *leid* (finding), *projekt* (Project), *sihtmärk
 (tool), *töölaud* (workbench), *ehitaja* (builder), *Seaded* (Settings) and *taasehitus* (rebuild).
 
 The kind detection that reads a request also knows *mäng* for a game and *veebileht*, *koduleht* and
-*veebisait* for a website, so a translated suggestion keeps its project kind.
+*veebisait* for a website, so a translated suggestion keeps its project kind. If a request names
+both, the head of the main clause wins: a complement case (*mängust*, *veebilehega*) marks the
+source or topic, not the thing to build, so *Tee sellest mängust veebileht* is a website while
+*Loo mäng nimega Veebileht* is a game.
 
 ## Georgian
 
