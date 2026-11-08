@@ -991,6 +991,27 @@ fn log_view(app: &CraftApp, ui: &mut Ui) {
 mod tests {
     use super::*;
 
+    /// After an open, a busy session leaves the old snapshot: the list waits for the new one
+    /// rather than loading with the old target's tool.
+    #[test]
+    fn the_rail_waits_for_a_fresh_snapshot() {
+        let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Experienced, true));
+        app.view.active = Some("t_old".into());
+        app.state.rail = RailKind::Classes;
+        app.state.lists.clear();
+        app.view_dirty = true;
+        {
+            let engine = app.engine.clone();
+            let _busy = engine.session();
+            app.refresh_view();
+            app.ensure_rail_loaded();
+        }
+        assert!(!app.state.lists.contains_key(&RailKind::Classes), "{:?}", app.state.lists.get(&RailKind::Classes));
+        app.view_dirty = false;
+        app.ensure_rail_loaded();
+        assert!(app.state.lists.contains_key(&RailKind::Classes));
+    }
+
     #[test]
     fn recorded_findings_render_even_without_evidence_rows() {
         let mut app = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, false));

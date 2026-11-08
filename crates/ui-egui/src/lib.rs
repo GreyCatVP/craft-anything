@@ -1133,7 +1133,9 @@ impl CraftApp {
     /// Load the current rail list if it hasn't been.
     pub fn ensure_rail_loaded(&mut self) {
         let kind = self.state.rail;
-        if kind == RailKind::Targets || self.view.active.is_none() {
+        // A stale snapshot (the session was busy) would pick the old target's tool; the
+        // workbench asks again each frame while the list is idle.
+        if kind == RailKind::Targets || self.view.active.is_none() || self.view_dirty {
             return;
         }
         if matches!(self.state.lists.get(&kind), None | Some(Fill::Idle)) {
@@ -1463,7 +1465,7 @@ impl CraftApp {
                         self.state.rail = if self.state.rail == RailKind::Targets { RailKind::Functions } else { self.state.rail };
                         // The list's tool depends on the new target's kind, not the one shown before.
                         self.refresh_view();
-                        self.load_rail(self.state.rail);
+                        self.ensure_rail_loaded();
                     }
                 }
                 Err(e) if clean_room::is_refusal(&e) => self.state.modal = Some(state::Modal::DeepMode),
