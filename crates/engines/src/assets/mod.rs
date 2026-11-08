@@ -5,6 +5,7 @@
 //! what it cost. Audio would be one more [`AssetRequest`] variant and table.
 
 pub mod fal;
+pub mod minimax;
 pub mod zhipu;
 
 use craft_anything_evidence::{ErrorCode, ToolError};
@@ -369,9 +370,9 @@ impl Default for AssetProviders {
 }
 
 impl AssetProviders {
-    /// fal.ai and Zhipu's open platform.
+    /// fal.ai, Zhipu's open platform and MiniMax.
     pub fn built_in() -> AssetProviders {
-        AssetProviders { providers: vec![Arc::new(fal::Fal::default()), Arc::new(zhipu::Zhipu::default())] }
+        AssetProviders { providers: vec![Arc::new(fal::Fal::default()), Arc::new(zhipu::Zhipu::default()), Arc::new(minimax::Minimax::default())] }
     }
 
     /// Add a provider, or replace the one with the same id.
@@ -496,7 +497,7 @@ mod tests {
             }
         }
         let mut r = AssetProviders::built_in();
-        assert_eq!(r.ids(), vec!["fal", "zhipu"]);
+        assert_eq!(r.ids(), vec!["fal", "zhipu", "minimax"]);
         let mut m = Catalogue::fallback().image_model(None).unwrap().clone();
         m.provider = "stub".into();
         let req = AssetRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };

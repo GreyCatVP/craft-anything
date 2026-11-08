@@ -61,6 +61,17 @@ usd_per_image = 0.0
 size_by = "pixels"
 licence = "免费模型（智谱开放平台服务条款）"
 
+# MiniMax's open platform: `image-01`, billed per picture; ¥0.025 converted at ¥7.1 to $1 on
+# 2026-11-08. Its sizes are aspect ratios (`size_by = "aspect_ratio"`): 1:1, 16:9 and 9:16.
+[[image]]
+id = "minimax-image-01"
+provider = "minimax"
+name = "MiniMax image-01"
+endpoint = "image-01"
+usd_per_image = 0.0035
+size_by = "aspect_ratio"
+licence = "MiniMax 开放平台服务条款"
+
 # Game-ready 3D models (GLB) from a picture, billed per model; `faces` is the face-count range the
 # model accepts.
 [[model_3d]]
