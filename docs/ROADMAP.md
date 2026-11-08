@@ -368,6 +368,12 @@ been run live.
 - [x] Keep the retry condition when `Action:` or `Final Answer:` appears between fenced
       calls, without rejecting ordinary words between calls (PR #1031 review)
       — claimed: Codex, branch bugfix/r5.4-fenced-call-followup
+- [ ] A call to a tool that isn't offered comes back from a llama.cpp server as text in Qwen's
+      markup (`<tool_call><function=web_search><parameter=query>…`), and the loop takes it as the
+      final answer: a live build on a 512k-window Qwen model stopped at its second check in 3
+      minutes. Read that markup as a call when it names an offered tool; when it names one that
+      isn't, say so and name the tools it has, and ask again
+      — claimed: youkaicountry, branch bugfix/r5.4-text-tool-calls
 - [ ] A local builder spends its rounds on the project file and never writes the app: run 4 had a
       compiling `Cargo.toml` by check 3, its last, with `main.rs` still "Hello, world!". See whether
       more rounds get there, or whether a small model needs the window and the `--screenshot`
