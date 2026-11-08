@@ -194,25 +194,12 @@ fn python_package_script(app: &Path, bin: &Path) -> Option<PathBuf> {
 }
 
 /// Whether `java -jar` can start `jar`: its manifest names a main class. Only the archive's
-/// directory and manifest are read, whatever the jar's size. A ZIP64 jar is read whole up to 64 MB;
-/// a bigger one counts as runnable, as a jar that size is usually an application bundle.
+/// directory and manifest are read, whatever the jar's size. A jar that can't be read this way
+/// (a central directory over 16 MB, a damaged archive) doesn't count.
 fn runnable_jar(jar: &Path) -> bool {
-    use craft_anything_formats::{zip, zip_file};
-    const MANIFEST: &str = "META-INF/MANIFEST.MF";
-    const READ_CAP: u64 = 64 << 20;
     let Ok(mut file) = std::fs::File::open(jar) else { return false };
-    let manifest = match zip_file::read_named_entry(&mut file, MANIFEST, 1 << 20) {
-        Err(zip::ZipError::Unsupported(_)) => {
-            if std::fs::metadata(jar).is_ok_and(|m| m.len() > READ_CAP) {
-                return true;
-            }
-            let Ok(bytes) = std::fs::read(jar) else { return false };
-            let Ok(archive) = zip::parse(&bytes, 500_000) else { return false };
-            archive.entries.iter().find(|e| e.name == MANIFEST).and_then(|e| zip::read_entry(&bytes, e, 1 << 20).ok())
-        }
-        other => other.ok().flatten(),
-    };
-    manifest.is_some_and(|m| crate::tools::java_tools::parse_manifest(&m).get("Main-Class").is_some_and(|c| !c.is_empty()))
+    let manifest = craft_anything_formats::zip_file::read_named_entry(&mut file, "META-INF/MANIFEST.MF", 1 << 20);
+    manifest.ok().flatten().is_some_and(|m| crate::tools::java_tools::parse_manifest(&m).get("Main-Class").is_some_and(|c| !c.is_empty()))
 }
 
 #[cfg(test)]
