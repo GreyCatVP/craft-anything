@@ -545,6 +545,13 @@ V2 also names a tool call `id` (V1: `callID`), so every tool event was dropped a
 for the whole turn. Use a file in `OPENCODE_CONFIG` with `run --standalone`, and confirm a live run
 reached the server (`mcp connected server=craft-anything` in OpenCode's log), not just that it started.
 
+**A side door to a service the main path avoided.** Runs used `--standalone` so OpenCode's shared
+service never saw them, and #1185 deleted the sessions a stopped turn left. But the model check
+before each turn ran plain `api model.list`, which starts that service, and the service resumed a
+session the person had left unfinished days before and went on editing another project for half
+an hour. When a program has a mode that must be avoided, give every call to it the same flag, not
+only the main one: list each command we run (`run`, `api`, `session delete`) and test each.
+
 **Keywords that only some code paths honour.** "…in Rust" picked Rust for apps but not for games, so
 a headless game rebuild stopped at once for want of Unity. It was found only by a live run. Run the
 real flow end to end after changing how requests are read, and add the case as a test.

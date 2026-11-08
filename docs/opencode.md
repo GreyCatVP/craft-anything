@@ -117,6 +117,10 @@ keeps failing is given up after three tries, with the command to run by hand.
 
 Model discovery uses `opencode api model.list --param location[directory]=...` (the V2
 `GET /api/model` operation). This keeps credentials and configuration resolution inside OpenCode.
-Global `--server` and `--standalone` arguments are shared with discovery. Extra model arguments
+Global `--server` and `--standalone` arguments are shared with discovery. Without a `--server`,
+discovery adds `--standalone` itself, as runs do: plain `api` starts OpenCode's shared service,
+which resumes every unfinished session on the computer, in any project, and carries on with its
+commands (#1115). The model check before each turn is a discovery, so without it every build could
+wake an old session somewhere else. Extra model arguments
 remain available when no model or thinking selection is saved. With an explicit selection,
 conflicting extra model arguments are refused; choose the model through its settings instead.
