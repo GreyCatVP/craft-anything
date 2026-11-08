@@ -366,7 +366,7 @@ mod tests {
         let v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(v["mcp"][MCP_NAME]["command"], json!(["craft-anything-cli", "mcp"]));
         let options = BackendOptions { cli_model: Some("test/model".into()), ..Default::default() };
-        assert!(OpenCode.check_native_options(&options).is_ok());
+        assert!(OpenCode.check_native_options(&options, None).is_ok());
     }
 
     #[test]

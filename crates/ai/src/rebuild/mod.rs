@@ -705,7 +705,7 @@ impl Worker {
             if let Some(host) = remote_host {
                 adapter.check_remote_tool_server(host, &self.stop)?;
             } else {
-                crate::cli_agents::check_builder_tools(adapter.as_ref(), &entry.config.model, &entry.options, &self.stop)?;
+                crate::cli_agents::check_builder_tools(adapter.as_ref(), &entry.config.model, &entry.options, &ws.root, &self.stop)?;
                 let program = crate::cli_agents::program_of(&entry.config, &entry.options)?;
                 // A saved path that's gone (an update moved it) or would start the wrong app runs another program: say which (#721).
                 if let Some(saved) = crate::cli_agents::replaced_program(&entry.options, &program) {

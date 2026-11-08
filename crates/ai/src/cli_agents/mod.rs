@@ -243,13 +243,13 @@ pub fn cli_can_start(cli: Option<&Path>, stop: &CancelToken) -> Result<(), ToolE
     }
 }
 
-/// Whether a local build by `agent` can have our tool server: over ACP every agent is handed it,
-/// else its adapter says.
-pub fn check_builder_tools(adapter: &dyn AgentAdapter, agent: &str, options: &BackendOptions, stop: &CancelToken) -> Result<(), ToolError> {
+/// Whether a local build by `agent` in `cwd` can have our tool server: over ACP every agent is
+/// handed it, else its adapter says.
+pub fn check_builder_tools(adapter: &dyn AgentAdapter, agent: &str, options: &BackendOptions, cwd: &Path, stop: &CancelToken) -> Result<(), ToolError> {
     if selected_acp_args(adapter, agent, options).is_some() {
         return cli_can_start(craft_anything_platform::self_cli_path().as_deref(), stop);
     }
-    adapter.check_native_options(options)?;
+    adapter.check_native_options(options, Some(cwd))?;
     adapter.check_tool_server(stop)
 }
 
@@ -861,7 +861,9 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         });
         return nothing_done(&name);
     }
-    if let Err(e) = adapter.check_native_options(&spec.options) {
+    // The folder the agent's process starts in below.
+    let cwd = remote.is_none().then(|| spec.project.clone().or_else(|| std::env::current_dir().ok())).flatten();
+    if let Err(e) = adapter.check_native_options(&spec.options, cwd.as_deref()) {
         let _ = tx.send(AgentEvent::Error { message: e.message, remediation: e.remediation, log: None });
         return nothing_done(&name);
     }
@@ -1472,7 +1474,7 @@ mod tests {
             for acp in [false, true] {
                 let options = BackendOptions { cli_model: model.map(str::to_string), cli_thinking: thinking, acp: Some(acp), ..Default::default() };
                 assert!(selected_acp_args(adapter.as_ref(), "opencode", &options).is_none());
-                assert!(adapter.check_native_options(&options).is_ok());
+                assert!(adapter.check_native_options(&options, None).is_ok());
             }
         }
         let mcp = McpCommand { command: "craft-anything-cli".into(), args: vec![], notes: None };
@@ -2442,7 +2444,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         // before it runs (#72), which its own tests cover.
         let aider = BackendOptions { cli_model: Some("anthropic/claude-sonnet-4".into()), ..Default::default() };
         for (agent, options) in [("gemini-cli", BackendOptions::default()), ("aider", aider), ("no-such-agent", BackendOptions::default())] {
-            assert!(check_builder_tools(adapter_for(agent).as_ref(), agent, &options, &CancelToken::default()).is_ok(), "{agent}");
+            assert!(check_builder_tools(adapter_for(agent).as_ref(), agent, &options, Path::new("."), &CancelToken::default()).is_ok(), "{agent}");
         }
     }
 

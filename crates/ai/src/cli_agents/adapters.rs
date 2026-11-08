@@ -71,7 +71,8 @@ pub trait AgentAdapter: Send + Sync {
     }
     /// Refuse options that the native transport cannot support, before preflight or process I/O.
     /// Saving a model choice and discovering its catalogue do not imply native execution support.
-    fn check_native_options(&self, _options: &BackendOptions) -> Result<(), ToolError> {
+    /// `cwd` is the folder the agent will run in on this computer; none for a run over SSH.
+    fn check_native_options(&self, _options: &BackendOptions, _cwd: Option<&Path>) -> Result<(), ToolError> {
         Ok(())
     }
 
