@@ -901,6 +901,7 @@ Owner: open · Status: in progress
 Owner: maintainers · Status: in progress
 - [ ] A remote (SSH) builder needs a craft-anything-cli that knows `--deep` and `--clean-room`:
       check its version first and say so when it's older
+      — claimed: rmsff, branch test/r2.8-remote-cli-flags
 
 ### R2.9 Everyday use: typing, projects, settings
 Owner: maintainers · Status: in progress
