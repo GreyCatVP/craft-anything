@@ -99,8 +99,6 @@ by recovery.
 The current ACP transport cannot select models or variants. An explicit choice bypasses ACP
 even if `acp = true` was previously set and runs natively. OpenCode V2 ignores
 `OPENCODE_CONFIG_CONTENT`, and plain `opencode run` hands the turn to the background service,
-which never sees the run's environment; so the adapter writes the server to a temp config file
-and starts a private server with `--standalone`. V2 names a tool call `id` (V1: `callID`); both
 which never sees the run's environment; so the adapter writes the server to a config file
 and starts a private server with `--standalone` (locally in this computer's temporary
 folder, over SSH on the host itself). V2 names a tool call `id` (V1: `callID`); both
