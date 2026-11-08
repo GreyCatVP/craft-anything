@@ -1147,6 +1147,10 @@ Gaps found while using the app for real projects.
 - [x] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
       not "update the pinned URL", which nobody installing an engine can do (#1193)
       — claimed: justinjohn0306, branch bugfix/r2.9-download-server-errors
+- [ ] The person's messages stand out from the builder's: a solid brand-blue bubble with white
+      text, and the builder's answers as plain text without a card, in the feed and the console.
+      The faint tint made the two hard to tell apart at a glance
+      — claimed: StrongTheDev, branch feature/r2.9-person-message-look
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
