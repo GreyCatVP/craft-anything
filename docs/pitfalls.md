@@ -162,9 +162,10 @@ A controlled fragmented request reproduced the fixture defect; the old CI log di
 the probe's underlying error, so it does not establish that failure's cause.
 
 **A socket option set after the peer reset it.** A preview test set its clients' read timeout
-after stopping the server; once a reset has reached a socket, macOS answers `setsockopt` with
-`Invalid argument` (Linux doesn't), so the test failed only on Macs. Set socket options right after
-connecting, before anything can close the other end.
+after stopping the server. macOS answers `setsockopt` with `Invalid argument` on a socket closed in
+both directions (a reset, or the peer's FIN after our own `shutdown(Write)`); Linux doesn't check,
+so the test failed only on Macs. Set socket options right after connecting, before anything can
+close the connection.
 
 **A script written and run at once.** Tests that write a stand-in program and start it failed now
 and then on Linux with "Text file busy": another test thread was starting a child at that moment,
