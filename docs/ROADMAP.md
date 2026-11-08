@@ -438,10 +438,17 @@ been run live.
       A Qwen model with a 512k window: 2 of 3 full-list builds of "a scientific calculator" were
       Ready, using the brief, handoff and finding tools; the third stopped when the model wrote a
       call to a tool that doesn't exist as text. A small model wasn't run
-- [ ] A builder that can't see pictures is still told to open screenshots with Read (the capture
-      and `--screenshot` lines in `brief.rs`, "Pictures of your build" in the check's report),
-      right after the API loop's note says it can't look at pictures. Give it only what it can
-      use, and say what the check measures instead
+- [x] A builder that can't see pictures (the API loop) is told it can't, then sent to open
+      screenshots with Read: the website capture lines and the `--screenshot` and reference-picture
+      lines in `brief.rs`, the website check's "Open each pair", the reminder after each round, the
+      `--screenshot` contract and `capture/README.md`'s window picture. Give it only what it can
+      use, and say what the check measures instead. `BriefCx::sees_pictures` (today: not the API
+      loop) picks the wording: a website's `layouts` and each round's `capture.json`, a program's
+      `ui-tree.json` and the check's likeness, and asking the person what their pictures show
+      — claimed: youkaicountry, branch bugfix/r5.4-blind-builder-prompts
+- [ ] The carry-on and follow-up prompts (`continue_prompt`, `follow_up`) ask an API-loop builder
+      to check its work with rebuild_check, which the loop refuses while it builds; only its first
+      message says so. Say "Craft Anything checks it after your turn" there instead
 - [ ] Models that can see get pictures: an image block in the conversation, sent as `image_url`
       parts (OpenAI-style) and `image` blocks (Anthropic), for the check's screenshots beside the
       original's, the pictures in `reference/` and a PNG the builder reads. Each AI's Pictures

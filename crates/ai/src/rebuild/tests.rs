@@ -19,10 +19,10 @@ fn kind_of(request: &str, target: &TargetRef, stack: &str) -> &'static str {
     KindRegistry::built_in().detect(request, target, stack).unwrap().id()
 }
 fn brief(ws: &Workspace, k: &str, deep: bool, ghidra: bool, editor: Option<&Path>, assets: bool, extra: Option<&str>) -> String {
-    super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None }, extra)
+    super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra, editor, assets, image_model: None, sees_pictures: true }, extra)
 }
 fn refine(k: &str, check: &CheckResult) -> String {
-    kind(k).refine(check)
+    kind(k).refine(check, true)
 }
 fn follow_up(message: &str, k: &str) -> String {
     super::follow_up(message, kind(k).as_ref())
@@ -424,7 +424,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         self_check: None,
         reset_progress_after_notes: false,
     };
-    assert!(w.added(&mut ws, true).is_none(), "nothing added, nothing to say");
+    assert!(w.added(&mut ws, true, true).is_none(), "nothing added, nothing to say");
     use craft_anything_engine::questions::{self, AskedQuestion};
     let asked = AskedQuestion { deep: false, ..AskedQuestion::new("where is the score kept".into(), "In src.".into(), true, "Stand-in".into(), None, 0) };
     questions::add(&ws, asked.clone()).unwrap();
@@ -432,7 +432,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
     let mut first = note(1, "Make it faster");
     first.questions = vec![asked];
     notes.lock().unwrap().extend([first, note(2, "A blue sky")]);
-    let (p, more) = w.added(&mut ws, true).unwrap();
+    let (p, more) = w.added(&mut ws, true, true).unwrap();
     assert!(p.contains("where is the score kept") && p.contains("- Make it faster (pictures: a.png)\n- A blue sky"), "{p}");
     assert_eq!(more.len(), 1, "the question is marked told after the turn");
     assert!(notes.lock().unwrap().is_empty(), "each note goes in once");
@@ -518,14 +518,104 @@ fn pictures_of_the_original_reach_the_builder() {
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Game", "Copy this game", TargetRef::None).unwrap();
     assert!(!brief(&ws, "game", false, false, None, false, None).contains("reference/picture"));
-    assert!(pictures_reminder(&ws).is_empty());
+    assert!(pictures_reminder(&ws, true).is_empty());
     let pic = d.path().join("shot.webp");
     std::fs::write(&pic, "x").unwrap();
     ws.add_references(&[pic]).unwrap();
     let b = brief(&ws, "game", false, false, None, false, None);
     assert!(b.contains("reference/picture-1.webp") && b.contains("--screenshot"), "{b}");
     assert!(!brief(&ws, "website", false, false, None, false, None).contains("--screenshot"), "websites are photographed for it");
-    assert!(pictures_reminder(&ws).contains("1 picture(s)"));
+    assert!(pictures_reminder(&ws, true).contains("1 picture(s)"));
+}
+
+/// What a builder that can't look at pictures (the API loop) is told to open or look at a
+/// picture with. A sighted builder's prompts say these; a blind one's never do (R5.4).
+const LOOK_AT_A_PICTURE: &[&str] = &[
+    "Read tool and look",
+    "with the Read tool to learn the style",
+    "Open every one with the Read tool",
+    "open that picture with Read",
+    "Open each pair",
+    "open any you haven't looked at",
+    // The --screenshot contract's old wording, kept here so it can't come back for a blind builder.
+    "now.png) and look at the picture",
+    "open it with Read and look at it",
+    "from the pictures and how it plays",
+    "use the pictures in reference/",
+    "Work from these pictures",
+    "so match how they look",
+];
+
+fn said_to_look(text: &str) -> Option<&'static str> {
+    LOOK_AT_A_PICTURE.iter().copied().find(|p| text.contains(p))
+}
+
+/// R5.4: every first message, refinement and reminder a blind builder can get, for every kind,
+/// target, mode and with or without the person's pictures, sends it to no picture, and each says
+/// what to use instead.
+#[test]
+fn a_builder_that_cant_see_is_never_sent_to_a_picture() {
+    let sees_only = |ws: &Workspace, k: &str, deep: bool, assets: bool, sees_pictures: bool| {
+        super::brief(kind(k).as_ref(), &BriefCx { ws, deep, ghidra: false, editor: None, assets, image_model: None, sees_pictures }, None)
+    };
+    let mut checked = 0;
+    // Everything a sighted builder is sent, to show the guard's phrases are still what it's told.
+    let mut sighted_all = String::new();
+    for k in KindRegistry::built_in().ids() {
+        for target in ["none", "web", "local"] {
+            for (deep, assets, pics, generated) in (0..16).map(|b| (b & 1 != 0, b & 2 != 0, b & 4 != 0, b & 8 != 0)) {
+                let d = tempfile::tempdir().unwrap();
+                let t = match target {
+                    "web" => TargetRef::Website { url: "https://example.com".into() },
+                    "local" => TargetRef::Local { path: d.path().join("orig").join("game.exe") },
+                    _ => TargetRef::None,
+                };
+                let mut ws = Workspace::create(d.path(), "P", "Make it", t).unwrap();
+                ws.manifest.generate_assets = generated;
+                if pics {
+                    let p = d.path().join("shot.png");
+                    std::fs::write(&p, "x").unwrap();
+                    ws.add_references(&[p]).unwrap();
+                }
+                let case = format!("{k} {target} deep={deep} assets={assets} pictures={pics} generated={generated}");
+                let blind = sees_only(&ws, k, deep, assets, false);
+                assert_eq!(said_to_look(&blind), None, "{case}:\n{blind}");
+                sighted_all.push_str(&sees_only(&ws, k, deep, assets, true));
+                sighted_all.push_str(&pictures_reminder(&ws, true));
+                if pics {
+                    assert!(blind.contains("you can't look at pictures") && blind.contains("core_person_ask"), "{case}:\n{blind}");
+                    assert_eq!(said_to_look(&pictures_reminder(&ws, false)), None, "{case}");
+                    assert!(pictures_reminder(&ws, false).contains("you can't look at them"), "{case}");
+                }
+                if target == "web" && k == "website" {
+                    assert!(blind.contains("`layouts`") && !blind.contains("screenshot and `layouts`"), "{case}:\n{blind}");
+                }
+                if target == "local" && !deep {
+                    assert!(blind.contains("capture/ui-tree.json"), "{case}:\n{blind}");
+                }
+                checked += 1;
+            }
+        }
+        let mut c = CheckResult::new("x", 3, true, String::from("the note"));
+        assert_eq!(said_to_look(&kind(k).refine(&c, false)), None, "{k}");
+        c.similarity = Some(71.0);
+        let blind = kind(k).refine(&c, false);
+        assert_eq!(said_to_look(&blind), None, "{k}: {blind}");
+        if k == "website" {
+            assert!(blind.contains("checks/round-3/capture.json") && blind.contains("capture/capture.json"), "{blind}");
+        }
+        sighted_all.push_str(&kind(k).refine(&c, true));
+    }
+    assert!(checked >= 100, "only {checked} cases");
+    sighted_all.push_str(&super::kinds::screenshot::contract(true));
+    for phrase in LOOK_AT_A_PICTURE.iter().filter(|p| **p != "now.png) and look at the picture") {
+        assert!(sighted_all.contains(phrase), "{phrase:?} is no longer said to any builder: the guard is stale");
+    }
+    // The --screenshot contract, also sent inside a failed check's note.
+    assert_eq!(said_to_look(&super::kinds::screenshot::contract(false)), None);
+    assert_eq!(said_to_look(super::kinds::screenshot::SCREENSHOT_CONTRACT), None, "a check's note may reach a blind builder");
+    // The API loop's own note says it once; agent apps aren't told.
+    assert!(!API_BUILDER.contains("can't look at pictures") && BLIND_BUILDER.contains("can't look at pictures"));
 }
 
 mod typed_retries {
@@ -1117,7 +1207,8 @@ fn a_registered_kind_is_chosen_from_its_words_and_brings_its_checks() {
     let ws = Workspace::create(d.path(), "Deck", "Make slides", TargetRef::None).unwrap();
     let checks = kinds.get("slides").unwrap().checks(&ws);
     assert_eq!(checks.iter().map(|c| c.id()).collect::<Vec<_>>(), ["outline"]);
-    let b = super::brief(&SlidesKind, &BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None }, None);
+    let b =
+        super::brief(&SlidesKind, &BriefCx { ws: &ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, sees_pictures: true }, None);
     assert!(b.contains("What to build: a slide deck."), "{b}");
 }
 
@@ -1287,7 +1378,7 @@ fn other_pages_of_the_same_site_are_picked_from_its_links() {
     // The brief mentions the other pages only when some were captured.
     let d = tempfile::tempdir().unwrap();
     let ws = Workspace::create(d.path(), "Shop", "Clone it", TargetRef::Website { url: "https://shop.example.com/".into() }).unwrap();
-    let cx = |ws| BriefCx { ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None };
+    let cx = |ws| BriefCx { ws, deep: false, ghidra: false, editor: None, assets: false, image_model: None, sees_pictures: true };
     assert!(kinds::WebsiteKind.brief_sections(&cx(&ws)).is_empty());
     std::fs::create_dir_all(ws.capture_dir()).unwrap();
     std::fs::write(ws.capture_dir().join(ROUTES_FILE), serde_json::to_vec(&r).unwrap()).unwrap();
@@ -2595,7 +2686,7 @@ fn a_resumed_game_builder_hears_the_asset_choice_as_it_is_now() {
     let mut ws = Workspace::create(d.path(), "Game", "A snake game", TargetRef::None).unwrap();
     let game = kind("game");
     fn cx(ws: &Workspace, assets: bool) -> BriefCx<'_> {
-        BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None }
+        BriefCx { ws, deep: false, ghidra: false, editor: None, assets, image_model: None, sees_pictures: true }
     }
     assert!(game.follow_up_sections(&cx(&ws, true)).is_empty(), "off and never used: nothing to say");
     // Turned on after the first build, with a key: the follow-up carries the asset note and budget.
@@ -2998,7 +3089,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
     assert_eq!(shown, ["make the header blue"], "it joins the feed as soon as the builder took it");
     assert!(!notes::was_read(&dir, 1), "its files are gone");
     // After the turn, only the note nobody took is sent, and no hook can hand it over again.
-    let (follow, _) = w.added(&mut ws, true).unwrap();
+    let (follow, _) = w.added(&mut ws, true, true).unwrap();
     assert!(follow.contains("add a footer") && !follow.contains("make the header blue"), "{follow}");
     assert!(notes::claim(&dir).is_empty());
 }
