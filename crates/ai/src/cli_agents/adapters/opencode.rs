@@ -100,8 +100,28 @@ impl AgentAdapter for OpenCode {
         false
     }
 
+    /// A turn stopped part-way stays `running` in OpenCode's storage, and its shared service picks
+    /// it up the next time it starts and runs the builder's commands again (#1115, seen with 2.2.5).
+    /// A private server deletes it without resuming it.
+    fn discard_unfinished(&self, program: &str, id: &str) -> Result<(), ToolError> {
+        let out =
+            self.process(program).args(["session", "delete", "--standalone", id]).timeout(std::time::Duration::from_secs(60)).stdout_cap(64 * 1024).run()?;
+        if out.success {
+            Ok(())
+        } else {
+            Err(ToolError::new(
+                ErrorCode::ProgramFailed,
+                format!("opencode session delete exited with {}", out.code.map_or("no code".into(), |c| c.to_string())),
+            )
+            .with_remediation(format!("Delete it yourself with `opencode session delete {id}`, so OpenCode doesn't pick it up again.")))
+        }
+    }
+
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
         let mut events = Vec::new();
+        if p.run_session.is_none() {
+            p.run_session = v.get("sessionID").and_then(Value::as_str).map(str::to_string);
+        }
         let part = v.get("part").unwrap_or(&Value::Null);
         match v.get("type").and_then(Value::as_str) {
             Some("text") => {
@@ -310,9 +330,11 @@ mod tests {
             json!({"type":"text","part":{"text":"Built a page"}}),
             json!({"type":"tool_use","part":{"callID":"write-1","tool":"write","state":{"status":"completed","input":{"path":"index.html"},"output":"wrote the page"}}}),
             json!({"type":"step_finish","part":{"tokens":{"input":10,"output":5,"reasoning":2,"cache":{"read":3,"write":1}},"cost":0.01}}),
-            json!({"type":"step_finish","part":{"tokens":{"input":1,"output":2},"cost":0.02}}),
+            json!({"type":"step_finish","sessionID":"another","part":{"tokens":{"input":1,"output":2},"cost":0.02}}),
         ];
         let events: Vec<_> = lines.iter().flat_map(|v| p.line(&v.to_string())).collect();
+        // #1115: kept so an unfinished turn's session can be deleted, the first one it named.
+        assert_eq!(p.run_session.as_deref(), Some("reported-but-not-resumable"));
         assert!(
             matches!(events.as_slice(), [AgentEvent::TextDelta { text }, AgentEvent::ToolStarted { tool, .. }, AgentEvent::ToolFinished { ok:true, .. }] if text=="Built a page" && tool=="write")
         );

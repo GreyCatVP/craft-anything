@@ -241,6 +241,13 @@ pub trait AgentAdapter: Send + Sync {
     fn in_folder(&self, _folder: std::path::PathBuf) -> Option<Arc<dyn AgentAdapter>> {
         None
     }
+    /// Remove session `id` that a turn run with `program` left unfinished (stopped, failed or timed
+    /// out), so nothing the agent keeps running in the background picks it up again and goes on
+    /// working after we stopped it (#1115). Only for runs on this computer. Default: this agent
+    /// leaves nothing that resumes by itself.
+    fn discard_unfinished(&self, _program: &str, _id: &str) -> Result<(), ToolError> {
+        Ok(())
+    }
 }
 
 /// The adapters a run can use.

@@ -109,6 +109,14 @@ and starts a private server with `--standalone` (locally in this computer's temp
 folder, over SSH on the host itself). V2 names a tool call `id` (V1: `callID`); both
 are read, so tool calls reach the feed while the turn runs.
 
+A `--standalone` turn still keeps its session in OpenCode's shared storage. If the turn is
+stopped part-way, the session stays `running`, and the background service picks it up the next
+time it starts and carries on with the builder's commands (#1115, seen with 2.2.5 on Windows).
+So a local turn that doesn't finish (stopped, failed or timed out) deletes its session with
+`opencode session delete --standalone <id>`, which removes it without resuming it. A turn that
+finishes keeps its session. If Craft Anything itself is killed mid-turn, nothing is left to
+clean up after it: delete the session yourself (`opencode session list`, then `delete`).
+
 Model discovery uses `opencode api model.list --param location[directory]=...` (the V2
 `GET /api/model` operation). This keeps credentials and configuration resolution inside OpenCode.
 Global `--server` and `--standalone` arguments are shared with discovery. Extra model arguments

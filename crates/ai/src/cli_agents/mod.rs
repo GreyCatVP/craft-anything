@@ -432,6 +432,10 @@ fn standalone(program: &str) -> Process {
 pub struct StreamParser {
     adapter: Arc<dyn AgentAdapter>,
     pub session_id: Option<String>,
+    /// The agent's own session for this run, kept even when it can't be resumed
+    /// ([`AgentAdapter::resumes`]), so a turn that doesn't finish can be cleaned up
+    /// ([`AgentAdapter::discard_unfinished`]).
+    pub run_session: Option<String>,
     pub tool_names: HashMap<String, String>,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -481,6 +485,7 @@ impl StreamParser {
         StreamParser {
             adapter,
             session_id: None,
+            run_session: None,
             tool_names: HashMap::new(),
             input_tokens: 0,
             output_tokens: 0,
@@ -1005,6 +1010,10 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         };
         *failure.lock().unwrap_or_else(PoisonError::into_inner) = failed;
     }
+    let unfinished = match &result {
+        Ok(out) => !out.success,
+        Err(_) => true,
+    };
     match result {
         // The protocol already named the required tool server. Stop the owned process without
         // replacing that useful error with the cancellation used to stop it.
@@ -1035,6 +1044,16 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         Err(e) => {
             let _ = tx.send(shown.error_event(&agent, e));
         }
+    }
+    // #1115: a turn that didn't finish leaves its session marked as running, and the agent's
+    // background service may pick it up later and carry on with nobody watching.
+    if unfinished
+        && remote.is_none()
+        && let Some(id) = &p.run_session
+        && let Err(e) = adapter.discard_unfinished(&program, id)
+    {
+        let fix = e.remediation.map(|r| format!(" {r}")).unwrap_or_default();
+        let _ = tx.send(AgentEvent::Status { text: format!("Couldn't remove {}'s unfinished session {id}: {}.{fix}", display_for(&agent), e.message) });
     }
     AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd: p.cost_usd, cost_is_estimate: true }
 }
@@ -1490,6 +1509,87 @@ mod tests {
         std::fs::write(&cli, b"").unwrap();
         assert_eq!(desktop_cli("opencode", Some(d.path())), Some(cli));
         assert_eq!(desktop_cli("codex", Some(d.path())), None, "only the agents listed");
+    }
+
+    const UNFINISHED_CHILD_ENV: &str = "CRAFT_ANYTHING_TEST_UNFINISHED_CHILD";
+
+    /// The stand-in agent of `a_stopped_turn_discards_its_session`: it names its session in
+    /// OpenCode's format, then finishes or hangs as told. Run as an ordinary test, it does nothing.
+    #[test]
+    fn unfinished_child() {
+        let Some(how) = std::env::var_os(UNFINISHED_CHILD_ENV) else { return };
+        // On a line of its own: libtest has already written "test … ... " without a line break.
+        println!("\n{}", json!({"type":"text","sessionID":"ses_child","part":{"text":"working"}}));
+        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        if how == "hang" {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    /// #1115: a turn stopped part-way removes the session it started, so the agent's background
+    /// service can't pick it up again; a turn that finishes leaves its session alone.
+    #[test]
+    fn a_stopped_turn_discards_its_session() {
+        struct StandIn {
+            how: &'static str,
+            discarded: Arc<Mutex<Vec<String>>>,
+        }
+        impl AgentAdapter for StandIn {
+            /// Register the fixture without replacing any built-in agent.
+            fn ids(&self) -> &'static [&'static str] {
+                &["test-unfinished"]
+            }
+            /// Run only `unfinished_child` in this test program.
+            fn args(&self, _cx: &ArgsCx) -> Vec<String> {
+                ["--exact", "--test-threads=1", "--nocapture", "cli_agents::tests::unfinished_child"].map(String::from).to_vec()
+            }
+            fn streams_json(&self) -> bool {
+                true
+            }
+            /// Tell the child how to behave (the runner hands the agent this variable).
+            fn mcp_env(&self, _mcp: &McpCommand) -> Result<Option<(&'static str, String)>, ToolError> {
+                Ok(Some((UNFINISHED_CHILD_ENV, self.how.to_string())))
+            }
+            /// Read the stream as OpenCode's adapter does.
+            fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
+                adapters::OpenCode.parse(p, v)
+            }
+            /// Record what would be deleted.
+            fn discard_unfinished(&self, _program: &str, id: &str) -> Result<(), ToolError> {
+                self.discarded.lock().unwrap_or_else(PoisonError::into_inner).push(id.to_string());
+                Ok(())
+            }
+        }
+        for (how, stopped) in [("hang", true), ("finish", false)] {
+            let discarded = Arc::new(Mutex::new(Vec::new()));
+            let config = BackendConfig {
+                name: "Test".into(),
+                kind: BackendKind::AgentCli,
+                model: "test-unfinished".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            };
+            let options = BackendOptions { command: Some(std::env::current_exe().unwrap().display().to_string()), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, None);
+            spec.adapters.register(Arc::new(StandIn { how, discarded: discarded.clone() }));
+            let mut c = CliConversation::new(spec);
+            c.send("go");
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            let mut all = Vec::new();
+            while !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                assert!(std::time::Instant::now() < deadline, "{how}: no TurnDone: {all:?}");
+                let got = c.poll();
+                // Stopped once it's working, as Pause does.
+                if stopped && got.iter().any(|e| matches!(e, AgentEvent::TextDelta { .. })) {
+                    c.stop();
+                }
+                all.extend(got);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let want: &[&str] = if stopped { &["ses_child"] } else { &[] };
+            assert_eq!(*discarded.lock().unwrap_or_else(PoisonError::into_inner), want, "{how}: {all:?}");
+        }
     }
 
     /// Validation failures finish exactly once, preserving cancellation status and other error details.
