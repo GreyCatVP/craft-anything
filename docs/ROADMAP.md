@@ -433,7 +433,7 @@ been run live.
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
       — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
-- [ ] A builder on an API backend can't be shown a picture: the model layer has no image block, so
+- [x] A builder on an API backend can't be shown a picture: the model layer has no image block, so
       the check's screenshot and the person's pictures of the original never reach the model, local
       or paid, and every API builder is treated as blind. Add an image block that each API sends
       the way it expects (OpenAI-style `image_url` data URIs, Anthropic's image source), capped in
@@ -442,6 +442,8 @@ been run live.
 - [ ] Say per AI whether its model sees pictures (`vision = auto | yes | no`; Auto asks the
       server: llama.cpp's `/props` modalities, Ollama's capabilities), and let a builder whose model
       sees get the check's screenshot and the person's pictures attached to its next message
+- [ ] Shrink a picture larger than `MAX_IMAGE_BYTES` (3.75 MB) before it's shown to a model,
+      instead of refusing it (a 4K screenshot as PNG can be larger)
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
