@@ -651,12 +651,13 @@ impl Worker {
         }
     }
 
-    /// How the builder's agent runs. Reads the session once: a lock taken twice in one statement
-    /// is held by the first until the statement ends, and the second then waits forever.
-    fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions) -> CliSpec {
-        let (deep, config_dir, targets) = {
+    /// How the builder's agent runs, in the mode `deep` its session was kept for. Reads the session
+    /// once: a lock taken twice in one statement is held by the first until the statement ends,
+    /// and the second then waits forever.
+    fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions, deep: bool) -> CliSpec {
+        let (config_dir, targets) = {
             let session = self.engine.session();
-            (!session.clean_room(), session.config_dir(), session.shared_targets())
+            (session.config_dir(), session.shared_targets())
         };
         CliSpec {
             builder: Some(Builder { investigation: Some(ws.investigation_dir()), inbox: ws.inbox_dir() }),
@@ -753,9 +754,10 @@ impl Worker {
         }
         // Clean room doesn't continue a session that ran in Deep mode, or one whose mode wasn't
         // kept: it may carry what Deep mode read. The builder starts from the brief instead, and
-        // whatever session this run keeps ran in this run's mode.
+        // whatever session this run keeps ran in this run's mode. The agent is started in the mode
+        // read here, so what's recorded can't differ from it.
+        let deep = !self.engine.session().clean_room();
         if !api_loop {
-            let deep = !self.engine.session().clean_room();
             if ws.manifest.agent_session.is_some() && ws.manifest.agent_session_in(&entry.config.model, deep).is_none() {
                 ws.manifest.agent_session = None;
             }
@@ -770,7 +772,7 @@ impl Worker {
         // A coding agent that never saved a session starts over, so it needs the brief.
         let has_history = resumable && (api_loop || ws.manifest.agent_session.is_some());
         self.step(ws, Step::Build, Status::Building, "Getting the builder ready…")?;
-        let spec = self.agent_spec(ws, &entry, opts);
+        let spec = self.agent_spec(ws, &entry, opts, deep);
         let mut agent: Box<dyn Conversation> = match api {
             Some(a) => Box::new(a),
             None => crate::cli_agents::builder_conversation(spec, self.approver(ws)),

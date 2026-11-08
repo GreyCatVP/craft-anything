@@ -2775,7 +2775,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
     };
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = done.send(w.agent_spec(&ws, &entry, &RunOptions::default()).logs);
+        let _ = done.send(w.agent_spec(&ws, &entry, &RunOptions::default(), false).logs);
     });
     let logs = finished.recv_timeout(std::time::Duration::from_secs(20)).expect("it took the session lock twice and waited on itself");
     assert!(logs.is_some());
