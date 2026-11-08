@@ -315,6 +315,14 @@ impl CraftApp {
         });
     }
 
+    pub fn set_vision(&mut self, name: &str, vision: craft_anything_ai::Vision) {
+        let (hub, name) = (self.hub.clone(), name.to_string());
+        self.jobs.spawn(tr("Set whether an AI sees pictures"), false, move |_| {
+            hub.set_vision(&name, Some(vision)).map_err(|e| e.message)?;
+            Ok(crate::backends(&hub))
+        });
+    }
+
     /// Ask an AI's server how large its context window is, so Settings → AI can say what Auto
     /// works out to. Asked again when the AI's model changes.
     pub fn ask_server_window(&mut self, name: &str, model: &str) {
