@@ -64,6 +64,9 @@ pub struct BriefCx<'a> {
     pub assets: bool,
     /// The picture model chosen in Settings (an asset-table id); `None` = the table's default.
     pub image_model: Option<&'a str>,
+    /// The builder can look at pictures (an agent app opens them with its Read tool). One that
+    /// can't (the API loop) is never sent to open a screenshot; it's told what to use instead.
+    pub sees_pictures: bool,
 }
 
 /// The words the app uses for a kind's result.
@@ -114,8 +117,9 @@ pub trait TargetKind: Send + Sync {
     }
     /// The checks that judge a build of this kind for this project, in order.
     fn checks(&self, ws: &Workspace) -> Vec<Box<dyn Check>>;
-    /// The next round's message after a check that wasn't good enough.
-    fn refine(&self, check: &CheckResult) -> String {
+    /// The next round's message after a check that wasn't good enough, for a builder that can
+    /// look at pictures or one that can't ([`BriefCx::sees_pictures`]).
+    fn refine(&self, check: &CheckResult, _sees_pictures: bool) -> String {
         format!(
             "Check {}: {}\n\nFix this in app/, build again until it succeeds, and reply with 1-2 plain sentences on what you changed.",
             check.round, check.note
