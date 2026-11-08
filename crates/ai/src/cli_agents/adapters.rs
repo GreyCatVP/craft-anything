@@ -248,6 +248,12 @@ pub trait AgentAdapter: Send + Sync {
     fn discard_unfinished(&self, _program: &str, _id: &str, _host: Option<&str>) -> Result<(), ToolError> {
         Ok(())
     }
+    /// Whether [`discard_unfinished`](Self::discard_unfinished) really deletes sessions. Only then
+    /// is a turn's session recorded for a later sweep, and only then does a sweep take a record's
+    /// session as deleted (the default's `Ok` deletes nothing).
+    fn discards_sessions(&self) -> bool {
+        false
+    }
 }
 
 /// The adapters a run can use.

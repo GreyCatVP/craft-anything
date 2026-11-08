@@ -37,6 +37,7 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// A record of session `id`, started by `agent`'s `program` on `host` (None: this computer).
     pub fn new(agent: &str, program: &str, host: Option<&str>, id: &str) -> Entry {
         Entry { version: VERSION, agent: agent.into(), program: program.into(), host: host.map(str::to_string), id: id.into(), tries: 0 }
     }
@@ -64,11 +65,17 @@ impl Held {
         Ok(Held { file, path })
     }
 
-    /// Its session is gone or finished: remove the record (still locked, so no sweep reads it).
+    /// Its session is gone or finished: retire the record while it's still locked.
     pub fn done(self) {
-        let _ = std::fs::remove_file(&self.path);
-        drop(self.file);
+        retire(&self.file, &self.path);
     }
+}
+
+/// Empty a record, then remove it. A sweep that opened it a moment earlier can still take its
+/// lock once it's released, but finds nothing to act on.
+fn retire(file: &File, path: &Path) {
+    let _ = file.set_len(0);
+    let _ = std::fs::remove_file(path);
 }
 
 /// Delete the session of every record no running turn holds. Returns what to tell the person:
@@ -77,41 +84,51 @@ pub fn sweep(dir: &Path, adapters: &AgentAdapters) -> Vec<String> {
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut said = Vec::new();
     for path in rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")) {
-        // Held by a running turn, or deleted under us: not ours to touch.
-        let Ok(mut file) = OpenOptions::new().read(true).write(true).open(&path) else { continue };
-        if file.try_lock().is_err() {
-            continue;
-        }
-        let mut text = String::new();
-        let entry = file.read_to_string(&mut text).ok().and_then(|_| serde_json::from_str::<Entry>(&text).ok());
-        let Some(mut entry) = entry.filter(|e| e.version == VERSION) else {
-            // Unreadable or from a newer version: leave it as it is.
-            continue;
-        };
-        let on = entry.host.as_ref().map(|h| format!(" on {h}")).unwrap_or_default();
-        let adapter = adapters.for_agent(&entry.agent);
-        // No adapter here knows this agent (one a fork added): keep the record for a build that does.
-        if adapter.ids().is_empty() {
-            continue;
-        }
-        match adapter.discard_unfinished(&entry.program, &entry.id, entry.host.as_deref()) {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&path);
-                said.push(format!("Removed session {}{on}, left unfinished by a build Craft Anything didn't get to stop.", entry.id));
-            }
-            Err(e) => {
-                entry.tries += 1;
-                if entry.tries >= TRIES {
-                    let _ = std::fs::remove_file(&path);
-                    let fix = e.remediation.map(|r| format!(" {r}")).unwrap_or_default();
-                    said.push(format!("Couldn't remove session {}{on}, left unfinished by an earlier build: {}.{fix}", entry.id, e.message));
-                } else if let Ok(bytes) = serde_json::to_vec(&entry) {
-                    let _ = file.set_len(0).and_then(|_| file.rewind()).and_then(|_| file.write_all(&bytes));
-                }
-            }
-        }
+        // Deleted under us: not ours to touch.
+        let Ok(file) = OpenOptions::new().read(true).write(true).open(&path) else { continue };
+        said.extend(sweep_one(&path, file, adapters));
     }
     said
+}
+
+/// One record, opened at `path`: what to tell the person, if anything.
+fn sweep_one(path: &Path, mut file: File, adapters: &AgentAdapters) -> Option<String> {
+    // Held by a running turn.
+    file.try_lock().ok()?;
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok()?;
+    if text.is_empty() {
+        // Retired: its owner removed it, or was stopped before it could.
+        let _ = std::fs::remove_file(path);
+        return None;
+    }
+    // Unreadable or from a newer version: leave it as it is.
+    let mut entry = serde_json::from_str::<Entry>(&text).ok().filter(|e| e.version == VERSION)?;
+    let adapter = adapters.for_agent(&entry.agent);
+    // The adapter here doesn't delete sessions (a fork's agent, or one a fork replaced): keep the
+    // record for a build that has the adapter that does.
+    if !adapter.discards_sessions() {
+        return None;
+    }
+    let on = entry.host.as_ref().map(|h| format!(" on {h}")).unwrap_or_default();
+    match adapter.discard_unfinished(&entry.program, &entry.id, entry.host.as_deref()) {
+        Ok(()) => {
+            retire(&file, path);
+            Some(format!("Removed session {}{on}, left unfinished by a build Craft Anything didn't get to stop.", entry.id))
+        }
+        Err(e) => {
+            entry.tries += 1;
+            if entry.tries >= TRIES {
+                retire(&file, path);
+                let fix = e.remediation.map(|r| format!(" {r}")).unwrap_or_default();
+                return Some(format!("Couldn't remove session {}{on}, left unfinished by an earlier build: {}.{fix}", entry.id, e.message));
+            }
+            if let Ok(bytes) = serde_json::to_vec(&entry) {
+                let _ = file.set_len(0).and_then(|_| file.rewind()).and_then(|_| file.write_all(&bytes));
+            }
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -136,6 +153,11 @@ mod tests {
         fn ids(&self) -> &'static [&'static str] {
             &["test-sweep"]
         }
+        /// It stands in for an agent whose sessions are deleted.
+        fn discards_sessions(&self) -> bool {
+            true
+        }
+        /// Never run: the sweep only asks it to delete.
         fn args(&self, _cx: &crate::cli_agents::adapters::ArgsCx) -> Vec<String> {
             Vec::new()
         }
@@ -219,11 +241,28 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("x.json"), "{\"version\":99}").unwrap();
         std::fs::write(d.path().join("y.json"), "not json").unwrap();
-        // An agent no adapter here knows would get the plain adapter, which deletes nothing.
+        // Agents whose adapter here deletes nothing: one no adapter knows (the plain adapter), and
+        // a built-in one a fork's adapter may have recorded under its id.
         drop(Held::record(d.path(), &Entry::new("no-such-agent", "agent-cli", None, "ses_other")).unwrap());
+        drop(Held::record(d.path(), &Entry::new("claude", "agent-cli", None, "ses_fork")).unwrap());
         let (a, asked) = adapters(false);
         assert!(sweep(d.path(), &a).is_empty());
         assert!(asked.lock().unwrap_or_else(PoisonError::into_inner).is_empty());
-        assert_eq!(records(d.path()), 3);
+        assert_eq!(records(d.path()), 4);
+    }
+
+    /// A sweep that opened a record just before its turn finished takes the lock once the turn
+    /// lets go, and must not delete the finished session.
+    #[test]
+    fn a_record_retired_while_a_sweep_had_it_open_is_left_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let (a, asked) = adapters(false);
+        let held = Held::record(d.path(), &Entry::new("test-sweep", "agent-cli", None, "ses_done")).unwrap();
+        let path = std::fs::read_dir(d.path()).unwrap().flatten().next().unwrap().path();
+        let early = OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        held.done();
+        assert_eq!(sweep_one(&path, early, &a), None);
+        assert!(asked.lock().unwrap_or_else(PoisonError::into_inner).is_empty(), "a finished session isn't deleted");
+        assert_eq!(records(d.path()), 0);
     }
 }

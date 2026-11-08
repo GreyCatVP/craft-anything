@@ -130,6 +130,10 @@ impl AgentAdapter for OpenCode {
         }
     }
 
+    fn discards_sessions(&self) -> bool {
+        true
+    }
+
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
         let mut events = Vec::new();
         if p.run_session.is_none() {

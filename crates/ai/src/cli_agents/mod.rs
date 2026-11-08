@@ -960,6 +960,7 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         });
     }
     // This turn's own session, recorded once the agent names it, for a sweep if we're killed.
+    let records = records.filter(|_| adapter.discards_sessions());
     // Some once tried, recorded or not.
     let held: Arc<Mutex<Option<Option<unfinished::Held>>>> = Arc::new(Mutex::new(None));
     let (held2, agent2, program2, host2) = (held.clone(), agent.clone(), program.clone(), remote.clone());
@@ -1583,6 +1584,10 @@ mod tests {
             /// Read the stream as OpenCode's adapter does.
             fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
                 adapters::OpenCode.parse(p, v)
+            }
+            /// It stands in for an agent whose sessions are deleted.
+            fn discards_sessions(&self) -> bool {
+                true
             }
             /// Record what would be deleted.
             fn discard_unfinished(&self, _program: &str, id: &str, _host: Option<&str>) -> Result<(), ToolError> {
