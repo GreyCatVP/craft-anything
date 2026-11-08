@@ -102,10 +102,15 @@ impl AgentAdapter for OpenCode {
 
     /// A turn stopped part-way stays `running` in OpenCode's storage, and its shared service picks
     /// it up the next time it starts and runs the builder's commands again (#1115, seen with 2.2.5).
-    /// A private server deletes it without resuming it.
+    /// A private server deletes it without resuming it. Short: the turn waits for it before it ends.
     fn discard_unfinished(&self, program: &str, id: &str) -> Result<(), ToolError> {
+        // From the agent's output: one read as a flag would delete nothing, or something else.
+        if id.is_empty() || id.starts_with('-') {
+            return Err(ToolError::invalid(format!("OpenCode named its session {id:?}, which can't be passed to `opencode session delete`."))
+                .with_remediation("Find it with `opencode session list` and delete it with `opencode session delete --standalone <id>`."));
+        }
         let out =
-            self.process(program).args(["session", "delete", "--standalone", id]).timeout(std::time::Duration::from_secs(60)).stdout_cap(64 * 1024).run()?;
+            self.process(program).args(["session", "delete", "--standalone", id]).timeout(std::time::Duration::from_secs(30)).stdout_cap(64 * 1024).run()?;
         if out.success {
             Ok(())
         } else {
@@ -113,7 +118,8 @@ impl AgentAdapter for OpenCode {
                 ErrorCode::ProgramFailed,
                 format!("opencode session delete exited with {}", out.code.map_or("no code".into(), |c| c.to_string())),
             )
-            .with_remediation(format!("Delete it yourself with `opencode session delete {id}`, so OpenCode doesn't pick it up again.")))
+            // With --standalone, as above: without it, the command may start the shared service, which resumes it.
+            .with_remediation(format!("Delete it yourself with `opencode session delete --standalone {id}`, so OpenCode doesn't pick it up again.")))
         }
     }
 
@@ -497,6 +503,16 @@ mod tests {
     }
 
     /// Every supported depth reaches native chat and builder runs in the selected model reference.
+    #[test]
+    fn a_session_id_that_reads_as_a_flag_is_refused_before_anything_runs() {
+        // No such program: had it been started, the error would say it wasn't found.
+        for id in ["", "-h", "--all"] {
+            let e = OpenCode.discard_unfinished("no-such-opencode-here", id).unwrap_err();
+            assert_eq!(e.code, ErrorCode::BadInput, "{id:?}: {e:?}");
+            assert!(e.remediation.unwrap_or_default().contains("--standalone"), "the manual command doesn't wake the shared service");
+        }
+    }
+
     #[test]
     fn thinking_depth_is_part_of_the_selected_model_reference() {
         for depth in crate::Effort::ALL {
