@@ -185,6 +185,17 @@ fn thai_requests_keep_their_project_kind() {
 }
 
 #[test]
+fn estonian_requests_keep_their_project_kind() {
+    for request in ["Lihtne usumäng", "Sama mäng, aga edetabeliga", "Loo mäng, mis mängib nii"] {
+        assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
+    }
+    for request in ["Veebileht minu pagaritöökojale", "Loo see veebileht uuesti", "Veebileht minu töökojale"] {
+        assert_eq!(choose(request, &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "{request}");
+    }
+    assert_eq!(choose("Sama rakendus, aga lihtsam", &TargetRef::None).0, "app");
+}
+
+#[test]
 fn chinese_requests_keep_their_project_kind() {
     for request in ["一个简单的贪吃蛇游戏", "簡單的貪食蛇遊戲", "复刻它的玩法"] {
         assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
