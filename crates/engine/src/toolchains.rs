@@ -32,7 +32,8 @@ pub struct Toolchain {
     /// Optional ways to start the app, in preference order. No recipe means no inferred launch.
     #[serde(default)]
     pub launch: Vec<LaunchRecipe>,
-    /// Detect a script-only project from its launch entrypoint, after checking all manifest markers.
+    /// Detect a script-only project from a root launch entrypoint, after checking all manifest
+    /// markers. A wildcard one such as a package folder could be any project's helper.
     #[serde(default)]
     pub standalone_entrypoints: bool,
     /// Use a single installed PEP 621 console script after checking the fixed entrypoints.
@@ -47,6 +48,10 @@ pub struct LaunchRecipe {
     /// `{file}` is the matched relative filename. `{package}` is its parent with an explicit `./`,
     /// `{module}` its parent as a Python module name.
     pub command: Vec<String>,
+    /// Count only jars whose manifest names a `Main-Class`, which `java -jar` needs: a build can
+    /// also leave a plain library jar, sources or the original of a repackaged one.
+    #[serde(default)]
+    pub runnable_jar: bool,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -65,7 +70,7 @@ pub fn found_in(dir: &Path) -> Option<&'static Toolchain> {
     catalogue()
         .iter()
         .find(|t| t.found_by.iter().any(|pattern| !matching_files(dir, pattern).is_empty()))
-        .or_else(|| catalogue().iter().find(|t| t.standalone_entrypoints && t.launch(dir).is_some()))
+        .or_else(|| catalogue().iter().find(|t| t.standalone_entrypoints && t.launch.iter().any(|r| !r.file.contains('*') && dir.join(&r.file).is_file())))
 }
 
 /// Match exact files, suffixes in a fixed directory (`*.csproj`, `target/*.jar`), or one named
@@ -127,7 +132,14 @@ impl Toolchain {
     /// Infer a launch only from a recipe's unambiguous entrypoint. Never guess among projects.
     pub fn launch(&self, app: &Path) -> Option<(PathBuf, Vec<String>)> {
         for recipe in &self.launch {
-            let files = matching_files(app, &recipe.file);
+            let mut files = matching_files(app, &recipe.file);
+            if recipe.runnable_jar {
+                files.retain(|f| runnable_jar(f));
+            }
+            // `python -m` reads a dot as a subpackage and refuses a hidden folder's leading one.
+            if recipe.command.iter().any(|a| a == "{module}") {
+                files.retain(|f| f.parent().and_then(Path::file_name).is_some_and(|n| !n.to_string_lossy().contains('.')));
+            }
             if files.len() != 1 {
                 continue;
             }
@@ -179,6 +191,22 @@ fn python_package_script(app: &Path, bin: &Path) -> Option<PathBuf> {
         }
     }
     metadata.is_file().then_some(file)
+}
+
+/// Whether `java -jar` can start `jar`: its manifest names a main class. One too big to read while
+/// looking counts as runnable, as a jar that size is usually an application bundled to be run.
+fn runnable_jar(jar: &Path) -> bool {
+    const READ_CAP: u64 = 64 << 20;
+    let Ok(meta) = std::fs::metadata(jar) else { return false };
+    if meta.len() > READ_CAP {
+        return true;
+    }
+    let Ok(bytes) = std::fs::read(jar) else { return false };
+    let Ok(archive) = craft_anything_formats::zip::parse(&bytes, 500_000) else { return false };
+    let manifest = archive.entries.iter().find(|e| e.name == "META-INF/MANIFEST.MF");
+    manifest
+        .and_then(|e| craft_anything_formats::zip::read_entry(&bytes, e, 1 << 20).ok())
+        .is_some_and(|m| crate::tools::java_tools::parse_manifest(&m).get("Main-Class").is_some_and(|c| !c.is_empty()))
 }
 
 #[cfg(test)]
@@ -249,27 +277,37 @@ mod tests {
         assert_eq!(launch(), Some(("go".into(), vec!["run".into(), ".".into()])));
     }
 
-    /// A Java project runs the one jar its build left, with `java` even beside a build wrapper.
+    /// A Java project runs the one runnable jar its build left, with `java` even beside a build
+    /// wrapper. A plain library jar beside it isn't a second choice.
     #[test]
-    fn java_launch_uses_the_one_built_jar() {
+    fn java_launch_uses_the_one_runnable_jar() {
+        let jar = |manifest: &str| craft_anything_testkit::electron::zip_stored(&[("META-INF/MANIFEST.MF", manifest.as_bytes())]);
+        let runnable = jar("Manifest-Version: 1.0\r\nMain-Class: app.Main\r\n\r\n");
+        let library = jar("Manifest-Version: 1.0\r\n\r\n");
         for (marker, folder) in [("pom.xml", "target"), ("build.gradle", "build/libs")] {
             let dir = tempfile::tempdir().unwrap();
             let app = dir.path();
-            for file in [marker, "mvnw", "gradlew"] {
+            for file in [marker, "mvnw", "mvnw.cmd", "gradlew", "gradlew.bat"] {
                 std::fs::write(app.join(file), "").unwrap();
             }
             std::fs::create_dir_all(app.join(folder)).unwrap();
             let launch = || crate::outputs::launch(app, None);
             assert!(launch().is_none(), "{marker}: nothing built yet");
-            std::fs::write(app.join(folder).join("app.jar"), "").unwrap();
-            let jar = Path::new(folder).join("app.jar").display().to_string();
-            assert_eq!(launch(), Some(("java".into(), vec!["-jar".into(), jar])), "{marker}");
-            std::fs::write(app.join(folder).join("app-plain.jar"), "").unwrap();
-            assert!(launch().is_none(), "{marker}: never choose between jars");
+            std::fs::write(app.join(folder).join("app-plain.jar"), &library).unwrap();
+            assert!(launch().is_none(), "{marker}: a jar without a main class can't be started");
+            std::fs::write(app.join(folder).join("app.jar"), &runnable).unwrap();
+            let expected = Some(("java".into(), vec!["-jar".into(), Path::new(folder).join("app.jar").display().to_string()]));
+            assert_eq!(launch(), expected, "{marker}");
+            let tool = found_in(app).unwrap();
+            let command = tool.launch[0].command.clone();
+            assert_eq!(tool.command_for(app, &command, true).unwrap().0, PathBuf::from("java"), "{marker}: not the Windows wrapper");
+            std::fs::write(app.join(folder).join("app-all.jar"), &runnable).unwrap();
+            assert!(launch().is_none(), "{marker}: never choose between runnable jars");
         }
     }
 
-    /// A Python package runs as a module; a root `__main__.py` keeps priority, two packages none.
+    /// A Python project's package runs as a module. A root `__main__.py` keeps priority, two
+    /// packages give none, and a package alone doesn't make a folder a Python project.
     #[test]
     fn python_package_launches_as_a_module() {
         let dir = tempfile::tempdir().unwrap();
@@ -277,14 +315,21 @@ mod tests {
         let python = if cfg!(windows) { "python" } else { "python3" };
         std::fs::create_dir_all(app.join("game")).unwrap();
         std::fs::write(app.join("game/__main__.py"), "").unwrap();
-        assert_eq!(found_in(app).unwrap().name, "Python", "a package alone is a Python project");
+        assert!(found_in(app).is_none(), "a package folder alone could be any project's helper");
+        std::fs::write(app.join("pyproject.toml"), "").unwrap();
         let launch = || crate::outputs::launch(app, None);
         assert_eq!(launch(), Some((python.into(), vec!["-m".into(), "game".into()])));
+        for hidden in [".cache", "game.v2"] {
+            std::fs::create_dir_all(app.join(hidden)).unwrap();
+            std::fs::write(app.join(hidden).join("__main__.py"), "").unwrap();
+        }
+        assert_eq!(launch(), Some((python.into(), vec!["-m".into(), "game".into()])), "python -m can't name a folder with a dot");
+        std::fs::write(app.join("__main__.py"), "").unwrap();
+        assert_eq!(launch(), Some((python.into(), vec![".".into()])), "the root entrypoint comes first");
+        std::fs::remove_file(app.join("__main__.py")).unwrap();
         std::fs::create_dir_all(app.join("tools")).unwrap();
         std::fs::write(app.join("tools/__main__.py"), "").unwrap();
         assert!(launch().is_none(), "never choose between packages");
-        std::fs::write(app.join("__main__.py"), "").unwrap();
-        assert_eq!(launch(), Some((python.into(), vec![".".into()])));
     }
 
     /// A helper script must not override a project's explicit Go, Rust or Node.js manifest.

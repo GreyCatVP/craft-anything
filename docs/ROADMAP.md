@@ -938,7 +938,8 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch feature/r2.7-python-console-entrypoint
 - [x] Extend launch recipes to Java build outputs and Python packages; build checks already use
       their toolchain commands. A single `<name>/__main__.py` runs as `python3 -m <name>`, the
-      single jar in `target/` or `build/libs/` with `java -jar`; build wrappers stay out of launch
+      single runnable jar in `target/` or `build/libs/` with `java -jar` (Maven now builds with
+      `package`); build wrappers stay out of launch
       — PR #1209; claimed: rmsff, branch feature/r2.7-python-java-launch
 - [ ] Audit relative project placements in build, option-run and Play paths too: runtime window
       capture now normalizes its request paths, but earlier runner paths can still be relative

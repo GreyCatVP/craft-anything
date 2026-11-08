@@ -54,10 +54,11 @@ launch = [{ file = "*.csproj", command = ["dotnet", "run", "--no-build", "--proj
 [[toolchain]]
 name = "Maven"
 found_by = ["pom.xml"]
-build = ["mvn", "-q", "-B", "compile"]
+# `package` rather than `compile`, so Play starts the jar of this build and not an older one.
+build = ["mvn", "-q", "-B", "package", "-DskipTests"]
 test = ["mvn", "-q", "-B", "test"]
 local_programs = ["mvnw", "mvnw.cmd"]
-launch = [{ file = "target/*.jar", command = ["java", "-jar", "{file}"] }]
+launch = [{ file = "target/*.jar", command = ["java", "-jar", "{file}"], runnable_jar = true }]
 
 [[toolchain]]
 name = "Gradle"
@@ -65,7 +66,7 @@ found_by = ["build.gradle", "build.gradle.kts"]
 build = ["gradle", "-q", "assemble"]
 test = ["gradle", "-q", "test"]
 local_programs = ["gradlew", "gradlew.bat"]
-launch = [{ file = "build/libs/*.jar", command = ["java", "-jar", "{file}"] }]
+launch = [{ file = "build/libs/*.jar", command = ["java", "-jar", "{file}"], runnable_jar = true }]
 
 [[toolchain]]
 name = "Make"
