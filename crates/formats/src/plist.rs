@@ -782,10 +782,10 @@ mod tests {
         o
     }
 
+    /// Writers store equal values once: Python's plistlib writes `[0] * 17` as two objects, an
+    /// array of 17 references to one integer. Sets share the array branch.
     #[test]
     fn arrays_may_name_one_stored_value_many_times() {
-        // Writers store equal values once: Python's plistlib writes `[0] * 17` as two objects,
-        // an array of 17 references to one integer. Sets share the array branch.
         for marker in [0xaf_u8, 0xcf] {
             let v = parse(&small_bplist(&[repeated(marker, 17, 1), vec![0x10, 0x00]])).unwrap_or_else(|e| panic!("marker {marker:#04x}: {e}"));
             let items = v.as_array().unwrap();
@@ -797,11 +797,11 @@ mod tests {
         assert!(matches!(parse(&nested), Err(FormatError::TooLarge(_))));
     }
 
+    /// One stored leaf of about 1 KiB named 16 x 16 times through two shared arrays. Text is
+    /// charged by its decoded size: damaged UTF-8 bytes and lone surrogates become a 3-byte
+    /// U+FFFD, and U+0800 takes 3 bytes from 2 stored ones.
     #[test]
     fn repeated_data_and_text_spend_one_byte_budget() {
-        // One stored leaf of about 1 KiB named 16 x 16 times through two shared arrays. Text is
-        // charged by its decoded size: damaged UTF-8 bytes and lone surrogates become a 3-byte
-        // U+FFFD, and U+0800 takes 3 bytes from 2 stored ones.
         let cases: [(u8, u16, Vec<u8>, usize); 5] = [
             (0x4f, 1024, vec![7; 1024], 1024),
             (0x5f, 1024, vec![b'a'; 1024], 1024),
@@ -826,10 +826,10 @@ mod tests {
         }
     }
 
+    /// The references name a missing object: the length of the list alone refuses it, before any
+    /// child is read or space is reserved for them.
     #[test]
     fn containers_past_the_node_budget_are_refused_before_their_children() {
-        // The references name a missing object: the length of the list alone refuses it, before
-        // any child is read or space is reserved for them.
         for (marker, count) in [(0xaf_u8, MAX_NODES), (0xdf, MAX_NODES / 2)] {
             let mut top = vec![marker, 0x12];
             top.extend_from_slice(&(count as u32).to_be_bytes());
