@@ -1067,7 +1067,7 @@ Gaps found while using the app for real projects.
       default fonts: without craft-fonts they show as boxes, and with it each such letter comes from
       Noto Sans CJK while the rest of the word is DM Sans. Bundle a DM Sans build that has the
       Vietnamese set (with its OFL notice) so Tiếng Việt renders in one face
-- [ ] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
+- [x] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
       not "update the pinned URL", which nobody installing an engine can do (#1193)
       — claimed: justinjohn0306, branch bugfix/r2.9-download-server-errors
 
