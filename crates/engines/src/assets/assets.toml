@@ -72,6 +72,30 @@ usd_per_image = 0.0035
 size_by = "aspect_ratio"
 licence = "MiniMax 开放平台服务条款"
 
+# Alibaba Cloud's Model Studio (阿里云百炼): Z-Image-Turbo, a fast open-weight model billed per
+# picture; ¥0.1 converted at ¥7.1 to $1 on 2026-11-08. Its sizes are pixel sizes (`W*H`), and the
+# answer comes back from one synchronous request.
+[[image]]
+id = "z-image-turbo"
+provider = "aliyun"
+name = "Z-Image-Turbo (阿里云百炼)"
+endpoint = "z-image-turbo"
+usd_per_image = 0.014
+size_by = "pixels"
+licence = "Apache-2.0 (model weights)"
+
+# Volcengine's Ark (火山方舟): Seedream 4.0, billed per picture; about ¥0.2, converted at ¥7.1 to
+# $1 on 2026-11-08 (check the Ark console before a large batch). Its sizes are pixel sizes
+# (`WxH`), and 4.5/5.0 can be added as more entries once their model ids are confirmed.
+[[image]]
+id = "seedream-4"
+provider = "volcengine"
+name = "Seedream 4.0 (火山方舟)"
+endpoint = "doubao-seedream-4-0-250828"
+usd_per_image = 0.03
+size_by = "pixels"
+licence = "火山方舟服务条款"
+
 # Game-ready 3D models (GLB) from a picture, billed per model; `faces` is the face-count range the
 # model accepts.
 [[model_3d]]

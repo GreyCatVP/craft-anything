@@ -4,8 +4,10 @@
 //! ([`Catalogue`]), so a cost is known before anything is spent, and every generation reports
 //! what it cost. Audio would be one more [`AssetRequest`] variant and table.
 
+pub mod aliyun;
 pub mod fal;
 pub mod minimax;
+pub mod volcengine;
 pub mod zhipu;
 
 use craft_anything_evidence::{ErrorCode, ToolError};
@@ -372,7 +374,15 @@ impl Default for AssetProviders {
 impl AssetProviders {
     /// fal.ai, Zhipu's open platform and MiniMax.
     pub fn built_in() -> AssetProviders {
-        AssetProviders { providers: vec![Arc::new(fal::Fal::default()), Arc::new(zhipu::Zhipu::default()), Arc::new(minimax::Minimax::default())] }
+        AssetProviders {
+            providers: vec![
+                Arc::new(fal::Fal::default()),
+                Arc::new(zhipu::Zhipu::default()),
+                Arc::new(minimax::Minimax::default()),
+                Arc::new(aliyun::Aliyun::default()),
+                Arc::new(volcengine::Volcengine::default()),
+            ],
+        }
     }
 
     /// Add a provider, or replace the one with the same id.
@@ -497,7 +507,7 @@ mod tests {
             }
         }
         let mut r = AssetProviders::built_in();
-        assert_eq!(r.ids(), vec!["fal", "zhipu", "minimax"]);
+        assert_eq!(r.ids(), vec!["fal", "zhipu", "minimax", "aliyun", "volcengine"]);
         let mut m = Catalogue::fallback().image_model(None).unwrap().clone();
         m.provider = "stub".into();
         let req = AssetRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };

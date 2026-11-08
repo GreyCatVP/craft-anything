@@ -464,12 +464,13 @@ Owner: open · Status: todo
       "400: Provider returned error" (#369): a request with tools now sets
       `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
       text protocol like any server that rejects tools
-- [x] Domestic picture providers: Zhipu's open platform (智谱开放平台) and MiniMax are asset
-      providers beside fal.ai, with CogView-4, the free CogView-3-Flash and MiniMax image-01 in the
-      asset table and their own keys (`ZHIPU_API_KEY`, `MINIMAX_API_KEY`, or stored in the keychain
-      through `assets_key_set`); the game-assets switch and its dialog ask for the key of whichever
-      providers the chosen models use instead of assuming fal.ai
-      — claimed: lead, branch `feature/r5.5-domestic-image-providers`
+- [x] Domestic picture providers: Zhipu's open platform (智谱开放平台), MiniMax, Alibaba Cloud's
+      Model Studio (阿里云百炼) and Volcengine's Ark (火山方舟) are asset providers beside fal.ai, with
+      CogView-4, the free CogView-3-Flash, MiniMax image-01, Z-Image-Turbo and Seedream 4.0 in the
+      asset table and their own keys (`ZHIPU_API_KEY`, `MINIMAX_API_KEY`, `DASHSCOPE_API_KEY`,
+      `ARK_API_KEY`, or stored in the keychain through `assets_key_set`); the game-assets switch and
+      its dialog ask for the key of whichever providers the chosen models use instead of assuming
+      fal.ai — claimed: lead, branch `feature/r5.5-domestic-image-providers`
 - [x] A saved fal.ai key reaches an API-key build's asset tools; every call said "No fal.ai key"
       (#923). Outside a project the tools now say that instead. Not checked with a real fal.ai key
       or API build
