@@ -704,7 +704,7 @@ Owner: open · Status: in progress
       build isn't known to wait for the delete either), no turn is left to delete the OpenCode
       session, and the service still resumes it (#1115): record each session as the turn starts
       and delete leftovers at the next start or in `craft-anything-cli uninstall`. Over SSH,
-      delete it on the host too
+      delete it on the host too — claimed: justinjohn0306, branch bugfix/r2.2-opencode-leftover-sessions
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
