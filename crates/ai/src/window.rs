@@ -22,6 +22,11 @@ const ASK_TIMEOUT: Duration = Duration::from_secs(3);
 /// Read JSON from the server; `None` for any failure (a probe that can't read just says nothing).
 pub trait Fetch {
     fn get(&self, url: &str) -> Option<Value>;
+    /// POST `body` as JSON and read JSON back (Ollama's `/api/show` is a POST).
+    fn post(&self, url: &str, body: &Value) -> Option<Value> {
+        let _ = (url, body);
+        None
+    }
 }
 
 /// The model a probe asks about, on the server it's served from.
@@ -40,7 +45,7 @@ impl Server<'_> {
     }
 
     /// This model's entry in the OpenAI-style model list.
-    fn listed(&self, fetch: &dyn Fetch) -> Option<Value> {
+    pub(crate) fn listed(&self, fetch: &dyn Fetch) -> Option<Value> {
         let list = fetch.get(&format!("{}/models", self.base.trim_end_matches('/')))?;
         let entries = list.get("data").or_else(|| list.get("models")).and_then(Value::as_array)?;
         entries.iter().find(|m| m.get("id").and_then(Value::as_str) == Some(self.model)).cloned()
@@ -79,17 +84,34 @@ pub fn read_window(server: &Server<'_>, fetch: &dyn Fetch, probes: &[Box<dyn Win
     probes.iter().find_map(|p| p.window(server, fetch).filter(|n| (MIN_WINDOW..=MAX_WINDOW).contains(n)).map(|tokens| Window { tokens, source: p.source() }))
 }
 
-/// Ask the server with `headers` (its key, when it has one). Each address is asked once.
-pub fn read_from_server(server: &Server<'_>, headers: &[(&'static str, String)], on_this_network: bool) -> Option<Window> {
-    let fetch = HttpFetch { agent: crate::http::quick_agent(ASK_TIMEOUT), headers, seen: RefCell::new(BTreeMap::new()) };
-    read_window(server, &fetch, &probes(on_this_network))
+/// Ask with the built-in probes. A model llama-swap lists but hasn't loaded is asked about only
+/// through the list: llama-swap starts a model for almost any request naming it (`/props?model=`
+/// too), unloading the one in use.
+pub fn ask(server: &Server<'_>, fetch: &dyn Fetch, on_this_network: bool) -> Option<Window> {
+    read_window(server, fetch, &probes(on_this_network && !would_start_it(server, fetch)))
 }
 
-struct HttpFetch<'a> {
+/// Ask the server with `headers` (its key, when it has one). Each address is asked once.
+pub fn read_from_server(server: &Server<'_>, headers: &[(&'static str, String)], on_this_network: bool) -> Option<Window> {
+    ask(server, &HttpFetch::new(headers), on_this_network)
+}
+
+/// Asks over HTTP with a short time limit, each address once.
+pub(crate) struct HttpFetch<'a> {
     agent: ureq::Agent,
     headers: &'a [(&'static str, String)],
     seen: RefCell<BTreeMap<String, Option<Value>>>,
 }
+
+impl<'a> HttpFetch<'a> {
+    pub(crate) fn new(headers: &'a [(&'static str, String)]) -> Self {
+        HttpFetch { agent: crate::http::quick_agent(ASK_TIMEOUT), headers, seen: RefCell::new(BTreeMap::new()) }
+    }
+}
+
+/// The most a probe reads of an answer it POSTed for (Ollama's `/api/show` carries the template
+/// and parameters, a few kB to a few hundred).
+const MAX_ANSWER: u64 = 4 << 20;
 
 impl Fetch for HttpFetch<'_> {
     fn get(&self, url: &str) -> Option<Value> {
@@ -98,6 +120,19 @@ impl Fetch for HttpFetch<'_> {
         }
         let v = crate::http::get_json(&self.agent, "the model server", url, self.headers).ok();
         self.seen.borrow_mut().insert(url.to_string(), v.clone());
+        v
+    }
+
+    fn post(&self, url: &str, body: &Value) -> Option<Value> {
+        use std::io::Read as _;
+        let key = format!("POST {url} {body}");
+        if let Some(v) = self.seen.borrow().get(&key) {
+            return v.clone();
+        }
+        let v = crate::http::post_json(&self.agent, "the model server", url, self.headers, body)
+            .ok()
+            .and_then(|reader| serde_json::from_reader::<_, Value>(reader.take(MAX_ANSWER)).ok());
+        self.seen.borrow_mut().insert(key, v.clone());
         v
     }
 }
@@ -130,20 +165,7 @@ impl WindowProbe for LlamaSwap {
         "llama-swap"
     }
     fn window(&self, server: &Server<'_>, fetch: &dyn Fetch) -> Option<u64> {
-        let m = server.listed(fetch)?;
-        let swap = m.get("meta")?.get("llamaswap")?;
-        // An alias is served by the model it names.
-        let id = swap.get("modelID").and_then(Value::as_str).unwrap_or(server.model);
-        if id != server.model {
-            let list = fetch.get(&format!("{}/models", server.base.trim_end_matches('/')))?;
-            let entries = list.get("data").and_then(Value::as_array)?;
-            let target = entries.iter().find(|e| e.get("id").and_then(Value::as_str) == Some(id))?;
-            if !loaded(target) {
-                return None;
-            }
-        } else if !loaded(&m) {
-            return None;
-        }
+        let id = loaded_swap_model(server, fetch)?;
         let upstream = format!("{}/upstream/{id}", server.root());
         let props = fetch.get(&format!("{upstream}/props"));
         props.as_ref().and_then(props_window).or_else(|| {
@@ -151,6 +173,32 @@ impl WindowProbe for LlamaSwap {
             inner.get("data")?.as_array()?.iter().find_map(|e| number(e, &["meta", "n_ctx"]))
         })
     }
+}
+
+/// The model llama-swap serves `server.model` with (an alias is served by the model it names),
+/// when its list says that one is loaded; `None` for any other server, or an unloaded model.
+pub(crate) fn loaded_swap_model(server: &Server<'_>, fetch: &dyn Fetch) -> Option<String> {
+    let m = server.listed(fetch)?;
+    let swap = m.get("meta")?.get("llamaswap")?;
+    let id = swap.get("modelID").and_then(Value::as_str).unwrap_or(server.model);
+    if id != server.model {
+        let list = fetch.get(&format!("{}/models", server.base.trim_end_matches('/')))?;
+        let entries = list.get("data").and_then(Value::as_array)?;
+        let target = entries.iter().find(|e| e.get("id").and_then(Value::as_str) == Some(id))?;
+        if !loaded(target) {
+            return None;
+        }
+    } else if !loaded(&m) {
+        return None;
+    }
+    Some(id.to_string())
+}
+
+/// Whether llama-swap lists the model but hasn't loaded it, so asking its server anything about
+/// the model would start it.
+pub(crate) fn would_start_it(server: &Server<'_>, fetch: &dyn Fetch) -> bool {
+    let is_swaps = server.listed(fetch).is_some_and(|m| m.get("meta").and_then(|meta| meta.get("llamaswap")).is_some());
+    is_swaps && loaded_swap_model(server, fetch).is_none()
 }
 
 fn loaded(entry: &Value) -> bool {
@@ -205,7 +253,7 @@ impl WindowProbe for Ollama {
 }
 
 /// `text` for a URL query: unreserved characters as they are, every other byte as `%XX`.
-fn query_text(text: &str) -> String {
+pub(crate) fn query_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for b in text.bytes() {
         if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
@@ -242,7 +290,7 @@ mod tests {
     }
 
     fn read(base: &str, model: &str, fetch: &Canned, local: bool) -> Option<Window> {
-        read_window(&Server { base, model }, fetch, &probes(local))
+        ask(&Server { base, model }, fetch, local)
     }
 
     #[test]
@@ -306,7 +354,9 @@ mod tests {
     fn an_unloaded_llama_swap_model_is_not_started_by_asking() {
         let f = Canned::new(&[("http://h/v1/models", json!({"data": [{"id": "m", "meta": {"llamaswap": {}}, "status": {"value": "unloaded"}}]}))]);
         assert_eq!(read("http://h/v1", "m", &f, true), None);
-        assert!(f.asked.borrow().iter().all(|u| !u.contains("/upstream/")), "{:?}", f.asked.borrow());
+        // Not through its upstream route, and not as llama.cpp's `/props?model=` either: llama-swap
+        // starts a model for that too (seen live), so only the list is read.
+        assert!(f.asked.borrow().iter().all(|u| u == "http://h/v1/models"), "{:?}", f.asked.borrow());
     }
 
     #[test]
