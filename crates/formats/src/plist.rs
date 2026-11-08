@@ -11,8 +11,10 @@ use serde_json::{Map, Value as Json, json};
 pub const MAX_DEPTH: usize = 256;
 /// Most nodes produced by one parse (guards against reference blow-up in binary plists).
 pub const MAX_NODES: usize = 2_000_000;
-/// Most data and text bytes one binary plist may copy out, unless the file itself is larger. A
-/// shared object is copied once per reference, so repeats spend this budget.
+/// Most data and decoded text bytes one binary plist may produce, unless three times the file size
+/// is more (damaged text decodes to at most three bytes per stored byte, so a file whose objects
+/// are each used once always fits). A shared object is copied once per reference, so repeats spend
+/// this budget.
 pub const MAX_EXPANDED_BYTES: usize = 64 << 20;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -184,7 +186,7 @@ struct Bin<'a> {
 
 /// Parse a `bplist00` binary property list.
 pub fn parse_binary(data: &[u8]) -> Result<Value, FormatError> {
-    parse_binary_within(data, MAX_EXPANDED_BYTES.max(data.len()))
+    parse_binary_within(data, MAX_EXPANDED_BYTES.max(data.len().saturating_mul(3)))
 }
 
 fn parse_binary_within(data: &[u8], byte_budget: usize) -> Result<Value, FormatError> {
@@ -234,6 +236,21 @@ fn parse_binary_within(data: &[u8], byte_budget: usize) -> Result<Value, FormatE
 fn read_be(r: &Reader<'_>, off: usize, n: usize) -> Option<u64> {
     let s = r.slice(off, n)?;
     Some(s.iter().fold(0u64, |acc, &b| (acc << 8) | u64::from(b)))
+}
+
+/// UTF-8 size of `String::from_utf8_lossy(bytes)`: each damaged sequence becomes a U+FFFD.
+fn lossy_utf8_len(bytes: &[u8]) -> usize {
+    bytes.utf8_chunks().fold(0usize, |n, c| {
+        let replacement = if c.invalid().is_empty() { 0 } else { char::REPLACEMENT_CHARACTER.len_utf8() };
+        n.saturating_add(c.valid().len()).saturating_add(replacement)
+    })
+}
+
+/// UTF-8 size of `String::from_utf16_lossy` over big-endian code units: a lone surrogate becomes
+/// a U+FFFD.
+fn lossy_utf16_len(bytes: &[u8]) -> usize {
+    let units = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c));
+    char::decode_utf16(units).fold(0usize, |n, c| n.saturating_add(c.map_or(char::REPLACEMENT_CHARACTER.len_utf8(), char::len_utf8)))
 }
 
 impl Bin<'_> {
@@ -327,7 +344,7 @@ impl Bin<'_> {
             0x5 => {
                 let (n, s) = self.count(at, lo)?;
                 let bytes = self.r.slice(s, n).ok_or_else(|| FormatError::Truncated("string".into()))?;
-                self.spend(bytes.len())?;
+                self.spend(lossy_utf8_len(bytes))?;
                 Value::String(String::from_utf8_lossy(bytes).into_owned())
             }
             0x6 => {
@@ -336,7 +353,7 @@ impl Bin<'_> {
                     .r
                     .slice(s, n.checked_mul(2).ok_or_else(|| FormatError::Malformed("string".into()))?)
                     .ok_or_else(|| FormatError::Truncated("string".into()))?;
-                self.spend(bytes.len())?;
+                self.spend(lossy_utf16_len(bytes))?;
                 let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
                 Value::String(String::from_utf16_lossy(&units))
             }
@@ -780,17 +797,30 @@ mod tests {
 
     #[test]
     fn repeated_data_and_text_spend_one_byte_budget() {
-        // 1 KiB of data, ASCII or UTF-16 text named 16 x 16 times through two shared arrays:
-        // 256 KiB of copies from a file of about 1 KiB.
-        for marker in [0x4f_u8, 0x5f, 0x6f] {
-            let length: u16 = if marker == 0x6f { 512 } else { 1024 };
+        // One stored leaf of about 1 KiB named 16 x 16 times through two shared arrays. Text is
+        // charged by its decoded size: damaged UTF-8 bytes and lone surrogates become a 3-byte
+        // U+FFFD, and U+0800 takes 3 bytes from 2 stored ones.
+        let cases: [(u8, u16, Vec<u8>, usize); 5] = [
+            (0x4f, 1024, vec![7; 1024], 1024),
+            (0x5f, 1024, vec![b'a'; 1024], 1024),
+            (0x5f, 1024, vec![0xff; 1024], 3072),
+            (0x6f, 512, [0x08, 0x00].repeat(512), 1536),
+            (0x6f, 512, [0xd8, 0x00].repeat(512), 1536),
+        ];
+        for (marker, length, payload, decoded) in cases {
             let mut leaf = vec![marker, 0x11];
             leaf.extend_from_slice(&length.to_be_bytes());
-            leaf.extend([0u8, b'a'].repeat(512));
+            leaf.extend(payload);
             let b = small_bplist(&[repeated(0xaf, 16, 1), repeated(0xaf, 16, 2), leaf]);
-            assert!(parse_binary_within(&b, 256 * 1024).is_ok(), "{marker:#04x}");
-            let r = parse_binary_within(&b, 256 * 1024 - 1);
-            assert!(matches!(r, Err(FormatError::TooLarge(_))), "{marker:#04x}: {r:?}");
+            let v = parse_binary_within(&b, 256 * decoded).unwrap_or_else(|e| panic!("{marker:#04x}, {decoded}: {e}"));
+            let size = match &v.as_array().unwrap()[0].as_array().unwrap()[0] {
+                Value::Data(d) => d.len(),
+                Value::String(s) => s.len(),
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(size, decoded, "{marker:#04x}");
+            let r = parse_binary_within(&b, 256 * decoded - 1);
+            assert!(matches!(r, Err(FormatError::TooLarge(_))), "{marker:#04x}, {decoded}: {r:?}");
         }
     }
 
