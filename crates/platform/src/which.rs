@@ -113,9 +113,13 @@ fn find_interpreter(dir: &Path, interpreter: &str, path: Option<OsString>) -> Op
 }
 
 /// What an npm (or pnpm) `.cmd` shim runs: its interpreter (`node`; none when the target is an
-/// `.exe`) and the target, relative to the shim's folder.
+/// `.exe`) and the target, relative to the shim's folder. A `.cmd` that only runs one `.exe` by its
+/// full path (see [`exe_wrapper_target`]) gives that path, with no interpreter.
 #[cfg(any(windows, test))]
 fn parse_npm_shim(text: &str) -> Option<(Option<String>, String)> {
+    if let Some(exe) = exe_wrapper_target(text) {
+        return Some((None, exe));
+    }
     let run = text.lines().find(|l| l.contains("%*"))?;
     let quoted: Vec<&str> = run.split('"').skip(1).step_by(2).collect();
     let target = quoted.iter().rev().find_map(|q| q.strip_prefix(r"%dp0%\").or_else(|| q.strip_prefix(r"%~dp0\")))?;
@@ -130,6 +134,32 @@ fn parse_npm_shim(text: &str) -> Option<(Option<String>, String)> {
         quoted.iter().any(|q| q.to_ascii_lowercase().ends_with(r"\node.exe")).then_some("node")?
     };
     Some((Some(interpreter.to_string()), target.to_string()))
+}
+
+/// The `.exe` a `.cmd` wrapper starts when that is all it does: `"C:\…\codex.exe" %*`, written by
+/// hand or by another tool, with only `@echo off`, comments and blank lines besides. Through
+/// `cmd.exe` an argument with a line break is refused ("batch file arguments are invalid", #1237),
+/// `%` is expanded and the line stops at 8191 characters, so starting the `.exe` is better and the
+/// same. Anything more in the file (a `set`, arguments before `%*`, a `%` in the path) and the
+/// wrapper is run as it is.
+#[cfg(any(windows, test))]
+fn exe_wrapper_target(text: &str) -> Option<String> {
+    let mut target = None;
+    for line in text.lines().map(str::trim) {
+        let lower = line.to_ascii_lowercase();
+        let lower = lower.strip_prefix('@').unwrap_or(&lower);
+        if line.is_empty() || lower == "echo off" || lower == "rem" || lower.starts_with("rem ") || lower.starts_with("::") {
+            continue;
+        }
+        let (path, rest) = line.strip_prefix('@').unwrap_or(line).strip_prefix('"')?.split_once('"')?;
+        let drive = path.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && path.get(1..3) == Some(":\\");
+        let full = drive || path.starts_with(r"\\");
+        if target.is_some() || rest.trim() != "%*" || !full || path.contains('%') || !path.to_ascii_lowercase().ends_with(".exe") {
+            return None;
+        }
+        target = Some(path.to_string());
+    }
+    target
 }
 
 /// The `bin` folders of the Node versions nvm installed, newest first: npm puts the agents it
@@ -614,6 +644,45 @@ mod tests {
         // Not a shim we know: the batch file is run as it is.
         assert_eq!(parse_npm_shim("@echo off\r\n\"%NODE_EXE%\" \"%NPM_CLI_JS%\" %*\r\n"), None);
         assert_eq!(parse_npm_shim("@echo off\r\necho hi\r\n"), None);
+    }
+
+    /// #1237: a hand-written `codex.cmd` that runs Codex's own `codex.exe` by its full path.
+    const EXE_WRAPPER: &str = "@echo off\r\nrem Points \"codex\" at the real binary.\r\n:: and a second comment\r\n\r\n\"C:\\npm\\node_modules\\@openai\\codex\\bin\\codex.exe\" %*\r\n";
+
+    #[test]
+    fn a_cmd_that_only_runs_an_exe_names_it() {
+        let exe = r"C:\npm\node_modules\@openai\codex\bin\codex.exe";
+        assert_eq!(exe_wrapper_target(EXE_WRAPPER).as_deref(), Some(exe));
+        assert_eq!(parse_npm_shim(EXE_WRAPPER), Some((None, exe.into())));
+        assert_eq!(exe_wrapper_target("@\"\\\\server\\share\\tool.EXE\"   %*\n").as_deref(), Some(r"\\server\share\tool.EXE"), "a UNC path, and @ before it");
+        // Anything more and the wrapper is run as it is, so nothing it does is lost.
+        for (text, why) in [
+            ("@echo off\nset CODEX_HOME=C:\\x\n\"C:\\x\\codex.exe\" %*\n", "it sets something first"),
+            ("@echo off\n\"C:\\x\\codex.exe\" --profile work %*\n", "arguments before %*"),
+            ("@echo off\n\"C:\\x\\codex.exe\" %* --extra\n", "arguments after %*"),
+            ("@echo off\n\"C:\\x\\codex.exe\"\n", "it drops the arguments"),
+            ("@echo off\n\"%LOCALAPPDATA%\\x\\codex.exe\" %*\n", "a % in the path"),
+            ("@echo off\n\"x\\codex.exe\" %*\n", "a relative path"),
+            ("@echo off\n\"C:\\x\\codex.cmd\" %*\n", "not an .exe"),
+            ("@echo off\n\"C:\\x\\a.exe\" %*\n\"C:\\x\\b.exe\" %*\n", "two programs"),
+            ("@echo off\nrem nothing here\n", "nothing runs"),
+        ] {
+            assert_eq!(exe_wrapper_target(text), None, "{why}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_that_only_runs_an_exe_starts_the_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let exe = bin.path().join("codex.exe");
+        let wrapper = |exe: &Path| format!("@echo off\r\nrem a wrapper\r\n\"{}\" %*\r\n", exe.display());
+        std::fs::write(dir.path().join("codex.cmd"), wrapper(&exe)).unwrap();
+        // The .exe isn't there: the wrapper itself, as before.
+        assert_eq!(launch_target(dir.path().join("codex").as_os_str()), (dir.path().join("codex.cmd").into_os_string(), Vec::new()));
+        std::fs::write(&exe, "").unwrap();
+        assert_eq!(launch_target(dir.path().join("codex").as_os_str()), (exe.into_os_string(), Vec::new()));
     }
 
     #[cfg(windows)]

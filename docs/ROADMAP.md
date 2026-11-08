@@ -884,11 +884,11 @@ Owner: open · Status: in progress
       command that breaks it. The installed skill now warns against running `setup` on such an entry;
       `doctor` and `setup` should keep the person's extra arguments instead
       — claimed: 18923837179wjt-dot, branch fix/setup-skill-warns-before-setup-drops-all-tools
-- [ ] Windows: a `.cmd` that only runs one `.exe` by its full path (`"C:\…\codex.exe" %*`, written
-      by hand or by another tool) is started through `cmd.exe`, which refuses an argument with a
+- [x] Windows: a `.cmd` that only runs one `.exe` by its full path (`"C:\…\codex.exe" %*`, written
+      by hand or by another tool) was started through `cmd.exe`, which refuses an argument with a
       line break ("batch file arguments are invalid"), expands `%` and caps the line at 8191
-      characters; start that `.exe` directly, as an npm shim's is (#1237)
-      — claimed: jgt87, branch bugfix/r2.2-cmd-wrapper-exe
+      characters; that `.exe` is now started directly, as an npm shim's is (#1237)
+      — claimed: jgt87, branch bugfix/r2.2-cmd-wrapper-exe — PR #1238
 
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
