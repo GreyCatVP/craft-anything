@@ -187,10 +187,11 @@ Owner: maintainers · Status: in progress
 Review comes before new work while the queue is long, smallest and clean PRs first. A PR is merged
 only when it's green and a maintainer has fully reviewed it, code as well as wording.
 - [ ] Maintainers: protect `main` (PRs required, squash only); the only ruleset covers `release`
-- [ ] `cargo xtask secrets` treats every environment variable whose name contains `AUTH` as a
+- [x] `cargo xtask secrets` treats every environment variable whose name contains `AUTH` as a
       secret, git's `GIT_AUTHOR_NAME` among them, so the pre-commit hook refuses any added line with
       the committer's own name when it's 12 characters or more (a roadmap claim by a contributor
       whose git name is their handle). Leave git's identity variables out of `env_values`
+      (`NOT_SECRET`); `OAUTH`, `AUTHORIZATION` and other `AUTH` names are still checked
       — claimed: youkaicountry, branch bugfix/r5.2-secrets-git-identity
 - [x] Auto mode's delete check is a safety bug that shows up as Mac test failures. It splits a
       command on spaces, so `rm -rf "C:/x/Game Backup/y"` from a project at `C:/x/Game` goes ahead
