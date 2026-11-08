@@ -44,7 +44,8 @@ pub struct Toolchain {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct LaunchRecipe {
     pub file: String,
-    /// `{file}` is the matched relative filename. `{package}` is its parent with an explicit `./`.
+    /// `{file}` is the matched relative filename. `{package}` is its parent with an explicit `./`,
+    /// `{module}` its parent as a Python module name.
     pub command: Vec<String>,
 }
 
@@ -67,16 +68,18 @@ pub fn found_in(dir: &Path) -> Option<&'static Toolchain> {
         .or_else(|| catalogue().iter().find(|t| t.standalone_entrypoints && t.launch(dir).is_some()))
 }
 
-/// Match exact files, root suffixes, or one named file below each child of a fixed directory.
+/// Match exact files, suffixes in a fixed directory (`*.csproj`, `target/*.jar`), or one named
+/// file below each child of a fixed directory (`cmd/*/main.go`, `*/__main__.py`).
 fn matching_files(dir: &Path, pattern: &str) -> Vec<PathBuf> {
-    if let Some((folder, filename)) = pattern.split_once("/*/") {
+    if let Some((folder, filename)) = pattern.split_once("*/") {
         return scan_entries(&dir.join(folder), |entry| {
             let file = entry.path().join(filename);
             Ok((entry.file_type()?.is_dir() && file.is_file()).then_some(file))
         });
     }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return scan_entries(dir, |entry| {
+    let (folder, name) = pattern.rsplit_once('/').unwrap_or(("", pattern));
+    if let Some(suffix) = name.strip_prefix('*') {
+        return scan_entries(&dir.join(folder), |entry| {
             let file = entry.path();
             Ok((entry.file_name().to_string_lossy().ends_with(suffix) && file.is_file()).then_some(file))
         });
@@ -112,8 +115,12 @@ impl Toolchain {
         let here = |p: &&String| windows == [".bat", ".cmd", ".exe"].iter().any(|e| p.ends_with(e));
         // Callers run in `app`, so a project-relative executable must first be made absolute.
         // Keep virtualenv symlinks intact: canonicalizing can select the system interpreter.
-        let local = self.local_programs.iter().filter(here).map(|p| app.join(p)).find(|p| p.is_file()).map(std::path::absolute).transpose().ok()?;
-        let system = self.windows_program.as_ref().filter(|_| windows).unwrap_or(program);
+        // Only the toolchain's own program (its build's or tests') has local copies and a Windows
+        // name: a Maven project's `java -jar` must not become `mvnw -jar`.
+        let own = [&self.build, &self.test].iter().any(|c| c.first() == Some(program));
+        let local =
+            self.local_programs.iter().filter(|_| own).filter(here).map(|p| app.join(p)).find(|p| p.is_file()).map(std::path::absolute).transpose().ok()?;
+        let system = self.windows_program.as_ref().filter(|_| windows && own).unwrap_or(program);
         Some((local.unwrap_or_else(|| PathBuf::from(system)), args.to_vec()))
     }
 
@@ -132,6 +139,7 @@ impl Toolchain {
                 .iter()
                 .map(|arg| match arg.as_str() {
                     "{package}" => format!("./{}", parent.display()),
+                    "{module}" => parent.to_string_lossy().replace(['/', '\\'], "."),
                     _ => arg.replace("{file}", file),
                 })
                 .collect();
@@ -239,6 +247,44 @@ mod tests {
         assert!(launch().is_none());
         std::fs::write(app.join("main.go"), "package main").unwrap();
         assert_eq!(launch(), Some(("go".into(), vec!["run".into(), ".".into()])));
+    }
+
+    /// A Java project runs the one jar its build left, with `java` even beside a build wrapper.
+    #[test]
+    fn java_launch_uses_the_one_built_jar() {
+        for (marker, folder) in [("pom.xml", "target"), ("build.gradle", "build/libs")] {
+            let dir = tempfile::tempdir().unwrap();
+            let app = dir.path();
+            for file in [marker, "mvnw", "gradlew"] {
+                std::fs::write(app.join(file), "").unwrap();
+            }
+            std::fs::create_dir_all(app.join(folder)).unwrap();
+            let launch = || crate::outputs::launch(app, None);
+            assert!(launch().is_none(), "{marker}: nothing built yet");
+            std::fs::write(app.join(folder).join("app.jar"), "").unwrap();
+            let jar = Path::new(folder).join("app.jar").display().to_string();
+            assert_eq!(launch(), Some(("java".into(), vec!["-jar".into(), jar])), "{marker}");
+            std::fs::write(app.join(folder).join("app-plain.jar"), "").unwrap();
+            assert!(launch().is_none(), "{marker}: never choose between jars");
+        }
+    }
+
+    /// A Python package runs as a module; a root `__main__.py` keeps priority, two packages none.
+    #[test]
+    fn python_package_launches_as_a_module() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path();
+        let python = if cfg!(windows) { "python" } else { "python3" };
+        std::fs::create_dir_all(app.join("game")).unwrap();
+        std::fs::write(app.join("game/__main__.py"), "").unwrap();
+        assert_eq!(found_in(app).unwrap().name, "Python", "a package alone is a Python project");
+        let launch = || crate::outputs::launch(app, None);
+        assert_eq!(launch(), Some((python.into(), vec!["-m".into(), "game".into()])));
+        std::fs::create_dir_all(app.join("tools")).unwrap();
+        std::fs::write(app.join("tools/__main__.py"), "").unwrap();
+        assert!(launch().is_none(), "never choose between packages");
+        std::fs::write(app.join("__main__.py"), "").unwrap();
+        assert_eq!(launch(), Some((python.into(), vec![".".into()])));
     }
 
     /// A helper script must not override a project's explicit Go, Rust or Node.js manifest.

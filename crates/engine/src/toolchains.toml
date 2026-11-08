@@ -1,5 +1,5 @@
 # Project build/test commands and optional launch recipes, in detection order.
-# Launch recipes match a root file and pass argv directly, never through a shell.
+# Launch recipes match a project file and pass argv directly, never through a shell.
 # {file} is replaced with the matched file; wildcard launch matches must be unique.
 
 [[toolchain]]
@@ -31,6 +31,7 @@ launch = [
     { file = "main.py", command = ["python3", "{file}"] },
     { file = "app.py", command = ["python3", "{file}"] },
     { file = "__main__.py", command = ["python3", "."] },
+    { file = "*/__main__.py", command = ["python3", "-m", "{module}"] },
 ]
 
 [[toolchain]]
@@ -56,6 +57,7 @@ found_by = ["pom.xml"]
 build = ["mvn", "-q", "-B", "compile"]
 test = ["mvn", "-q", "-B", "test"]
 local_programs = ["mvnw", "mvnw.cmd"]
+launch = [{ file = "target/*.jar", command = ["java", "-jar", "{file}"] }]
 
 [[toolchain]]
 name = "Gradle"
@@ -63,6 +65,7 @@ found_by = ["build.gradle", "build.gradle.kts"]
 build = ["gradle", "-q", "assemble"]
 test = ["gradle", "-q", "test"]
 local_programs = ["gradlew", "gradlew.bat"]
+launch = [{ file = "build/libs/*.jar", command = ["java", "-jar", "{file}"] }]
 
 [[toolchain]]
 name = "Make"
