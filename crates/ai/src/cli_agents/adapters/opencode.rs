@@ -109,8 +109,16 @@ impl AgentAdapter for OpenCode {
             return Err(ToolError::invalid(format!("OpenCode named its session {id:?}, which can't be passed to `opencode session delete`."))
                 .with_remediation("Find it with `opencode session list` and delete it with `opencode session delete --standalone <id>`."));
         }
-        let out =
-            self.process(program).args(["session", "delete", "--standalone", id]).timeout(std::time::Duration::from_secs(30)).stdout_cap(64 * 1024).run()?;
+        // With --standalone, as here: without it, the command may start the shared service, which resumes it.
+        // Said for every failure (a time limit here isn't a setting the person can raise).
+        let by_hand = format!("Delete it yourself with `opencode session delete --standalone {id}`, so OpenCode doesn't pick it up again.");
+        let out = self
+            .process(program)
+            .args(["session", "delete", "--standalone", id])
+            .timeout(std::time::Duration::from_secs(30))
+            .stdout_cap(64 * 1024)
+            .run()
+            .map_err(|e| e.with_remediation(by_hand.clone()))?;
         if out.success {
             Ok(())
         } else {
@@ -118,8 +126,7 @@ impl AgentAdapter for OpenCode {
                 ErrorCode::ProgramFailed,
                 format!("opencode session delete exited with {}", out.code.map_or("no code".into(), |c| c.to_string())),
             )
-            // With --standalone, as above: without it, the command may start the shared service, which resumes it.
-            .with_remediation(format!("Delete it yourself with `opencode session delete --standalone {id}`, so OpenCode doesn't pick it up again.")))
+            .with_remediation(by_hand))
         }
     }
 
@@ -511,6 +518,10 @@ mod tests {
             assert_eq!(e.code, ErrorCode::BadInput, "{id:?}: {e:?}");
             assert!(e.remediation.unwrap_or_default().contains("--standalone"), "the manual command doesn't wake the shared service");
         }
+        // A delete that couldn't run says how to do it by hand, not the process runner's own advice.
+        let e = OpenCode.discard_unfinished("no-such-opencode-here", "ses_1").unwrap_err();
+        assert_ne!(e.code, ErrorCode::BadInput, "{e:?}");
+        assert!(e.remediation.as_deref().unwrap_or_default().contains("opencode session delete --standalone ses_1"), "{e:?}");
     }
 
     #[test]
