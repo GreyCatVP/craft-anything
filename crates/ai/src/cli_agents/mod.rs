@@ -2584,6 +2584,25 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         }
     }
 
+    /// A host without the helper is told apart from a failed connection: the fix is to install it
+    /// or put it on the PATH ssh sessions use.
+    #[cfg(unix)]
+    #[test]
+    fn a_host_without_the_helper_is_told_to_install_it() {
+        let empty = tempfile::tempdir().unwrap();
+        let out = craft_anything_platform::Process::new("/bin/sh")
+            .args(["-c", adapters::REMOTE_CHECK_LINE])
+            .env_clear()
+            .env("PATH", empty.path())
+            .timeout(std::time::Duration::from_secs(5))
+            .run()
+            .unwrap();
+        assert_eq!(out.code, Some(127));
+        let err = adapters::remote_failure("build-box", &out);
+        assert!(err.message.contains("craft-anything-cli wasn't found on build-box"), "{}", err.message);
+        assert!(err.remediation.unwrap_or_default().contains("PATH"));
+    }
+
     /// Claude Code and Codex hand a remote host's own craft-anything-cli the tool server, so a build
     /// over SSH asks the host for it first, as one here checks this computer's.
     #[cfg(unix)]

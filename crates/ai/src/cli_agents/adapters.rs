@@ -969,10 +969,14 @@ fn ssh_run(host: &str, line: &str, timeout: std::time::Duration, stop: Option<&C
     proc.run()
 }
 
+/// `command -v` only promises a nonzero status for a missing program: 127 is the shell's own "not
+/// found", which [`crate::ssh::diagnose`] turns into how to install it or put it on the PATH.
+pub(super) const REMOTE_CHECK_LINE: &str = "command -v craft-anything-cli >/dev/null || exit 127";
+
 /// The remote helper is on PATH, checked before a build starts (the remote server runs it). For
 /// every agent that's handed our tool server over SSH, as the local check is for one here.
 fn remote_check(host: &str, stop: Option<&CancelToken>) -> Result<(), ToolError> {
-    let out = ssh_run(host, "command -v craft-anything-cli >/dev/null", std::time::Duration::from_secs(15), stop)?;
+    let out = ssh_run(host, REMOTE_CHECK_LINE, std::time::Duration::from_secs(15), stop)?;
     if out.success {
         return Ok(());
     }
@@ -980,7 +984,7 @@ fn remote_check(host: &str, stop: Option<&CancelToken>) -> Result<(), ToolError>
 }
 
 /// Map the remote failure onto the fix, reusing the ssh failure wording other remote runs use.
-fn remote_failure(host: &str, out: &craft_anything_platform::Output) -> ToolError {
+pub(super) fn remote_failure(host: &str, out: &craft_anything_platform::Output) -> ToolError {
     if let Some(failure) = crate::ssh::diagnose(host, "craft-anything-cli", crate::ssh::is_git_server(host), out.code, out.stderr_text().as_str()) {
         return ToolError::new(ErrorCode::EngineMissing, format!("Craft Anything can't set up its tools on {host}: {}.", failure.what))
             .with_remediation(failure.fix);
