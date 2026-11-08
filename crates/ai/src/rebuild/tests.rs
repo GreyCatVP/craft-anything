@@ -186,7 +186,7 @@ fn thai_requests_keep_their_project_kind() {
 
 #[test]
 fn estonian_requests_keep_their_project_kind() {
-    for request in ["Lihtne usumäng", "Sama mäng, aga edetabeliga", "Loo mäng, mis mängib nii"] {
+    for request in ["Lihtne usumäng", "Sama mäng, aga edetabeliga", "Loo mäng, mis mängib nii", "Loo mänge lastele"] {
         assert_eq!(choose(request, &TargetRef::None), ("game", "Unity"), "{request}");
     }
     for request in ["Veebileht minu pagaritöökojale", "Loo see veebileht uuesti", "Veebileht minu töökojale"] {

@@ -224,6 +224,7 @@ fn says_game_in_estonian(cx: &DetectCx) -> bool {
         "mängul",
         "mänguga",
         "mängud",
+        "mänge",
         "mängude",
         "mängudes",
         "mängudest",
