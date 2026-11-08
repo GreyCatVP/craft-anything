@@ -497,7 +497,9 @@ been run live.
       — claimed: youkaicountry, branch feature/r5.4-vision-setting
 - [ ] Ask whether a model sees again after its first reply when the server didn't say before it:
       llama-swap answers only for a loaded model, and asking about an unloaded one would start it,
-      so under Auto a model it hasn't loaded yet reads as blind for the whole conversation
+      so under Auto a model it hasn't loaded yet reads as blind for the whole conversation. One it
+      has just started reads the same: llama-swap lists it as loaded while its server is still
+      starting, and the server's `/props` didn't answer for about a minute (seen live, a 512k model)
 - [ ] Shrink a picture larger than `MAX_IMAGE_BYTES` (3.75 MB) before it's shown to a model,
       instead of refusing it (a 4K screenshot as PNG can be larger)
 
