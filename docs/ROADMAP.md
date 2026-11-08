@@ -747,6 +747,12 @@ Owner: open · Status: in progress
 - [ ] A turn stopped before OpenCode's first event leaves no session id to delete: OpenCode names its
       session only in that event, so the session it may already have made stays (#1115, review on
       #1176). Needs a session id known before the run (one we create and pass in), if OpenCode allows it
+- [ ] OpenCode's model discovery (`api model.list`, run before every turn to check the chosen
+      model) has no `--standalone`, so it starts the shared service, and the service resumes any
+      unfinished session on the computer, in any project (#1115). Seen live with 2.2.5 on Linux: a
+      build's model check woke it, and a session left from days before went on editing another
+      project. Discover with a private server unless the person chose `--server`
+      — claimed: youkaicountry, branch bugfix/r2.2-opencode-discovery-standalone
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
