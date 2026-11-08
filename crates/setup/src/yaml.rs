@@ -204,6 +204,10 @@ fn split(text: &str) -> (Vec<Line>, &'static str) {
         } else if let Some(c) = seg.strip_suffix('\n') {
             lf += 1;
             lines.push((c.to_string(), "\n"));
+        } else if let Some(c) = seg.strip_suffix('\r') {
+            // A last CRLF line cut off after its CR: it gets its LF back, not a second ending.
+            crlf += 1;
+            lines.push((c.to_string(), "\r\n"));
         } else {
             lines.push((seg.to_string(), ""));
         }
@@ -334,6 +338,10 @@ mod tests {
         let added = set("a: 1\r\nb: 2", "mcp_servers", "craft-anything", &entry).unwrap();
         assert_eq!(added.matches('\n').count(), added.matches("\r\n").count(), "{added:?}");
         assert!(added.starts_with("a: 1\r\nb: 2\r\nmcp_servers:\r\n"), "{added:?}");
+        // A last line cut off after its CR gets its LF back, not "\r\r\n".
+        let cut = set("a: 1\r\nb: 2\r", "mcp_servers", "craft-anything", &entry).unwrap();
+        assert!(cut.starts_with("a: 1\r\nb: 2\r\nmcp_servers:\r\n"), "{cut:?}");
+        assert!(!cut.contains("\r\r"), "{cut:?}");
     }
 
     #[test]

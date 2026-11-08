@@ -242,6 +242,9 @@ fn setup_keeps_a_crlf_config_crlf_and_a_second_run_changes_nothing() {
     assert!(after.starts_with(&crlf), "the person's own lines are byte-identical: {after:?}");
     assert!(after.contains("craft-anything:\r\n"), "{after:?}");
     assert_eq!(plan(&fx.host, &r).unwrap().change_count(), 0);
+    // A second run leaves the file byte for byte as it was.
+    apply(&plan(&fx.host, &r).unwrap());
+    assert_eq!(read(&path), after);
     // An LF file stays LF.
     std::fs::write(&path, HERMES).unwrap();
     assert_eq!(apply(&plan(&fx.host, &r).unwrap()).status, "configured");
