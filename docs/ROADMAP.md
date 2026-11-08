@@ -433,8 +433,11 @@ been run live.
       again when a later answer changes it (Ollama says only once loaded); paid services keep every
       tool. Only builders are trimmed: a chat keeps every tool whatever the setting
       — claimed: youkaicountry, branch feature/r5.4-tool-list-per-ai (stacked on #1155)
-- [ ] Run a build live with the full list on a large local model (a 262k or 512k window) and a
-      lean one on a small model, and note in STATUS which models used the extra Core tools well
+- [x] Run a build live with the full list on a large local model (a 262k or 512k window) and a
+      lean one on a small model, and note in STATUS which models used the extra Core tools well.
+      A Qwen model with a 512k window: 2 of 3 full-list builds of "a scientific calculator" were
+      Ready, using the brief, handoff and finding tools; the third stopped when the model wrote a
+      call to a tool that doesn't exist as text. A small model wasn't run
 - [ ] A builder that can't see pictures is still told to open screenshots with Read (the capture
       and `--screenshot` lines in `brief.rs`, "Pictures of your build" in the check's report),
       right after the API loop's note says it can't look at pictures. Give it only what it can
