@@ -134,6 +134,14 @@ impl AgentAdapter for OpenCode {
         true
     }
 
+    /// OpenCode 1.x has no `--standalone` and rejects it, so it's refused before it runs (#1111).
+    fn missing_flags_error(&self) -> Option<(&'static str, &'static str)> {
+        Some((
+            "This OpenCode's `run --help` doesn't list --standalone, so it looks like OpenCode 1.x. Craft Anything needs OpenCode 2.",
+            "Install OpenCode 2 (`npm install -g @opencode/cli`) and remove the old `opencode-ai` package, or choose the OpenCode 2 program in Settings → AI.",
+        ))
+    }
+
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
         let mut events = Vec::new();
         if p.run_session.is_none() {

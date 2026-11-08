@@ -239,7 +239,7 @@ fn opencode_selection_is_validated_saved_and_run_natively_with_our_mcp_server() 
     let seen = dir.path().join("arguments.txt");
     let quote = |p: &std::path::Path| ssh::shell_quote(&p.display().to_string());
     let script = format!(
-        "#!/bin/sh\ncase \"$1\" in\napi) cat {};;\nrun) printf '%s\\n' \"$@\" > {}; cat \"$OPENCODE_CONFIG\" >> {}; printf 'done';;\n*) exit 8;;\nesac\n",
+        "#!/bin/sh\ncase \"$1\" in\napi) cat {};;\nrun) if [ \"$2\" = '--help' ]; then printf '%s\\n' '--format --standalone'; exit 0; fi; printf '%s\\n' \"$@\" > {}; cat \"$OPENCODE_CONFIG\" >> {}; printf 'done';;\n*) exit 8;;\nesac\n",
         quote(&catalogue),
         quote(&seen),
         quote(&seen)

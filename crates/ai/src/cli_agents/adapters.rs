@@ -148,6 +148,11 @@ pub trait AgentAdapter: Send + Sync {
     fn plain_fallback(&self) -> bool {
         true
     }
+    /// When the flag check fails and there's no plain fallback: the error and its fix, if this
+    /// agent can't work without those flags (else the run tries anyway).
+    fn missing_flags_error(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
     /// The CLI writes one JSON event per line (else its output is the answer text).
     fn streams_json(&self) -> bool {
         true
