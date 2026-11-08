@@ -584,7 +584,9 @@ impl Worker {
 
     /// The prompt for notes the person added while the agent worked, if there are any, and the
     /// Just-ask answers it carries so they're marked told once the turn finishes.
-    fn added(&self, ws: &mut Workspace, deep: bool, sees_pictures: bool) -> Option<(String, Vec<AskedQuestion>)> {
+    /// What the person added while the builder worked, as the next message, with the questions it
+    /// tells the builder about and the pictures the notes carry (relative to the project).
+    fn added(&self, ws: &mut Workspace, deep: bool, sees_pictures: bool) -> Option<(String, Vec<AskedQuestion>, Vec<PathBuf>)> {
         let mut notes = std::mem::take(&mut *self.notes.lock().unwrap_or_else(PoisonError::into_inner));
         if notes.is_empty() {
             return None;
@@ -611,8 +613,9 @@ impl Worker {
         let mut questions = attached;
         questions.extend(extra);
         let context = just_asked(&questions);
+        let pictures = pictures::in_project(&ws.root, &notes.iter().flat_map(|n| n.pictures.iter().cloned()).collect::<Vec<_>>());
         let texts: Vec<String> = notes.into_iter().map(|n| n.text).collect();
-        Some((context + &added_prompt(&texts) + &pictures_reminder(ws, sees_pictures), questions))
+        Some((context + &added_prompt(&texts) + &pictures_reminder(ws, sees_pictures), questions, pictures))
     }
 
     /// Decides an ACP builder's permission requests with the same policy Claude Code's approval
@@ -818,8 +821,15 @@ impl Worker {
         }
         // Each run's conversation starts without the pictures' bytes (a kept transcript has only
         // their names), so the original's go with its first message.
+        // The pictures the person attached to this request come first: they show what they mean.
         if attaches {
-            self.show_pictures(agent.as_mut(), ws, &pictures::for_first_message(ws));
+            let mut shown = if new_request { pictures::in_project(&ws.root, &opts.shown_pictures) } else { Vec::new() };
+            for p in pictures::for_first_message(ws) {
+                if !shown.contains(&p) {
+                    shown.push(p);
+                }
+            }
+            self.show_pictures(agent.as_mut(), ws, &shown);
         }
         let mut refinements = 0;
         // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
@@ -898,11 +908,14 @@ impl Worker {
                     progress.save(&ws.root)?;
                 }
                 // What the person added while the agent worked goes in before anything else.
-                if let Some((p, more)) = self.added(ws, deep, sees_pictures) {
+                if let Some((p, more, added_pictures)) = self.added(ws, deep, sees_pictures) {
                     asked.extend(more);
                     progress.reset();
                     progress.save(&ws.root)?;
                     ws.manifest.not_working_checks = 0;
+                    if attaches {
+                        self.show_pictures(agent.as_mut(), ws, &added_pictures);
+                    }
                     prompt = p;
                     continue;
                 }
@@ -925,11 +938,14 @@ impl Worker {
             for c in &checks {
                 self.emit(RunEvent::Checked(c.clone()));
             }
-            if let Some((p, more)) = self.added(ws, deep, sees_pictures) {
+            if let Some((p, more, added_pictures)) = self.added(ws, deep, sees_pictures) {
                 asked.extend(more);
                 progress.reset();
                 progress.save(&ws.root)?;
                 ws.manifest.not_working_checks = 0;
+                if attaches {
+                    self.show_pictures(agent.as_mut(), ws, &added_pictures);
+                }
                 prompt = p;
                 continue;
             }

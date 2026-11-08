@@ -53,6 +53,13 @@ pub(super) fn for_check(checks: &[CheckResult], good_enough: f64, exists: impl F
     v
 }
 
+/// Pictures the person attached (their copies in the project, as notes and follow-ups carry
+/// them), relative to the project folder; one outside it is left out, so no path outside the
+/// project is ever named to a model.
+pub(super) fn in_project(root: &Path, files: &[PathBuf]) -> Vec<PathBuf> {
+    files.iter().filter_map(|f| f.strip_prefix(root).ok()).filter(|r| !r.as_os_str().is_empty()).map(Path::to_path_buf).collect()
+}
+
 /// The largest picture file read to be shrunk; past it a picture isn't shown.
 const MAX_SOURCE_BYTES: u64 = 64_000_000;
 
