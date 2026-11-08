@@ -1018,16 +1018,25 @@ impl AiHub {
     /// every toolset is enabled, so it can look inside the original with all of them.
     /// `transcript`: where the conversation is kept, and resumed from when it's there. `deep` is
     /// the run's mode, given by the caller: a tool that starts a build holds the session (#1102).
-    pub fn start_builder(&self, entry: &BackendEntry, beginner: bool, transcript: Option<PathBuf>, deep: bool) -> Result<ApiConversation, ToolError> {
+    /// `project` is the folder being built: a picture the builder opens there is shown to a
+    /// model that sees.
+    pub fn start_builder(
+        &self,
+        entry: &BackendEntry,
+        beginner: bool,
+        transcript: Option<PathBuf>,
+        deep: bool,
+        project: Option<PathBuf>,
+    ) -> Result<ApiConversation, ToolError> {
         use craft_anything_engine::Toolset;
         let toolsets = if deep { self.engine.registry().toolsets() } else { vec![Toolset::Core, Toolset::Build] };
-        self.start_loop(entry, beginner, transcript, &toolsets, true)
+        self.start_loop(entry, beginner, transcript, &toolsets, true, project)
     }
 
     /// Start the asset extractor: our agent loop with the Build tools and the game archive tools.
     pub fn start_extractor(&self, entry: &BackendEntry, beginner: bool, transcript: Option<PathBuf>) -> Result<ApiConversation, ToolError> {
         use craft_anything_engine::Toolset;
-        self.start_loop(entry, beginner, transcript, &[Toolset::Core, Toolset::Build, Toolset::Formats], false)
+        self.start_loop(entry, beginner, transcript, &[Toolset::Core, Toolset::Build, Toolset::Formats], false, None)
     }
 
     fn start_loop(
@@ -1037,6 +1046,7 @@ impl AiHub {
         transcript: Option<PathBuf>,
         toolsets: &[craft_anything_engine::Toolset],
         lean_for_local: bool,
+        project: Option<PathBuf>,
     ) -> Result<ApiConversation, ToolError> {
         let mut slot = self.build_model(entry)?;
         slot.max_turns = slot.max_turns.max(agent::BUILDER_MAX_TURNS);
@@ -1044,7 +1054,7 @@ impl AiHub {
         ApiConversation::start_with(
             host,
             vec![slot],
-            LoopConfig { beginner, prices: self.config().prices.clone(), transcript, lean_for_local, ..LoopConfig::default() },
+            LoopConfig { beginner, prices: self.config().prices.clone(), transcript, lean_for_local, project, ..LoopConfig::default() },
             toolsets.iter().copied().collect(),
         )
     }
