@@ -290,6 +290,11 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [x] Limit the decision line above to what was measured (one RX 6900 XT, one driver, one Windows
       build) and say other Radeons and drivers aren't checked (#912 review)
       — claimed: 00xJS, branch docs/r5.2-radeon-idle-scope
+- [ ] STATUS.md has rows twice, kept by squash merges of PRs that edited the same row: OpenCode
+      models and thinking (three copies that disagree about SSH), Claude desktop app without Claude
+      Code, Websites as targets, Desktop app and CLI; `docs/opencode.md` has a paragraph twice.
+      Keep the newest complete copy of each
+      — claimed: youkaicountry, branch docs/r5.2-doubled-status-rows
 
 ### R5.3 A builder that can't make progress stops
 Owner: open · Status: todo
