@@ -1359,6 +1359,9 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-dns-rdata-names-review-20261104
 - [x] Keep address and service records attached to their owner and validate the record's wire fields.
       — claimed: Afloat16, branch bugfix/r3.12-dns-record-evidence
+- [x] Accept binary plist arrays and sets that name one stored value many times; repeated data and
+      text spend a byte budget, and containers past the node cap are refused before reserving space.
+      — claimed: Plastic-time, branch bugfix/r3.12-plist-shared-array-values
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress
