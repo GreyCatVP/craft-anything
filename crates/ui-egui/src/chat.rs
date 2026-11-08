@@ -371,10 +371,14 @@ fn margin(dense: bool) -> Margin {
     if dense { Margin::symmetric(10, 6) } else { Margin::symmetric(16, 12) }
 }
 
+/// The person's message is a solid bubble; the builder's answer is plain text on the page, lined
+/// up with the steps beside it. A faint tint against a card made the two hard to tell apart.
 pub(crate) fn bubble(t: &Tokens, user: bool, dense: bool) -> egui::Frame {
-    let fill = if user { t.accent_soft } else { t.card };
-    let stroke = if user { egui::Stroke::NONE } else { egui::Stroke::new(1.0, t.card_border) };
-    egui::Frame::new().fill(fill).stroke(stroke).corner_radius(t.r_lg()).inner_margin(margin(dense))
+    if user {
+        egui::Frame::new().fill(t.user_bubble).corner_radius(t.r_lg()).inner_margin(margin(dense))
+    } else {
+        egui::Frame::new().inner_margin(Margin { left: 0, ..margin(dense) })
+    }
 }
 
 /// A button at `at` that copies a whole message (#825: selecting text in the feed is
@@ -400,7 +404,7 @@ pub(crate) fn user_bubble(ui: &mut Ui, text: &str, dense: bool) {
             ui.set_max_width((ui.available_width() - COPY - 4.0).min(560.0));
             // The bubble sits on the right; its lines still read from the left.
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.add(egui::Label::new(RichText::new(text).color(t.text)).wrap());
+                ui.add(egui::Label::new(RichText::new(text).color(t.on_user_bubble)).wrap());
             });
         });
         let r = shown.response.rect;
@@ -408,8 +412,8 @@ pub(crate) fn user_bubble(ui: &mut Ui, text: &str, dense: bool) {
     });
 }
 
-/// An answer in its bubble, with its copy button in a column of its own on the right, so it
-/// never covers the text.
+/// An answer as plain text on the page, with its copy button in a column of its own on the right,
+/// so it never covers the text.
 pub(crate) fn answer_bubble(ui: &mut Ui, dense: bool, text: &str, content: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     let shown = bubble(&t, false, dense).show(ui, |ui| {
