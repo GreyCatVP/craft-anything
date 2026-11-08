@@ -19,6 +19,8 @@ fn flat(shape: &Shape, out: &mut Vec<Shape>) {
     }
 }
 
+/// The project screen in `theme` with one message from the person and one answer from the
+/// builder: the theme's tokens, and every shape painted on the last frame.
 fn painted(theme: &str) -> (Tokens, Vec<Shape>) {
     let theme = theme.to_string();
     let mut h = Harness::builder().with_size(egui::vec2(1280.0, 820.0)).build_eframe(move |cc| {
@@ -36,6 +38,7 @@ fn painted(theme: &str) -> (Tokens, Vec<Shape>) {
     (t, shapes)
 }
 
+/// The text shape whose whole text is `wanted`; the test fails if it wasn't painted.
 fn text<'a>(shapes: &'a [Shape], wanted: &str) -> &'a TextShape {
     shapes
         .iter()
@@ -57,6 +60,8 @@ fn fills_under(shapes: &[Shape], at: Pos2) -> Vec<egui::Color32> {
         .collect()
 }
 
+/// In both themes the person's words are drawn in the bubble's text colour on the solid bubble,
+/// and the builder's answer has neither a card nor that bubble behind it.
 #[test]
 fn the_persons_message_is_a_solid_bubble_and_the_builders_answer_has_no_card() {
     for theme in ["studio", "studio-light"] {
