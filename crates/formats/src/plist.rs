@@ -319,7 +319,9 @@ impl Bin<'_> {
             }
             0xa | 0xc => {
                 let (n, s) = self.count(at, lo)?;
-                if n > self.offsets.len().saturating_mul(4).max(16) || s.saturating_add(n.saturating_mul(self.ref_size)) > self.r.len() {
+                // Writers store equal values once, so an array may name one object many times:
+                // only its references have to fit in the file. MAX_NODES bounds the expansion.
+                if s.saturating_add(n.saturating_mul(self.ref_size)) > self.r.len() {
                     return Err(FormatError::Malformed("array larger than the file".into()));
                 }
                 stack.push(idx);
@@ -704,26 +706,42 @@ mod tests {
         }
     }
 
+    /// A binary plist of `objects` with two-byte offsets and one-byte references; object 0 is the top.
+    fn small_bplist(objects: &[Vec<u8>]) -> Vec<u8> {
+        let mut b = b"bplist00".to_vec();
+        let mut offsets = Vec::new();
+        for o in objects {
+            offsets.extend_from_slice(&(b.len() as u16).to_be_bytes());
+            b.extend_from_slice(o);
+        }
+        let table = b.len();
+        b.extend(offsets);
+        b.extend_from_slice(&[0, 0, 0, 0, 0, 0, 2, 1]);
+        b.extend_from_slice(&(objects.len() as u64).to_be_bytes());
+        b.extend_from_slice(&0u64.to_be_bytes());
+        b.extend_from_slice(&(table as u64).to_be_bytes());
+        b
+    }
+
+    /// An array (or set) of `n` references to object `child`.
+    fn repeated(marker: u8, n: u8, child: u8) -> Vec<u8> {
+        let mut o = vec![marker, 0x10, n];
+        o.extend(std::iter::repeat_n(child, usize::from(n)));
+        o
+    }
+
     #[test]
     fn arrays_may_name_one_stored_value_many_times() {
         // Writers store equal values once: Python's plistlib writes `[0] * 17` as two objects,
         // an array of 17 references to one integer. Sets share the array branch.
         for marker in [0xaf_u8, 0xcf] {
-            let mut b = b"bplist00".to_vec();
-            b.extend_from_slice(&[marker, 0x10, 17]);
-            b.extend_from_slice(&[1; 17]);
-            let zero = b.len();
-            b.extend_from_slice(&[0x10, 0x00]);
-            let table = b.len();
-            b.extend_from_slice(&[8, zero as u8]);
-            b.extend_from_slice(&[0, 0, 0, 0, 0, 0, 1, 1]);
-            b.extend_from_slice(&2u64.to_be_bytes());
-            b.extend_from_slice(&0u64.to_be_bytes());
-            b.extend_from_slice(&(table as u64).to_be_bytes());
-            let v = parse(&b).unwrap_or_else(|e| panic!("marker {marker:#04x}: {e}"));
+            let v = parse(&small_bplist(&[repeated(marker, 17, 1), vec![0x10, 0x00]])).unwrap_or_else(|e| panic!("marker {marker:#04x}: {e}"));
             let items = v.as_array().unwrap();
             assert_eq!(items.len(), 17);
             assert!(items.iter().all(|i| i.as_int() == Some(0)));
         }
+        // Shared arrays three deep would expand to 255^3 values; the node cap still stops them.
+        let nested = small_bplist(&[repeated(0xaf, 255, 1), repeated(0xaf, 255, 2), repeated(0xaf, 255, 3), vec![0x10, 0x00]]);
+        assert!(matches!(parse(&nested), Err(FormatError::TooLarge(_))));
     }
 }
