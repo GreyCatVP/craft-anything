@@ -413,7 +413,58 @@ been run live.
       — commit `0c3ae5cca569`
 - [ ] Find how each local server is told its context size and set it, or stop with a plain message
       when the prompt won't fit. We assume 24k and send no `num_ctx`, which an OpenAI-style endpoint
-      may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73)
+      may ignore anyway; LM Studio refused a 12.6k prompt on its 8k default (#73). Ollama 0.40.15
+      loads a model with 4096 tokens unless told otherwise: its window is now read (`/api/ps`), so
+      the budget is 3072, but a builder's prompt alone is larger
+- [x] Read the context window from the server before the first request, so a large local model
+      isn't trimmed at 24k: llama.cpp's `/props`, llama-swap's `/upstream/<model>/…` (its model
+      list has a window only when its config gives one), Ollama's `/api/ps`, LM Studio's model
+      list, and `context_length` in an OpenAI-style model list (OpenRouter). Only the window a
+      server has loaded counts (not Ollama's `/api/show`, which says what the model was trained
+      with), so Ollama and LM Studio say it once the model is loaded: asked again after the first
+      turn. Keep 24k when the server says nothing, and a budget the person set stays the most.
+      `context_tokens` is in Settings → AI and `ai context`
+      — claimed: youkaicountry, branch feature/r5.4-server-context-window — PR #1155
+- [x] Each AI's tool list is Auto, Lean or Full in Settings → AI. Auto offers every tool when the
+      window is 64k or more and the lean builder list (#417) below that; the memory steps in the
+      system prompt follow the same choice. Today every local builder is lean, whatever its window.
+      `tools` in `[[ai.backends]]`, `ai tools <name>`; Auto decides on the conversation's budget
+      (`FULL_TOOLS_BUDGET`, a 64k window less its quarter) after the server is asked, and decides
+      again when a later answer changes it (Ollama says only once loaded); paid services keep every
+      tool. Only builders are trimmed: a chat keeps every tool whatever the setting
+      — claimed: youkaicountry, branch feature/r5.4-tool-list-per-ai (stacked on #1155)
+- [x] Run a build live with the full list on a large local model (a 262k or 512k window) and a
+      lean one on a small model, and note in STATUS which models used the extra Core tools well.
+      A Qwen model with a 512k window: 2 of 3 full-list builds of "a scientific calculator" were
+      Ready, using the brief, handoff and finding tools; the third stopped when the model wrote a
+      call to a tool that doesn't exist as text. A small model wasn't run
+- [x] A builder that can't see pictures (the API loop) is told it can't, then sent to open
+      screenshots with Read: the website capture lines and the `--screenshot` and reference-picture
+      lines in `brief.rs`, the website check's "Open each pair", the reminder after each round, the
+      `--screenshot` contract and `capture/README.md`'s window picture. Give it only what it can
+      use, and say what the check measures instead. `BriefCx::sees_pictures` (today: not the API
+      loop) picks the wording: a website's `layouts` and each round's `capture.json`, a program's
+      `ui-tree.json` and the check's likeness, and asking the person what their pictures show
+      — claimed: youkaicountry, branch bugfix/r5.4-blind-builder-prompts
+- [ ] The carry-on and follow-up prompts (`continue_prompt`, `follow_up`) ask an API-loop builder
+      to check its work with rebuild_check, which the loop refuses while it builds; only its first
+      message says so. Say "Craft Anything checks it after your turn" there instead
+- [x] Models that can see get pictures: an image block in the conversation, sent as `image_url`
+      parts (OpenAI-style) and `image` blocks (Anthropic), for the check's screenshots beside the
+      original's, the pictures in `reference/` and a PNG the builder reads. Each AI's Pictures
+      setting is Auto, On or Off; Auto follows what the server reports (Ollama's capabilities,
+      LM Studio's model type, `input_modalities` in a model list). The image block and the setting
+      are in; what's left is attaching the pictures to a builder whose model sees, and treating it
+      as sighted (`BriefCx::sees_pictures`), with the setting in Settings → AI
+      — claimed: youkaicountry, branch feature/r5.4-pictures-to-builders
+- [x] Let an API builder whose model sees open a picture itself: `build_file_read` refuses
+      pictures, so it sees only what the run attaches (the original's with the first message, each
+      check's after it), not a screenshot it takes of its own build mid-turn or one in reference/
+      that went past the six a message carries
+      — claimed: youkaicountry, branch feature/r5.4-builder-opens-pictures
+- [ ] Show the pictures a person adds while a build runs (a note's pictures, a follow-up's) to an
+      API builder whose model sees, with the message that tells it about them; it's shown only
+      what reference/ and capture/ hold when a run starts, and each check's pictures
 - [x] When a server refuses a request for its context window and says the size (Ollama, llama.cpp,
       OpenAI-style), fit the conversation to that window and ask once more, else say how to raise it (#962)
 - [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
@@ -433,6 +484,26 @@ been run live.
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
       — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
+- [x] A builder on an API backend can't be shown a picture: the model layer has no image block, so
+      the check's screenshot and the person's pictures of the original never reach the model, local
+      or paid, and every API builder is treated as blind. Add an image block that each API sends
+      the way it expects (OpenAI-style `image_url` data URIs, Anthropic's image source), capped in
+      size, kept out of saved transcripts as bytes, and counted toward the context budget
+      — claimed: youkaicountry, branch feature/r5.4-pictures-to-models
+- [x] Say per AI whether its model sees pictures (`vision = auto | yes | no` in `[[ai.backends]]`,
+      `ai vision`), Auto asking the server: a model list's `input_modalities`, llama.cpp's `/props`
+      `modalities` (through llama-swap's upstream route for a loaded model), LM Studio's model
+      `type`, Ollama's `capabilities`; Claude reads pictures. Unknown is treated as blind. A
+      builder starts using it once pictures can be attached (the next step)
+      — claimed: youkaicountry, branch feature/r5.4-vision-setting
+- [ ] Ask whether a model sees again after its first reply when the server didn't say before it:
+      llama-swap answers only for a loaded model, and asking about an unloaded one would start it,
+      so under Auto a model it hasn't loaded yet reads as blind for the whole conversation. One it
+      has just started reads the same: llama-swap lists it as loaded while its server is still
+      starting, and the server's `/props` didn't answer for about a minute (seen live, a 512k model)
+- [x] Shrink a picture larger than `MAX_IMAGE_BYTES` (3.75 MB) before it's shown to a model,
+      instead of refusing it (a 4K screenshot as PNG can be larger)
+      — claimed: youkaicountry, branch feature/r5.4-shrink-pictures
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
@@ -559,6 +630,9 @@ yet, and the quick start is how every new person begins.
       — claimed: hasnain607, branch docs/r5.7-vineflower-live-run
 - [ ] Verify the 23 unverified adb tools; record results in tool-status.md
 - [ ] Android locales: try `only_locales` on a real APK (only the test fixture so far)
+- [ ] Ask LM Studio and a plain llama.cpp server for their context window (R5.4,
+      `crate::window`): llama-swap (its list and its `/upstream/` route) and Ollama 0.40.15 were
+      asked live; these two probes rest on their documented answers
 - [ ] `app_graphs_compare` on the two real Electron releases again, to count how many of the
       162 "removed" now pair (and pair the `index-<hash>` chunks by structure if many stay)
 - [ ] A real IL2CPP `global-metadata.dat` (needs a Unity build or a shipped game); synthetic so far.
