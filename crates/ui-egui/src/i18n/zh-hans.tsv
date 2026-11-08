@@ -1462,3 +1462,22 @@ In this project, {kind}: {choice}.	在这个项目中，{kind}：{choice}。
 Couldn't change the approvals:	无法更改审批：
 What the builder may do without asking you, in this project.	在这个项目中，构建助手无需问你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	默认跟随自动模式：开启时，可撤销的操作会执行，其余的会被拒绝；关闭时，构建助手会询问。
+Context budget (tokens)	上下文预算（令牌）
+Auto	自动
+How much of the conversation is sent before older parts are trimmed. Auto: what the model's server says it has room for, or a safe default when it doesn't say.	在截短较早内容之前发送多少对话。自动：模型服务器所说的容量，若它不说则用安全的默认值。
+Set an AI's context budget	设置 AI 的上下文预算
+Custom…	自定义…
+Asking the server…	正在询问服务器…
+Auto: {budget} tokens of the server's {window}	自动：服务器 {window} 中的 {budget} 个令牌
+Auto: {budget} tokens, the usual amount (its server doesn't say how much it holds)	自动：{budget} 个令牌，常规用量（服务器未说明能容纳多少）
+{budget} will be used: the server holds {window}	将使用 {budget}：服务器可容纳 {window}
+The server holds {window}	服务器可容纳 {window}
+Ask an AI's server how much it holds	询问 AI 的服务器能容纳多少
+Tools for building	构建用的工具
+Lean	精简
+Full	完整
+Which tools a builder on this AI is offered. Lean: only the tools for building, for small local models. Full: every tool. Auto: every tool when the conversation has room for 64k tokens or more.	在这个 AI 上构建时提供哪些工具。精简：只有构建用的工具，适合小型本地模型。完整：所有工具。自动：对话有 64k 令牌或更多空间时提供所有工具。
+(every tool)	（所有工具）
+(the lean list)	（精简列表）
+(the lean list until its server says it holds more)	（精简列表，直到它的服务器说能容纳更多）
+Set which tools an AI is offered	设置 AI 可用的工具
