@@ -238,6 +238,10 @@ impl ChatModel for OpenAi {
     fn model(&self) -> String {
         self.model.clone()
     }
+
+    fn endpoint(&self) -> Option<String> {
+        Some(self.url("chat/completions"))
+    }
 }
 
 impl OpenAi {

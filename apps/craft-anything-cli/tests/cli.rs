@@ -190,6 +190,33 @@ fn mcp_restores_the_desktop_target_before_listing_tools() {
     }
 }
 
+/// A tool server that can't start says why on stderr, which goes to the agent app that started
+/// it, and keeps the reason in a failure log in the config folder; one that starts and ends
+/// normally leaves none (ROADMAP R5.5).
+#[test]
+fn mcp_that_cannot_start_leaves_a_failure_log() {
+    let cfg = tempfile::tempdir().unwrap();
+    let logs = cfg.path().join("logs");
+    let agent_logs = || -> Vec<std::path::PathBuf> {
+        let Ok(dir) = std::fs::read_dir(&logs) else { return Vec::new() };
+        dir.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("agent-"))).collect()
+    };
+    let started = cli_with_stdin(&["mcp"], cfg.path(), b"");
+    assert!(started.success, "{}", started.stderr_text());
+    assert!(agent_logs().is_empty(), "a server that started leaves no failure log");
+    let failed = cli_with_stdin(&["mcp", "--target", "not a target"], cfg.path(), b"");
+    assert!(!failed.success);
+    let logged = agent_logs();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    let stderr = failed.stderr_text();
+    let name = logged[0].file_name().unwrap().to_string_lossy().into_owned();
+    assert!(stderr.contains("Invalid shared target") && stderr.contains(&name), "{stderr}");
+    let text = std::fs::read_to_string(&logged[0]).unwrap();
+    for part in ["What: Craft Anything's tool server (mcp)", "Error: Invalid shared target", "Exit code: 1", " doctor", "mcp --target 'not a target'"] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
+}
+
 #[test]
 fn raw_binary_open_params_tool_format_and_project_evidence_across_processes() {
     let cfg = tempfile::tempdir().unwrap();

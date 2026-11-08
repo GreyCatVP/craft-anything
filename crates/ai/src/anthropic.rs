@@ -334,6 +334,10 @@ impl ChatModel for Anthropic {
     fn model(&self) -> String {
         self.model.clone()
     }
+
+    fn endpoint(&self) -> Option<String> {
+        Some(self.url("messages"))
+    }
 }
 
 /// Marker for tool input that wasn't valid JSON.

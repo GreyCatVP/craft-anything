@@ -272,4 +272,8 @@ pub trait ChatModel: Send {
     fn turn(&mut self, req: &TurnRequest<'_>, on_delta: &mut dyn FnMut(Delta), stop: &Stop) -> Result<TurnResult, ToolError>;
     /// Model id, for display, journal and pricing.
     fn model(&self) -> String;
+    /// The address each turn is sent to, for failure logs; `None` when there isn't one.
+    fn endpoint(&self) -> Option<String> {
+        None
+    }
 }

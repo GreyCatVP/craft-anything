@@ -121,8 +121,12 @@ pub fn ask(
             let host = Arc::new(ReadOnlyHost(EngineHost(engine)));
             let slot = hub.build_model(&entry)?;
             let toolsets = [Toolset::Core, Toolset::Build].into_iter().collect();
-            let conv =
-                crate::agent::ApiConversation::start_with(host, vec![slot], LoopConfig { prices: cfg.prices.clone(), ..LoopConfig::default() }, toolsets)?;
+            let conv = crate::agent::ApiConversation::start_with(
+                host,
+                vec![slot],
+                LoopConfig { prices: cfg.prices.clone(), logs: logs.clone(), ..LoopConfig::default() },
+                toolsets,
+            )?;
             (Box::new(conv), AnsweredFrom::TheFiles)
         }
     };
