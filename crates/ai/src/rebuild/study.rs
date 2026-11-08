@@ -177,7 +177,7 @@ impl Worker {
         let tree = capture.join("ui-tree.json");
         let params =
             json!({"program": program.display().to_string(), "wait_secs": 15, "output": shot.display().to_string(), "ui_tree": tree.display().to_string()});
-        let picture = "capture/window.png is a picture of its window 15 seconds after it started. Open it with the Read tool: match its layout, colours and proportions.\n";
+        let picture = "capture/window.png is a picture of its window 15 seconds after it started: match its layout, colours and proportions.\n";
         let mut notes = String::from("\n## How it looks running\n\n");
         notes.push_str(&match self.call("native_window_capture", params) {
             Ok(_) if tree.is_file() => format!(
