@@ -695,6 +695,11 @@ Owner: open · Status: in progress
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
+- [ ] A stopped, failed or killed OpenCode turn deletes its session, so OpenCode's shared service
+      can't resume it and keep running the builder's commands later (#1115). Probed live with
+      OpenCode 2.2.5 on Windows: a killed `run --standalone` session stays `running` and the
+      service resumes it; `session delete --standalone` removes it without resuming it
+      — claimed: justinjohn0306, branch bugfix/r2.2-opencode-interrupted-sessions
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
