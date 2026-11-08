@@ -1026,6 +1026,9 @@ Gaps found while using the app for real projects.
       — `agent_session_deep` in `craft.json` records it (one saved before the field counts as Deep);
       a mismatch starts from the brief, and a question is answered from the files; tests cover both
       directions and the legacy case. Claimed: AlexJoaquimPereira, branch bugfix/r2.9-session-mode
+- [x] The shared investigation chat (`SharedConversation`) doesn't continue a Deep chat's agent
+      session once the chat is in Clean room; Clean room to Deep still continues — claimed: rmsff,
+      branch fix/r2.9-shared-chat-mode
 - [ ] A Clean room build or question must also not resume an API backend's kept transcript:
       `ws.transcript_path()` is loaded whenever it exists, so switching modes can carry what a Deep
       API build read. Clear it, or record its mode, when the mode changes; add a regression
