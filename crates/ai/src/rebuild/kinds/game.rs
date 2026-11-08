@@ -98,9 +98,9 @@ impl TargetKind for GameKind {
                 " oyunun ",
                 " oyunlar",
                 "เกม",
-                "mäng",
             ])
             || says_game_in_spanish(cx)
+            || says_game_in_estonian(cx)
         {
             Some(60)
         } else {
@@ -208,6 +208,32 @@ impl Check for CreditsCheck {
 fn says_game_in_spanish(cx: &DetectCx) -> bool {
     let tool_set = cx.says(&["juego de herramienta"]);
     (cx.says(&[" juego", " juegos"]) && !tool_set) || cx.says(&["jugabilidad", "videojuego"])
+}
+
+/// Estonian for "game" is *mäng*: its noun forms end in *mäng* or one of its case endings
+/// (*mängu*, *mängus*, *mängud*…), and compounds end the same way (*usumäng*, *lauamäng*). The
+/// verb *mängima* ("to play") and its forms begin with *mängi* (*mängiv*, *mängib*), so suffix
+/// matching keeps an app that plays music an app.
+fn says_game_in_estonian(cx: &DetectCx) -> bool {
+    const FORMS: &[&str] = &[
+        "mäng",
+        "mängu",
+        "mängus",
+        "mängust",
+        "mängule",
+        "mängul",
+        "mänguga",
+        "mängud",
+        "mängude",
+        "mängudes",
+        "mängudest",
+        "mängudele",
+        "mängudel",
+        "mängudega",
+        "mängusid",
+        "mänguks",
+    ];
+    cx.words.split_whitespace().any(|w| FORMS.iter().any(|f| w.ends_with(f)))
 }
 
 fn credits(app: &Path) -> (bool, String) {

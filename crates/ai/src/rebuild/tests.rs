@@ -193,6 +193,19 @@ fn estonian_requests_keep_their_project_kind() {
         assert_eq!(choose(request, &TargetRef::None), ("website", stacks::BUILDERS_CHOICE), "{request}");
     }
     assert_eq!(choose("Sama rakendus, aga lihtsam", &TargetRef::None).0, "app");
+    // A game noun keeps its kind in compounds and inflected forms; the verb "mängima" (to play)
+    // and toy compounds do not.
+    for request in ["Lauamäng", "Arvutimängu uus versioon"] {
+        assert_eq!(choose(request, &TargetRef::None).0, "game", "{request}");
+    }
+    for request in ["Loo muusikat mängiv rakendus", "Mänguasjapood"] {
+        assert_eq!(choose(request, &TargetRef::None).0, "app", "{request}");
+    }
+    // Punctuation and newlines still expose the website cues, and a browser is not a website.
+    for request in ["Loo:\nveebileht pagaritöökojale", "Kodulehele"] {
+        assert_eq!(choose(request, &TargetRef::None).0, "website", "{request}");
+    }
+    assert_eq!(choose("Ava veebilehitseja", &TargetRef::None).0, "app");
 }
 
 #[test]
