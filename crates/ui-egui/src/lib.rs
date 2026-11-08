@@ -1461,6 +1461,8 @@ impl CraftApp {
                     } else {
                         self.state.screen = Screen::Workbench;
                         self.state.rail = if self.state.rail == RailKind::Targets { RailKind::Functions } else { self.state.rail };
+                        // The list's tool depends on the new target's kind, not the one shown before.
+                        self.refresh_view();
                         self.load_rail(self.state.rail);
                     }
                 }

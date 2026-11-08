@@ -2936,24 +2936,37 @@ fn advanced_mode_keeps_projects_and_their_questions_in_sight() {
 #[test]
 fn opening_the_workbench_from_a_project_opens_its_own_target() {
     use craft_anything_engine::workspace::{TargetRef, Workspace};
+    use craft_anything_ui_egui::state::Fill;
     let d = tempfile::tempdir().unwrap();
-    let path = d.path().join("notes.txt");
-    std::fs::write(&path, "hello from the project's own file").unwrap();
+    let other = d.path().join("other.txt");
+    std::fs::write(&other, "something else that was open").unwrap();
+    let path = d.path().join("notes.jar");
+    std::fs::write(&path, craft_anything_testkit::java::notes_jar()).unwrap();
     // A project of its own, beside the target it was started from.
     let projects = d.path().join("projects");
     let ws = Workspace::create(&projects, "Notes", "Rebuild this app", TargetRef::Local { path: path.clone() }).unwrap();
+    let first = other.clone();
     let mut h = harness(move || {
         let mut a = demo::app(demo::engine(Mode::Experienced, true));
         demo::deep(&mut a);
-        a.open_workspace(ws);
+        a.open_path(first);
         a
     });
+    assert!(wait(&mut h, |a| a.view.active_target().is_some_and(|t| t.path == other)), "the other file is open");
+    h.state_mut().state.rail = RailKind::Classes;
+    h.state_mut().open_workspace(ws);
     h.run_steps(3);
     assert_eq!(h.state().state.screen, Screen::Project);
     h.get_by_label("Open in the workbench").click();
     assert!(
         wait(&mut h, |a| a.state.screen == Screen::Workbench && a.view.active_target().is_some_and(|t| t.path == path)),
         "the workbench shows the project's own target"
+    );
+    // Its class list comes from the jar's own tool, not the one for the file shown before.
+    assert!(
+        wait(&mut h, |a| matches!(a.state.lists.get(&RailKind::Classes), Some(Fill::Ready(e)) if e.operation == "java_classes_find")),
+        "{:?}",
+        h.state().state.lists.get(&RailKind::Classes)
     );
 }
 
