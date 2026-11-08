@@ -425,10 +425,16 @@ been run live.
       turn. Keep 24k when the server says nothing, and a budget the person set stays the most.
       `context_tokens` is in Settings → AI and `ai context`
       — claimed: youkaicountry, branch feature/r5.4-server-context-window — PR #1155
-- [ ] Each AI's tool list is Auto, Lean or Full in Settings → AI. Auto offers every tool when the
+- [x] Each AI's tool list is Auto, Lean or Full in Settings → AI. Auto offers every tool when the
       window is 64k or more and the lean builder list (#417) below that; the memory steps in the
-      system prompt follow the same choice. Today every local builder is lean, whatever its window
+      system prompt follow the same choice. Today every local builder is lean, whatever its window.
+      `tools` in `[[ai.backends]]`, `ai tools <name>`; Auto decides on the conversation's budget
+      (`FULL_TOOLS_BUDGET`, a 64k window less its quarter) after the server is asked, and decides
+      again when a later answer changes it (Ollama says only once loaded); paid services keep every
+      tool. Only builders are trimmed: a chat keeps every tool whatever the setting
       — claimed: youkaicountry, branch feature/r5.4-tool-list-per-ai (stacked on #1155)
+- [ ] Run a build live with the full list on a large local model (a 262k or 512k window) and a
+      lean one on a small model, and note in STATUS which models used the extra Core tools well
 - [ ] A builder that can't see pictures is still told to open screenshots with Read (the capture
       and `--screenshot` lines in `brief.rs`, "Pictures of your build" in the check's report),
       right after the API loop's note says it can't look at pictures. Give it only what it can
