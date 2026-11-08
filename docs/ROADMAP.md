@@ -1163,9 +1163,9 @@ Gaps found while using the app for real projects.
 - [x] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
       not "update the pinned URL", which nobody installing an engine can do (#1193)
       — claimed: justinjohn0306, branch bugfix/r2.9-download-server-errors
-- [ ] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
-      button; today the line doesn't wrap and runs on under the button
-      — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap
+- [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
+      button; the line didn't wrap and ran on under the button
+      — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
