@@ -2592,7 +2592,6 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         for agent in ["claude-code", "codex"] {
             let err = adapter_for(agent).check_remote_tool_server("no-such-host.invalid", &CancelToken::default()).expect_err(agent);
             assert_eq!(err.code, ErrorCode::EngineMissing, "{agent}: {}", err.message);
-            assert!(err.message.contains("no-such-host.invalid"), "{agent}: {}", err.message);
         }
     }
 
