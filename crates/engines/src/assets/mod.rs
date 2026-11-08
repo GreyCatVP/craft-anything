@@ -5,11 +5,66 @@
 //! what it cost. Audio would be one more [`AssetRequest`] variant and table.
 
 pub mod fal;
+pub mod zhipu;
 
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde::Deserialize;
+use serde_json::Value;
+use std::io::Read as _;
 use std::ops::RangeInclusive;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+
+/// A provider's own HTTP agent: a status code we want to read isn't an error, and no wait is open
+/// ended.
+pub(crate) fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .user_agent("CraftAnything")
+        .timeout_connect(Some(Duration::from_secs(20)))
+        .timeout_recv_response(Some(timeout))
+        .timeout_recv_body(Some(Duration::from_secs(10 * 60)))
+        .build()
+        .new_agent()
+}
+
+/// Largest generated file we keep (a textured GLB is a few MB).
+const MAX_DOWNLOAD: u64 = 200 << 20;
+
+/// Fetch the file a provider points at: an http(s) address, or a data: URI.
+pub(crate) fn download(url: &str) -> Result<Vec<u8>, ToolError> {
+    if let Some(data) = url.strip_prefix("data:") {
+        use base64::Engine as _;
+        let b64 = data
+            .split_once(";base64,")
+            .map(|(_, b)| b)
+            .ok_or_else(|| ToolError::new(ErrorCode::GarbledOutput, "The provider sent a file in an unknown form."))?;
+        return base64::engine::general_purpose::STANDARD
+            .decode(b64.trim())
+            .map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("The provider sent an unreadable file: {e}")));
+    }
+    let resp =
+        agent(Duration::from_secs(120)).get(url).call().map_err(|e| ToolError::new(ErrorCode::EngineMissing, format!("Couldn't download the file: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(ToolError::new(ErrorCode::EngineMissing, format!("Downloading the file failed ({}).", resp.status().as_u16())));
+    }
+    let mut bytes = Vec::new();
+    resp.into_body()
+        .into_reader()
+        .take(MAX_DOWNLOAD + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| ToolError::new(ErrorCode::EngineMissing, format!("The download broke off: {e}")))?;
+    if bytes.len() as u64 > MAX_DOWNLOAD {
+        return Err(ToolError::new(ErrorCode::OverLimit, "The generated file is too large."));
+    }
+    Ok(bytes)
+}
+
+/// A provider answered without the file (or model) it owes, keeping its answer, shortened.
+pub(crate) fn unexpected(provider: &str, what: &str, v: &Value) -> ToolError {
+    ToolError::new(ErrorCode::GarbledOutput, format!("{provider} didn't return a {what}."))
+        .with_details(serde_json::json!({"answer": v.to_string().chars().take(500).collect::<String>()}))
+}
 
 /// What kind of asset a request makes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +112,8 @@ pub enum SizeBy {
     ImageSize,
     /// An aspect ratio (`1:1`, `16:9`), as Nano Banana Pro takes it.
     AspectRatio,
+    /// A pixel size (`1344x768`), as Zhipu's open platform takes it.
+    Pixels,
 }
 
 /// A picture model from the table.
@@ -312,9 +369,9 @@ impl Default for AssetProviders {
 }
 
 impl AssetProviders {
-    /// fal.ai.
+    /// fal.ai and Zhipu's open platform.
     pub fn built_in() -> AssetProviders {
-        AssetProviders { providers: vec![Arc::new(fal::Fal::default())] }
+        AssetProviders { providers: vec![Arc::new(fal::Fal::default()), Arc::new(zhipu::Zhipu::default())] }
     }
 
     /// Add a provider, or replace the one with the same id.
@@ -439,7 +496,7 @@ mod tests {
             }
         }
         let mut r = AssetProviders::built_in();
-        assert_eq!(r.ids(), vec!["fal"]);
+        assert_eq!(r.ids(), vec!["fal", "zhipu"]);
         let mut m = Catalogue::fallback().image_model(None).unwrap().clone();
         m.provider = "stub".into();
         let req = AssetRequest::Image { model: &m, prompt: "a crate", shape: Shape::Square };

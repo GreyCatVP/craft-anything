@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	Neste projeto, {kind}: {choice}.
 Couldn't change the approvals:	Não foi possível alterar as aprovações:
 What the builder may do without asking you, in this project.	O que o agente pode fazer sem perguntar a você, neste projeto.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	A opção Padrão segue o Modo automático: com ele ativado, o que pode ser desfeito é executado e o restante é recusado; com ele desativado, o agente pergunta antes.
+Needs a {provider} key. Until then the game is built without them.	É preciso uma chave da {provider}; até lá o jogo é criado sem eles.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Feito com {provider} e pago na sua conta: um modelo 3D {model}, uma imagem {picture}. Desligado, o jogo é criado sem eles.
+Add a {provider} key	Adicionar uma chave da {provider}
+Your {provider} key	Sua chave da {provider}
+Generated pictures and 3D models are made with {provider}.	Imagens e modelos 3D gerados são feitos com {provider}.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	O construtor cria os modelos 3D e as texturas do jogo a partir de descrições de designs originais, pagos na sua conta {provider}. Os modelos são low-poly para o jogo rodar rápido. Um modelo com textura custa {model} e uma imagem {picture}. Cada projeto tem um orçamento de {budget}, e você é avisado antes de passar. A chave fica no chaveiro do sistema.

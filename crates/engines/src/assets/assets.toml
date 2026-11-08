@@ -1,5 +1,5 @@
 # The models Craft Anything generates game assets with, and what each one costs (US dollars, the
-# provider's listed prices). `provider` names an asset provider in the registry (`fal`), and
+# provider's listed prices). `provider` names an asset provider in the registry (`fal`, `zhipu`), and
 # `endpoint` is the model's address at that provider. The `[default]` table picks the model used
 # when Settings names none; `[assets] image_model` in config.toml picks another picture model by
 # its `id`. A table that doesn't parse falls back to the built-in defaults (a test keeps it parsing).
@@ -39,6 +39,27 @@ name = "FLUX.1 [schnell]"
 endpoint = "fal-ai/flux/schnell"
 usd_per_megapixel = 0.003
 licence = "Apache-2.0 (model weights)"
+
+# Zhipu's open platform (智谱开放平台, BigModel): CogView-4, and its free Flash model. Each picture
+# is billed per picture; the prices are its published ¥ figures converted at ¥7.1 to $1 on
+# 2026-11-08. Its sizes are pixel sizes (`size_by = "pixels"`): 1024×1024, 1344×768 and 768×1344.
+[[image]]
+id = "cogview-4"
+provider = "zhipu"
+name = "CogView-4 (智谱)"
+endpoint = "cogview-4-250304"
+usd_per_image = 0.0085
+size_by = "pixels"
+licence = "智谱开放平台服务条款"
+
+[[image]]
+id = "cogview-3-flash"
+provider = "zhipu"
+name = "CogView-3-Flash (智谱)"
+endpoint = "cogview-3-flash"
+usd_per_image = 0.0
+size_by = "pixels"
+licence = "免费模型（智谱开放平台服务条款）"
 
 # Game-ready 3D models (GLB) from a picture, billed per model; `faces` is the face-count range the
 # model accepts.

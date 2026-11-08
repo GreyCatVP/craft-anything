@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	En este proyecto, {kind}: {choice}.
 Couldn't change the approvals:	No se pudieron cambiar las aprobaciones:
 What the builder may do without asking you, in this project.	Lo que el constructor puede hacer sin preguntarte, en este proyecto.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Predeterminado sigue al modo automático: activado, lo que se puede deshacer se hace y el resto se rechaza; desactivado, el constructor pregunta.
+Needs a {provider} key. Until then the game is built without them.	Hace falta una clave de {provider}; hasta entonces el juego se construye sin ellos.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Hecho con {provider} y pagado de tu cuenta: un modelo 3D {model} y una imagen {picture}. Desactivado, el juego se construye sin ellos.
+Add a {provider} key	Añadir una clave de {provider}
+Your {provider} key	Tu clave de {provider}
+Generated pictures and 3D models are made with {provider}.	Las imágenes y modelos 3D generados se hacen con {provider}.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	El constructor crea los modelos 3D y las texturas del juego a partir de descripciones de diseños originales, pagados con tu cuenta de {provider}. Los modelos son de pocos polígonos para que el juego vaya rápido. Un modelo con textura cuesta {model} y una imagen {picture}. Cada proyecto tiene un presupuesto de {budget} y se te pregunta antes de pasarlo. La clave se guarda en el llavero del sistema.

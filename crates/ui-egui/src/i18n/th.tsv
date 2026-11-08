@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	ในโปรเจกต์นี้ {kind
 Couldn't change the approvals:	เปลี่ยนการอนุมัติไม่ได้:
 What the builder may do without asking you, in this project.	สิ่งที่ตัวสร้างทำได้โดยไม่ถามในโปรเจกต์นี้
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	ค่าเริ่มต้นตามโหมดอัตโนมัติ: เปิดไว้จะทำสิ่งที่ย้อนกลับได้ต่อและปฏิเสธที่เหลือ ปิดไว้ตัวสร้างจะถาม
+Needs a {provider} key. Until then the game is built without them.	ต้องใช้คีย์ของ {provider} จนกว่าจะมี เกมจะถูกสร้างโดยไม่มีสิ่งเหล่านี้
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	สร้างด้วย {provider} และชำระจากบัญชีของคุณ: โมเดล 3D {model} รูปภาพ {picture} เมื่อปิด เกมจะถูกสร้างโดยไม่มีสิ่งเหล่านี้
+Add a {provider} key	เพิ่มคีย์ของ {provider}
+Your {provider} key	คีย์ {provider} ของคุณ
+Generated pictures and 3D models are made with {provider}.	รูปภาพและโมเดล 3D ที่สร้างขึ้นทำด้วย {provider}
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	ตัวสร้างจะทำโมเดล 3D และพื้นผิวของเกมจากคำอธิบายการออกแบบต้นฉบับ โดยชำระจากบัญชี {provider} ของคุณ โมเดลเป็นแบบ low-poly เพื่อให้เกมเร็ว โมเดลมีพื้นผิวราคา {model} รูปภาพราคา {picture} แต่ละโปรเจกต์มีงบ {budget} และจะถามก่อนเกินงบ คีย์เก็บไว้ใน keychain ของระบบ

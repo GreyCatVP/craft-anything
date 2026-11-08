@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	V tomto projektu {kind}: {choice}.
 Couldn't change the approvals:	Schvalování nešlo změnit:
 What the builder may do without asking you, in this project.	Co smí sestavovací agent v tomto projektu dělat, aniž by se vás ptal.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Výchozí se řídí automatickým režimem: když je zapnutý, co lze vrátit, proběhne, a zbytek se odmítne; když je vypnutý, sestavovací agent se ptá.
+Needs a {provider} key. Until then the game is built without them.	Je potřeba klíč {provider}; do té doby se hra staví bez nich.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Vytvořeno pomocí {provider} a hrazeno z vašeho účtu: 3D model {model}, obrázek {picture}. Vypnuto se hra staví bez nich.
+Add a {provider} key	Přidat klíč {provider}
+Your {provider} key	Váš klíč {provider}
+Generated pictures and 3D models are made with {provider}.	Generované obrázky a 3D modely vytváří {provider}.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Builder vytváří 3D modely a textury hry z popisů původních návrhů, placeno z vašeho účtu {provider}. Modely jsou low-poly, aby hra běžela rychle. Texturovaný model stojí {model}, obrázek {picture}. Každý projekt má rozpočet {budget} a před jeho překročením se vás zeptáme. Klíč je v systémové keychain.

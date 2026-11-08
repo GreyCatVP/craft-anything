@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	Bu projede {kind}: {choice}.
 Couldn't change the approvals:	Onaylar değiştirilemedi:
 What the builder may do without asking you, in this project.	Oluşturucunun bu projede size sormadan yapabilecekleri.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Varsayılan, otomatik modu izler: açıkken geri alınabilenler yapılır, gerisi reddedilir; kapalıyken oluşturucu sorar.
+Needs a {provider} key. Until then the game is built without them.	{provider} anahtarı gerekiyor; o zamana kadar oyun onlar olmadan oluşturulur.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	{provider} ile üretilir ve hesabınızdan ödenir: 3D model {model}, görsel {picture}. Kapalıyken oyun onlar olmadan oluşturulur.
+Add a {provider} key	{provider} anahtarı ekle
+Your {provider} key	{provider} anahtarınız
+Generated pictures and 3D models are made with {provider}.	Üretilen görseller ve 3D modeller {provider} ile yapılır.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Oluşturucu, özgün tasarım açıklamalarından oyunun 3D modellerini ve dokularını yapar; ödeme {provider} hesabınızdan alınır. Modeller düşük poligonludur, oyun hızlı çalışır. Dokulu model {model}, bir görsel {picture}. Her projenin {budget} bütçesi vardır ve aşmadan önce size sorulur. Anahtar sistem anahtarlığında saklanır.

@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	在這個專案中，{kind}：{choice}。
 Couldn't change the approvals:	無法變更審核：
 What the builder may do without asking you, in this project.	在這個專案中，建置助手不必問你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	預設跟隨自動模式：開啟時，可復原的操作會執行，其餘會被拒絕；關閉時，建置助手會詢問。
+Needs a {provider} key. Until then the game is built without them.	需要 {provider} 的金鑰，在此之前遊戲不會產生這些素材。
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	由 {provider} 產生，從你的帳戶扣費：3D 模型 {model}，圖片 {picture}。關閉後遊戲不會產生這些素材。
+Add a {provider} key	新增 {provider} 金鑰
+Your {provider} key	你的 {provider} 金鑰
+Generated pictures and 3D models are made with {provider}.	產生的圖片和 3D 模型由 {provider} 製作。
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	建置助手會依原始設計的描述製作遊戲的 3D 模型和貼圖，費用從你的 {provider} 帳戶扣款。模型為低多邊形，遊戲執行更快。含貼圖的模型 {model}，一張圖片 {picture}。每個專案有 {budget} 預算，超出前會先問你。金鑰保存在系統鑰匙圈中。
