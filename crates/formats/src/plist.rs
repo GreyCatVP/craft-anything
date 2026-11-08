@@ -1,6 +1,7 @@
 //! Property lists: binary (`bplist00`) and XML, parsed into one [`Value`] tree and projected to
-//! normalised JSON. Bounded: object counts, nesting depth and total nodes are capped; shared
-//! references in binary plists are expanded at most once per path (cycles are refused).
+//! normalised JSON. Bounded: object counts, nesting depth, total nodes and copied data and text
+//! are capped; shared references in binary plists are expanded at most once per path (cycles are
+//! refused).
 
 use crate::FormatError;
 use crate::bytes::Reader;
@@ -10,6 +11,9 @@ use serde_json::{Map, Value as Json, json};
 pub const MAX_DEPTH: usize = 256;
 /// Most nodes produced by one parse (guards against reference blow-up in binary plists).
 pub const MAX_NODES: usize = 2_000_000;
+/// Most data and text bytes one binary plist may copy out, unless the file itself is larger. A
+/// shared object is copied once per reference, so repeats spend this budget.
+pub const MAX_EXPANDED_BYTES: usize = 64 << 20;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -174,10 +178,16 @@ struct Bin<'a> {
     offsets: Vec<usize>,
     ref_size: usize,
     nodes: usize,
+    /// Data and text bytes still allowed to be copied out.
+    bytes_left: usize,
 }
 
 /// Parse a `bplist00` binary property list.
 pub fn parse_binary(data: &[u8]) -> Result<Value, FormatError> {
+    parse_binary_within(data, MAX_EXPANDED_BYTES.max(data.len()))
+}
+
+fn parse_binary_within(data: &[u8], byte_budget: usize) -> Result<Value, FormatError> {
     if !data.starts_with(b"bplist") {
         return Err(FormatError::Malformed("not a binary plist".into()));
     }
@@ -216,7 +226,7 @@ pub fn parse_binary(data: &[u8]) -> Result<Value, FormatError> {
     let top = usize::try_from(top).map_err(|_| FormatError::Malformed("top object".into()))?;
     // Object payloads and references must not borrow bytes from the offset table or trailer.
     let objects = data.get(..table).ok_or_else(|| FormatError::Truncated("object area".into()))?;
-    let mut b = Bin { r: Reader::new(objects), offsets, ref_size, nodes: 0 };
+    let mut b = Bin { r: Reader::new(objects), offsets, ref_size, nodes: 0, bytes_left: byte_budget };
     let mut stack = Vec::new();
     b.object(top, &mut stack)
 }
@@ -248,6 +258,21 @@ impl Bin<'_> {
         let off = i.checked_mul(self.ref_size).and_then(|x| x.checked_add(at)).ok_or_else(|| FormatError::Malformed("reference".into()))?;
         let v = read_be(&self.r, off, self.ref_size).ok_or_else(|| FormatError::Truncated("object reference".into()))?;
         usize::try_from(v).map_err(|_| FormatError::Malformed("reference".into()))
+    }
+
+    /// Refuse a container whose `children` would pass MAX_NODES, before space is reserved for them.
+    fn room_for_nodes(&self, children: usize) -> Result<(), FormatError> {
+        if children > MAX_NODES.saturating_sub(self.nodes) {
+            return Err(FormatError::TooLarge(format!("more than {MAX_NODES} plist nodes")));
+        }
+        Ok(())
+    }
+
+    /// Spend `n` bytes of the data and text budget before copying them out.
+    fn spend(&mut self, n: usize) -> Result<(), FormatError> {
+        self.bytes_left =
+            self.bytes_left.checked_sub(n).ok_or_else(|| FormatError::TooLarge("repeated data and text expand past the plist byte budget".into()))?;
+        Ok(())
     }
 
     fn object(&mut self, idx: usize, stack: &mut Vec<usize>) -> Result<Value, FormatError> {
@@ -295,11 +320,15 @@ impl Bin<'_> {
             0x3 => Value::Date(DateValue::Seconds(self.r.u64_be(at + 1).map(f64::from_bits).ok_or_else(|| FormatError::Truncated("date".into()))?)),
             0x4 => {
                 let (n, s) = self.count(at, lo)?;
-                Value::Data(self.r.slice(s, n).ok_or_else(|| FormatError::Truncated("data".into()))?.to_vec())
+                let bytes = self.r.slice(s, n).ok_or_else(|| FormatError::Truncated("data".into()))?;
+                self.spend(bytes.len())?;
+                Value::Data(bytes.to_vec())
             }
             0x5 => {
                 let (n, s) = self.count(at, lo)?;
-                Value::String(String::from_utf8_lossy(self.r.slice(s, n).ok_or_else(|| FormatError::Truncated("string".into()))?).into_owned())
+                let bytes = self.r.slice(s, n).ok_or_else(|| FormatError::Truncated("string".into()))?;
+                self.spend(bytes.len())?;
+                Value::String(String::from_utf8_lossy(bytes).into_owned())
             }
             0x6 => {
                 let (n, s) = self.count(at, lo)?;
@@ -307,6 +336,7 @@ impl Bin<'_> {
                     .r
                     .slice(s, n.checked_mul(2).ok_or_else(|| FormatError::Malformed("string".into()))?)
                     .ok_or_else(|| FormatError::Truncated("string".into()))?;
+                self.spend(bytes.len())?;
                 let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
                 Value::String(String::from_utf16_lossy(&units))
             }
@@ -320,10 +350,12 @@ impl Bin<'_> {
             0xa | 0xc => {
                 let (n, s) = self.count(at, lo)?;
                 // Writers store equal values once, so an array may name one object many times:
-                // only its references have to fit in the file. MAX_NODES bounds the expansion.
+                // only its references have to fit in the file. MAX_NODES and the byte budget bound
+                // the expansion.
                 if s.saturating_add(n.saturating_mul(self.ref_size)) > self.r.len() {
                     return Err(FormatError::Malformed("array larger than the file".into()));
                 }
+                self.room_for_nodes(n)?;
                 stack.push(idx);
                 let mut out = Vec::with_capacity(n);
                 for i in 0..n {
@@ -338,6 +370,7 @@ impl Bin<'_> {
                 if s.saturating_add(n.saturating_mul(self.ref_size).saturating_mul(2)) > self.r.len() {
                     return Err(FormatError::Malformed("dictionary larger than the file".into()));
                 }
+                self.room_for_nodes(n.saturating_mul(2))?;
                 stack.push(idx);
                 let mut out = Vec::with_capacity(n);
                 for i in 0..n {
@@ -743,5 +776,34 @@ mod tests {
         // Shared arrays three deep would expand to 255^3 values; the node cap still stops them.
         let nested = small_bplist(&[repeated(0xaf, 255, 1), repeated(0xaf, 255, 2), repeated(0xaf, 255, 3), vec![0x10, 0x00]]);
         assert!(matches!(parse(&nested), Err(FormatError::TooLarge(_))));
+    }
+
+    #[test]
+    fn repeated_data_and_text_spend_one_byte_budget() {
+        // 1 KiB of data, ASCII or UTF-16 text named 16 x 16 times through two shared arrays:
+        // 256 KiB of copies from a file of about 1 KiB.
+        for marker in [0x4f_u8, 0x5f, 0x6f] {
+            let length: u16 = if marker == 0x6f { 512 } else { 1024 };
+            let mut leaf = vec![marker, 0x11];
+            leaf.extend_from_slice(&length.to_be_bytes());
+            leaf.extend([0u8, b'a'].repeat(512));
+            let b = small_bplist(&[repeated(0xaf, 16, 1), repeated(0xaf, 16, 2), leaf]);
+            assert!(parse_binary_within(&b, 256 * 1024).is_ok(), "{marker:#04x}");
+            let r = parse_binary_within(&b, 256 * 1024 - 1);
+            assert!(matches!(r, Err(FormatError::TooLarge(_))), "{marker:#04x}: {r:?}");
+        }
+    }
+
+    #[test]
+    fn containers_past_the_node_budget_are_refused_before_their_children() {
+        // The references name a missing object: the length of the list alone refuses it, before
+        // any child is read or space is reserved for them.
+        for (marker, count) in [(0xaf_u8, MAX_NODES), (0xdf, MAX_NODES / 2)] {
+            let mut top = vec![marker, 0x12];
+            top.extend_from_slice(&(count as u32).to_be_bytes());
+            top.extend(std::iter::repeat_n(9u8, MAX_NODES));
+            let r = parse(&small_bplist(&[top]));
+            assert!(matches!(r, Err(FormatError::TooLarge(_))), "{marker:#04x}: {r:?}");
+        }
     }
 }
