@@ -371,14 +371,12 @@ fn margin(dense: bool) -> Margin {
     if dense { Margin::symmetric(10, 6) } else { Margin::symmetric(16, 12) }
 }
 
-/// The person's message is a solid bubble; the builder's answer is plain text on the page, lined
-/// up with the steps beside it. A faint tint against a card made the two hard to tell apart.
+/// The person's message is a solid bubble; the builder's answer is plain text on the page, keeping
+/// the bubble's margin so it lines up with the prompt box. A faint tint against a card made the
+/// two hard to tell apart.
 pub(crate) fn bubble(t: &Tokens, user: bool, dense: bool) -> egui::Frame {
-    if user {
-        egui::Frame::new().fill(t.user_bubble).corner_radius(t.r_lg()).inner_margin(margin(dense))
-    } else {
-        egui::Frame::new().inner_margin(Margin { left: 0, ..margin(dense) })
-    }
+    let frame = egui::Frame::new().inner_margin(margin(dense));
+    if user { frame.fill(t.user_bubble).corner_radius(t.r_lg()) } else { frame }
 }
 
 /// A button at `at` that copies a whole message (#825: selecting text in the feed is
