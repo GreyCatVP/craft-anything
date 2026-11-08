@@ -885,7 +885,7 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
             continue;
         }
         // Skip table-level constraints.
-        let first_word = seg.split([' ', '\t', '\n', '(']).next().unwrap_or("").to_ascii_uppercase();
+        let first_word = seg.split(|c: char| c.is_whitespace() || c == '(').next().unwrap_or("").to_ascii_uppercase();
         if matches!(first_word.as_str(), "CONSTRAINT" | "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN") {
             continue;
         }
@@ -1390,6 +1390,15 @@ mod tests {
         assert_eq!(cols[0].type_name, "VARCHAR(50)");
         assert_eq!(cols[1].name, "odd");
         assert_eq!(cols[1].type_name, "NUMERIC");
+    }
+
+    #[test]
+    fn column_parsing_crlf_constraints() {
+        for kw in ["UNIQUE", "CHECK", "PRIMARY", "FOREIGN", "CONSTRAINT"] {
+            let sql = format!("CREATE TABLE t (a INT,\r\n {kw}\r\n (a))");
+            let names: Vec<String> = parse_create_columns(&sql).into_iter().map(|c| c.name).collect();
+            assert_eq!(names, vec!["a".to_string()], "{kw}");
+        }
     }
 
     #[test]
