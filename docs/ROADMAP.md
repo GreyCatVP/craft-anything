@@ -1198,6 +1198,12 @@ Gaps found while using the app for real projects.
 - [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
       button; the line didn't wrap and ran on under the button
       — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
+- [ ] **decision** Simple and Advanced use one text size and spacing: switching modes changes what
+      is shown, not how big everything is (today Simple sets 16 pt text and roomier controls,
+      Advanced 13 pt, so the whole window seems to zoom). Zoom (Cmd/Ctrl + / −) stays the way to
+      make everything bigger. To decide: Simple's larger text is there for people who find small
+      text hard to read; this would leave that to zoom
+      — claimed: jgt87, branch feature/r2.9-one-size-both-modes
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
