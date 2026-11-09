@@ -253,26 +253,21 @@ pub fn certificate(data: &[u8]) -> Option<CertInfo> {
 
 /// The certificates (whole DER TLVs) inside a PKCS#7 SignedData blob, as in `META-INF/*.RSA`.
 pub fn pkcs7_certificates(data: &[u8]) -> Vec<&[u8]> {
-    let mut out = Vec::new();
-    let Some(ci) = read(data, 0) else { return out };
+    let Some(ci) = read(data, 0).filter(|t| t.tag == 0x30) else { return Vec::new() };
     let kids = children(data, &ci);
     let is_signed = kids.first().is_some_and(|t| t.tag == 0x06 && oid(t.bytes(data).unwrap_or(&[])) == "1.2.840.113549.1.7.2");
     if !is_signed {
-        return out;
+        return Vec::new();
     }
-    let Some(explicit) = kids.get(1).filter(|t| t.tag == 0xa0) else { return out };
-    let Some(sd) = children(data, explicit).into_iter().next() else { return out };
-    for field in children(data, &sd) {
-        // certificates [0] IMPLICIT SET OF Certificate
-        if field.tag == 0xa0 {
-            for c in children(data, &field).into_iter().take(MAX_CERTS) {
-                if let Some(w) = c.whole(data) {
-                    out.push(w);
-                }
-            }
-        }
+    let Some(explicit) = kids.get(1).filter(|t| t.tag == 0xa0) else { return Vec::new() };
+    let Some(sd) = children(data, explicit).into_iter().next().filter(|t| t.tag == 0x30) else { return Vec::new() };
+    let fields = children(data, &sd);
+    let [version, digests, content, certificates, ..] = fields.as_slice() else { return Vec::new() };
+    if (version.tag, digests.tag, content.tag, certificates.tag) != (0x02, 0x31, 0x30, 0xa0) {
+        return Vec::new();
     }
-    out
+    // Only the untagged SEQUENCE choice is an X.509 certificate.
+    children(data, certificates).into_iter().filter(|t| t.tag == 0x30).take(MAX_CERTS).filter_map(|t| t.whole(data)).collect()
 }
 
 /// The dotted OID of an AlgorithmIdentifier SEQUENCE's first child (the algorithm OID).
@@ -416,6 +411,28 @@ mod tests {
         let certs = pkcs7_certificates(&p7);
         assert_eq!(certs, vec![cert.as_slice()]);
         assert!(count_nodes(&p7) > 10);
+    }
+
+    #[test]
+    fn only_x509_choices_in_the_certificate_field_are_returned() {
+        let mut choices = vec![0xa2, 0x00];
+        for i in 0..70 {
+            choices.extend_from_slice(&[0x30, 3, 2, 1, i]);
+        }
+        let cms = craft_anything_testkit::android::pkcs7_der(&choices);
+        let certs = pkcs7_certificates(&cms);
+        assert_eq!(certs.len(), MAX_CERTS);
+        assert_eq!(certs[0], [0x30, 3, 2, 1, 0]);
+        assert_eq!(certs[MAX_CERTS - 1], [0x30, 3, 2, 1, 63]);
+
+        let ci = children(&cms, &read(&cms, 0).unwrap());
+        let sd = children(&cms, &ci[1])[0];
+        let fields = children(&cms, &sd);
+        for (offset, tag) in [(0, 0x31), (sd.start, 0x31), (fields[0].start, 0x04), (fields[3].start, 0xa1)] {
+            let mut damaged = cms.clone();
+            damaged[offset] = tag;
+            assert!(pkcs7_certificates(&damaged).is_empty());
+        }
     }
 
     #[test]
