@@ -959,13 +959,8 @@ pub fn parse_create_columns(sql: &str) -> Vec<Column> {
     column_definitions(sql).into_iter().map(|(column, _)| column).collect()
 }
 
-/// Where a CREATE TABLE's column list opens: the first parenthesis outside quotes, so a table
-/// named `"export (1)"` doesn't start it.
-fn column_list_open(sql: &str) -> Option<usize> {
-    let open = sql_tokens(sql).into_iter().find(|token| *token == "(")?;
-    (open.as_ptr() as usize).checked_sub(sql.as_ptr() as usize)
-}
-
+/// Each column of a CREATE TABLE, with the text that follows its name (type, constraints,
+/// default).
 fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
     let mut cols = Vec::new();
     // Take the text inside the outermost parentheses.
@@ -1005,6 +1000,13 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
         cols.push((Column { name, type_name }, rest));
     }
     cols
+}
+
+/// Where a CREATE TABLE's column list opens: the first parenthesis outside quotes, so a table
+/// named `"export (1)"` doesn't start it.
+fn column_list_open(sql: &str) -> Option<usize> {
+    let open = sql_tokens(sql).into_iter().find(|token| *token == "(")?;
+    (open.as_ptr() as usize).checked_sub(sql.as_ptr() as usize)
 }
 
 /// Identify the single INTEGER primary key, excluding the column-level DESC exception.
