@@ -77,9 +77,7 @@ impl BackendKind {
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::Gemini => openai::GEMINI_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => {
-                &["claude-code", "codex", "copilot", "grok", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "dsh", "devin"]
-            }
+ main
         }
     }
 
@@ -102,7 +100,7 @@ pub struct BackendConfig {
     /// User-chosen name, unique: "Claude", "Local Llama", "Codex on studio-mac".
     pub name: String,
     pub kind: BackendKind,
-    /// Model id (API backends) or agent id (`claude-code`, `codex`, `gemini-cli`, `antigravity`, `hermes`, `opencode`…).
+    /// Model id (API backends) or agent id (`claude-code`, `codex`, `gemini-cli`, `hermes`, `opencode`…).
     pub model: String,
     /// Base URL for API backends (defaults per kind).
     #[serde(default)]
@@ -587,7 +585,7 @@ impl AiHub {
             && std::path::Path::new(c).is_dir()
         {
             return Err(ToolError::invalid(format!("{c} is a folder, so it can't be the agent's program. On a Mac an app is a folder."))
-                .with_remediation("Pick the agent's command-line program instead, such as `agy`, or clear the program to use the usual one."));
+                .with_remediation("Pick the agent's command-line program instead, such as `codex`, or clear the program to use the usual one."));
         }
         b.options.command = command.map(str::to_string);
         self.save_config(&cfg)?;

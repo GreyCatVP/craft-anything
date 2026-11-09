@@ -806,6 +806,12 @@ any session lock is held (`AiHub::ensure_session_id`), and test a restart keeps 
 
 ## Agent tooling
 
+**Removing an agent's adapter didn't stop running its program.** The unknown-agent fallback (`Plain`)
+runs any program it's given, so a saved backend with `agy` as its command still started Antigravity's
+CLI after the adapter was deleted (#929, a provider whose terms forbid wrapping it). Refuse a retired
+agent where its program is resolved (`program_in`), which every preflight, model list and run uses,
+and test both the agent id and the program name.
+
 **Shared CLI efforts reached Claude unchanged.** Keep CLI-only levels available for agents, but
 normalize at the provider boundary; test serialized requests for known and unknown model families.
 

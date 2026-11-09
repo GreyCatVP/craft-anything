@@ -26,7 +26,6 @@ pub const ENV_KEYS: &[&str] = &[
     "DSH_HOME",
     "KIMI_CODE_HOME",
     "FACTORY_HOME_OVERRIDE",
-    "ANTIGRAVITY_HOME",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -169,7 +168,7 @@ pub struct Client {
 }
 
 /// Other names people use for a client (its program's name).
-const ALIASES: &[(&str, &str)] = &[("agy", "antigravity")];
+const ALIASES: &[(&str, &str)] = &[];
 
 impl Client {
     /// Whether `name` (an id, `-` or `_`, or an alias) means this client.
@@ -341,21 +340,6 @@ pub fn clients(host: &Host) -> Vec<Client> {
     });
     add("hermes", "Hermes", hermes.join("config.yaml"), vec![hermes.clone()], Format::Yaml, vec!["mcp_servers"], Shape::Enabled, Some(hermes.join("skills")));
 
-    // Antigravity (agy)
-    let ag_home = host.var("ANTIGRAVITY_HOME").unwrap_or_else(|| h.clone());
-    let ag = ag_home.join(".gemini").join("config");
-    let ag_cli = ag_home.join(".gemini").join("antigravity-cli");
-    add(
-        "antigravity",
-        "Antigravity",
-        ag.join("mcp_config.json"),
-        vec![ag.clone(), ag_cli],
-        Format::Jsonc,
-        vec!["mcpServers"],
-        Shape::Plain,
-        Some(ag.join("skills")),
-    );
-
     // Grok Build
     let grok = host.var("GROK_HOME").unwrap_or_else(|| h.join(".grok"));
     add("grok_build", "Grok Build", grok.join("config.toml"), vec![grok.clone()], Format::Toml, vec!["mcp_servers"], Shape::WithStartupTimeout, None);
@@ -477,8 +461,9 @@ mod tests {
     fn a_client_is_named_by_id_dashes_or_its_program() {
         let cs = clients(&Host::with_home("/home/u"));
         let named = |n: &str| cs.iter().filter(|c| c.is(n)).map(|c| c.id).collect::<Vec<_>>();
-        assert_eq!(named("antigravity"), ["antigravity"]);
-        assert_eq!(named("agy"), ["antigravity"]);
+        // Antigravity is no longer connected to: its terms don't allow it (#929).
+        assert!(named("antigravity").is_empty());
+        assert!(named("agy").is_empty());
         assert_eq!(named("kimi-code"), ["kimi_code"]);
         assert!(named("nope").is_empty());
     }

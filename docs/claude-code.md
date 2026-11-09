@@ -54,7 +54,7 @@ folder, and a release or an allow rule added later could change them) (#564):
 - A chat over **ACP** in Clean room refuses the agent's own read, write, command and fetch
   requests instead of showing them as a card the person could allow with one click; its other
   requests (planning, our tools) are allowed.
-- Other agents (Codex, Gemini CLI, OpenCode, Antigravity, Hermes, Maki) are not held to this in a
+- Other agents (Codex, Gemini CLI, OpenCode, Hermes, Maki) are not held to this in a
   chat: they keep whatever sandbox they have, if any. See the roadmap's R2.2.
 
 Not yet checked live against Claude Code or an ACP agent (the tests cover the flags and the
