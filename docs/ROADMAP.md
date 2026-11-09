@@ -499,6 +499,17 @@ Owner: open · Status: todo
       "400: Provider returned error" (#369): a request with tools now sets
       `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
       text protocol like any server that rejects tools
+- [x] OpenAI's GPT Image 2.5 as a picture provider: its two API models (Flare and Sunburst) in the
+      asset table with a `quality` level on each entry (the level, not the model, sets the price), the
+      answer's base64 picture decoded as it arrives, and `OPENAI_API_KEY` as its own key
+      — claimed: lead, branch `feature/r5.5-domestic-image-providers`
+- [x] Domestic picture providers: Zhipu's open platform (智谱开放平台), MiniMax, Alibaba Cloud's
+      Model Studio (阿里云百炼) and Volcengine's Ark (火山方舟) are asset providers beside fal.ai, with
+      CogView-4, the free CogView-3-Flash, MiniMax image-01, Z-Image-Turbo and Seedream 4.0 in the
+      asset table and their own keys (`ZHIPU_API_KEY`, `MINIMAX_API_KEY`, `DASHSCOPE_API_KEY`,
+      `ARK_API_KEY`, or stored in the keychain through `assets_key_set`); the game-assets switch and
+      its dialog ask for the key of whichever providers the chosen models use instead of assuming
+      fal.ai — claimed: lead, branch `feature/r5.5-domestic-image-providers`
 - [x] A saved fal.ai key reaches an API-key build's asset tools; every call said "No fal.ai key"
       (#923). Outside a project the tools now say that instead. Not checked with a real fal.ai key
       or API build
@@ -570,6 +581,8 @@ yet, and the quick start is how every new person begins.
       Confirm on a real invoice whether a 1024×1024 picture bills as 1 or 2 megapixels, then round
       in the table (needs a key)
 - [ ] A live extraction run with Kimi K3.1 Pro (needs the person's OpenRouter key)
+- [ ] Run CogView-4 once with a real Zhipu key and check the invoice (¥0.06 a picture, converted at
+      ¥7.1/$ in the table)
 
 **A second computer or another system:**
 - [ ] A live run of a project copied between two real computers with Claude Code (#451, #452); done

@@ -900,3 +900,9 @@ In this project, {kind}: {choice}.	このプロジェクトでは {kind}: {choic
 Couldn't change the approvals:	承認を変更できませんでした:
 What the builder may do without asking you, in this project.	このプロジェクトでビルダーが確認なしにしてよいこと。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	既定は自動モードに従います。オンのときは元に戻せることは実行し、それ以外は拒否します。オフのときはビルダーが確認します。
+Needs a {provider} key. Until then the game is built without them.	{provider} のキーが必要です。それまではゲームはこれらなしで作られます。
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	{provider} で作り、あなたのアカウントから支払います: 3D モデル {model}、画像 {picture}。オフにするとゲームはこれらなしで作られます。
+Add a {provider} key	{provider} のキーを追加
+Your {provider} key	{provider} のキー
+Generated pictures and 3D models are made with {provider}.	生成される画像と 3D モデルは {provider} で作られます。
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	ビルダーはオリジナルデザインの説明からゲームの 3D モデルとテクスチャを作り、費用はあなたの {provider} アカウントから支払われます。モデルは軽量（ローポリ）でゲームが速く動きます。テクスチャ付きモデルは {model}、画像は {picture}。各プロジェクトには {budget} の予算があり、超える前に確認します。キーはシステムのキーチェーンに保管されます。

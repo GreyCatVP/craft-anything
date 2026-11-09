@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	Trong dự án này, {kind}: {choice}.
 Couldn't change the approvals:	Không thể thay đổi phê duyệt:
 What the builder may do without asking you, in this project.	Những gì trình xây dựng được làm mà không cần hỏi bạn, trong dự án này.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Mặc định theo chế độ tự động: khi bật, việc có thể hoàn tác sẽ được làm và phần còn lại bị từ chối; khi tắt, trình xây dựng sẽ hỏi.
+Needs a {provider} key. Until then the game is built without them.	Cần khóa {provider}; đến lúc đó trò chơi được dựng mà không có chúng.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Tạo bằng {provider} và trả từ tài khoản của bạn: mô hình 3D {model}, ảnh {picture}. Tắt thì trò chơi được dựng không có chúng.
+Add a {provider} key	Thêm khóa {provider}
+Your {provider} key	Khóa {provider} của bạn
+Generated pictures and 3D models are made with {provider}.	Ảnh và mô hình 3D được tạo bằng {provider}.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Trình dựng tạo mô hình 3D và hoạ tiết cho trò chơi từ mô tả các thiết kế gốc, trả từ tài khoản {provider} của bạn. Mô hình ít đa giác để trò chơi chạy nhanh. Mô hình có hoạ tiết giá {model}, một ảnh giá {picture}. Mỗi dự án có ngân sách {budget}, và bạn được hỏi trước khi vượt. Khóa được giữ trong kho khóa của hệ thống.

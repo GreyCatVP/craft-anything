@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	이 프로젝트에서 {kind}: {choice}.
 Couldn't change the approvals:	승인을 바꾸지 못했습니다:
 What the builder may do without asking you, in this project.	이 프로젝트에서 빌더가 묻지 않고 해도 되는 일입니다.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	기본값은 자동 모드를 따릅니다. 켜져 있으면 되돌릴 수 있는 일은 진행하고 나머지는 거부하며, 꺼져 있으면 빌더가 묻습니다.
+Needs a {provider} key. Until then the game is built without them.	{provider} 키가 필요합니다. 그전까지 게임은 이것들 없이 만들어집니다.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	{provider}로 만들고 내 계정에서 결제합니다: 3D 모델 {model}, 그림 {picture}. 끄면 게임은 이것들 없이 만들어집니다.
+Add a {provider} key	{provider} 키 추가
+Your {provider} key	{provider} 키
+Generated pictures and 3D models are made with {provider}.	생성된 그림과 3D 모델은 {provider}로 만듭니다.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	빌더가 원본 디자인 설명으로 게임의 3D 모델과 텍스처를 만들며, 비용은 {provider} 계정에서 결제됩니다. 모델은 게임이 빠르게 돌도록 저폴리곤입니다. 텍스처가 있는 모델은 {model}, 그림은 {picture}입니다. 각 프로젝트에는 {budget} 예산이 있고, 초과하기 전에 묻습니다. 키는 시스템 키체인에 보관됩니다.

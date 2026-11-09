@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	В этом проекте {kind}: {choice}.
 Couldn't change the approvals:	Не удалось изменить разрешения:
 What the builder may do without asking you, in this project.	Что конструктор может делать в этом проекте, не спрашивая вас.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	«По умолчанию» следует авторежиму: когда он включён, то, что можно отменить, выполняется, а остальное отклоняется; когда выключен, конструктор спрашивает.
+Needs a {provider} key. Until then the game is built without them.	Нужен ключ {provider}; до этого игра собирается без них.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Сделано в {provider} и оплачено с вашего счёта: 3D-модель {model}, картинка {picture}. Выключено — игра собирается без них.
+Add a {provider} key	Добавить ключ {provider}
+Your {provider} key	Ваш ключ {provider}
+Generated pictures and 3D models are made with {provider}.	Созданные картинки и 3D-модели делаются в {provider}.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Сборщик делает 3D-модели и текстуры игры по описаниям собственных эскизов, оплата с вашего счёта {provider}. Модели низкополигональные, чтобы игра работала быстро. Модель с текстурой стоит {model}, картинка — {picture}. У каждого проекта бюджет {budget}, и перед превышением вас спросят. Ключ хранится в системном хранилище ключей.

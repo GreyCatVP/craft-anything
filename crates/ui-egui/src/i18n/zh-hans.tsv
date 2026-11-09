@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	在这个项目中，{kind}：{choice}。
 Couldn't change the approvals:	无法更改审批：
 What the builder may do without asking you, in this project.	在这个项目中，构建助手无需问你就可以做的事。
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	默认跟随自动模式：开启时，可撤销的操作会执行，其余的会被拒绝；关闭时，构建助手会询问。
+Needs a {provider} key. Until then the game is built without them.	需要 {provider} 的密钥，在此之前游戏不会生成这些素材。
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	由 {provider} 生成，从你的账户扣费：3D 模型 {model}，图片 {picture}。关闭后游戏不会生成这些素材。
+Add a {provider} key	添加 {provider} 密钥
+Your {provider} key	你的 {provider} 密钥
+Generated pictures and 3D models are made with {provider}.	生成的图片和 3D 模型由 {provider} 制作。
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	构建助手会按原始设计的描述制作游戏的 3D 模型和贴图，费用从你的 {provider} 账户扣除。模型为低多边形，游戏运行更快。带贴图的模型 {model}，一张图片 {picture}。每个项目有 {budget} 预算，超出前会先问你。密钥保存在系统钥匙串中。

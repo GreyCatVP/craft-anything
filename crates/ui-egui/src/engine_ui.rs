@@ -12,7 +12,7 @@ use crate::theme::{self, Tokens};
 use crate::{CraftApp, Done, icons, widgets};
 use craft_anything_ai::rebuild::KindRegistry;
 use craft_anything_engine::{CallOptions, Caller};
-use craft_anything_engines::assets::{AssetProvider, AssetProviders, fal};
+use craft_anything_engines::assets::{AssetProvider, AssetProviders};
 use craft_anything_engines::game::{self, Builder, Inventory};
 use craft_anything_engines::ghidra::{self, get};
 use egui::{RichText, Ui, Vec2};
@@ -392,9 +392,11 @@ impl CraftApp {
         self.jobs.spawn("Check the asset keys", false, move |_| Ok(Done::AssetKeys(stored_keys(&hub))));
     }
 
-    /// Whether a fal.ai key is set up: it makes the generated pictures and models.
-    pub fn fal_key(&self) -> Option<bool> {
-        self.asset_keys.as_ref().map(|k| k.get(fal::ID).copied().unwrap_or(false))
+    /// Whether every provider the assets in use need has a key: the chosen picture model's and the
+    /// 3D model generator's. `None` while the keys are still being read.
+    pub fn asset_keys_ready(&self) -> Option<bool> {
+        let keys = self.asset_keys.as_ref()?;
+        Some(asset_providers_needed(self).iter().all(|id| keys.get(id).copied().unwrap_or(false)))
     }
 
     /// Save an asset provider's key in the system keychain.
@@ -428,7 +430,7 @@ impl CraftApp {
             }
             None => self.state.make.generate_assets = on,
         }
-        if on && self.fal_key() == Some(false) {
+        if on && self.asset_keys_ready() == Some(false) {
             self.state.modal = Some(Modal::Assets);
         }
     }
@@ -464,19 +466,20 @@ pub fn assets_toggle(app: &mut CraftApp, ui: &mut Ui, mut on: bool) {
     if widgets::toggle(ui, &mut on, "Generate custom pictures and models").changed() {
         app.set_generate_assets(on);
     }
-    let no_key = on && app.fal_key() == Some(false);
+    let names = asset_provider_names(app);
+    let no_key = on && app.asset_keys_ready() == Some(false);
     let note = if no_key {
-        tr("Needs a fal.ai key. Until then the game is built without them.")
+        trf("Needs a {provider} key. Until then the game is built without them.", &[("provider", &names)])
     } else {
         let p = AssetPrices::of(app);
         trf(
-            "Made with fal.ai and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.",
-            &[("model", &p.model), ("picture", &p.picture)],
+            "Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.",
+            &[("provider", &names), ("model", &p.model), ("picture", &p.picture)],
         )
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(note).color(if no_key { t.warning } else { t.text_dim }).size(theme::SMALL));
-        if no_key && widgets::link(ui, "Add a fal.ai key").clicked() {
+        if no_key && widgets::link(ui, &trf("Add a {provider} key", &[("provider", &names)])).clicked() {
             app.state.modal = Some(Modal::Assets);
         }
     });
@@ -485,14 +488,19 @@ pub fn assets_toggle(app: &mut CraftApp, ui: &mut Ui, mut on: bool) {
 /// Asks for a fal.ai key when generated assets are turned on without one.
 pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
     let t = Tokens::get(ui.ctx());
+    let all = AssetProviders::built_in();
+    // The providers still without a key: usually one, and each gets its own field.
+    let missing: Vec<String> =
+        asset_providers_needed(app).into_iter().filter(|id| app.asset_keys.as_ref().and_then(|k| k.get(id.as_str()).copied()) != Some(true)).collect();
+    let names = provider_names(&all, &missing);
     ui.set_width(520.0);
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, t.radius, t.accent_soft);
         icons::paint(ui, rect, "boxes", 24.0, t.accent_ink);
         ui.vertical(|ui| {
-            ui.label(theme::heading(tr("Your fal.ai key"), theme::SECTION));
-            ui.label(RichText::new(tr("Generated pictures and 3D models are made with fal.ai.")).color(t.text_dim));
+            ui.label(theme::heading(trf("Your {provider} key", &[("provider", &names)]), theme::SECTION));
+            ui.label(RichText::new(trf("Generated pictures and 3D models are made with {provider}.", &[("provider", &names)])).color(t.text_dim));
         });
     });
     ui.add_space(12.0);
@@ -501,8 +509,8 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
             RichText::new({
                 let p = AssetPrices::of(app);
                 trf(
-                    "The builder makes the game's 3D models and textures from descriptions of original designs, paid from your fal.ai account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.",
-                    &[("model", &p.model), ("picture", &p.picture), ("budget", &p.budget)],
+                    "The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.",
+                    &[("provider", &names), ("model", &p.model), ("picture", &p.picture), ("budget", &p.budget)],
                 )
             })
             .size(theme::BODY),
@@ -510,18 +518,48 @@ pub fn assets_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
         .wrap(),
     );
     ui.add_space(10.0);
-    let fal = fal::Fal::default();
-    keys_link(ui, &fal);
-    ui.add_space(8.0);
-    if let Some(key) = key_field(app, ui, &fal, "Save") {
-        *close = true;
-        app.save_asset_key(fal.id().into(), key);
+    for id in &missing {
+        let Some(provider) = all.get(id) else { continue };
+        keys_link(ui, provider.as_ref());
+        ui.add_space(8.0);
+        if let Some(key) = key_field(app, ui, provider.as_ref(), "Save") {
+            *close = true;
+            app.save_asset_key(provider.id().into(), key);
+        }
+        ui.add_space(8.0);
     }
     ui.add_space(14.0);
     if widgets::secondary(ui, None, "Not now").clicked() {
         *close = true;
         app.set_generate_assets(false);
     }
+}
+
+/// The providers the assets in use need, by id: the chosen picture model's, then the 3D model
+/// generator's, each once.
+fn asset_providers_needed(app: &CraftApp) -> Vec<String> {
+    use craft_anything_engines::assets::Catalogue;
+    let table = Catalogue::built_in();
+    let picture = table.image_model(app.settings.assets.image_model.as_deref()).ok().map(|m| m.provider.clone());
+    let model = table.model_3d(None).ok().map(|m| m.provider.clone());
+    let mut out: Vec<String> = Vec::new();
+    for id in [picture, model].into_iter().flatten() {
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
+/// Those providers' names, as a list ("fal.ai, Zhipu (智谱)").
+fn asset_provider_names(app: &CraftApp) -> String {
+    let all = AssetProviders::built_in();
+    provider_names(&all, &asset_providers_needed(app))
+}
+
+/// The names of `ids` among `all`, as a list.
+fn provider_names(all: &AssetProviders, ids: &[String]) -> String {
+    ids.iter().filter_map(|id| all.get(id)).map(|p| p.name().to_string()).collect::<Vec<_>>().join(", ")
 }
 
 /// Prices for the text about generated art, from the asset table and Settings.

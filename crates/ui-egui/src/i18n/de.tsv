@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	In diesem Projekt {kind}: {choice}.
 Couldn't change the approvals:	Die Freigaben konnten nicht geändert werden:
 What the builder may do without asking you, in this project.	Was der Builder in diesem Projekt tun darf, ohne dich zu fragen.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	Standard folgt dem Automatikmodus: Ist er an, geschieht, was sich rückgängig machen lässt, und der Rest wird abgelehnt; ist er aus, fragt der Builder.
+Needs a {provider} key. Until then the game is built without them.	Dafür wird ein Schlüssel für {provider} gebraucht; bis dahin wird das Spiel ohne sie gebaut.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	Mit {provider} erzeugt und von deinem Konto bezahlt: ein 3D-Modell {model}, ein Bild {picture}. Aus wird das Spiel ohne sie gebaut.
+Add a {provider} key	Schlüssel für {provider} hinzufügen
+Your {provider} key	Dein {provider}-Schlüssel
+Generated pictures and 3D models are made with {provider}.	Erzeugte Bilder und 3D-Modelle entstehen mit {provider}.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	Der Builder fertigt die 3D-Modelle und Texturen des Spiels nach Beschreibungen eigener Entwürfe an, bezahlt von deinem {provider}-Konto. Modelle sind low-poly, damit das Spiel schnell läuft. Ein texturiertes Modell kostet {model}, ein Bild {picture}. Jedes Projekt hat ein Budget von {budget}, und du wirst gefragt, bevor es überschritten wird. Der Schlüssel liegt in deinem Systemschlüsselbund.

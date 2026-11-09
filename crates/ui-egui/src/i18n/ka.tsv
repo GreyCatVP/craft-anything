@@ -1462,3 +1462,9 @@ In this project, {kind}: {choice}.	ამ პროექტში {kind}: {choi
 Couldn't change the approvals:	ნებართვების შეცვლა ვერ მოხერხდა:
 What the builder may do without asking you, in this project.	რისი გაკეთება შეუძლია ამწყობს ამ პროექტში თქვენი კითხვის გარეშე.
 Default follows Auto mode: with it on, what can be undone goes ahead and the rest is refused; with it off, the builder asks.	ნაგულისხმევი ავტორეჟიმს მიჰყვება: როცა ჩართულია, რისი გაუქმებაც შეიძლება, სრულდება, დანარჩენი კი უარყოფილია; როცა გამორთულია, ამწყობი გეკითხებათ.
+Needs a {provider} key. Until then the game is built without them.	საჭიროა {provider}-ის გასაღები; მანამდე თამაში მათ გარეშე იწყობა.
+Made with {provider} and paid from your account: {model} a 3D model, {picture} a picture. Off, the game is built without them.	{provider}-ით შექმნილი და თქვენი ანგარიშიდან გადახდილი: 3D მოდელი {model}, სურათი {picture}. გამორთულზე თამაში მათ გარეშე იწყობა.
+Add a {provider} key	{provider}-ის გასაღების დამატება
+Your {provider} key	{provider}-ის თქვენი გასაღები
+Generated pictures and 3D models are made with {provider}.	გენერირებული სურათები და 3D მოდელები {provider}-ით მზადდება.
+The builder makes the game's 3D models and textures from descriptions of original designs, paid from your {provider} account. Models are low-poly so the game runs fast. A textured model costs {model} and a picture {picture}. Each project has a {budget} budget, and you're asked before it goes over. The key is kept in your system keychain.	მშენებელი თამაშის 3D მოდელებსა და ტექსტურებს ორიგინალური დიზაინის აღწერით ამზადებს, გადახდა თქვენი {provider} ანგარიშიდან. მოდელები დაბალპოლიგონიანია, რომ თამაში სწრაფად მუშაობდეს. ტექსტურიანი მოდელი {model}, სურათი {picture}. თითოეულ პროექტს აქვს {budget} ბიუჯეტი და გადაჭარბებამდე გკითხავენ. გასაღები სისტემის გასაღებების საცავში ინახება.

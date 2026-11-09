@@ -1,5 +1,5 @@
 # The models Craft Anything generates game assets with, and what each one costs (US dollars, the
-# provider's listed prices). `provider` names an asset provider in the registry (`fal`), and
+# provider's listed prices). `provider` names an asset provider in the registry (`fal`, `zhipu`), and
 # `endpoint` is the model's address at that provider. The `[default]` table picks the model used
 # when Settings names none; `[assets] image_model` in config.toml picks another picture model by
 # its `id`. A table that doesn't parse falls back to the built-in defaults (a test keeps it parsing).
@@ -39,6 +39,97 @@ name = "FLUX.1 [schnell]"
 endpoint = "fal-ai/flux/schnell"
 usd_per_megapixel = 0.003
 licence = "Apache-2.0 (model weights)"
+
+# Zhipu's open platform (智谱开放平台, BigModel): CogView-4, and its free Flash model. Each picture
+# is billed per picture; the prices are its published ¥ figures converted at ¥7.1 to $1 on
+# 2026-11-08. Its sizes are pixel sizes (`size_by = "pixels"`): 1024×1024, 1344×768 and 768×1344.
+[[image]]
+id = "cogview-4"
+provider = "zhipu"
+name = "CogView-4 (智谱)"
+endpoint = "cogview-4-250304"
+usd_per_image = 0.0085
+size_by = "pixels"
+licence = "智谱开放平台服务条款"
+
+[[image]]
+id = "cogview-3-flash"
+provider = "zhipu"
+name = "CogView-3-Flash (智谱)"
+endpoint = "cogview-3-flash"
+usd_per_image = 0.0
+size_by = "pixels"
+licence = "免费模型（智谱开放平台服务条款）"
+
+# MiniMax's open platform: `image-01`, billed per picture; ¥0.025 converted at ¥7.1 to $1 on
+# 2026-11-08. Its sizes are aspect ratios (`size_by = "aspect_ratio"`): 1:1, 16:9 and 9:16.
+[[image]]
+id = "minimax-image-01"
+provider = "minimax"
+name = "MiniMax image-01"
+endpoint = "image-01"
+usd_per_image = 0.0035
+size_by = "aspect_ratio"
+licence = "MiniMax 开放平台服务条款"
+
+# Alibaba Cloud's Model Studio (阿里云百炼): Z-Image-Turbo, a fast open-weight model billed per
+# picture; ¥0.1 converted at ¥7.1 to $1 on 2026-11-08. Its sizes are pixel sizes (`W*H`), and the
+# answer comes back from one synchronous request.
+[[image]]
+id = "z-image-turbo"
+provider = "aliyun"
+name = "Z-Image-Turbo (阿里云百炼)"
+endpoint = "z-image-turbo"
+usd_per_image = 0.014
+size_by = "pixels"
+licence = "Apache-2.0 (model weights)"
+
+# Volcengine's Ark (火山方舟): Seedream 4.0, billed per picture; about ¥0.2, converted at ¥7.1 to
+# $1 on 2026-11-08 (check the Ark console before a large batch). Its sizes are pixel sizes
+# (`WxH`), and 4.5/5.0 can be added as more entries once their model ids are confirmed.
+[[image]]
+id = "seedream-4"
+provider = "volcengine"
+name = "Seedream 4.0 (火山方舟)"
+endpoint = "doubao-seedream-4-0-250828"
+usd_per_image = 0.03
+size_by = "pixels"
+licence = "火山方舟服务条款"
+
+# OpenAI's GPT Image 2.5 (2026-09-08) in its two API models: Flare is the faster default, Sunburst
+# spends longer on intricate detail. Both take a quality level (`quality`), and the price is OpenAI's
+# token calculator's per-picture estimate for 1024×1024: low ≈ $0.006, medium ≈ $0.053, high/max up
+# to ≈ $0.211; the high entry is priced at that upper bound so a budget is never under-counted.
+# Check the invoice for a large batch.
+[[image]]
+id = "gpt-image-2.5-flare-low"
+provider = "openai"
+name = "GPT Image 2.5 Flare (low)"
+endpoint = "gpt-image-2.5-flare"
+usd_per_image = 0.006
+size_by = "pixels"
+quality = "low"
+licence = "OpenAI 服务条款"
+
+[[image]]
+id = "gpt-image-2.5-flare-medium"
+provider = "openai"
+name = "GPT Image 2.5 Flare (medium)"
+endpoint = "gpt-image-2.5-flare"
+usd_per_image = 0.053
+size_by = "pixels"
+quality = "medium"
+licence = "OpenAI 服务条款"
+
+[[image]]
+id = "gpt-image-2.5-sunburst-high"
+provider = "openai"
+name = "GPT Image 2.5 Sunburst (high)"
+endpoint = "gpt-image-2.5-sunburst"
+usd_per_image = 0.211
+size_by = "pixels"
+quality = "high"
+licence = "OpenAI 服务条款"
 
 # Game-ready 3D models (GLB) from a picture, billed per model; `faces` is the face-count range the
 # model accepts.

@@ -3,28 +3,27 @@
 //! capped). One key (`Authorization: Key …`), paid per generation; every call reports what it cost.
 //! Which models and what they cost come from the asset table (`assets.toml`).
 
-use super::{AssetProvider, AssetRequest, Generated, Shape, SizeBy};
+use super::{AssetProvider, AssetRequest, Generated, Shape, SizeBy, agent, download, unexpected};
 use craft_anything_evidence::{ErrorCode, ToolError};
 use serde_json::{Value, json};
-use std::io::Read;
 use std::time::Duration;
 
 /// The provider id the asset table names.
 pub const ID: &str = "fal";
 const BASE: &str = "https://fal.run";
-/// Largest download we keep (a textured GLB is a few MB).
-const MAX_BYTES: u64 = 200 << 20;
 
-/// How fal is told a picture's shape: the field and its value for the model.
-fn fal_size(by: SizeBy, shape: Shape) -> (&'static str, &'static str) {
-    match (by, shape) {
+/// How fal is told a picture's shape: the field and its value for the model. `None` for a
+/// convention fal doesn't use, which means the table entry isn't fal's.
+fn fal_size(by: SizeBy, shape: Shape) -> Option<(&'static str, &'static str)> {
+    Some(match (by, shape) {
         (SizeBy::ImageSize, Shape::Square) => ("image_size", "square_hd"),
         (SizeBy::ImageSize, Shape::Wide) => ("image_size", "landscape_16_9"),
         (SizeBy::ImageSize, Shape::Tall) => ("image_size", "portrait_16_9"),
         (SizeBy::AspectRatio, Shape::Square) => ("aspect_ratio", "1:1"),
         (SizeBy::AspectRatio, Shape::Wide) => ("aspect_ratio", "16:9"),
         (SizeBy::AspectRatio, Shape::Tall) => ("aspect_ratio", "9:16"),
-    }
+        (SizeBy::Pixels, _) => return None,
+    })
 }
 
 /// fal.ai, as an [`AssetProvider`].
@@ -59,7 +58,10 @@ impl AssetProvider for Fal {
         let key = key.trim();
         match *req {
             AssetRequest::Image { model, prompt, shape } => {
-                let (field, size) = fal_size(model.size_by, shape);
+                let (field, size) = fal_size(model.size_by, shape).ok_or_else(|| {
+                    ToolError::new(ErrorCode::BadSettings, format!("{} isn't a fal.ai picture model.", model.id))
+                        .with_remediation("Point the asset table's entry at the provider that runs it.")
+                })?;
                 let body = json!({"prompt": prompt, field: size, "num_images": 1, "output_format": "png"});
                 let v = self.post(key, &model.endpoint, &body)?;
                 if v.pointer("/has_nsfw_concepts/0").and_then(Value::as_bool) == Some(true) {
@@ -67,14 +69,14 @@ impl AssetProvider for Fal {
                         ToolError::new(ErrorCode::ProgramFailed, "fal.ai's safety check blocked that picture.").with_remediation("Describe it differently.")
                     );
                 }
-                let url = image_url(&v).ok_or_else(|| unexpected("picture", &v))?;
+                let url = image_url(&v).ok_or_else(|| unexpected("fal.ai", "picture", &v))?;
                 Ok(Generated { bytes: download(&url)?, url, cost_usd: req.listed_cost() })
             }
             AssetRequest::Model3d { model, image_url, textured, faces } => {
                 let range = model.faces();
                 let faces = faces.clamp(*range.start(), *range.end());
                 let v = self.post(key, &model.endpoint, &json!({"image_url": image_url, "texture": textured, "face_limit": faces}))?;
-                let url = model_url(&v).ok_or_else(|| unexpected("3D model", &v))?;
+                let url = model_url(&v).ok_or_else(|| unexpected("fal.ai", "3D model", &v))?;
                 Ok(Generated { bytes: download(&url)?, url, cost_usd: req.listed_cost() })
             }
         }
@@ -106,41 +108,6 @@ impl Fal {
     }
 }
 
-fn agent(timeout: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .user_agent("CraftAnything")
-        .timeout_connect(Some(Duration::from_secs(20)))
-        .timeout_recv_response(Some(timeout))
-        .timeout_recv_body(Some(Duration::from_secs(10 * 60)))
-        .build()
-        .new_agent()
-}
-
-/// Fetch a generated file (fal answers with its address, or a `data:` URI in sync mode).
-fn download(url: &str) -> Result<Vec<u8>, ToolError> {
-    if let Some(data) = url.strip_prefix("data:") {
-        let b64 =
-            data.split_once(";base64,").map(|(_, b)| b).ok_or_else(|| ToolError::new(ErrorCode::GarbledOutput, "fal.ai sent a file in an unknown form."))?;
-        return base64_decode(b64);
-    }
-    let resp =
-        agent(Duration::from_secs(120)).get(url).call().map_err(|e| ToolError::new(ErrorCode::EngineMissing, format!("Couldn't download the file: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(ToolError::new(ErrorCode::EngineMissing, format!("Downloading the file failed ({}).", resp.status().as_u16())));
-    }
-    let mut bytes = Vec::new();
-    resp.into_body()
-        .into_reader()
-        .take(MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| ToolError::new(ErrorCode::EngineMissing, format!("The download broke off: {e}")))?;
-    if bytes.len() as u64 > MAX_BYTES {
-        return Err(ToolError::new(ErrorCode::OverLimit, "The generated file is too large."));
-    }
-    Ok(bytes)
-}
-
 fn image_url(v: &Value) -> Option<String> {
     v.pointer("/images/0/url").and_then(Value::as_str).map(str::to_string)
 }
@@ -155,11 +122,6 @@ fn model_url(v: &Value) -> Option<String> {
     glb.or_else(|| mesh.and_then(|m| m.get("url")?.as_str())).filter(|u| !u.is_empty()).map(str::to_string)
 }
 
-fn unexpected(what: &str, v: &Value) -> ToolError {
-    ToolError::new(ErrorCode::GarbledOutput, format!("fal.ai didn't return a {what}."))
-        .with_details(json!({"answer": v.to_string().chars().take(500).collect::<String>()}))
-}
-
 /// A `data:` URI for a local picture (fal accepts these for some models; links always work).
 pub fn data_uri(bytes: &[u8], media_type: &str) -> String {
     format!("data:{media_type};base64,{}", base64_encode(bytes))
@@ -170,17 +132,12 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn base64_decode(s: &str) -> Result<Vec<u8>, ToolError> {
-    use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(s.trim()).map_err(|e| ToolError::new(ErrorCode::GarbledOutput, format!("invalid base64: {e}")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::assets::Catalogue;
     use craft_anything_platform::sync::Mutex;
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::Arc;
 
