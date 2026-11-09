@@ -65,6 +65,8 @@ pub struct DoctorReport {
     pub checks: Vec<Check>,
 }
 
+/// Runs the read-only checks: the CLI binary, each selected app's registration and skills, and,
+/// when asked, the engines and an MCP self-test.
 pub fn doctor(host: &Host, req: &DoctorRequest) -> DoctorReport {
     let mut checks = Vec::new();
 
