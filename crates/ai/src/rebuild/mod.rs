@@ -59,7 +59,8 @@ pub mod tools;
 
 use brief::*;
 pub use kinds::{
-    AppKind, BriefCx, BuildCheck, Check, CheckCx, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, TargetKind, WebVisualCheck, WebsiteKind,
+    AppKind, BriefCx, BuildCheck, Check, CheckCx, CheckStop, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, TargetKind, WebVisualCheck,
+    WebsiteKind,
 };
 pub use locate::game_folder;
 use locate::*;
@@ -298,6 +299,7 @@ impl RebuildRun {
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
             reset_progress_after_notes: false,
+            keys: hub.keys.clone(),
         };
         let r2 = running.clone();
         let key_store = hub.keys.clone();
@@ -313,19 +315,7 @@ impl RebuildRun {
                     ctx.load_asset_keys(&key_store);
                     ctx.run(&mut ws, entry, api, extractor, &opts)
                 }));
-                let (ok, message, paused) = match result {
-                    Ok(Ok(m)) => (true, m, false),
-                    Ok(Err(e)) if e.code == ErrorCode::Cancelled => {
-                        let _ = ws.set_status(Status::Stopped, "Paused. Send a message to continue.");
-                        (false, "Paused.".to_string(), true)
-                    }
-                    Ok(Err(e)) => {
-                        let msg = e.for_people();
-                        let _ = ws.set_status(Status::NeedsYou, msg.clone());
-                        (false, msg, false)
-                    }
-                    Err(_) => (false, "The workflow hit a bug and stopped safely. Your files are untouched.".to_string(), false),
-                };
+                let (ok, message, paused) = run_outcome(result, &mut ws);
                 ctx.record_usage(None);
                 // The CLI can exit as soon as it sees completion: release the helper while its
                 // supervisor threads are still available to stop it.
@@ -504,6 +494,8 @@ struct Worker {
     self_check: Option<(Arc<dyn kinds::TargetKind>, f64)>,
     /// A hook consumed a new request; persist its reset only after the builder finishes.
     reset_progress_after_notes: bool,
+    /// The backends' stored keys, for an agent CLI that asks the host to authenticate (Devin).
+    keys: crate::keys::KeyStore,
 }
 
 /// The project a run records its usage in, and when it last did.
@@ -724,6 +716,7 @@ impl Worker {
             deep,
             targets,
             logs: Some(crate::failure_log::dir_in(&config_dir)),
+            key: crate::cli_agents::acp::key_for(&self.keys, &entry.config.model, &entry.config.name, entry.config.kind),
             resume: ws.manifest.agent_session_for_mode(&entry.config.model, deep).map(str::to_string),
             preamble: Some(
                 "You work inside Craft Anything for a person who doesn't code. The message below is your task.
@@ -1350,6 +1343,29 @@ impl Worker {
             if self.seen.insert(r.id.clone()) {
                 self.emit(RunEvent::Ask(r));
             }
+        }
+    }
+}
+
+/// What the run says, and the status it leaves on the project, when it ends: paused, failed, or
+/// a caught bug. A caught bug must not leave the saved status as it last was ("Checking" while
+/// nothing runs), or the project looks stuck rather than stopped.
+fn run_outcome(result: Result<Result<String, ToolError>, Box<dyn std::any::Any + Send>>, ws: &mut Workspace) -> (bool, String, bool) {
+    match result {
+        Ok(Ok(m)) => (true, m, false),
+        Ok(Err(e)) if e.code == ErrorCode::Cancelled => {
+            let _ = ws.set_status(Status::Stopped, "Paused. Send a message to continue.");
+            (false, "Paused.".to_string(), true)
+        }
+        Ok(Err(e)) => {
+            let msg = e.for_people();
+            let _ = ws.set_status(Status::NeedsYou, msg.clone());
+            (false, msg, false)
+        }
+        Err(_) => {
+            let msg = "The workflow hit a bug and stopped safely. Your files are untouched.".to_string();
+            let _ = ws.set_status(Status::NeedsYou, msg.clone());
+            (false, msg, false)
         }
     }
 }

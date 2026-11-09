@@ -574,6 +574,9 @@ yet, and the quick start is how every new person begins.
       within 90 s while the same check passed in the builder's turn and on a re-run; not
       reproduced. The app waited on animation frames, which a window behind others may not get;
       the Electron steps now say to capture after loading instead
+- [ ] A live Windows build whose check stalls (Codex, a Godot project, as in the reports): the
+      feed names the check it is in, the builder's own checks stop at their 30-minute limit,
+      Pause acts between checks and stops a running build step, and a caught bug leaves "Needs you"
 - [ ] A live chat run with a big comparison result, to see Claude Code page it with
       `core_evidence_browse` (and whether 80 KB is the right size)
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't
@@ -742,14 +745,7 @@ Owner: open · Status: in progress
       Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [x] Find OpenCode's CLI inside its Windows desktop app (`opencode-cli.exe`), for detection and for runs (#1060)
-- [x] Antigravity is no longer run or connected to (#929). Google's Antigravity FAQ says `agy -p`
-      isn't supported when wrapped in third-party tools on consumer plans, and section 6 of its terms
-      treats third-party access as a breach. Its adapter, its setup connector and its offer are gone;
-      a backend for `antigravity`, or with a program named `agy`, is refused before any program starts.
-      Chosen as option 1 of the three in the issue discussion; the `agy acp` route isn't confirmed
-      permitted on personal plans by Google, so it's not used.
-      `platform::which` still searches Antigravity's install folders for a file named `agy`; no run
-      uses it now, so it's left for a later clean-up. — claimed: fabox-os, branch bugfix/929-disable-antigravity
+ 
 - [ ] Settings → AI can only add an agent it detected: add one by choosing its program, for a CLI
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
@@ -874,6 +870,9 @@ Owner: open · Status: in progress
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
+- [ ] Devin over ACP: `devin acp` asks the host to `authenticate` (`meta.api_key`) before
+      `session/new`, so the backend's stored key is sent — claimed: NibrasAz7, branch
+      feature/r2.2-devin-agent
 
 **Finding them:**
 - [ ] #105, #135, #259, #385 and #423 predate 0.3.0, which looks in more places, and came through
