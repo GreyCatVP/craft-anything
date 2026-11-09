@@ -1376,6 +1376,7 @@ Owner: open · Status: in progress
       — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-default-literals
 - [ ] Read a TEXT column's REAL default as SQLite does: `DEFAULT 1e3` and `DEFAULT 5.` are
       '1000.0' and '5.0' in SQLite, while non-separated reals keep the schema's text here.
+      — claimed: alksv1, branch bugfix/r3.12-sqlite-text-real-default
 - [x] Whole numbers in SQLite REAL columns read as REAL: SQLite stores a REAL with no fractional
       part as an integer and turns it back into a REAL when it reads the column, so a REAL, FLOAT
       or DOUBLE column holding 1.0 shows 1.0 instead of 1.
