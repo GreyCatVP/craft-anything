@@ -742,6 +742,14 @@ Owner: open · Status: in progress
       Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [x] Find OpenCode's CLI inside its Windows desktop app (`opencode-cli.exe`), for detection and for runs (#1060)
+- [x] Antigravity is no longer run or connected to (#929). Google's Antigravity FAQ says `agy -p`
+      isn't supported when wrapped in third-party tools on consumer plans, and section 6 of its terms
+      treats third-party access as a breach. Its adapter, its setup connector and its offer are gone;
+      a backend for `antigravity`, or with a program named `agy`, is refused before any program starts.
+      Chosen as option 1 of the three in the issue discussion; the `agy acp` route isn't confirmed
+      permitted on personal plans by Google, so it's not used.
+      `platform::which` still searches Antigravity's install folders for a file named `agy`; no run
+      uses it now, so it's left for a later clean-up. — claimed: fabox-os, branch bugfix/929-disable-antigravity
 - [ ] Settings → AI can only add an agent it detected: add one by choosing its program, for a CLI
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,

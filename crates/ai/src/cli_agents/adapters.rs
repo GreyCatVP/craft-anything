@@ -6,7 +6,6 @@
 use super::*;
 
 mod aider;
-mod antigravity;
 mod copilot;
 mod dsh;
 mod grok;
@@ -14,7 +13,6 @@ mod hermes;
 mod maki;
 mod opencode;
 pub use aider::Aider;
-pub use antigravity::Antigravity;
 pub use copilot::Copilot;
 pub use dsh::DeepSeekHarness;
 pub use grok::Grok;
@@ -284,7 +282,6 @@ impl AgentAdapters {
                 Arc::new(Codex),
                 Arc::new(GeminiCli),
                 Arc::new(OpenCode),
-                Arc::new(Antigravity),
                 Arc::new(Hermes),
                 Arc::new(Maki),
                 Arc::new(Aider),

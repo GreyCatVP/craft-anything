@@ -45,7 +45,6 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("copilot", "copilot", "GitHub Copilot"),
     ("grok", "grok", "Grok Build"),
     ("gemini-cli", "gemini", "Gemini CLI"),
-    ("antigravity", "agy", "Antigravity"),
     ("opencode", "opencode", "OpenCode"),
     ("hermes", "hermes", "Hermes Agent"),
     ("qwen-code", "qwen", "Qwen Code"),
@@ -76,7 +75,26 @@ pub fn replaced_program(options: &BackendOptions, program: &str) -> Option<Strin
     Path::new(saved).parent().is_some_and(|p| !p.as_os_str().is_empty()).then(|| saved.to_string())
 }
 
+/// Agents Craft Anything doesn't run. Google's Antigravity FAQ and section 6 of its terms don't
+/// allow third-party tools to run `agy`, so a backend for it is refused before any program starts
+/// (#929).
+pub const RETIRED: &[&str] = &["antigravity"];
+
+/// The refusal for a backend that would run a retired agent: its agent is retired, or the program
+/// it's given is `agy`.
+fn retired_error(config: &BackendConfig, options: &BackendOptions) -> Option<ToolError> {
+    let by_agent = RETIRED.contains(&config.model.trim());
+    let by_program = options.command.as_deref().map(str::trim).map(Path::new).and_then(Path::file_stem).is_some_and(|s| s.eq_ignore_ascii_case("agy"));
+    (by_agent || by_program).then(|| {
+        ToolError::invalid("Antigravity can't be used with Craft Anything.")
+            .with_remediation("Google's terms don't allow third-party tools to run its agy command (#929). Choose another coding agent for this backend.")
+    })
+}
+
 fn program_in(config: &BackendConfig, options: &BackendOptions, search: Option<std::ffi::OsString>) -> Result<String, ToolError> {
+    if let Some(refused) = retired_error(config, options) {
+        return Err(refused);
+    }
     let usual = program_for(&config.model);
     let local = config.ssh_host.as_deref().is_none_or(|h| h.trim().is_empty());
     let Some(chosen) = options.command.as_deref().map(str::trim).filter(|c| !c.is_empty()) else {
@@ -2268,28 +2286,66 @@ mod tests {
         retry_after_checking_flags(false);
     }
 
+    /// #929: Antigravity's `agy` is refused before any program is looked up: by its agent, or by a
+    /// program named `agy` on any agent. Other agents are unaffected.
+    #[test]
+    fn antigravity_is_refused_by_agent_and_by_its_program() {
+        let cfg =
+            |model: &str| BackendConfig { name: "X".into(), kind: BackendKind::AgentCli, model: model.into(), base_url: None, ssh_host: None, enabled: true };
+        let with = |command: Option<&str>| BackendOptions { command: command.map(str::to_string), ..Default::default() };
+        let refused = [(cfg("antigravity"), with(None)), (cfg("antigravity"), with(Some("/opt/agy/bin/agy"))), (cfg("opencode"), with(Some("agy")))];
+        for (config, options) in &refused {
+            let err = program_in(config, options, Some(std::ffi::OsString::new())).unwrap_err();
+            assert!(err.message.contains("Antigravity can't be used"), "{err:?}");
+            assert!(err.remediation.as_deref().is_some_and(|r| r.contains("#929")), "{err:?}");
+        }
+        assert_eq!(program_in(&cfg("codex"), &with(None), Some(std::ffi::OsString::new())).unwrap(), "codex", "other agents are unaffected");
+    }
+
+    /// A stand-in agent that checks its flags with `--help` and resumes a session, as the retry
+    /// test needs. Its id is not a real agent's.
+    struct FakeCli;
+    impl AgentAdapter for FakeCli {
+        fn ids(&self) -> &'static [&'static str] {
+            &["fake-cli"]
+        }
+        fn required_flags(&self) -> (&'static [&'static str], &'static [&'static str]) {
+            (&["--help"], &["--output-format"])
+        }
+        fn resumes(&self) -> bool {
+            true
+        }
+        fn args(&self, cx: &ArgsCx) -> Vec<String> {
+            let mut a = Vec::new();
+            if let Some(r) = cx.resume {
+                a.extend(["--conversation".to_string(), r.to_string()]);
+            }
+            a.push(format!("{}{}", cx.preamble, cx.prompt));
+            a
+        }
+    }
+
     #[cfg(unix)]
     fn retry_after_checking_flags(send_first: bool) {
         use std::os::unix::fs::PermissionsExt;
         for supported in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let program = dir.path().join("agy");
+            let program = dir.path().join("fake-cli");
             let help = if supported { "--output-format stream-json" } else { "old command options" };
             let script = format!(
                 "#!/bin/sh\nd=$(dirname \"$0\")\nif [ \"$1\" = --help ]; then echo '{help}'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$d/argv\"\necho run >> \"$d/runs\"\nexit 7\n"
             );
             std::fs::write(&program, script).unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let config = BackendConfig {
-                name: "Antigravity".into(),
-                kind: BackendKind::AgentCli,
-                model: "antigravity".into(),
-                base_url: None,
-                ssh_host: None,
-                enabled: true,
-            };
+            let config =
+                BackendConfig { name: "Fake CLI".into(), kind: BackendKind::AgentCli, model: "fake-cli".into(), base_url: None, ssh_host: None, enabled: true };
             let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
             let mut spec = CliSpec::new(config, options, false, None);
+            spec.adapters = {
+                let mut adapters = AgentAdapters::built_in();
+                adapters.register(Arc::new(FakeCli));
+                adapters
+            };
             spec.preamble = Some("P:".into());
             spec.resume = Some("saved".into());
             let mut c = CliConversation::new(spec);
@@ -2697,12 +2753,14 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         assert!(matches!(p.line(r#"{"say":"hello"}"#).as_slice(), [AgentEvent::TextDelta { text }] if text == "hello"));
         // Unknown agents stream their output as text; the built-ins keep their own adapters.
         assert!(!reg.for_agent("no-such-agent").streams_json());
-        assert!(reg.for_agent("claude").resumes() && !reg.for_agent("codex").resumes() && reg.for_agent("antigravity").resumes());
+        assert!(reg.for_agent("claude").resumes() && !reg.for_agent("codex").resumes());
+        // Antigravity has no adapter: its id falls to the plain one, and its backend is refused (#929).
+        assert!(!reg.for_agent("antigravity").resumes());
         // Registering an adapter for an existing id replaces that one.
         reg.register(Arc::new(EchoAgent));
         assert_eq!(
             format!("{reg:?}"),
-            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "copilot", "grok", "dsh", "echo-agent"]"#
+            r#"["claude-code", "codex", "gemini-cli", "opencode", "hermes", "maki", "aider", "copilot", "grok", "dsh", "echo-agent"]"#
         );
     }
 
