@@ -1336,6 +1336,8 @@ Owner: open · Status: in progress
       Count rejected lengths against the packet scan limit and summarize them once at the end of the walk.
 - [x] Bound rejected packet records, validate timestamp fractions and check pcapng section-local interfaces.
       — claimed: Afloat16, branch bugfix/r3.12-capture-timing-framing
+- [x] Validate the size and location of the ZIP64 end record before consuming its fixed fields or extensible data.
+      — claimed: Afloat16, branch bugfix/r3.12-zip64-record-extent
 - [x] Keep ZIP directory entries within the declared directory.
       — claimed: Afloat16, branch bugfix/r3.12-zip-directory-bounds-20261105
 - [x] Refuse split ZIP archives without their other volumes.

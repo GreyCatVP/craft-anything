@@ -117,26 +117,31 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
             }
             let rec = r.u64_le(loc + 8).ok_or(ZipError::Truncated("zip64 locator"))?;
             let rec = usize::try_from(rec).map_err(|_| ZipError::Corrupt("zip64 record offset".into()))?;
-            if r.slice(rec, 4) == Some(b"PK\x06\x06") {
-                disk = r.u32_le(rec + 16).ok_or(ZipError::Truncated("zip64 record"))?;
-                directory_disk = r.u32_le(rec + 20).ok_or(ZipError::Truncated("zip64 record"))?;
-                let zip64_disk_entries = r.u64_le(rec + 24).ok_or(ZipError::Truncated("zip64 record"))?;
-                let zip64_total = r.u64_le(rec + 32).ok_or(ZipError::Truncated("zip64 record"))?;
-                if (disk_entries != 0xffff && disk_entries != zip64_disk_entries) || (total != 0xffff && total != zip64_total) {
-                    return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
-                }
-                disk_entries = zip64_disk_entries;
-                total = zip64_total;
-                let zip64_cd_size = r.u64_le(rec + 40).ok_or(ZipError::Truncated("zip64 record"))?;
-                let zip64_cd_offset = r.u64_le(rec + 48).ok_or(ZipError::Truncated("zip64 record"))?;
-                if (cd_size != 0xffff_ffff && cd_size != zip64_cd_size) || (cd_offset != 0xffff_ffff && cd_offset != zip64_cd_offset) {
-                    return Err(ZipError::Corrupt("ZIP64 and classic directory bounds disagree".into()));
-                }
-                cd_size = zip64_cd_size;
-                cd_offset = zip64_cd_offset;
-                zip64 = true;
-                eocd_record_start = rec as u64;
+            if r.slice(rec, 4) != Some(b"PK\x06\x06") {
+                return Err(ZipError::Corrupt("ZIP64 locator does not point to an end record".into()));
             }
+            let payload_size = r.u64_le(rec + 4).ok_or(ZipError::Truncated("zip64 record size"))?;
+            if payload_size < 44 || (rec as u64).checked_add(12).and_then(|start| start.checked_add(payload_size)) != Some(loc as u64) {
+                return Err(ZipError::Corrupt("ZIP64 end record does not end at its locator".into()));
+            }
+            disk = r.u32_le(rec + 16).ok_or(ZipError::Truncated("zip64 record"))?;
+            directory_disk = r.u32_le(rec + 20).ok_or(ZipError::Truncated("zip64 record"))?;
+            let zip64_disk_entries = r.u64_le(rec + 24).ok_or(ZipError::Truncated("zip64 record"))?;
+            let zip64_total = r.u64_le(rec + 32).ok_or(ZipError::Truncated("zip64 record"))?;
+            if (disk_entries != 0xffff && disk_entries != zip64_disk_entries) || (total != 0xffff && total != zip64_total) {
+                return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
+            }
+            disk_entries = zip64_disk_entries;
+            total = zip64_total;
+            let zip64_cd_size = r.u64_le(rec + 40).ok_or(ZipError::Truncated("zip64 record"))?;
+            let zip64_cd_offset = r.u64_le(rec + 48).ok_or(ZipError::Truncated("zip64 record"))?;
+            if (cd_size != 0xffff_ffff && cd_size != zip64_cd_size) || (cd_offset != 0xffff_ffff && cd_offset != zip64_cd_offset) {
+                return Err(ZipError::Corrupt("ZIP64 and classic directory bounds disagree".into()));
+            }
+            cd_size = zip64_cd_size;
+            cd_offset = zip64_cd_offset;
+            zip64 = true;
+            eocd_record_start = rec as u64;
         }
     }
     if disk != 0 || directory_disk != 0 || disk_entries != total {
@@ -464,6 +469,26 @@ mod tests {
         zip.extend_from_slice(b"tail");
 
         assert_eq!(parse(&zip, 10).unwrap().entries.len(), 1);
+    }
+
+    #[test]
+    fn checks_the_zip64_record_extent_including_extension_bytes() {
+        let mut record = vec![0; 56];
+        record[..4].copy_from_slice(b"PK\x06\x06");
+        record[4..12].copy_from_slice(&46u64.to_le_bytes());
+        record.extend([1, 2]); // extensible data
+        record.extend(b"PK\x06\x07");
+        record.extend([0; 12]);
+        record.extend(1u32.to_le_bytes());
+        record.extend(b"PK\x05\x06");
+        record.extend([0; 4]);
+        record.extend([0xff; 4]);
+        record.extend([0; 10]);
+        assert!(parse(&record, 1).unwrap().zip64);
+        for len in [43, 44, 47, u64::MAX] {
+            record[4..12].copy_from_slice(&len.to_le_bytes());
+            assert!(parse(&record, 1).is_err(), "{len}");
+        }
     }
 
     #[test]
