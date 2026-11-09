@@ -1212,11 +1212,11 @@ Gaps found while using the app for real projects.
       page calls "Open folder" (both `project_open_folder`), and a game's chosen folder was shown as a
       full path in its row, where other chosen folders are shortened, cut to fit and whole on hover
       — claimed: jgt87, branch bugfix/r2.9-same-words-open-folder — PR #1243
-- [ ] Make → "What do you want to recreate?" offers Simple / Advanced, and always shows Clean room /
+- [x] Make → "What do you want to recreate?" offers Simple / Advanced, and always shows Clean room /
       Deep: Simple mode hides the mode switch everywhere but Settings, and the Clean room / Deep
       tiles appeared only once an original was picked (with none, they show dimmed and say they
       apply once there is one)
-      — claimed: jgt87, branch feature/r2.9-make-choices
+      — claimed: jgt87, branch feature/r2.9-make-choices — PR #1286
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
