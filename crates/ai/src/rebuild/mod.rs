@@ -721,6 +721,7 @@ impl Worker {
             targets,
             logs: Some(crate::failure_log::dir_in(&config_dir)),
             key: crate::cli_agents::acp::key_for(&self.keys, &entry.config.model, &entry.config.name, entry.config.kind),
+            cost_totals: Some(crate::cli_agents::claude_cost::path_in(&config_dir)),
             resume: ws.manifest.agent_session_for_mode(&entry.config.model, deep).map(str::to_string),
             preamble: Some(
                 "You work inside Craft Anything for a person who doesn't code. The message below is your task.

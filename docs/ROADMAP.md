@@ -1249,6 +1249,12 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
+- [x] A build's AI cost estimate counts each Claude Code turn's own cost: a resumed session reports
+      its running total, so the build summed the whole session at every turn (#1187). A turn's cost
+      is now its total less the total kept for its session; a resumed session with nothing kept has
+      no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
+      the reported running total was $0.00350053. Earlier builds' totals stay as they were.
+      — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

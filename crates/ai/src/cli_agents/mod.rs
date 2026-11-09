@@ -10,6 +10,7 @@
 
 pub mod acp;
 pub mod adapters;
+pub mod claude_cost;
 pub mod models;
 mod shared;
 pub mod unfinished;
@@ -570,6 +571,9 @@ pub struct CliSpec {
     /// The backend's stored API key, for an ACP agent that asks the host to authenticate before a
     /// session opens (Devin). None for agents that sign in some other way.
     pub key: Option<String>,
+    /// Where Claude Code's session costs are kept, so a resumed turn's cost is what it added
+    /// ([`claude_cost`]). None: a resumed turn has no cost.
+    pub cost_totals: Option<PathBuf>,
 }
 
 /// What a building run needs besides the working folder.
@@ -615,6 +619,7 @@ impl CliSpec {
             deep: false,
             preamble: None,
             logs: None,
+            cost_totals: None,
             adapters: AgentAdapters::built_in(),
             question: false,
             key: None,
@@ -1107,7 +1112,14 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     if gone && let Some(h) = held {
         h.done();
     }
-    AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd: p.cost_usd, cost_is_estimate: true }
+    // Claude Code's total is the session's running total (#1187); a question's copy is answered by
+    // question.rs, which keeps no cost for it.
+    let cost_usd = if adapter.ids().contains(&"claude-code") && !spec.question {
+        claude_cost::turn_cost(spec.cost_totals.as_deref(), resume.as_deref(), p.session_id.as_deref(), p.cost_usd)
+    } else {
+        p.cost_usd
+    };
+    AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd, cost_is_estimate: true }
 }
 
 /// What's needed to explain a failed CLI run: the command with the person's message left out, and
