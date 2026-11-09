@@ -39,6 +39,25 @@ fn a_key_declared_last_still_leaves_only_added_columns_to_defaults() {
     assert_eq!(page.rows[0].values, vec![CellValue::Int(1), text("a"), text("new")]);
 }
 
+/// A record that ends before a column declared ahead of the key still keeps the key it stores.
+#[test]
+fn a_short_record_keeps_every_stored_field() {
+    let sql = "CREATE TABLE t (v INT, k TEXT, PRIMARY KEY (k)) WITHOUT ROWID";
+    let data = without_rowid_db(sql, &[vec![Val::Text("a".into())]]);
+    let page = SqliteDb::parse(&data).unwrap().read_rows(2, 0, 10);
+    assert_eq!(page.rows[0].values, vec![CellValue::Null, text("a")]);
+}
+
+/// A VIRTUAL column added later stores no field and is shown as not read; a column added after it
+/// still takes its default.
+#[test]
+fn an_added_virtual_column_is_not_read_and_later_defaults_apply() {
+    let sql = "CREATE TABLE t (k TEXT PRIMARY KEY, v INT, g INT AS (v * 2), w INT DEFAULT 5) WITHOUT ROWID";
+    let data = without_rowid_db(sql, &[vec![Val::Text("a".into()), Val::Int(1)]]);
+    let page = SqliteDb::parse(&data).unwrap().read_rows(2, 0, 10);
+    assert_eq!(page.rows[0].values, vec![text("a"), CellValue::Int(1), CellValue::NotRead, CellValue::Int(5)]);
+}
+
 /// A default that isn't a plain literal still becomes NULL, and the note says so.
 #[test]
 fn an_expression_default_is_disclosed_for_without_rowid_rows_too() {
