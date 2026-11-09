@@ -927,9 +927,10 @@ fn walk_version(r: &Reader<'_>, start: usize, end: usize, depth: u8, info: &mut 
             "StringFileInfo" => walk_version(r, align4(value_off + value_bytes), node_end, depth + 1, info),
             "VarFileInfo" => {}
             // A string with an empty value stores no value at all (wValueLength 0), as
-            // OleSelfRegister does. Only a table can hold children, so a leaf here is a string.
-            _ if depth >= 3 && is_text && value_len == 0 && value_off >= node_end => {
-                info.strings.insert(key, String::new());
+            // OleSelfRegister does. Strings sit right under a string table, one level below it;
+            // a leaf deeper down is inside another node's value. A value read earlier is kept.
+            _ if depth == 3 && !key.is_empty() && is_text && value_len == 0 && value_off >= node_end => {
+                info.strings.entry(key).or_default();
             }
             _ if depth >= 2 && is_text && value_len > 0 => {
                 let units = value_len.min((node_end.saturating_sub(value_off)) / 2);

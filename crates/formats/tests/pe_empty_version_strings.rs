@@ -45,6 +45,28 @@ fn version_strings_with_empty_values_are_kept() {
     assert_eq!(info.strings, expected);
 }
 
+/// Only a node right under a string table is a string. A node inside another string's value (as in
+/// a binary-typed `FileDescription`) or a node with no key isn't one.
+#[test]
+fn leaves_that_are_not_strings_stay_out() {
+    let binary = node("FileDescription", &[0x4d, 0, 0x53, 0, 0x20, 0, 0x43, 0], 8, false, &[empty_string("Inner")]);
+    let nameless = node("", &[], 0, true, &[]);
+    let table = node("040904b0", &[], 0, true, &[binary, nameless, string("ProductName", "Craft")]);
+    let info = pe::parse_version_info(&version_info(&[table])).unwrap();
+    assert_eq!(info.strings.keys().collect::<Vec<_>>(), ["ProductName"]);
+}
+
+/// An empty value in one language's table doesn't hide the value another table gives the key.
+#[test]
+fn an_empty_value_does_not_replace_a_real_one() {
+    let named = || node("040904b0", &[], 0, true, &[string("InternalName", "foo")]);
+    let empty = || node("000004b0", &[], 0, true, &[empty_string("InternalName")]);
+    for tables in [[named(), empty()], [empty(), named()]] {
+        let info = pe::parse_version_info(&version_info(&tables)).unwrap();
+        assert_eq!(info.strings.get("InternalName").map(String::as_str), Some("foo"));
+    }
+}
+
 /// A string table with no strings is a table, not an empty string named after its language.
 #[test]
 fn an_empty_string_table_is_not_a_string() {
