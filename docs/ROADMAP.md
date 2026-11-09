@@ -1255,6 +1255,12 @@ Gaps found while using the app for real projects.
       no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
       the reported running total was $0.00350053. Earlier builds' totals stay as they were.
       — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
+- [x] Simple and Advanced use one text size and spacing: switching modes changes what is shown, not
+      how big everything is (Simple set 16 pt text and roomier controls, Advanced 13 pt, so the
+      whole window seemed to zoom). Zoom (Cmd/Ctrl + / −) stays the way to make everything bigger.
+      A maintainer's call, made by merging: Simple's larger text was there for people who find
+      small text hard to read, and this leaves that to zoom
+      — claimed: jgt87, branch feature/r2.9-one-size-both-modes — PR #1236
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
