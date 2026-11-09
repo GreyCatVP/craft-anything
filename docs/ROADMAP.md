@@ -1234,9 +1234,9 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
-- [ ] The app's version can be seen inside it on every system: only macOS's menu bar had an About,
+- [x] The app's version can be seen inside it on every system: only macOS's menu bar had an About,
       and the About dialog in `home.rs` was never opened (#1300)
-      — claimed: jgt87, branch feature/r2.9-show-version
+      — claimed: jgt87, branch feature/r2.9-show-version — PR #1301
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

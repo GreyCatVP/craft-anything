@@ -906,6 +906,24 @@ fn website_choice_stays_picked_while_the_address_is_empty() {
     assert!(h.query_by_label("Type the website's address:").is_none());
 }
 
+/// #1300: the app's version can be seen on every system, under Settings → About at the bottom of
+/// the tab list (only macOS has an About in its menu bar).
+#[test]
+fn settings_about_shows_the_apps_version() {
+    let mut h = harness(|| {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        a.state.settings_open = true;
+        a
+    });
+    h.run_steps(3);
+    let safety = h.get_by_label("Safety").rect();
+    let about = h.get_by_label("About").rect();
+    assert!(about.top() > safety.bottom() + 40.0, "About sits apart at the bottom of the list");
+    h.get_by_label("About").click();
+    h.run_steps(3);
+    h.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+}
+
 #[test]
 fn mode_switch_and_deep_toggle() {
     let store = tempfile::tempdir().unwrap();
