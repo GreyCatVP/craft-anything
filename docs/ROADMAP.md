@@ -833,6 +833,9 @@ Owner: open · Status: in progress
       started before the install, or by a launcher, finds it (#116)
 - [ ] Live-check #116 on Windows: install Hermes natively, start the app from a launcher, and see
       Settings → AI offer it; #116's "error after every message" has no text yet (asked)
+- [x] A Hermes `config.yaml` that starts with a byte-order mark gets our entry in its own
+      `mcp_servers` table, not in a second one that hides the person's servers from Hermes.
+      — claimed: Plastic-time, branch bugfix/r2.2-yaml-config-bom
 - [ ] See whether Hermes still fails on 0.3.0 (#460: the fix its `fixed` label names was already in
       0.3.0 when it was filed, and it gives no version)
 
