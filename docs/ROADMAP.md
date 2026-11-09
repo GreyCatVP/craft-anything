@@ -753,6 +753,11 @@ Owner: open · Status: in progress
       build's model check woke it, and a session left from days before went on editing another
       project. Discover with a private server unless the person chose `--server`
       — claimed: youkaicountry, branch bugfix/r2.2-opencode-discovery-standalone
+- [ ] `docs/opencode.md` says "OpenCode V2" but not where to get it: OpenCode's install script
+      and npm give the 1.x line, whose `run` has no `--standalone`, so the check before a build
+      can't confirm it. Say where 2.x comes from and how to point the backend at it, and record
+      the Linux live runs in STATUS.md
+      — claimed: youkaicountry, branch docs/r2.2-opencode-live-findings
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
