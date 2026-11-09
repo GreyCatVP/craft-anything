@@ -667,6 +667,9 @@ Owner: open · Status: in progress
       have no file there)
 - [x] `ai test` names the program it ran and the saved one it replaced, and `doctor` says a saved
       path has no program there instead of blaming PATH (#721)
+- [x] `doctor` looks a registration's bare command (`craft-anything-cli`, as a hand-made entry
+      names it) up on PATH, as the app starting it does, instead of calling it missing.
+      — claimed: Plastic-time, branch bugfix/r2.2-doctor-cli-on-path
 - [ ] Settings says when a saved agent program is gone and which one runs in its place; today a
       build moves to the newest build folder or the usual program without saying so, and the
       setting keeps the old path (read on a worker, not while drawing) (#721)
