@@ -133,10 +133,11 @@ fn go_env_key(base: &str) -> Option<String> {
     ["OPENCODEGO_API_KEY", "OPENCODE_GO_API_KEY"].iter().filter_map(|v| std::env::var(v).ok()).find(|k| !k.trim().is_empty())
 }
 
-/// How long an API backend's streamed answer may take: its `timeout_secs`, else one hour. A slow
-/// local model can need hours for a long answer (#1096); 0 is not a limit anyone means.
-fn stream_limit(options: &BackendOptions) -> std::time::Duration {
-    options.timeout_secs.filter(|s| *s > 0).map_or(http::STREAM_BODY, std::time::Duration::from_secs)
+/// An API backend's own limit on a streamed answer, its `timeout_secs`; none uses the defaults
+/// ([`http::stream_agent`]). A slow local model can need hours for a long answer (#1096); 0 is not a
+/// limit anyone means.
+fn stream_limit(options: &BackendOptions) -> Option<std::time::Duration> {
+    options.timeout_secs.filter(|s| *s > 0).map(std::time::Duration::from_secs)
 }
 
 /// An OpenAI-compatible client, carrying OpenCode Go's session header when the base is its own.

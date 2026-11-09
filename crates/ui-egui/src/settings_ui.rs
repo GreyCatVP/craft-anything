@@ -695,28 +695,34 @@ fn ai(app: &mut CraftApp, ui: &mut Ui) {
         let configured = app.backends.iter().any(|b| b.name == d.suggestion.name);
         widgets::panel(&t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(&d.suggestion.name).font(theme::medium(theme::SMALL)));
-                    ui.label(RichText::new(&d.reason).color(t.text_faint).size(theme::CAPTION));
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if configured {
-                        widgets::pill(ui, "Added", t.success, t.raised);
-                        // Claude Code once more, to give it another account's folder.
-                        if craft_anything_ai::folder_var(&d.suggestion).is_some()
-                            && widgets::link(ui, "Add another").on_hover_text(tr("Add it again, to choose another account's folder for it.")).clicked()
-                        {
-                            let taken = |n: &String| app.backends.iter().any(|b| &b.name == n);
-                            if let Some(name) = (2..100).map(|i| format!("{} {i}", d.suggestion.name)).find(|n| !taken(n)) {
-                                app.add_backend(craft_anything_ai::BackendConfig { name, ..d.suggestion.clone() }, None);
-                            }
-                        }
-                    } else if !d.needs_key && widgets::primary(ui, "Add").clicked() {
-                        app.add_backend(d.suggestion.clone(), None);
+            // The buttons first, in the top right corner, then the name and reason wrapped in the
+            // width they leave: a label in a horizontal row doesn't wrap, so a long reason ran on
+            // under the Add button.
+            // Child uis (not scopes, which would move the cursor down after each), then one advance.
+            let top = ui.available_rect_before_wrap();
+            let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(top).layout(egui::Layout::right_to_left(egui::Align::Min)));
+            if configured {
+                widgets::pill(&mut right_ui, "Added", t.success, t.raised);
+                // Claude Code once more, to give it another account's folder.
+                if craft_anything_ai::folder_var(&d.suggestion).is_some()
+                    && widgets::link(&mut right_ui, "Add another").on_hover_text(tr("Add it again, to choose another account's folder for it.")).clicked()
+                {
+                    let taken = |n: &String| app.backends.iter().any(|b| &b.name == n);
+                    if let Some(name) = (2..100).map(|i| format!("{} {i}", d.suggestion.name)).find(|n| !taken(n)) {
+                        app.add_backend(craft_anything_ai::BackendConfig { name, ..d.suggestion.clone() }, None);
                     }
-                });
-            });
+                }
+            } else if !d.needs_key && widgets::primary(&mut right_ui, "Add").clicked() {
+                app.add_backend(d.suggestion.clone(), None);
+            }
+            let right = right_ui.min_rect();
+            // Nothing on the right (a key to paste below instead): the text takes the whole width.
+            let text_right = if right.width() > 0.0 { right.left() - ui.spacing().item_spacing.x } else { top.right() };
+            let mut left_ui =
+                ui.new_child(egui::UiBuilder::new().max_rect(top.with_max_x(text_right.max(top.left()))).layout(egui::Layout::top_down(egui::Align::Min)));
+            left_ui.add(egui::Label::new(RichText::new(&d.suggestion.name).font(theme::medium(theme::SMALL))).wrap());
+            left_ui.add(egui::Label::new(RichText::new(&d.reason).color(t.text_faint).size(theme::CAPTION)).wrap());
+            ui.advance_cursor_after_rect(left_ui.min_rect().union(right));
             // A subscription key is worth pasting even when the environment already has one, so a
             // different key can be used without restarting the app.
             let pastable = d.needs_key || d.suggestion.base_url.as_deref().is_some_and(craft_anything_ai::openai::is_opencode_go);

@@ -72,8 +72,9 @@ pub struct OpenAi {
     pub auto_react: bool,
     /// Talking to OpenRouter, which routes each request to one of several upstream providers.
     pub openrouter: bool,
-    /// How long one streamed answer may take (a slow local model can need hours).
-    pub stream_limit: std::time::Duration,
+    /// The AI's own limit on one streamed answer (a slow local model can need hours); none uses
+    /// the defaults.
+    pub stream_limit: Option<std::time::Duration>,
 }
 
 impl OpenAi {
@@ -103,7 +104,7 @@ impl OpenAi {
             react: false,
             auto_react: true,
             openrouter: false,
-            stream_limit: http::STREAM_BODY,
+            stream_limit: None,
         }
     }
 

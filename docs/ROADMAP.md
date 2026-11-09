@@ -1163,10 +1163,9 @@ Gaps found while using the app for real projects.
 - [x] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
       not "update the pinned URL", which nobody installing an engine can do (#1193)
       — claimed: justinjohn0306, branch bugfix/r2.9-download-server-errors
-- [ ] Simple and Advanced use one text size and spacing: switching modes changes what is shown, not
-      how big everything is (today Simple sets 16 pt text and roomier controls, Advanced 13 pt, so
-      the whole window seems to zoom). Zoom (Ctrl + / −) stays the way to make everything bigger
-      — claimed: jgt87, branch feature/r2.9-one-size-both-modes
+- [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
+      button; the line didn't wrap and ran on under the button
+      — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

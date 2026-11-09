@@ -7,13 +7,14 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 
-/// #1096: an AI's timeout_secs sets how long its streamed answer may take; unset or 0 is an hour.
+/// #1096, #1239: an AI's timeout_secs is its own limit on a streamed answer, starting included;
+/// unset or 0 leaves the defaults.
 #[test]
 fn an_ais_own_timeout_bounds_its_streamed_answer() {
     let with = |timeout_secs| BackendOptions { timeout_secs, ..Default::default() };
-    assert_eq!(stream_limit(&with(None)), http::STREAM_BODY);
-    assert_eq!(stream_limit(&with(Some(0))), http::STREAM_BODY);
-    assert_eq!(stream_limit(&with(Some(4 * 3600))), std::time::Duration::from_secs(4 * 3600));
+    assert_eq!(stream_limit(&with(None)), None);
+    assert_eq!(stream_limit(&with(Some(0))), None);
+    assert_eq!(stream_limit(&with(Some(2700))), Some(std::time::Duration::from_secs(2700)));
 }
 
 /// #1225: with no session id saved (a backend added before there was one, or found from an

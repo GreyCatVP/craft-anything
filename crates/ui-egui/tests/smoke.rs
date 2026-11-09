@@ -2737,6 +2737,43 @@ fn only_the_claude_desktop_app_is_named_when_nothing_can_build() {
     assert!(h.query_by_label("The Claude desktop app is installed, but building needs Claude Code, its separate command-line tool. Install Claude Code, sign in to it once in a terminal, then look again.").is_none());
 }
 
+/// A long reason on a card for an AI found on this computer wraps beside its Add button; it used
+/// to stay on one line and run on under the button.
+#[test]
+fn a_found_ais_long_reason_wraps_beside_its_add_button() {
+    use craft_anything_ai::Detected;
+    let reason = "Found the claude command on this computer, in a folder that another account's settings also point at, so adding it here uses the same sign-in as that one.";
+    let found = Detected {
+        suggestion: BackendConfig {
+            name: "Claude Code".into(),
+            kind: BackendKind::AgentCli,
+            model: "claude-code".into(),
+            base_url: None,
+            ssh_host: None,
+            enabled: true,
+        },
+        reason: reason.into(),
+        needs_key: false,
+    };
+    let mut h = harness_sized(egui::vec2(900.0, 1000.0), move || {
+        let mut a = demo::app(demo::engine(Mode::Experienced, true));
+        a.backends.clear();
+        a.detected = Some(vec![found]);
+        // The fixture is the discovery result; keep host detection out of this UI test.
+        a.detecting = true;
+        a.state.settings_open = true;
+        a.state.settings_tab = craft_anything_ui_egui::state::SettingsTab::Ai;
+        a
+    });
+    h.run_steps(4);
+    let text = h.get_by_label(reason).rect();
+    // The card's Add is the one on the reason's lines (the address form below has one too).
+    let add = h.query_all_by_label("Add").map(|n| n.rect()).find(|r| r.top() < text.bottom() && r.bottom() > text.top() - 30.0);
+    let add = add.expect("the card has an Add button beside its text");
+    assert!(text.right() <= add.left(), "the reason ({text:?}) ends before the Add button ({add:?})");
+    assert!(text.height() > 20.0, "the reason wraps onto more than one line ({text:?})");
+}
+
 #[test]
 fn an_ai_can_be_turned_off_and_removed_in_settings() {
     use craft_anything_ai::rebuild::StandIns;

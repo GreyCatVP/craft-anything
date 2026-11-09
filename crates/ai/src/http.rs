@@ -23,10 +23,14 @@ pub fn agent(connect: Duration, first_byte: Duration, body: Duration) -> ureq::A
 
 /// How long a streamed answer may take unless its AI sets `timeout_secs`.
 pub const STREAM_BODY: Duration = Duration::from_secs(60 * 60);
+/// How long to wait for a streamed answer to start unless its AI sets `timeout_secs`.
+pub const STREAM_FIRST_BYTE: Duration = Duration::from_secs(300);
 
-/// The agent for streamed model turns; `body` bounds the whole answer.
-pub fn stream_agent(body: Duration) -> ureq::Agent {
-    agent(Duration::from_secs(15), Duration::from_secs(300), body)
+/// The agent for streamed model turns. `limit` is the AI's own `timeout_secs`: it bounds the wait
+/// for the answer to start as well as the whole answer, as a request queued behind another tool's
+/// on a shared server gets no bytes until its turn (#1239). Without one, the defaults apply.
+pub fn stream_agent(limit: Option<Duration>) -> ureq::Agent {
+    agent(Duration::from_secs(15), limit.unwrap_or(STREAM_FIRST_BYTE), limit.unwrap_or(STREAM_BODY))
 }
 
 /// The agent for quick calls (model lists, probes).
@@ -37,8 +41,14 @@ pub fn quick_agent(total: Duration) -> ureq::Agent {
 fn net_error(what: &str, e: ureq::Error) -> ToolError {
     let timeout = matches!(e, ureq::Error::Timeout(_));
     let code = if timeout { ErrorCode::TimedOut } else { ErrorCode::EngineMissing };
-    ToolError::new(code, format!("Couldn't reach {what}: {e}"))
-        .with_remediation("Check your internet connection or that the server is running, then try again.")
+    // The server took the request but didn't start answering: busy, or queued behind another
+    // tool's request on a shared server (#1239).
+    let remediation = if matches!(e, ureq::Error::Timeout(ureq::Timeout::RecvResponse)) {
+        "The server took the request but didn't start answering in time (five minutes unless set). A server busy with another tool's work may need longer: set timeout_secs (in seconds) for this AI under [[ai.backends]] in config.toml."
+    } else {
+        "Check your internet connection or that the server is running, then try again."
+    };
+    ToolError::new(code, format!("Couldn't reach {what}: {e}")).with_remediation(remediation)
 }
 
 /// Turn a non-2xx response into a plain error. Keys are never echoed.
@@ -278,6 +288,17 @@ mod tests {
         assert!(timed_out.remediation.as_deref().is_some_and(|r| r.contains("timeout_secs")), "{timed_out:?}");
         let cut = parse_sse(Fails(|| ureq::Error::ConnectionFailed), |_| Ok(true)).unwrap_err();
         assert!(cut.remediation.is_none(), "{cut:?}");
+    }
+
+    /// #1239: an answer that never started (a server busy with another tool's work) says which
+    /// setting gives it longer; a server that can't be reached still says to check it.
+    #[test]
+    fn an_answer_that_never_started_says_how_to_wait_longer() {
+        let queued = net_error("Ollama", ureq::Error::Timeout(ureq::Timeout::RecvResponse));
+        assert_eq!(queued.code, ErrorCode::TimedOut);
+        assert!(queued.remediation.as_deref().is_some_and(|r| r.contains("timeout_secs")), "{queued:?}");
+        let down = net_error("Ollama", ureq::Error::ConnectionFailed);
+        assert!(down.remediation.as_deref().is_some_and(|r| r.contains("server is running")), "{down:?}");
     }
 
     fn collect(s: &str) -> Vec<SseEvent> {
