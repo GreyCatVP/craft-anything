@@ -1362,29 +1362,23 @@ fn literal_value(tokens: &[&str], affinity: Affinity, allow_words: bool) -> Opti
     if let Some(n) = hex_integer(token) {
         return Some(integer_default(n, affinity));
     }
-    let (number, quoted) = if matches!(token, "+" | "-") {
+    let number = if matches!(token, "+" | "-") {
         let value = *tokens.get(1)?;
         if let Some(text) = single_quoted(value) {
             if token == "+" {
                 return text_default(&text, affinity);
             }
-            // SQLite's unary minus coerces a numeric string; a string with a separator is not
-            // read as the number the separator would join, so leave it unknown.
-            if text.contains('_') {
-                return None;
-            }
-            (format!("-{text}"), true)
-        } else {
-            if let Some(n) = hex_integer(value) {
-                return Some(integer_default(if token == "-" { n.checked_neg()? } else { n }, affinity));
-            }
-            (format!("{token}{value}"), false)
+            return signed_quoted_default(&text, affinity);
         }
+        if let Some(n) = hex_integer(value) {
+            return Some(integer_default(if token == "-" { n.checked_neg()? } else { n }, affinity));
+        }
+        format!("{token}{value}")
     } else {
-        (token.to_owned(), false)
+        token.to_owned()
     };
-    let separated = !quoted && number.contains('_');
-    let clean = if quoted { number } else { unseparated_number(&number)? };
+    let separated = number.contains('_');
+    let clean = unseparated_number(&number)?;
     let integer = number_kind(&clean)?;
     let (minus, unsigned) = match clean.strip_prefix('-') {
         Some(unsigned) => (true, unsigned),
@@ -1437,6 +1431,31 @@ fn text_default(text: &str, affinity: Affinity) -> Option<CellValue> {
         return finite(number);
     }
     Some(text_value(text.as_bytes()))
+}
+
+/// A `-'…'` default: SQLite coerces the quoted text to an INTEGER when it is written as one,
+/// otherwise to a REAL, negates it, and reads it with the column's affinity.
+fn signed_quoted_default(text: &str, affinity: Affinity) -> Option<CellValue> {
+    let text = text.trim_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']);
+    // A separator inside quoted text is not the number the separator would join.
+    if text.contains('_') {
+        return None;
+    }
+    if let Ok(n) = text.parse::<i64>()
+        && let Some(neg) = n.checked_neg()
+    {
+        return Some(integer_default(neg, affinity));
+    }
+    let real = text.parse::<f64>().ok().filter(|n| n.is_finite())?;
+    let neg = -real;
+    match affinity {
+        Affinity::Text => Some(text_value(real_text(neg).as_bytes())),
+        Affinity::Numeric | Affinity::Real => {
+            let negated = if let Some(rest) = text.strip_prefix('-') { rest.to_string() } else { format!("-{}", text.strip_prefix('+').unwrap_or(text)) };
+            numeric_value(&negated).and_then(finite)
+        }
+        Affinity::Blob => finite(CellValue::Real(neg)),
+    }
 }
 
 /// A finite REAL as SQLite writes it into a TEXT column (`%!.15g`): 15 significant digits, a
@@ -2434,6 +2453,16 @@ mod tests {
             ("x REAL DEFAULT -'5'", CellValue::Real(-5.0)),
             ("x BLOB DEFAULT -'5'", CellValue::Int(-5)),
             ("x TEXT DEFAULT -'5'", text("-5")),
+            ("x TEXT DEFAULT -'1e3'", text("-1000.0")),
+            ("x TEXT DEFAULT -'1.50'", text("-1.5")),
+            ("x TEXT DEFAULT -'1.0'", text("-1.0")),
+            ("x TEXT DEFAULT -'1000'", text("-1000")),
+            ("x TEXT DEFAULT -' 1e3 '", text("-1000.0")),
+            ("x TEXT DEFAULT -' -5 '", text("5")),
+            ("x INTEGER DEFAULT -'1e3'", CellValue::Int(-1000)),
+            ("x INTEGER DEFAULT -'1.50'", CellValue::Real(-1.5)),
+            ("x REAL DEFAULT -'1e3'", CellValue::Real(-1000.0)),
+            ("x BLOB DEFAULT -'1e3'", CellValue::Real(-1000.0)),
             ("x TEXT DEFAULT 1_000", text("1000")),
             ("x TEXT DEFAULT 1_000.5", text("1000.5")),
             ("x TEXT DEFAULT 1_000.", text("1000.0")),
