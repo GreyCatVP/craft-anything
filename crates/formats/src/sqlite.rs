@@ -1116,6 +1116,10 @@ fn sql_tokens(mut sql: &str) -> Vec<&str> {
             }
         } else if !matches!(first, '(' | ')' | ',' | '/') {
             end = sql.find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ',' | '\'' | '"' | '`' | '[' | '/')).unwrap_or(sql.len());
+            // A line comment may follow a word with no space between: `INTEGER--note`.
+            if let Some(dash) = sql.get(..end).and_then(|word| word.find("--")).filter(|&dash| dash > 0) {
+                end = dash;
+            }
         }
         tokens.push(sql.get(..end).unwrap_or(""));
         sql = sql.get(end..).unwrap_or("");

@@ -19,6 +19,18 @@ fn quoted_table_names_with_parentheses_keep_their_columns() {
     }
 }
 
+/// A line comment glued to the table name is a comment, so a quote inside it doesn't hide the
+/// column list.
+#[test]
+fn a_line_comment_glued_to_the_table_name_is_skipped() {
+    let names: Vec<_> = parse_create_columns("CREATE TABLE t-- here's the table\n(id INTEGER PRIMARY KEY, name TEXT)").into_iter().map(|c| c.name).collect();
+    assert_eq!(names, ["id", "name"]);
+    let sql = "CREATE TABLE t-- here's the key order\n(v INT, k TEXT, PRIMARY KEY (k)) WITHOUT ROWID";
+    let data = without_rowid_db(sql, &[vec![Val::Text("x".into()), Val::Int(1)]]);
+    let page = SqliteDb::parse(&data).unwrap().read_rows(2, 0, 10);
+    assert_eq!(page.rows[0].values, vec![CellValue::Int(1), text("x")]);
+}
+
 /// The rowid alias of such a table still shows the rowid.
 #[test]
 fn a_parenthesized_table_name_keeps_the_rowid_alias() {
