@@ -162,18 +162,21 @@ pub fn parse(prefix: &[u8], file_size: u64) -> Result<ModelReport, FormatError> 
 
 /// A count in plain words: "7.2 billion".
 pub fn plain_count(n: u64) -> String {
-    let f = n as f64;
-    if n >= 1_000_000_000_000 {
-        format!("{:.1} trillion", f / 1e12)
-    } else if n >= 1_000_000_000 {
-        format!("{:.1} billion", f / 1e9)
-    } else if n >= 1_000_000 {
-        format!("{:.1} million", f / 1e6)
-    } else if n >= 1_000 {
-        format!("{:.1} thousand", f / 1e3)
-    } else {
-        n.to_string()
+    const UNITS: [(u64, &str); 4] = [(1_000_000_000_000, "trillion"), (1_000_000_000, "billion"), (1_000_000, "million"), (1_000, "thousand")];
+    // A value that rounds up to 1000.0 of a unit is shown in the next unit up.
+    for (i, (size, name)) in UNITS.iter().enumerate() {
+        if n < *size {
+            continue;
+        }
+        let tenths = (n as f64 / *size as f64 * 10.0).round();
+        if tenths >= 10_000.0
+            && let Some((_, up)) = i.checked_sub(1).and_then(|j| UNITS.get(j))
+        {
+            return format!("1.0 {up}");
+        }
+        return format!("{:.1} {name}", n as f64 / *size as f64);
     }
+    n.to_string()
 }
 
 fn shorten(s: String) -> (String, bool) {
