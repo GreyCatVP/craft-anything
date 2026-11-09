@@ -148,12 +148,19 @@ fn page_height(ctx: &egui::Context) -> f32 {
 }
 
 /// The app's name and version, on every system (only macOS has an About in its menu bar). The
-/// version can be selected and copied into a report.
+/// version can be selected, or copied with the button beside it, which the keyboard reaches too
+/// (egui leaves selectable labels out of Tab), for a report.
 fn about(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.label(theme::heading("Craft Anything", theme::SECTION));
     ui.add_space(4.0);
-    ui.add(egui::Label::new(RichText::new(format!("{} {}", tr("Version"), env!("CARGO_PKG_VERSION"))).color(t.text_dim).size(theme::BODY)).selectable(true));
+    let version = format!("{} {}", tr("Version"), env!("CARGO_PKG_VERSION"));
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(RichText::new(&version).color(t.text_dim).size(theme::BODY)).selectable(true));
+        if icons::button(ui, "copy", 24.0, false, "Copy the version").clicked() {
+            ui.ctx().copy_text(version.clone());
+        }
+    });
 }
 
 fn general(app: &mut CraftApp, ui: &mut Ui) {

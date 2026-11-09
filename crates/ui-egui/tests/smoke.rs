@@ -3193,5 +3193,11 @@ fn settings_about_shows_the_apps_version() {
     assert!(about.top() > safety.bottom() + 40.0, "About sits apart at the bottom of the list");
     h.get_by_label("About").click();
     h.run_steps(3);
-    h.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+    let version = format!("Version {}", env!("CARGO_PKG_VERSION"));
+    h.get_by_label(&version);
+    // A button copies it, so a keyboard can too (selectable labels aren't in egui's Tab order).
+    h.get_by_label("Copy the version").click();
+    h.step();
+    let copied = h.output().platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(t) if *t == version));
+    assert!(copied, "the button copies the version");
 }
