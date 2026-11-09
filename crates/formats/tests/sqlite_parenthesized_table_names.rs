@@ -6,10 +6,10 @@ fn text(value: &str) -> CellValue {
 }
 
 /// A quoted table name may hold parentheses, as imported sheets often do ("export (1)"). The
-/// column list starts at the first parenthesis outside quotes.
+/// column list starts at the first parenthesis outside quotes (and outside comments).
 #[test]
 fn quoted_table_names_with_parentheses_keep_their_columns() {
-    for name in ["\"export (1)\"", "[Sheet1 (2)]", "`a(b`", "'q (1)'", "\"(\""] {
+    for name in ["\"export (1)\"", "[Sheet1 (2)]", "`a(b`", "'q (1)'", "\"(\"", "t /* (v2) */"] {
         let sql = format!("CREATE TABLE {name} (id INTEGER PRIMARY KEY, name TEXT, size INT)");
         let columns = parse_create_columns(&sql);
         let names: Vec<_> = columns.iter().map(|c| c.name.as_str()).collect();
