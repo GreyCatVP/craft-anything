@@ -926,6 +926,11 @@ fn walk_version(r: &Reader<'_>, start: usize, end: usize, depth: u8, info: &mut 
             }
             "StringFileInfo" => walk_version(r, align4(value_off + value_bytes), node_end, depth + 1, info),
             "VarFileInfo" => {}
+            // A string with an empty value stores no value at all (wValueLength 0), as
+            // OleSelfRegister does. Only a table can hold children, so a leaf here is a string.
+            _ if depth >= 3 && is_text && value_len == 0 && value_off >= node_end => {
+                info.strings.insert(key, String::new());
+            }
             _ if depth >= 2 && is_text && value_len > 0 => {
                 let units = value_len.min((node_end.saturating_sub(value_off)) / 2);
                 let v = utf16_at(r, value_off, units).unwrap_or_default();

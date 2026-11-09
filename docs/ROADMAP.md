@@ -1334,6 +1334,9 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-pe-optional-header-framing-20261105
 - [x] Keep PE resource metadata within the resource directory.
       — claimed: Afloat16, branch bugfix/r3.12-pe-resource-directory-boundary-20261105
+- [x] Keep PE version strings whose value is empty (stored with no value at all), such as
+      `OleSelfRegister`, whose presence is the whole point.
+      — claimed: Plastic-time, branch bugfix/r3.12-pe-empty-version-strings
 - [x] Decode inline source-map data URLs without treating their URL fragments as payload; recognize case-insensitive scheme and base64 markers.
       — claimed: Afloat16, branch bugfix/r3.12-source-map-data-url-fragment
 - [x] Keep Go function tables and names within their section.
