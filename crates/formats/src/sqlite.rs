@@ -982,10 +982,9 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
         if cols.len() >= MAX_COLUMNS {
             break;
         }
-        let seg = seg.trim();
-        if seg.is_empty() {
-            continue;
-        }
+        // A comment in front of a definition (often the previous line's note) isn't part of it.
+        let Some(first) = sql_tokens(seg).into_iter().next() else { continue };
+        let seg = seg.get((first.as_ptr() as usize).saturating_sub(seg.as_ptr() as usize)..).unwrap_or("").trim_end();
         // Skip table-level constraints.
         let first_word = seg.split(|c: char| c.is_whitespace() || c == '(').next().unwrap_or("").to_ascii_uppercase();
         if matches!(first_word.as_str(), "CONSTRAINT" | "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN") {
@@ -995,7 +994,7 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
         if name.is_empty() {
             continue;
         }
-        let type_name = extract_type(rest.trim());
+        let type_name = extract_type(strip_comments(rest).trim());
         cols.push((Column { name, type_name }, rest));
     }
     cols
@@ -1108,11 +1107,30 @@ fn sql_tokens(mut sql: &str) -> Vec<&str> {
             }
         } else if !matches!(first, '(' | ')' | ',' | '/') {
             end = sql.find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ',' | '\'' | '"' | '`' | '[' | '/')).unwrap_or(sql.len());
+            // A line comment may follow a word with no space between: `INTEGER--note`.
+            if let Some(dash) = sql.get(..end).and_then(|word| word.find("--")).filter(|&dash| dash > 0) {
+                end = dash;
+            }
         }
         tokens.push(sql.get(..end).unwrap_or(""));
         sql = sql.get(end..).unwrap_or("");
     }
     tokens
+}
+
+/// `text` with each SQL comment replaced by a space. Quoted text is kept as it is.
+fn strip_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut end = 0usize;
+    for token in sql_tokens(text) {
+        let start = (token.as_ptr() as usize).saturating_sub(text.as_ptr() as usize);
+        // Only whitespace and comments lie between two tokens.
+        let gap = text.get(end..start).unwrap_or("");
+        out.push_str(if gap.contains("--") || gap.contains("/*") { " " } else { gap });
+        out.push_str(token);
+        end = start.saturating_add(token.len());
+    }
+    out
 }
 
 /// Missing trailing fields use literal defaults; expressions remain explicitly unknown.
@@ -1181,33 +1199,24 @@ fn literal_default(tokens: &[&str]) -> Option<CellValue> {
     number.parse::<f64>().ok().filter(|n| n.is_finite()).map(CellValue::Real)
 }
 
-/// Split on top-level commas (ignoring commas inside parentheses).
+/// Split on top-level commas (ignoring commas inside parentheses, quotes and comments).
 fn split_top_level(s: &str) -> Vec<&str> {
     let mut out = Vec::new();
-    let mut depth = 0i32;
+    let mut depth = 0usize;
     let mut start = 0usize;
-    let mut in_quote: Option<char> = None;
-    for (i, c) in s.char_indices() {
-        if let Some(q) = in_quote {
-            if c == q {
-                in_quote = None;
-            }
-            continue;
-        }
-        match c {
-            '\'' | '"' | '`' => in_quote = Some(c),
-            '[' => depth += 1,
-            ']' => depth -= 1,
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => {
-                out.push(s.get(start..i).unwrap_or(""));
-                start = i + 1;
+    for token in sql_tokens(s) {
+        match token {
+            "(" => depth = depth.saturating_add(1),
+            ")" => depth = depth.saturating_sub(1),
+            "," if depth == 0 => {
+                let at = (token.as_ptr() as usize).saturating_sub(s.as_ptr() as usize);
+                out.push(s.get(start..at).unwrap_or(""));
+                start = at.saturating_add(1);
+                if out.len() >= MAX_COLUMNS {
+                    return out;
+                }
             }
             _ => {}
-        }
-        if out.len() >= MAX_COLUMNS {
-            return out;
         }
     }
     out.push(s.get(start..).unwrap_or(""));
