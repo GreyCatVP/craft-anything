@@ -921,6 +921,10 @@ fn simple_and_advanced_use_the_same_text_sizes() {
     h.state_mut().set_mode(Mode::Experienced);
     h.run_steps(3);
     assert_eq!(sizes(&h), simple, "Advanced draws text and controls at the same sizes");
+    // Larger text is zoom's job now, and the Mode row says how.
+    h.state_mut().state.settings_open = true;
+    h.run_steps(3);
+    h.get_by_label("Text bigger or smaller: Ctrl/⌘ + and Ctrl/⌘ −. Ctrl/⌘ 0 resets it.");
 }
 
 #[test]
