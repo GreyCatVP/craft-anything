@@ -451,10 +451,12 @@ been run live.
       message says so. Say "Craft Anything checks it after your turn" there instead
 - [x] When a server refuses a request for its context window and says the size (Ollama, llama.cpp,
       OpenAI-style), fit the conversation to that window and ask once more, else say how to raise it (#962)
-- [ ] Ollama fits a long prompt to its context by dropping the oldest messages, and a Qwen 3.8 model
+- [x] Ollama fits a long prompt to its context by dropping the oldest messages, and a Qwen 3.8 model
       then refuses what's left with 500 "no user query found in messages" (#1245): say the context is
       too small and how to raise it, and don't retry what can't fit
       — claimed: justinjohn0306, branch bugfix/r5.4-ollama-dropped-request
+- [ ] Make room on its own after #1245's refusal: the server doesn't say its window, so this waits
+      for the window read from the server (#1155)
 - [x] A per-backend context budget in `[[ai.backends]]` (`LoopConfig::context_tokens` exists), for
       services whose real window differs from 150k (#374) — implementation: `6bd94b84828ec89b805cb8a246f557d0a778c037`
 - [x] Find LM Studio on another port (#73): the port in its settings file (when it is there) and

@@ -58,8 +58,12 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
     let full = parsed.as_ref().map(|value| response_detail(value).unwrap_or_else(|| "The service didn't provide an error message.".into()));
     // The window is read from the whole message: the shortened one may cut it off.
     let overflow = context_overflow(full.as_deref().unwrap_or(body));
+    // Ollama fits a long prompt to its context by dropping the oldest messages; once the person's
+    // request is among them, a Qwen 3.8 model refuses what's left with this, and no retry fits (#1245).
+    let dropped_request = overflow.is_none() && full.as_deref().unwrap_or(body).to_ascii_lowercase().contains("no user query found in messages");
     let detail: String = full.unwrap_or_else(|| body.chars().take(300).collect()).chars().take(1000).collect();
     let (code, remediation) = match status {
+        _ if dropped_request => (ErrorCode::BadSettings, ""),
         401 | 403 => (ErrorCode::NoPermission, "The API key was rejected. Check it in Settings → AI."),
         404 => (ErrorCode::BadSettings, "The model or address wasn't found. Check the model name and base URL."),
         408 | 504 => (ErrorCode::TimedOut, "The service took too long. Try again."),
@@ -70,11 +74,13 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
     let provider = parsed
         .as_ref()
         .and_then(|v| v.pointer("/error/code").and_then(Value::as_str).or_else(|| v.pointer("/error/type").and_then(Value::as_str)).map(str::to_string));
+    const RAISE: &str = "Give the model a larger context in its server (Ollama: the Context length setting or OLLAMA_CONTEXT_LENGTH; \
+                         LM Studio: the model's Context Length), or set context_tokens for this AI in Settings → AI so less is sent.";
     let remediation = match overflow {
-        Some((window, _)) => format!(
-            "The conversation is longer than the model's context window ({window} tokens). Give the model a larger context \
-             in its server (Ollama: the Context length setting or OLLAMA_CONTEXT_LENGTH; LM Studio: the model's Context Length), \
-             or set context_tokens for this AI in Settings → AI so less is sent."
+        Some((window, _)) => format!("The conversation is longer than the model's context window ({window} tokens). {RAISE}"),
+        None if dropped_request => format!(
+            "The conversation is longer than the context the server gives this model, so the server left out its earliest \
+             messages, the request among them. {RAISE}"
         ),
         None => remediation.to_string(),
     };
@@ -83,6 +89,7 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
         "provider_error": provider,
         "context_window": overflow.map(|o| o.0),
         "prompt_tokens": overflow.and_then(|o| o.1),
+        "context_overflow": overflow.is_some() || dropped_request,
     }))
 }
 
@@ -341,6 +348,26 @@ mod tests {
         let plain = status_error("Ollama (local)", 400, r#"{"error":{"message":"bad"}}"#);
         assert!(plain.details.unwrap()["context_window"].is_null());
         assert_eq!(plain.remediation.as_deref(), Some("The request was rejected; see the message."));
+    }
+
+    #[test]
+    fn a_request_the_server_dropped_to_fit_is_a_context_overflow_not_a_server_fault() {
+        // #1245: Ollama's own words when its truncation left a Qwen 3.8 model no user message.
+        let e = status_error("Ollama (local)", 500, r#"{"error":{"message":"no user query found in messages"}}"#);
+        assert_eq!(e.code, ErrorCode::BadSettings);
+        assert!(e.message.contains("no user query found in messages"), "the server's words are kept");
+        let remediation = e.remediation.clone().unwrap();
+        assert!(remediation.contains("OLLAMA_CONTEXT_LENGTH") && !remediation.contains("Try again soon"), "{remediation}");
+        let details = e.details.clone().unwrap();
+        assert_eq!(details["context_overflow"], true);
+        assert!(details["context_window"].is_null(), "the server didn't say its size");
+        assert!(!crate::TurnFailure::from_api(&e).retryable(), "the same request would be refused again");
+        // A window the server names still counts as an overflow, and a plain 500 is still worth retrying.
+        let sized = status_error("Ollama (local)", 500, r#"{"error":{"message":"request (9000 tokens) exceeds the available context size (8192 tokens)"}}"#);
+        assert!(!crate::TurnFailure::from_api(&sized).retryable());
+        let busy = status_error("Ollama (local)", 500, r#"{"error":{"message":"model runner has unexpectedly stopped"}}"#);
+        assert_eq!(busy.details.clone().unwrap()["context_overflow"], false);
+        assert!(crate::TurnFailure::from_api(&busy).retryable());
     }
 
     #[test]
