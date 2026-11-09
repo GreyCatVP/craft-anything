@@ -831,6 +831,9 @@ Owner: open · Status: in progress
 - [ ] Session copies for other agents that keep sessions (ACP agents' `session/load`) (#451)
 - [x] Hermes Agent's native Windows install (`%LOCALAPPDATA%\hermes\bin`) is searched, so an app
       started before the install, or by a launcher, finds it (#116)
+- [x] `mcp_servers: null` (or `~`) in a Hermes `config.yaml` takes our entry like an empty table,
+      instead of being refused as flow style.
+      — claimed: Plastic-time, branch bugfix/r2.2-yaml-null-table
 - [ ] Live-check #116 on Windows: install Hermes natively, start the app from a launcher, and see
       Settings → AI offer it; #116's "error after every message" has no text yet (asked)
 - [ ] See whether Hermes still fails on 0.3.0 (#460: the fix its `fixed` label names was already in
