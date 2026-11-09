@@ -513,6 +513,54 @@ fn emit_event(feed: &Mutex<feed::FeedLog>, tx: &Sender<RunEvent>, wake: &Wake, e
     wake.call();
 }
 
+/// The sessions saved Claude Code `--resume`/`-r` arguments name, in order.
+fn configured_resumes(args: &[String]) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        if arg == "--resume" || arg == "-r" {
+            if let Some(id) = rest.next() {
+                out.push(id.as_str());
+            }
+        } else if let Some(id) = arg.strip_prefix("--resume=") {
+            out.push(id);
+        }
+    }
+    out
+}
+
+/// Whether saved Claude Code arguments ask for the most recent conversation (`-c`/`--continue`).
+fn configured_continues(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--continue" || a == "-c")
+}
+
+/// Refuse saved Claude Code arguments that would continue the project's Deep session in Clean
+/// room: a `--resume` of its id or a `--continue`/`-c` of the latest conversation bypasses the
+/// mode filter and carries what that session read.
+fn refuse_deep_session_reuse_in_clean_room(ws: &Workspace, model: &str, args: &[String], deep: bool) -> Result<(), ToolError> {
+    if deep || !crate::cli_agents::adapter_for(model).ids().contains(&"claude-code") {
+        return Ok(());
+    }
+    let Some(saved) = ws.manifest.agent_session_for(model).filter(|_| ws.manifest.agent_session_deep.unwrap_or(true)) else {
+        return Ok(());
+    };
+    if configured_resumes(args).contains(&saved) {
+        return Err(ToolError::new(
+            ErrorCode::BadSettings,
+            format!("The saved Claude Code arguments resume session {saved}, which was saved in Deep mode, so this Clean room run is refused: that session may have read inside the original."),
+        )
+        .with_remediation(format!("Remove `--resume {saved}` from the Claude Code backend's extra arguments (config.toml), or run this in Deep mode.")));
+    }
+    if configured_continues(args) {
+        return Err(ToolError::new(
+            ErrorCode::BadSettings,
+            "The saved Claude Code arguments continue the most recent conversation, which may be this project's Deep session, so this Clean room run is refused: that session may have read inside the original.",
+        )
+        .with_remediation("Remove `--continue`/`-c` from the Claude Code backend's extra arguments (config.toml), or run this in Deep mode."));
+    }
+    Ok(())
+}
+
 impl Worker {
     /// Add the time worked since the last record (and an agent turn's tokens and reported cost)
     /// to the project's usage.json. The run is its only writer; a failure is logged and the build
@@ -652,13 +700,15 @@ impl Worker {
     }
 
     /// How the builder's agent runs. Reads the session once: a lock taken twice in one statement
-    /// is held by the first until the statement ends, and the second then waits forever.
-    fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions) -> CliSpec {
+    /// is held by the first until the statement ends, and the second then waits forever. A saved
+    /// Claude `--resume` that would continue the project's Deep session in Clean room is refused.
+    fn agent_spec(&self, ws: &Workspace, entry: &crate::BackendEntry, opts: &RunOptions) -> Result<CliSpec, ToolError> {
         let (deep, config_dir, targets) = {
             let session = self.engine.session();
             (!session.clean_room(), session.config_dir(), session.shared_targets())
         };
-        CliSpec {
+        refuse_deep_session_reuse_in_clean_room(ws, &entry.config.model, &entry.options.args, deep)?;
+        Ok(CliSpec {
             builder: Some(Builder { investigation: Some(ws.investigation_dir()), inbox: ws.inbox_dir() }),
             deep,
             targets,
@@ -672,7 +722,7 @@ impl Worker {
             ),
             adapters: opts.adapters.clone(),
             ..CliSpec::new(entry.config.clone(), entry.options.clone(), opts.beginner, Some(ws.root.clone()))
-        }
+        })
     }
 
     /// The whole run: checks the builder can start, studies a new project, then builds and checks
@@ -759,7 +809,7 @@ impl Worker {
         }
         // The run's mode comes from the same read as the resume decision: a settings change while
         // the run starts can't make the brief, the tool server and the recorded session disagree.
-        let spec = self.agent_spec(ws, &entry, opts);
+        let spec = self.agent_spec(ws, &entry, opts)?;
         let deep = spec.deep;
         // A session from the other mode is not resumed (it may have read the original there),
         // so the builder needs the brief as if it had none.

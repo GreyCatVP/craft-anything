@@ -83,6 +83,7 @@ pub fn ask(
     let builder_notice = super::builder_replacement(&cfg, ws, None).map(|r| super::replaced_builder_notice(&r.saved, &r.used));
     let entry = builder_backend(&cfg, project_builder(&cfg, ws))?;
     let deep = settings.deep_mode;
+    super::refuse_deep_session_reuse_in_clean_room(ws, &entry.config.model, &entry.options.args, deep)?;
     let cli = |resume: Option<String>| -> Box<dyn Conversation> {
         let spec = CliSpec {
             question: true,
@@ -309,6 +310,74 @@ mod tests {
         let clean = ws.manifest.agent_session_for_mode("claude-code", false);
         assert_eq!(answered_from(clean, true), AnsweredFrom::TheFiles, "a Deep session isn't used in Clean room");
         assert_eq!(answered_from(deep, false), AnsweredFrom::TheFiles, "an adapter that can't resume answers from the files");
+    }
+
+    /// R2.9 through `ask`: a Clean room question passes no resume to the agent and reports the
+    /// files; a Deep question with a Deep session resumes it. A saved `--resume`/`--continue` is
+    /// refused before the agent starts.
+    #[cfg(unix)]
+    #[test]
+    fn a_question_uses_the_session_only_in_the_mode_it_was_saved_in() {
+        use crate::{AiHub, BackendConfig, BackendEntry, BackendKind, BackendOptions, KeyStore};
+        use std::os::unix::fs::PermissionsExt;
+
+        fn ask_with(deep: bool, saved_args: bool) -> (Result<(Answered, String), ToolError>, bool) {
+            let d = tempfile::tempdir().unwrap();
+            let program = d.path().join("claude");
+            std::fs::write(&program, "#!/bin/sh\nd=$(dirname \"$0\")\nprintf '%s\\n' \"$@\" > \"$d/argv\"\ncat \"$d/reply.jsonl\"\n").unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(
+                d.path().join("reply.jsonl"),
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"It is a notes app.\"}]}}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"new-session\"}\n",
+            )
+            .unwrap();
+            let engine = Arc::new(Engine::new(craft_anything_engine::testing::session()));
+            let hub = AiHub::with_stores(engine, d.path().join("settings.toml"), KeyStore::file_only(d.path().join("keys.toml")));
+            let mut cfg = hub.config();
+            cfg.upsert(BackendEntry {
+                config: BackendConfig {
+                    name: "Claude".into(),
+                    kind: BackendKind::AgentCli,
+                    model: "claude-code".into(),
+                    base_url: None,
+                    ssh_host: None,
+                    enabled: true,
+                },
+                options: BackendOptions {
+                    command: Some(program.display().to_string()),
+                    args: if saved_args { vec!["--resume".into(), "deep-session".into()] } else { Vec::new() },
+                    ..Default::default()
+                },
+            });
+            hub.engine.session().settings.ai = cfg.to_table().unwrap();
+            let mut settings = hub.engine.session().settings.clone();
+            settings.deep_mode = deep;
+            let mut ws = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+            ws.manifest.agent_session = Some("deep-session".into());
+            ws.manifest.agent_session_by = Some("claude-code".into());
+            ws.manifest.agent_session_deep = Some(true);
+            ws.save().unwrap();
+            let answered = ask(&hub, &settings, None, &ws, "What is it?", &CancelToken::default());
+            let argv = std::fs::read_to_string(d.path().join("argv")).unwrap_or_default();
+            let spawned = !argv.is_empty();
+            (answered.map(|a| (a, argv)), spawned)
+        }
+
+        let (clean, clean_spawned) = ask_with(false, false);
+        assert!(clean_spawned, "Clean room spawns the agent");
+        let (clean, clean_argv) = clean.unwrap();
+        assert_eq!(clean.from, AnsweredFrom::TheFiles);
+        assert!(!clean_argv.lines().any(|a| a == "--resume" || a == "deep-session"), "{clean_argv:?}");
+
+        let (deep, deep_spawned) = ask_with(true, false);
+        assert!(deep_spawned, "Deep spawns the agent");
+        let (deep, deep_argv) = deep.unwrap();
+        assert_eq!(deep.from, AnsweredFrom::BuildersSession);
+        assert!(deep_argv.lines().any(|a| a == "--resume") && deep_argv.lines().any(|a| a == "deep-session"), "{deep_argv:?}");
+
+        let (err, spawned) = ask_with(false, true);
+        assert!(!spawned, "refused before the agent starts");
+        assert!(err.unwrap_err().message.contains("saved in Deep mode"), "the guard's message");
     }
 
     /// A question that finds the builder's session missing forgets it, unless a build has saved

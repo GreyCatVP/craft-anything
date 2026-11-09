@@ -760,11 +760,14 @@ impl AiHub {
         })
     }
 
-    /// This installation's OpenCode Go session id, or empty when the backend was added before one
-    /// was made. Reading never writes: `build_model` runs under the session lock, so a save there
-    /// would deadlock or freeze the window.
+    /// This installation's OpenCode Go session id. A backend added before one was made, or found
+    /// from an environment key, has none saved: it gets one for the life of this process, as
+    /// OpenCode Go refuses a request without the header (#1225). Reading never writes:
+    /// `build_model` runs under the session lock, so a save there would deadlock or freeze the
+    /// window.
     fn session_id(&self) -> String {
-        self.config().install_id.clone().filter(|s| !s.trim().is_empty()).unwrap_or_default()
+        static FOR_THIS_RUN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        self.config().install_id.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| FOR_THIS_RUN.get_or_init(new_session_id).clone())
     }
 
     fn entry(&self, name: &str) -> Result<BackendEntry, ToolError> {

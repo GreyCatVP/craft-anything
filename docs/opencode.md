@@ -4,9 +4,6 @@ Craft Anything can run OpenCode V2 locally or on an SSH host. OpenCode owns its 
 connections and sign-in. Set these up in OpenCode on the computer where it will run.
 
 Model and thinking choices can be discovered, validated and saved. A run with an explicit
-selection goes through the native adapter (`opencode run --standalone`), which hands a local run
-the Craft Anything MCP server in a config file named by `OPENCODE_CONFIG`; the person's own
-settings stay unchanged. Over SSH the native run has no Craft Anything tools yet.
 selection goes through the native adapter (`opencode run --standalone`), which hands the run
 the Craft Anything MCP server in a config file named by `OPENCODE_CONFIG`; the person's own
 settings stay unchanged. Over SSH one `ssh` run checks that `craft-anything-cli` is on the
@@ -102,8 +99,6 @@ by recovery.
 The current ACP transport cannot select models or variants. An explicit choice bypasses ACP
 even if `acp = true` was previously set and runs natively. OpenCode V2 ignores
 `OPENCODE_CONFIG_CONTENT`, and plain `opencode run` hands the turn to the background service,
-which never sees the run's environment; so the adapter writes the server to a temp config file
-and starts a private server with `--standalone`. V2 names a tool call `id` (V1: `callID`); both
 which never sees the run's environment; so the adapter writes the server to a config file
 and starts a private server with `--standalone` (locally in this computer's temporary
 folder, over SSH on the host itself). V2 names a tool call `id` (V1: `callID`); both
@@ -122,6 +117,10 @@ keeps failing is given up after three tries, with the command to run by hand.
 
 Model discovery uses `opencode api model.list --param location[directory]=...` (the V2
 `GET /api/model` operation). This keeps credentials and configuration resolution inside OpenCode.
-Global `--server` and `--standalone` arguments are shared with discovery. Extra model arguments
+Global `--server` and `--standalone` arguments are shared with discovery. Without a `--server`,
+discovery adds `--standalone` itself, as runs do: plain `api` starts OpenCode's shared service,
+which resumes every unfinished session on the computer, in any project, and carries on with its
+commands (#1115). The model check before each turn is a discovery, so without it every build could
+wake an old session somewhere else. Extra model arguments
 remain available when no model or thinking selection is saved. With an explicit selection,
 conflicting extra model arguments are refused; choose the model through its settings instead.

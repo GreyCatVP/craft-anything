@@ -16,6 +16,19 @@ fn an_ais_own_timeout_bounds_its_streamed_answer() {
     assert_eq!(stream_limit(&with(Some(4 * 3600))), std::time::Duration::from_secs(4 * 3600));
 }
 
+/// #1225: with no session id saved (a backend added before there was one, or found from an
+/// environment key), OpenCode Go still gets its session header, the same on every request.
+#[test]
+fn opencode_go_gets_a_session_header_without_a_saved_id() {
+    let (h, _d) = hub();
+    assert!(h.config().install_id.is_none(), "nothing saved");
+    let id = h.session_id();
+    assert!(!id.is_empty());
+    assert_eq!(h.session_id(), id, "the same for every request of this run");
+    let client = compatible_client("OpenCode Go", openai::OPENCODE_GO_BASE, Some("sk-test".into()), "m", &id);
+    assert!(client.extra_headers.iter().any(|(name, value)| *name == openai::OPENCODE_GO_SESSION_HEADER && *value == id), "{:?}", client.extra_headers);
+}
+
 /// The model list lives at /v1 on the service root, not under the chat path's /openai/v1.
 #[test]
 fn opencode_go_lists_models_at_the_documented_url() {

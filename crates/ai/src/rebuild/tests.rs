@@ -2239,6 +2239,27 @@ mod picking_up_a_build {
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("session-1"));
     }
 
+    /// A resumable stand-in: records the session id the runner would continue.
+    struct ResumingStandIn {
+        seen: Arc<craft_anything_platform::sync::Mutex<Vec<Option<String>>>>,
+    }
+
+    impl crate::cli_agents::AgentAdapter for ResumingStandIn {
+        fn ids(&self) -> &'static [&'static str] {
+            &["stand-in"]
+        }
+        fn args(&self, cx: &crate::cli_agents::ArgsCx) -> Vec<String> {
+            self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(cx.resume.map(str::to_string));
+            vec![cx.prompt.to_string()]
+        }
+        fn streams_json(&self) -> bool {
+            false
+        }
+        fn resumes(&self) -> bool {
+            true
+        }
+    }
+
     /// R2.9: a session saved in one mode is never continued in the other — a Clean room build
     /// must not carry what a Deep one read — and one saved before the mode was kept counts as
     /// Deep, so only Deep continues it.
@@ -2257,12 +2278,80 @@ mod picking_up_a_build {
             ws.manifest.agent_session_deep = saved;
             ws.save().unwrap();
             b.hub.engine.session().settings.deep_mode = deep;
-            let (ok, feed) = try_it(&b, &ws);
+            let seen = Arc::new(craft_anything_platform::sync::Mutex::new(Vec::new()));
+            let mut adapters = crate::cli_agents::AgentAdapters::built_in();
+            adapters.register(Arc::new(ResumingStandIn { seen: seen.clone() }));
+            let (ok, feed) = try_with(&b, &ws, RunOptions { adapters, ..Default::default() });
             assert!(ok, "saved={saved:?}, deep={deep}: {feed:?}");
             let told = std::fs::read_to_string(&b.prompts).unwrap();
             assert_eq!(told.contains("Pick up where you left off"), continued, "saved={saved:?}, deep={deep}: {told}");
             assert_eq!(told.contains("Their request"), !continued, "a fresh start gets the brief: {told}");
+            let expected = continued.then_some("session-1");
+            let seen = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(!seen.is_empty(), "saved={saved:?}, deep={deep}: the stand-in ran");
+            assert!(seen.iter().all(|r| r.as_deref() == expected), "saved={saved:?}, deep={deep}: the runner got {seen:?}");
         }
+    }
+
+    /// R2.9: a saved Claude `--resume` or `--continue` that would reuse the project's Deep session
+    /// is refused in Clean room; other agents' sessions, other ids, Deep runs and unrelated
+    /// arguments are left alone.
+    #[test]
+    fn a_saved_deep_session_in_claude_arguments_is_refused_in_clean_room() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "x", "A thing", TargetRef::None).unwrap();
+        ws.manifest.agent_session = Some("deep".into());
+        ws.manifest.agent_session_deep = Some(true);
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume", "deep"]), false).is_err());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume=deep"]), false).is_err());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["-r", "deep"]), false).is_err());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume", "other"]), false).is_ok());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume", "deep"]), true).is_ok());
+        assert!(
+            refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume", "other", "--resume", "deep"]), false).is_err(),
+            "any saved resume is checked"
+        );
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--continue"]), false).is_err());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["-c"]), false).is_err());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--continue"]), true).is_ok());
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "codex", &args(&["--resume", "deep"]), false).is_ok(), "only Claude's flag is checked");
+        ws.manifest.agent_session_by = Some("codex".into());
+        assert!(
+            refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume", "deep"]), false).is_ok(),
+            "another agent's session isn't Claude's"
+        );
+        ws.manifest.agent_session_by = None;
+        ws.manifest.agent_session_deep = None;
+        assert!(refuse_deep_session_reuse_in_clean_room(&ws, "claude-code", &args(&["--resume", "deep"]), false).is_err(), "a legacy session counts as Deep");
+    }
+
+    /// R2.9: the build path itself refuses a saved Deep resume in Clean room and allows it in
+    /// Deep, so removing the guard from `agent_spec` fails this test.
+    #[test]
+    fn the_build_path_refuses_a_saved_deep_resume_in_clean_room() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "x", "A thing", TargetRef::None).unwrap();
+        ws.manifest.agent_session = Some("deep".into());
+        ws.manifest.agent_session_by = Some("claude-code".into());
+        ws.manifest.agent_session_deep = Some(true);
+        ws.save().unwrap();
+        let entry = crate::BackendEntry {
+            config: crate::BackendConfig {
+                name: "Claude".into(),
+                kind: BackendKind::AgentCli,
+                model: "claude-code".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            },
+            options: crate::BackendOptions { args: vec!["--resume".into(), "deep".into()], ..Default::default() },
+        };
+        let clean = check_worker(&ws, false);
+        let err = clean.agent_spec(&ws, &entry, &RunOptions::default()).unwrap_err();
+        assert!(err.message.contains("saved in Deep mode"), "{}", err.message);
+        let deep = check_worker(&ws, true);
+        assert!(deep.agent_spec(&ws, &entry, &RunOptions::default()).is_ok(), "a Deep run may resume its session");
     }
 
     /// A saved session records the mode it ran in, and a lost one clears both.
@@ -2910,7 +2999,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
     };
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = done.send(w.agent_spec(&ws, &entry, &RunOptions::default()).logs);
+        let _ = done.send(w.agent_spec(&ws, &entry, &RunOptions::default()).unwrap().logs);
     });
     let logs = finished.recv_timeout(std::time::Duration::from_secs(20)).expect("it took the session lock twice and waited on itself");
     assert!(logs.is_some());

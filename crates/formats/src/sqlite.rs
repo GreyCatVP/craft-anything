@@ -459,7 +459,13 @@ impl<'a> SqliteDb<'a> {
         if let Some(table) = table {
             if let Some(order) = without_rowid_order(&table) {
                 for row in &mut w.out {
-                    row.values = order.iter().map(|&i| row.values.get(i).cloned().unwrap_or(CellValue::Null)).collect();
+                    row.values = order
+                        .iter()
+                        .map(|slot| match slot {
+                            Some(i) => row.values.get(*i).cloned().unwrap_or(CellValue::Null),
+                            None => CellValue::NotRead,
+                        })
+                        .collect();
                 }
             } else {
                 w.notes.push("Could not determine the primary-key column order; values remain in storage order.".into());
@@ -470,10 +476,22 @@ impl<'a> SqliteDb<'a> {
         let mut page: Vec<Row> = w.out.into_iter().skip(offset).take(limit).collect();
         let (schema, _) = self.schema();
         if let Some(table) = schema.iter().find(|o| o.obj_type == "table" && o.rootpage == rootpage) {
-            let defaults: Vec<_> = column_definitions(&table.sql).into_iter().map(|(_, rest)| column_default(rest)).collect();
+            let definitions = column_definitions(&table.sql);
+            let generated: Vec<bool> = definitions.iter().map(|(_, rest)| is_virtual_column(rest)).collect();
+            // WITHOUT ROWID rows were already placed in declaration order above.
+            if !w.index_tree && generated.contains(&true) {
+                for row in &mut page {
+                    row.values = place_stored_values(std::mem::take(&mut row.values), &generated);
+                }
+            }
+            let defaults: Vec<_> = definitions.into_iter().map(|(_, rest)| column_default(rest)).collect();
             let mut unsupported = vec![false; defaults.len()];
             for row in &mut page {
-                for ((value, supported), disclosed) in defaults.iter().zip(&mut unsupported).skip(row.values.len()) {
+                for (((value, supported), disclosed), is_virtual) in defaults.iter().zip(&mut unsupported).zip(&generated).skip(row.values.len()) {
+                    if *is_virtual {
+                        row.values.push(CellValue::NotRead);
+                        continue;
+                    }
                     row.values.push(value.clone());
                     if !supported {
                         *disclosed = true;
@@ -483,6 +501,14 @@ impl<'a> SqliteDb<'a> {
             for (i, disclosed) in unsupported.into_iter().enumerate() {
                 if disclosed {
                     w.notes.push(format!("Column {} has an unsupported DEFAULT expression; missing values were filled as NULL.", i + 1));
+                }
+            }
+            for (i, is_virtual) in generated.iter().enumerate() {
+                if *is_virtual {
+                    w.notes.push(format!(
+                        "Column {} is a VIRTUAL generated column; SQLite computes it when a row is read and stores no value, so it is shown as not read.",
+                        i + 1
+                    ));
                 }
             }
             if let Some(index) = rowid_alias_index(&table.sql) {
@@ -839,8 +865,11 @@ fn is_without_rowid(sql: &str) -> bool {
         .any(|pair| pair.first().is_some_and(|s| s.eq_ignore_ascii_case("WITHOUT")) && pair.get(1).is_some_and(|s| s.eq_ignore_ascii_case("ROWID")))
 }
 
-/// Output-column positions in the stored record: PK columns first, then all remaining columns.
-fn without_rowid_order(table: &SchemaObject) -> Option<Vec<usize>> {
+/// Output-column positions in the stored record: PK columns first, then the remaining stored
+/// columns. A VIRTUAL generated column has no field in the record, so its position is `None`.
+fn without_rowid_order(table: &SchemaObject) -> Option<Vec<Option<usize>>> {
+    let generated: Vec<bool> = column_definitions(&table.sql).iter().map(|(_, rest)| is_virtual_column(rest)).collect();
+    let is_virtual = |i: usize| generated.get(i).copied().unwrap_or(false);
     let open = table.sql.find('(')?;
     let close = table.sql.rfind(')')?;
     let body = table.sql.get(open.checked_add(1)?..close)?;
@@ -873,11 +902,56 @@ fn without_rowid_order(table: &SchemaObject) -> Option<Vec<usize>> {
         return None;
     }
     for i in 0..table.columns.len() {
-        if !stored.contains(&i) {
+        if !stored.contains(&i) && !is_virtual(i) {
             stored.push(i);
         }
     }
-    (0..table.columns.len()).map(|i| stored.iter().position(|&column| column == i)).collect()
+    (0..table.columns.len()).map(|i| if is_virtual(i) { Some(None) } else { stored.iter().position(|&column| column == i).map(Some) }).collect()
+}
+
+/// A generated column (`AS (expr)`, with or without `GENERATED ALWAYS`) is VIRTUAL unless
+/// `STORED` follows its expression. SQLite computes a VIRTUAL column when a row is read, so it
+/// has no field in the stored record.
+fn is_virtual_column(rest: &str) -> bool {
+    let tokens = sql_tokens(rest);
+    let mut depth = 0usize;
+    let mut generated = false;
+    let mut iter = tokens.iter();
+    while let Some(token) = iter.next() {
+        match *token {
+            "(" => depth = depth.saturating_add(1),
+            ")" => {
+                depth = depth.saturating_sub(1);
+                if generated && depth == 0 {
+                    return !iter.next().is_some_and(|next| next.eq_ignore_ascii_case("STORED"));
+                }
+            }
+            _ if depth == 0 && token.eq_ignore_ascii_case("AS") => generated = true,
+            _ => {}
+        }
+    }
+    generated
+}
+
+/// Spread a rowid table's record fields over its declared columns. A VIRTUAL generated column
+/// takes no field, so it is marked not read and the next field belongs to the next stored
+/// column. Placement stops where the record ends, so columns added later can take their
+/// defaults.
+fn place_stored_values(values: Vec<CellValue>, generated: &[bool]) -> Vec<CellValue> {
+    let mut stored = values.into_iter().peekable();
+    let mut placed = Vec::with_capacity(generated.len());
+    for &is_virtual in generated {
+        if stored.peek().is_none() {
+            break;
+        }
+        if is_virtual {
+            placed.push(CellValue::NotRead);
+        } else if let Some(value) = stored.next() {
+            placed.push(value);
+        }
+    }
+    placed.extend(stored);
+    placed
 }
 
 /// Parse column names and types from a CREATE TABLE statement (best effort, bounded).
@@ -1691,5 +1765,74 @@ mod tests {
             CellValue::Blob { len, .. } => assert_eq!(len, 3),
             other => panic!("expected blob, got {other:?}"),
         }
+    }
+
+    fn text(value: &str) -> CellValue {
+        CellValue::Text { text: value.into(), truncated: false }
+    }
+
+    /// A VIRTUAL generated column has no field in the record (SQLite computes it when a row is
+    /// read), so the fields after it belong to the next stored columns; a STORED one keeps its
+    /// field. Each VIRTUAL column is shown as not read and named in a note.
+    #[test]
+    fn virtual_generated_columns_take_no_record_field() {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        let sql = "CREATE TABLE t(a TEXT, b TEXT GENERATED ALWAYS AS (upper(a)) VIRTUAL, c INTEGER, \
+                   s INT AS (c * 2) STORED, d TEXT, e AS (a || d))";
+        let record = vec![Val::Text("x".into()), Val::Int(7), Val::Int(14), Val::Text("dee".into())];
+        let bytes = table_db(sql, &[(1, record)]);
+        let page = SqliteDb::parse(&bytes).expect("fixture parses").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![text("x"), CellValue::NotRead, CellValue::Int(7), CellValue::Int(14), text("dee"), CellValue::NotRead]);
+        let notes: Vec<_> = page.notes.iter().filter(|note| note.contains("VIRTUAL generated column")).collect();
+        assert_eq!(notes.len(), 2, "{:?}", page.notes);
+        assert!(notes[0].starts_with("Column 2 ") && notes[1].starts_with("Column 6 "), "{notes:?}");
+    }
+
+    /// The rowid alias and the defaults of columns added later still land on their own columns
+    /// when a VIRTUAL column comes before them.
+    #[test]
+    fn virtual_generated_columns_keep_aliases_and_added_defaults_in_place() {
+        use craft_anything_testkit::sqlite::{Val, table_db};
+        let bytes = table_db("CREATE TABLE t(v INT AS (1), id INTEGER PRIMARY KEY, x TEXT)", &[(10, vec![Val::Null, Val::Text("ten".into())])]);
+        let page = SqliteDb::parse(&bytes).expect("fixture parses").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![CellValue::NotRead, CellValue::Int(10), text("ten")]);
+
+        // ALTER TABLE ADD COLUMN g AS (...), then ADD COLUMN c DEFAULT 3: an old record holds only `a`.
+        let sql = "CREATE TABLE t(a TEXT, g TEXT AS (a || '!'), c INTEGER DEFAULT 3)";
+        let bytes = table_db(sql, &[(1, vec![Val::Text("old".into())]), (2, vec![Val::Text("new".into()), Val::Int(9)])]);
+        let page = SqliteDb::parse(&bytes).expect("fixture parses").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![text("old"), CellValue::NotRead, CellValue::Int(3)]);
+        assert_eq!(page.rows[1].values, vec![text("new"), CellValue::NotRead, CellValue::Int(9)]);
+    }
+
+    /// A WITHOUT ROWID record stores the key, then the other stored columns; VIRTUAL columns
+    /// are not among them.
+    #[test]
+    fn without_rowid_virtual_generated_columns_take_no_record_field() {
+        use craft_anything_testkit::sqlite::{Val, without_rowid_db};
+        let bytes =
+            without_rowid_db("CREATE TABLE t(k TEXT PRIMARY KEY, b TEXT AS (upper(k)), c INTEGER) WITHOUT ROWID", &[vec![Val::Text("x".into()), Val::Int(7)]]);
+        let page = SqliteDb::parse(&bytes).expect("fixture parses").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![text("x"), CellValue::NotRead, CellValue::Int(7)]);
+
+        let sql = "CREATE TABLE t(k TEXT, n INT, g TEXT AS (k || n), PRIMARY KEY (n, k)) WITHOUT ROWID";
+        let bytes = without_rowid_db(sql, &[vec![Val::Int(1), Val::Text("a".into())]]);
+        let page = SqliteDb::parse(&bytes).expect("fixture parses").read_rows(2, 0, 10);
+        assert_eq!(page.rows[0].values, vec![text("a"), CellValue::Int(1), CellValue::NotRead]);
+    }
+
+    /// Only a top-level `AS` makes a generated column, and `STORED` right after its expression
+    /// makes it a stored one.
+    #[test]
+    fn only_a_top_level_as_declares_a_virtual_column() {
+        let virtual_of = |sql: &str| column_definitions(sql).iter().map(|(_, rest)| is_virtual_column(rest)).collect::<Vec<_>>();
+        assert_eq!(
+            virtual_of(
+                "CREATE TABLE t(a INT DEFAULT (CAST('1' AS INT)), b TEXT CHECK (CAST(b AS TEXT) <> ''), \
+                 c AS (a), d INT GENERATED ALWAYS AS ((a + 1) * 2) VIRTUAL, e GENERATED ALWAYS AS (a) STORED NOT NULL, \
+                 f TEXT AS (printf('%d', a)) NOT NULL, g as (a) stored)"
+            ),
+            vec![false, false, true, true, false, true, false]
+        );
     }
 }

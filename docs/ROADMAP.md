@@ -290,6 +290,16 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
 - [x] Limit the decision line above to what was measured (one RX 6900 XT, one driver, one Windows
       build) and say other Radeons and drivers aren't checked (#912 review)
       — claimed: 00xJS, branch docs/r5.2-radeon-idle-scope
+- [x] STATUS.md has rows twice, kept by squash merges of PRs that edited the same row: OpenCode
+      models and thinking (three copies that disagree about SSH), Claude desktop app without Claude
+      Code, Websites as targets, Desktop app and CLI; `docs/opencode.md` has a paragraph twice.
+      Keep the newest complete copy of each
+      — claimed: youkaicountry, branch docs/r5.2-doubled-status-rows — PR #1226
+- [ ] Have `cargo xtask` refuse a STATUS.md table with two rows of the same name, so a merge
+      that keeps both copies of an edited row fails CI instead of reaching `main`
+- [x] `docs/opencode.md` still has one passage twice, missed by #1226: in "Configuration and
+      execution", the older copy of the standalone-server sentence, cut off after "both"
+      — claimed: youkaicountry, branch docs/r5.2-opencode-doubled-passage
 
 ### R5.3 A builder that can't make progress stops
 Owner: open · Status: todo
@@ -737,6 +747,12 @@ Owner: open · Status: in progress
 - [ ] A turn stopped before OpenCode's first event leaves no session id to delete: OpenCode names its
       session only in that event, so the session it may already have made stays (#1115, review on
       #1176). Needs a session id known before the run (one we create and pass in), if OpenCode allows it
+- [x] OpenCode's model discovery (`api model.list`, run before every turn to check the chosen
+      model) has no `--standalone`, so it starts the shared service, and the service resumes any
+      unfinished session on the computer, in any project (#1115). Seen live with 2.2.5 on Linux: a
+      build's model check woke it, and a session left from days before went on editing another
+      project. Discover with a private server unless the person chose `--server`
+      — claimed: youkaicountry, branch bugfix/r2.2-opencode-discovery-standalone
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
@@ -1036,6 +1052,11 @@ Gaps found while using the app for real projects.
 - [ ] A Clean room build or question must also not resume an API backend's kept transcript:
       `ws.transcript_path()` is loaded whenever it exists, so switching modes can carry what a Deep
       API build read. Clear it, or record its mode, when the mode changes; add a regression
+- [ ] A saved Claude `--resume`/`--continue` in the backend's extra arguments is refused in a
+      Clean room build or question when it would reuse the project's Deep session, leaving
+      unrelated arguments alone; unit and scripted CLI tests cover the build and question paths
+      (Clean room refuses, Deep allows), but no live signed-in Claude run is done, so this stays
+      open — claimed: AlexJoaquimPereira, branch bugfix/r2.9-saved-resume
 - [x] #504: the builder's plan card can be folded away with its X, or with `project_plan_fold`
       (between builds: a fold during a build can be overwritten by its next save). The steps stay
       in the conversation (`FEED_VERSION` 4, `FeedItem::PlanDismissed`), and a later run's
@@ -1152,6 +1173,9 @@ Gaps found while using the app for real projects.
 - [x] An engine download the server can't answer right now (a 5xx, 429) says to try again later,
       not "update the pinned URL", which nobody installing an engine can do (#1193)
       — claimed: justinjohn0306, branch bugfix/r2.9-download-server-errors
+- [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
+      button; the line didn't wrap and ran on under the button
+      — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -1362,6 +1386,11 @@ Owner: open · Status: in progress
 - [x] Accept binary plist arrays and sets that name one stored value many times; repeated data and
       text spend a byte budget, and containers past the node cap are refused before reserving space.
       — claimed: Plastic-time, branch bugfix/r3.12-plist-shared-array-values
+- [x] SQLite rows keep each value on its own column when a table has VIRTUAL generated columns:
+      SQLite computes those when a row is read and stores no field for them, so they show as not
+      read (with a note) instead of shifting later values onto the wrong columns, in rowid and
+      WITHOUT ROWID tables alike.
+      — claimed: Chr0mium24, branch bugfix/r3.12-sqlite-virtual-generated-columns
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress
