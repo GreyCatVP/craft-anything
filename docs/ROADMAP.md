@@ -1249,6 +1249,12 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
+- [x] Make → "What do you want to recreate?" offers Simple / Advanced, and always shows Clean room /
+      Deep: Simple mode's title bar had no mode switch, so only Settings offered it, and the
+      Clean room / Deep tiles appeared only once an original was picked (the switch is now beside
+      the ways in on Make; with no original, the tiles show dimmed and say they apply once there
+      is one)
+      — claimed: jgt87, branch feature/r2.9-make-choices — PR #1286
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
