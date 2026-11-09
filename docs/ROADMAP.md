@@ -1542,6 +1542,10 @@ Owner: open · Status: in progress
       and single-quoted names (which SQLite accepts) lose their quotes. Keys that name such columns
       find them, so rowid aliases and WITHOUT ROWID order hold.
       — claimed: Plastic-time, branch bugfix/r3.12-sqlite-quoted-column-names
+- [x] Removing the last member of a JSONC object takes the comma before it too, so a config that
+      is plain JSON (Claude Code's, Claude Desktop's) stays plain JSON after an uninstall; an
+      object written with trailing commas keeps them, new members included.
+      — claimed: Plastic-time, branch bugfix/r3.12-jsonc-no-new-trailing-comma
 - [x] SQLite rows keep each value on its own column when a table has VIRTUAL generated columns:
       SQLite computes those when a row is read and stores no field for them, so they show as not
       read (with a note) instead of shifting later values onto the wrong columns, in rowid and
