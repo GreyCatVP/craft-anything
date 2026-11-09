@@ -124,6 +124,18 @@ fn new_session_id() -> String {
     format!("craft-{:x}-{:x}", std::process::id(), n)
 }
 
+/// Gives `cfg` this installation's OpenCode Go session id when one of its backends is OpenCode Go
+/// and none is saved yet. Returns whether it did (#1225).
+fn give_session_id(cfg: &mut AiConfig) -> bool {
+    let blank = cfg.install_id.as_deref().is_none_or(|s| s.trim().is_empty());
+    let has_go = cfg.backends.iter().any(|b| openai::is_opencode_go(b.config.base_url.as_deref().unwrap_or("")));
+    if blank && has_go {
+        cfg.install_id = Some(new_session_id());
+        return true;
+    }
+    false
+}
+
 /// The OpenCode Go key from the environment, when the base URL is its own. A blank value counts as
 /// unset, so the other name is still tried.
 fn go_env_key(base: &str) -> Option<String> {
@@ -527,16 +539,26 @@ impl AiHub {
             return Err(ToolError::invalid("A backend needs a name."));
         }
         let mut cfg = self.config_to_change()?;
-        // The session id is made here, where saving the settings is already the job, rather than on
-        // the first model call, which runs under the session lock.
-        if cfg.install_id.as_deref().is_none_or(|s| s.trim().is_empty()) && openai::is_opencode_go(entry.config.base_url.as_deref().unwrap_or("")) {
-            cfg.install_id = Some(new_session_id());
-        }
         if let Some(k) = key.filter(|k| !k.trim().is_empty()) {
             self.keys.set(&entry.config.name, k.trim())?;
         }
         cfg.upsert(entry);
+        give_session_id(&mut cfg);
         self.save_config(&cfg)
+    }
+
+    /// Makes this installation's OpenCode Go session id and saves it, when a Go backend is set up
+    /// and has none (#1225). Returns whether it saved one. The app and the CLI call this at startup,
+    /// before any session lock is taken: a backend that never went through [`AiHub::add_backend`]
+    /// (one from an older version, or one copied in) would otherwise send a new id every run, which
+    /// OpenCode Go doesn't route efficiently.
+    pub fn ensure_session_id(&self) -> Result<bool, ToolError> {
+        let mut cfg = self.config_to_change()?;
+        if !give_session_id(&mut cfg) {
+            return Ok(false);
+        }
+        self.save_config(&cfg)?;
+        Ok(true)
     }
 
     /// Turn a backend on or off; it keeps its settings and key. Returns false when there was no

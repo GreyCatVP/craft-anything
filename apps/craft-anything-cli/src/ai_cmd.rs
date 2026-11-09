@@ -88,7 +88,12 @@ pub enum AiCommand {
 }
 
 fn hub(cli: &Cli) -> Result<AiHub, ToolError> {
-    Ok(AiHub::new(make_engine(cli.project.as_deref(), cli.deep_for_run())?))
+    let hub = AiHub::new(make_engine(cli.project.as_deref(), cli.deep_for_run())?);
+    // Before any command runs, while no session lock is held (#1225).
+    if let Err(e) = hub.ensure_session_id() {
+        log::warn!("couldn't save the OpenCode Go session id: {e}");
+    }
+    Ok(hub)
 }
 
 fn write_raw(s: &str) {
