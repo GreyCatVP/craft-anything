@@ -368,7 +368,7 @@ fn engine_stacks_get_their_own_steps_checks_and_play() {
     assert!(stack_steps("Unreal Engine", Some(ed)).contains("Game.uproject"));
 
     let d = tempfile::tempdir().unwrap();
-    let stop = CancelToken::default();
+    let stop = CheckStop::default();
     assert_eq!(build_check(d.path(), "app/", "Unity", Some(ed), &stop), (false, "No Unity project found in app/ yet.".into()));
     assert_eq!(build_check(d.path(), "app/", "Godot", Some(ed), &stop), (false, "No Godot project (project.godot) found in app/ yet.".into()));
     assert!(build_check(d.path(), "app/", "Unreal Engine", Some(ed), &stop).1.contains(".uproject"));
@@ -450,6 +450,8 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         editor: None,
         notes: notes.clone(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -1356,6 +1358,8 @@ fn an_api_backend_builds_with_the_build_tools() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -1473,6 +1477,8 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -2354,6 +2360,68 @@ mod picking_up_a_build {
         assert!(deep.agent_spec(&ws, &entry, &RunOptions::default()).is_ok(), "a Deep run may resume its session");
     }
 
+    /// Add the local API backend the transcript tests start.
+    fn local_api(b: &Bench) {
+        b.hub
+            .add_backend(
+                crate::BackendConfig {
+                    name: "Local".into(),
+                    kind: BackendKind::OpenaiCompatible,
+                    model: "test-model".into(),
+                    base_url: Some("http://127.0.0.1:0/v1".into()),
+                    ssh_host: None,
+                    enabled: true,
+                },
+                None,
+            )
+            .unwrap();
+    }
+
+    /// R2.9: a continuation keeps its API transcript, so the run can recognize completed Study
+    /// work; a genuinely fresh build still starts a new conversation.
+    #[test]
+    fn an_api_continuation_keeps_its_transcript_and_a_fresh_build_drops_it() {
+        let b = bench();
+        local_api(&b);
+        let ws = worked_on(&b);
+        std::fs::write(ws.transcript_path(), b"{}").unwrap();
+        let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), RunOptions { backend: Some("Local".into()), ..RunOptions::default() }).unwrap();
+        assert!(ws.transcript_path().is_file(), "a continuation keeps the conversation");
+        drop(run);
+
+        let b = bench();
+        local_api(&b);
+        let fresh = Workspace::create(&b.projects, "fresh", "Build a notes app", TargetRef::None).unwrap();
+        std::fs::write(fresh.transcript_path(), b"{}").unwrap();
+        let run = RebuildRun::start(
+            &b.hub,
+            Workspace::open(&fresh.root).unwrap(),
+            RunOptions { backend: Some("Local".into()), message: Some("Build a notes app".into()), ..RunOptions::default() },
+        )
+        .unwrap();
+        assert!(!fresh.transcript_path().exists(), "a fresh build starts a new conversation");
+        drop(run);
+    }
+
+    /// R2.9: an API transcript from the other mode isn't "carrying on", so a no-message run still
+    /// studies as a fresh one instead of skipping the Deep study.
+    #[test]
+    fn an_api_transcript_from_the_other_mode_is_not_carried_on() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "x", "A thing", TargetRef::None).unwrap();
+        let mut opts = RunOptions::default();
+        assert!(!super::super::is_carrying_on(&opts, &ws, true), "nothing is under way yet");
+        std::fs::write(ws.transcript_path(), b"{}").unwrap();
+        assert!(super::super::is_carrying_on(&opts, &ws, true), "a transcript in this mode is carried on");
+        assert!(!super::super::is_carrying_on(&opts, &ws, false), "another mode's transcript is not");
+        opts.message = Some("change it".into());
+        assert!(!super::super::is_carrying_on(&opts, &ws, true), "a new request isn't carrying on");
+        opts.message = None;
+        opts.continuing = true;
+        assert!(super::super::is_carrying_on(&opts, &ws, true), "an explicit resume in this mode is");
+        assert!(!super::super::is_carrying_on(&opts, &ws, false), "one in another mode is not");
+    }
+
     /// A saved session records the mode it ran in, and a lost one clears both.
     #[test]
     fn a_session_is_kept_with_the_mode_it_ran_in() {
@@ -2475,6 +2543,27 @@ fn just_ask_is_told_to_the_builder_shortly_and_cut_on_a_character() {
     assert!(super::just_asked(&longest).encode_utf16().count() < 20_000);
 }
 
+/// A run that ends by a caught bug must not leave the saved status as it last was ("Checking"
+/// while nothing runs), so the project looks stuck. Every ending records a status.
+#[test]
+fn a_caught_bug_leaves_a_status_the_person_can_act_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(dir.path(), "x", "Build an app", TargetRef::None).unwrap();
+    let panicked: Result<Result<String, ToolError>, Box<dyn std::any::Any + Send>> = Err(Box::new("boom"));
+    let (ok, message, paused) = super::run_outcome(panicked, &mut ws);
+    assert!(!ok && !paused && message.contains("hit a bug"), "{message}");
+    let saved = Workspace::open(&ws.root).unwrap();
+    assert_eq!(saved.manifest.status, Status::NeedsYou, "a project can't be left saying Checking with nothing running");
+    assert!(saved.manifest.note.contains("hit a bug"), "{}", saved.manifest.note);
+    // A pause is not a failure.
+    let (ok, message, paused) = super::run_outcome(Ok(Err(ToolError::cancelled())), &mut ws);
+    assert!(!ok && paused && message == "Paused.");
+    assert_eq!(Workspace::open(&ws.root).unwrap().manifest.status, Status::Stopped);
+    // A finished run keeps the status the run itself set.
+    let (ok, message, paused) = super::run_outcome(Ok(Ok("Ready.".into())), &mut ws);
+    assert!(ok && !paused && message == "Ready.");
+}
+
 /// #923: with OpenRouter as the builder, every asset call said "No fal.ai key" with one saved. The
 /// project hasn't turned on generated assets, so nothing is sent or spent.
 #[test]
@@ -2513,7 +2602,91 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
     }
+}
+
+#[test]
+fn a_check_that_worked_stands_while_nothing_it_looks_at_changes() {
+    use craft_anything_engine::workspace::progress::CheckedBuild;
+    use std::cell::Cell;
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Arena", "Recreate this game", TargetRef::None).unwrap();
+    std::fs::create_dir_all(ws.app_dir().join("src")).unwrap();
+    std::fs::write(ws.app_dir().join("src/main.rs"), "fn main() {}\n").unwrap();
+    let w = check_worker(&ws, false);
+    let runs = Cell::new(0);
+    let worked = Cell::new(true);
+    let check = |ws: &Workspace, round| {
+        w.checks_unless_unchanged(ws, &SheetKind, round, || {
+            runs.set(runs.get() + 1);
+            Ok(vec![CheckResult::new(CheckResult::BUILD, round, worked.get(), "built")])
+        })
+        .unwrap()
+    };
+
+    assert_eq!(check(&ws, 1)[0].round, 1);
+    assert_eq!(runs.get(), 1);
+    // The builder's own check, then the one after its turn: nothing changed, so it isn't run again.
+    let kept = check(&ws, self_check::SELF_CHECK_ROUND);
+    assert_eq!((runs.get(), kept[0].round, kept[0].passed), (1, self_check::SELF_CHECK_ROUND, true));
+    assert_eq!(check(&ws, 2)[0].round, 2);
+    assert_eq!(runs.get(), 1);
+
+    // A changed file, a new picture to compare with, or Deep mode checks again.
+    std::fs::write(ws.app_dir().join("src/main.rs"), "fn main() { println!(\"hi\"); }\n").unwrap();
+    check(&ws, 3);
+    assert_eq!(runs.get(), 2);
+    std::fs::create_dir_all(ws.reference_dir()).unwrap();
+    std::fs::write(ws.reference_dir().join("look.png"), "a picture").unwrap();
+    check(&ws, 4);
+    assert_eq!(runs.get(), 3);
+    let deep = check_worker(&ws, true);
+    *deep.kept_checks.lock().unwrap_or_else(PoisonError::into_inner) = std::mem::take(&mut *w.kept_checks.lock().unwrap_or_else(PoisonError::into_inner));
+    deep.checks_unless_unchanged(&ws, &SheetKind, 5, || {
+        runs.set(runs.get() + 1);
+        Ok(vec![CheckResult::new(CheckResult::BUILD, 5, true, "built")])
+    })
+    .unwrap();
+    assert_eq!(runs.get(), 4, "Deep mode checks again");
+
+    // A round with a failure is never kept: Try again looks again.
+    worked.set(false);
+    check(&ws, 6);
+    check(&ws, 7);
+    assert_eq!(runs.get(), 6);
+    worked.set(true);
+
+    // Kept across runs: the round saved in the progress record, while craft.json still ends with it.
+    let round = check(&ws, 8);
+    assert_eq!(runs.get(), 7);
+    let saved = w.kept_checks.lock().unwrap_or_else(PoisonError::into_inner).saved_for(8);
+    assert!(w.kept_checks.lock().unwrap_or_else(PoisonError::into_inner).saved_for(7).is_none());
+    ws.manifest.checks.extend(round);
+    let progress = BuildProgress { checked: saved.clone(), ..BuildProgress::default() };
+    let next_run = check_worker(&ws, false);
+    *next_run.kept_checks.lock().unwrap_or_else(PoisonError::into_inner) = kept_check::KeptChecks::from_saved(&progress, &ws);
+    let again = next_run.checks_unless_unchanged(&ws, &SheetKind, 9, || panic!("an unchanged build isn't checked again")).unwrap();
+    assert_eq!((again[0].round, again[0].note.as_str()), (9, "built"));
+    // A copy of the project, with the same files, checks its own build.
+    let other = tempfile::tempdir().unwrap();
+    let copy = Workspace::create(other.path(), "Arena", "Recreate this game", TargetRef::None).unwrap();
+    std::fs::create_dir_all(copy.app_dir().join("src")).unwrap();
+    std::fs::copy(ws.app_dir().join("src/main.rs"), copy.app_dir().join("src/main.rs")).unwrap();
+    std::fs::create_dir_all(copy.reference_dir()).unwrap();
+    std::fs::copy(ws.reference_dir().join("look.png"), copy.reference_dir().join("look.png")).unwrap();
+    let copied = Cell::new(false);
+    next_run
+        .checks_unless_unchanged(&copy, &SheetKind, 10, || {
+            copied.set(true);
+            Ok(Vec::new())
+        })
+        .unwrap();
+    assert!(copied.get(), "a copy is checked again");
+    // A record naming another round than craft.json's last one keeps nothing.
+    let stale = BuildProgress { checked: Some(CheckedBuild { round: 7, ..saved.unwrap() }), ..BuildProgress::default() };
+    assert!(kept_check::KeptChecks::from_saved(&stale, &ws).saved_for(7).is_none());
 }
 
 /// A new Python project reaches the same build/screenshot path as a packaged app. The local
@@ -2980,6 +3153,8 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -3022,6 +3197,8 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -3219,6 +3396,8 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
             Note { id: 2, text: "add a footer".into(), shown: "add a footer".into(), pictures: Vec::new(), questions: Vec::new() },
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -3346,6 +3525,60 @@ fn a_persons_own_project_is_judged_by_its_own_build_and_tests_whatever_its_kind(
     assert_eq!(r.iter().map(|c| c.check.as_str()).collect::<Vec<_>>(), [CheckResult::BUILD, kinds::own::OwnTestsCheck::ID]);
     assert!(r.iter().all(|c| c.passed), "{r:?}");
     assert!(r[1].note.starts_with("No tests ran"), "says what wasn't run: {}", r[1].note);
+}
+
+/// A round of the builder's own checks has a time limit and looks at Pause before each check. A
+/// check that couldn't start is a failed result with the reason, never a silent wait.
+#[test]
+fn a_self_check_round_stops_at_pause_and_at_its_time_limit() {
+    use craft_anything_engine::workspace::ExistingFiles::Edit;
+    let (_d, ws) = own_folder("index.html", Edit);
+    let round = self_check::SELF_CHECK_ROUND;
+    // Past its limit before the first check: that check is reported as not run, and nothing runs.
+    let r = check_worker(&ws, false).run_checks_within(&ws, &GameKind, round, Some(Duration::ZERO)).unwrap();
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert!(!r[0].passed && r[0].note.starts_with("Not run:"), "{r:?}");
+    // Paused: the round ends with the cancelled error before any check starts.
+    let paused = check_worker(&ws, false);
+    paused.stop.cancel();
+    let e = paused.run_checks_within(&ws, &GameKind, round, None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Cancelled);
+    // With time left, both checks run as they do without a limit.
+    let r = check_worker(&ws, false).run_checks_within(&ws, &GameKind, round, Some(Duration::from_secs(600))).unwrap();
+    assert_eq!(r.len(), 2, "{r:?}");
+    assert!(r.iter().all(|c| c.passed), "{r:?}");
+}
+
+/// Each check is said before it runs, as a step of its own, so a stall names the check it is in.
+/// A real round's lines are Check steps (the feed, the CLI and the progress panel keep their
+/// stage); the builder's own checks belong to its Build turn.
+#[test]
+fn every_check_is_said_before_it_runs_as_its_own_step() {
+    use craft_anything_engine::workspace::ExistingFiles::Edit;
+    let (_d, ws) = own_folder("index.html", Edit);
+    let run_round = |round: u32| {
+        let mut worker = check_worker(&ws, false);
+        let (tx, rx) = std::sync::mpsc::channel();
+        worker.tx = tx;
+        let r = worker.run_checks_within(&ws, &GameKind, round, None).unwrap();
+        let said: Vec<(Step, String)> = rx
+            .try_iter()
+            .filter_map(|e| match e {
+                RunEvent::Step { step, text } => Some((step, text)),
+                _ => None,
+            })
+            .collect();
+        (r, said)
+    };
+    let (r, said) = run_round(1);
+    assert_eq!(r.len(), 2, "{r:?}");
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert!(said.iter().all(|(s, _)| *s == Step::Check), "a real round stays in the Check stage: {said:?}");
+    assert!(said[0].1.contains("Checking the build (1 of 2): build"), "{said:?}");
+    assert!(said[1].1.contains("(2 of 2): own-tests"), "{said:?}");
+    let (_, said) = run_round(self_check::SELF_CHECK_ROUND);
+    assert!(said.iter().all(|(s, _)| *s == Step::Build), "the builder's own checks are part of its turn: {said:?}");
+    assert!(said[0].1.starts_with("Checking its work (1 of 2): build"), "{said:?}");
 }
 
 #[test]
@@ -3523,6 +3756,8 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -3578,6 +3813,8 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -3644,6 +3881,8 @@ fn the_builders_conversation_travels_with_the_project() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,
@@ -3721,6 +3960,8 @@ fn a_build_says_when_it_waits_for_an_analysis_started_earlier() {
         editor: None,
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
         assets: false,
         decompiled: false,
         usage: None,

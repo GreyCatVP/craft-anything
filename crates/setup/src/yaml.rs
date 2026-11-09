@@ -7,9 +7,21 @@
 use serde_json::{Map, Value};
 use yaml_rust2::{Yaml, YamlLoader};
 
+/// A byte-order mark some Windows editors put in front of the file. YAML allows one there; it isn't
+/// part of the first key.
+const BOM: &str = "\u{feff}";
+
+/// The file's byte-order mark, if it has one, and the text after it.
+fn split_bom(text: &str) -> (&'static str, &str) {
+    match text.strip_prefix(BOM) {
+        Some(rest) => (BOM, rest),
+        None => ("", text),
+    }
+}
+
 /// Parse to JSON-like data (first document; an empty file is an empty mapping).
 pub fn parse(text: &str) -> Result<Value, String> {
-    let docs = YamlLoader::load_from_str(text).map_err(|e| e.to_string())?;
+    let docs = YamlLoader::load_from_str(split_bom(text).1).map_err(|e| e.to_string())?;
     match docs.into_iter().next() {
         None | Some(Yaml::Null) => Ok(Value::Object(Map::new())),
         Some(y @ Yaml::Hash(_)) => Ok(to_json(&y, 0)),
@@ -126,6 +138,18 @@ struct Block {
     end: usize,
 }
 
+/// A value after `table:` that holds nothing: `{}`, or a null as the parser reads one (`null` or
+/// `~`), with an optional comment after it.
+fn empty_inline(rest: &str) -> bool {
+    let t = rest.trim();
+    if let Some(after) = t.strip_prefix("{}") {
+        return only_comment(after);
+    }
+    ["null", "~"].iter().any(|null| t.strip_prefix(null).is_some_and(|after| after.is_empty() || (after.starts_with([' ', '\t']) && only_comment(after))))
+}
+
+/// The top-level `table:` block, if the file has one. An inline value is refused unless it holds
+/// nothing (see [`empty_inline`]).
 fn find_table(lines: &[&str], table: &str) -> Result<Option<Block>, String> {
     for (i, l) in lines.iter().enumerate() {
         if indent_of(l) != 0 || is_blank_or_comment(l) {
@@ -133,7 +157,9 @@ fn find_table(lines: &[&str], table: &str) -> Result<Option<Block>, String> {
         }
         if let Some(rest) = key_line(l, table) {
             if !only_comment(rest) {
-                if rest.trim() == "{}" || rest.trim().starts_with("{}") && only_comment(rest.trim().get(2..).unwrap_or_default()) {
+                // A value that carries on onto indented lines isn't empty: `null` then `  more` is text.
+                let continued = lines.iter().skip(i + 1).find(|l2| !is_blank_or_comment(l2)).is_some_and(|l2| indent_of(l2) > 0);
+                if empty_inline(rest) && !continued {
                     return Ok(Some(Block { header: i, end: i + 1 }));
                 }
                 return Err(format!("`{table}` uses inline (flow) style; edit it by hand or convert it to a block mapping"));
@@ -228,6 +254,8 @@ fn join(lines: &[Line]) -> String {
 /// Set `table.name` to `value` (a mapping). Returns the new text.
 pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String, String> {
     parse(text)?;
+    // Lines are edited after the byte-order mark, which goes back in front as it was.
+    let (bom, text) = split_bom(text);
     let (mut out, eol) = split(text);
     let lines: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
     let new_lines = |rendered: String| -> Vec<Line> { rendered.lines().map(|l| (l.to_string(), eol)).collect() };
@@ -243,9 +271,11 @@ pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String,
             let child = find_child(&lines, &block, name);
             if block.end == block.header + 1
                 && let Some(h) = out.get_mut(block.header)
-                && key_line(&h.0, table).is_some_and(|r| r.trim().starts_with("{}"))
+                && let Some(rest) = key_line(&h.0, table).filter(|r| empty_inline(r))
             {
-                h.0 = format!("{table}:");
+                // Keep a comment that followed the empty value.
+                let comment = rest.find('#').and_then(|p| rest.get(p..)).map(|c| format!(" {c}")).unwrap_or_default();
+                h.0 = format!("{table}:{comment}");
             }
             match child {
                 Some((s, e)) => {
@@ -258,19 +288,20 @@ pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String,
             }
         }
     }
-    let new = join(&out);
+    let new = format!("{bom}{}", join(&out));
     parse(&new).map_err(|e| format!("the edited file would not parse: {e}"))?;
     Ok(new)
 }
 
 /// Remove `table.name`. Returns `None` when it was not there.
 pub fn remove(text: &str, table: &str, name: &str) -> Option<String> {
+    let (bom, text) = split_bom(text);
     let (mut out, _) = split(text);
     let lines: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
     let block = find_table(&lines, table).ok()??;
     let (s, e) = find_child(&lines, &block, name)?;
     out.drain(s..e);
-    let new = join(&out);
+    let new = format!("{bom}{}", join(&out));
     parse(&new).ok()?;
     Some(new)
 }

@@ -42,6 +42,7 @@ pub mod activity;
 mod brief;
 mod check;
 pub mod feed;
+mod kept_check;
 pub mod kinds;
 mod locate;
 pub mod notes;
@@ -59,7 +60,8 @@ pub mod tools;
 
 use brief::*;
 pub use kinds::{
-    AppKind, BriefCx, BuildCheck, Check, CheckCx, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, TargetKind, WebVisualCheck, WebsiteKind,
+    AppKind, BriefCx, BuildCheck, Check, CheckCx, CheckStop, DetectCx, GameKind, KindRegistry, KindWords, MechanicsCheck, TargetKind, WebVisualCheck,
+    WebsiteKind,
 };
 pub use locate::game_folder;
 use locate::*;
@@ -203,6 +205,13 @@ fn same_question(a: &AskedQuestion, b: &AskedQuestion) -> bool {
     a.at_ms == b.at_ms && a.question == b.question
 }
 
+/// Whether a run without a new request is carrying on work already under way in this mode. For an
+/// API loop, `api_resumed` says its kept transcript matched the run's mode: a transcript from the
+/// other mode isn't carried on, so the run still studies as a fresh one.
+fn is_carrying_on(opts: &RunOptions, ws: &Workspace, api_resumed: bool) -> bool {
+    (opts.continuing || (opts.message.is_none() && ws.builder_started())) && api_resumed
+}
+
 /// A running (or finished) rebuild.
 pub struct RebuildRun {
     rx: Receiver<RunEvent>,
@@ -240,7 +249,11 @@ impl RebuildRun {
         let api = match entry.config.kind {
             BackendKind::AgentCli => None,
             _ => {
-                if opts.message.is_none() || !ws.capture_dir().exists() {
+                // A run carrying on keeps its transcript, so `ApiConversation::resumed` can tell
+                // the run which conversation it continues. Only a genuinely fresh build (no
+                // continuation and no completed Study) starts a new one.
+                let continuing = opts.continuing || (opts.message.is_none() && ws.builder_started());
+                if !continuing && !ws.capture_dir().exists() {
                     let _ = std::fs::remove_file(ws.transcript_path());
                 }
                 Some(hub.start_builder(&entry, opts.beginner, Some(ws.transcript_path()), !clean_room)?)
@@ -250,7 +263,7 @@ impl RebuildRun {
         // study; the run only uses it in Deep mode on a game (see Worker::extract).
         let fresh = opts.message.is_none() || !ws.capture_dir().exists();
         let extractor = match hub.chosen(Role::Extractor).and_then(|n| hub.config().get(&n).cloned()) {
-            Some(e) if fresh && e.config.kind != BackendKind::AgentCli => {
+            Some(e) if fresh && e.config.kind != BackendKind::AgentCli && !clean_room => {
                 let _ = std::fs::remove_file(ws.root.join(EXTRACT_TRANSCRIPT));
                 Some((e.config.name.clone(), hub.start_extractor(&e, opts.beginner, Some(ws.root.join(EXTRACT_TRANSCRIPT)))?))
             }
@@ -287,6 +300,8 @@ impl RebuildRun {
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
             reset_progress_after_notes: false,
+            keys: hub.keys.clone(),
+            kept_checks: Mutex::default(),
         };
         let r2 = running.clone();
         let key_store = hub.keys.clone();
@@ -302,19 +317,7 @@ impl RebuildRun {
                     ctx.load_asset_keys(&key_store);
                     ctx.run(&mut ws, entry, api, extractor, &opts)
                 }));
-                let (ok, message, paused) = match result {
-                    Ok(Ok(m)) => (true, m, false),
-                    Ok(Err(e)) if e.code == ErrorCode::Cancelled => {
-                        let _ = ws.set_status(Status::Stopped, "Paused. Send a message to continue.");
-                        (false, "Paused.".to_string(), true)
-                    }
-                    Ok(Err(e)) => {
-                        let msg = e.for_people();
-                        let _ = ws.set_status(Status::NeedsYou, msg.clone());
-                        (false, msg, false)
-                    }
-                    Err(_) => (false, "The workflow hit a bug and stopped safely. Your files are untouched.".to_string(), false),
-                };
+                let (ok, message, paused) = run_outcome(result, &mut ws);
                 ctx.record_usage(None);
                 // The CLI can exit as soon as it sees completion: release the helper while its
                 // supervisor threads are still available to stop it.
@@ -493,6 +496,10 @@ struct Worker {
     self_check: Option<(Arc<dyn kinds::TargetKind>, f64)>,
     /// A hook consumed a new request; persist its reset only after the builder finishes.
     reset_progress_after_notes: bool,
+    /// The backends' stored keys, for an agent CLI that asks the host to authenticate (Devin).
+    keys: crate::keys::KeyStore,
+    /// The last check round in which everything worked, kept while nothing it looks at changes.
+    kept_checks: Mutex<kept_check::KeptChecks>,
 }
 
 /// The project a run records its usage in, and when it last did.
@@ -713,6 +720,7 @@ impl Worker {
             deep,
             targets,
             logs: Some(crate::failure_log::dir_in(&config_dir)),
+            key: crate::cli_agents::acp::key_for(&self.keys, &entry.config.model, &entry.config.name, entry.config.kind),
             resume: ws.manifest.agent_session_for_mode(&entry.config.model, deep).map(str::to_string),
             preamble: Some(
                 "You work inside Craft Anything for a person who doesn't code. The message below is your task.
@@ -739,6 +747,7 @@ impl Worker {
         opts: &RunOptions,
     ) -> Result<String, ToolError> {
         let mut progress = BuildProgress::load(&ws.root)?;
+        *self.kept_checks.lock().unwrap_or_else(PoisonError::into_inner) = kept_check::KeptChecks::from_saved(&progress, ws);
         let mut progress_available = true;
         let mut fingerprints = AppFingerprintCache::default();
         // Try again has no message. Only an explicit new request starts another attempt on
@@ -784,7 +793,8 @@ impl Worker {
         self.self_check = Some((kind.clone(), opts.good_enough));
         let kind = kind.as_ref();
         self.editor = self.find_editor(&ws.manifest.stack)?;
-        let carrying_on = opts.continuing || (opts.message.is_none() && ws.builder_started());
+        let api_resumed = api.as_ref().is_none_or(crate::agent::ApiConversation::resumed);
+        let carrying_on = is_carrying_on(opts, ws, api_resumed);
         let first = (opts.message.is_none() && !carrying_on) || !ws.capture_dir().exists();
         if first {
             self.study(ws, kind)?;
@@ -973,6 +983,9 @@ impl Worker {
             // round adds to it, across runs, until the limit stops the build.
             ws.manifest.not_working_checks = if checks.iter().all(|c| c.passed) { 0 } else { ws.manifest.not_working_checks.saturating_add(1) };
             ws.save()?;
+            // Kept for the next prompt when every check worked; saved after craft.json has the round.
+            progress.checked = self.kept_checks.lock().unwrap_or_else(PoisonError::into_inner).saved_for(round);
+            progress.save(&ws.root)?;
             for c in &checks {
                 self.emit(RunEvent::Checked(c.clone()));
             }
@@ -1107,6 +1120,10 @@ impl Worker {
     /// an error couldn't look at all (a browser that went away), which says nothing about the
     /// build, so it gets a second go before the run stops, and the run says what is really wrong.
     fn checks_with_a_retry(&self, ws: &Workspace, kind: &dyn kinds::TargetKind, round: u32) -> Result<Vec<CheckResult>, ToolError> {
+        self.checks_unless_unchanged(ws, kind, round, || self.checks_with_a_retry_now(ws, kind, round))
+    }
+
+    fn checks_with_a_retry_now(&self, ws: &Workspace, kind: &dyn kinds::TargetKind, round: u32) -> Result<Vec<CheckResult>, ToolError> {
         let e = match self.run_checks(ws, kind, round) {
             Err(e) if e.code != ErrorCode::Cancelled => e,
             done => return done,
@@ -1338,6 +1355,29 @@ impl Worker {
             if self.seen.insert(r.id.clone()) {
                 self.emit(RunEvent::Ask(r));
             }
+        }
+    }
+}
+
+/// What the run says, and the status it leaves on the project, when it ends: paused, failed, or
+/// a caught bug. A caught bug must not leave the saved status as it last was ("Checking" while
+/// nothing runs), or the project looks stuck rather than stopped.
+fn run_outcome(result: Result<Result<String, ToolError>, Box<dyn std::any::Any + Send>>, ws: &mut Workspace) -> (bool, String, bool) {
+    match result {
+        Ok(Ok(m)) => (true, m, false),
+        Ok(Err(e)) if e.code == ErrorCode::Cancelled => {
+            let _ = ws.set_status(Status::Stopped, "Paused. Send a message to continue.");
+            (false, "Paused.".to_string(), true)
+        }
+        Ok(Err(e)) => {
+            let msg = e.for_people();
+            let _ = ws.set_status(Status::NeedsYou, msg.clone());
+            (false, msg, false)
+        }
+        Err(_) => {
+            let msg = "The workflow hit a bug and stopped safely. Your files are untouched.".to_string();
+            let _ = ws.set_status(Status::NeedsYou, msg.clone());
+            (false, msg, false)
         }
     }
 }

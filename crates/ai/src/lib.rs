@@ -77,7 +77,9 @@ impl BackendKind {
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::Gemini => openai::GEMINI_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "grok", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "dsh"],
+            BackendKind::AgentCli => {
+                &["claude-code", "codex", "copilot", "grok", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "dsh", "devin"]
+            }
         }
     }
 
@@ -122,6 +124,18 @@ fn new_session_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("craft-{:x}-{:x}", std::process::id(), n)
+}
+
+/// Gives `cfg` this installation's OpenCode Go session id when one of its backends is OpenCode Go
+/// and none is saved yet. Returns whether it did (#1225).
+fn give_session_id(cfg: &mut AiConfig) -> bool {
+    let blank = cfg.install_id.as_deref().is_none_or(|s| s.trim().is_empty());
+    let has_go = cfg.backends.iter().any(|b| openai::is_opencode_go(b.config.base_url.as_deref().unwrap_or("")));
+    if blank && has_go {
+        cfg.install_id = Some(new_session_id());
+        return true;
+    }
+    false
 }
 
 /// The OpenCode Go key from the environment, when the base URL is its own. A blank value counts as
@@ -527,16 +541,26 @@ impl AiHub {
             return Err(ToolError::invalid("A backend needs a name."));
         }
         let mut cfg = self.config_to_change()?;
-        // The session id is made here, where saving the settings is already the job, rather than on
-        // the first model call, which runs under the session lock.
-        if cfg.install_id.as_deref().is_none_or(|s| s.trim().is_empty()) && openai::is_opencode_go(entry.config.base_url.as_deref().unwrap_or("")) {
-            cfg.install_id = Some(new_session_id());
-        }
         if let Some(k) = key.filter(|k| !k.trim().is_empty()) {
             self.keys.set(&entry.config.name, k.trim())?;
         }
         cfg.upsert(entry);
+        give_session_id(&mut cfg);
         self.save_config(&cfg)
+    }
+
+    /// Makes this installation's OpenCode Go session id and saves it, when a Go backend is set up
+    /// and has none (#1225). Returns whether it saved one. The app and the CLI call this at startup,
+    /// before any session lock is taken: a backend that never went through [`AiHub::add_backend`]
+    /// (one from an older version, or one copied in) would otherwise send a new id every run, which
+    /// OpenCode Go doesn't route efficiently.
+    pub fn ensure_session_id(&self) -> Result<bool, ToolError> {
+        let mut cfg = self.config_to_change()?;
+        if !give_session_id(&mut cfg) {
+            return Ok(false);
+        }
+        self.save_config(&cfg)?;
+        Ok(true)
     }
 
     /// Turn a backend on or off; it keeps its settings and key. Returns false when there was no
@@ -871,7 +895,7 @@ impl AiHub {
                 .with_remediation("Turn it on in Settings → AI, or choose another backend for this conversation."));
         }
         if first.config.kind == BackendKind::AgentCli {
-            return Ok(Box::new(cli_agents::SharedConversation::new(self.engine.clone(), first, beginner)?));
+            return Ok(Box::new(cli_agents::SharedConversation::new(self.engine.clone(), self.keys.clone(), first, beginner)?));
         }
         let mut chain = vec![self.build_model(&first)?];
         for name in cfg.chain_from(&first.config.name).into_iter().skip(1) {
@@ -890,25 +914,28 @@ impl AiHub {
     /// A builder conversation on an API backend: our agent loop with the Build toolset (files and
     /// commands in the project) enabled from the start, and room for a long build. In Deep mode
     /// every toolset is enabled, so it can look inside the original with all of them.
-    /// `transcript`: where the conversation is kept, and resumed from when it's there. `deep` is
-    /// the run's mode, given by the caller: a tool that starts a build holds the session (#1102).
+    /// `transcript`: where the conversation is kept, and resumed from when it's there in this
+    /// mode. `deep` is the run's mode, given by the caller: a tool that starts a build holds the
+    /// session (#1102).
     pub fn start_builder(&self, entry: &BackendEntry, beginner: bool, transcript: Option<PathBuf>, deep: bool) -> Result<ApiConversation, ToolError> {
         use craft_anything_engine::Toolset;
         let toolsets = if deep { self.engine.registry().toolsets() } else { vec![Toolset::Core, Toolset::Build] };
-        self.start_loop(entry, beginner, transcript, &toolsets, true)
+        self.start_loop(entry, beginner, transcript, deep, &toolsets, true)
     }
 
     /// Start the asset extractor: our agent loop with the Build tools and the game archive tools.
     pub fn start_extractor(&self, entry: &BackendEntry, beginner: bool, transcript: Option<PathBuf>) -> Result<ApiConversation, ToolError> {
         use craft_anything_engine::Toolset;
-        self.start_loop(entry, beginner, transcript, &[Toolset::Core, Toolset::Build, Toolset::Formats], false)
+        self.start_loop(entry, beginner, transcript, true, &[Toolset::Core, Toolset::Build, Toolset::Formats], false)
     }
 
+    /// Start one loop with these toolsets, keeping its transcript and resuming it only in `deep`.
     fn start_loop(
         &self,
         entry: &BackendEntry,
         beginner: bool,
         transcript: Option<PathBuf>,
+        deep: bool,
         toolsets: &[craft_anything_engine::Toolset],
         lean_for_local: bool,
     ) -> Result<ApiConversation, ToolError> {
@@ -918,7 +945,7 @@ impl AiHub {
         ApiConversation::start_with(
             host,
             vec![slot],
-            LoopConfig { beginner, prices: self.config().prices.clone(), transcript, lean_for_local, ..LoopConfig::default() },
+            LoopConfig { beginner, prices: self.config().prices.clone(), transcript, deep, lean_for_local, ..LoopConfig::default() },
             toolsets.iter().copied().collect(),
         )
     }

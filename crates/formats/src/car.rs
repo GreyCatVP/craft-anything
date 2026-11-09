@@ -102,6 +102,8 @@ pub fn attribute_name(id: u32) -> String {
         23 => "graphics-feature-set-class",
         24 => "display-gamut",
         25 => "deployment-target",
+        26 => "glyph-weight",
+        27 => "glyph-size",
         o => return format!("attribute-{o}"),
     }
     .into()
@@ -266,7 +268,7 @@ pub fn parse(data: &[u8]) -> Result<AssetCatalog, FormatError> {
         }
         m
     });
-    let key_ids: Vec<u32> = bom
+    let mut key_ids: Vec<u32> = bom
         .var(data, "KEYFORMAT")
         .map(|b| {
             let r = Reader::new(b);
@@ -274,6 +276,19 @@ pub fn parse(data: &[u8]) -> Result<AssetCatalog, FormatError> {
             (0..n.min(64)).map_while(|i| r.u32_le(12 + i * 4)).collect()
         })
         .unwrap_or_default();
+    // A catalog built for a system that predates an attribute (display gamut before macOS 10.12)
+    // keeps a stand-in in KEYFORMAT and the real attribute in KEYFORMATWORKAROUND: one
+    // little-endian u32 per key slot, where a non-zero value replaces the slot's attribute.
+    if let Some(b) = bom.var(data, "KEYFORMATWORKAROUND") {
+        let r = Reader::new(b);
+        for (i, id) in key_ids.iter_mut().enumerate() {
+            if let Some(w) = r.u32_le(i * 4)
+                && w != 0
+            {
+                *id = w;
+            }
+        }
+    }
     let key_format: Vec<String> = key_ids.iter().map(|&i| attribute_name(i)).collect();
     let mut facets = Vec::new();
     let mut ident_to_facet: BTreeMap<u16, String> = BTreeMap::new();
@@ -376,14 +391,89 @@ mod tests {
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
     }
 
+    /// What actool writes for a macOS 10.11 target with sRGB and Display P3 variants of one image:
+    /// KEYFORMAT holds the placeholder attribute (5) where display gamut (24) belongs, and
+    /// KEYFORMATWORKAROUND holds 24 for that slot. `workaround_len` cuts the workaround block.
+    fn catalog_with_key_workaround(workaround_len: usize) -> Vec<u8> {
+        use craft_anything_testkit::Buf;
+        let mut w = fx::BomWriter::new();
+        let mut kf = Buf::with_len(24);
+        kf.put(0, b"tmfk");
+        kf.u32(8, 3);
+        kf.u32(12, 12);
+        kf.u32(16, 17);
+        kf.u32(20, 5);
+        w.var("KEYFORMAT", kf.into_vec());
+        let mut wa = Buf::with_len(12);
+        wa.u32(8, 24);
+        let mut wa = wa.into_vec();
+        wa.truncate(workaround_len);
+        w.var("KEYFORMATWORKAROUND", wa);
+        let mut facet = Buf::with_len(10);
+        facet.u16(4, 1);
+        facet.u16(6, 17);
+        facet.u16(8, 7);
+        w.tree("FACETKEYS", vec![(b"Logo".to_vec(), facet.into_vec())]);
+        let key = |gamut: u16| {
+            let mut b = Buf::with_len(6);
+            b.u16(0, 1);
+            b.u16(2, 7);
+            b.u16(4, gamut);
+            b.into_vec()
+        };
+        w.tree("RENDITIONS", vec![(key(0), b"sRGB".to_vec()), (key(1), b"P3".to_vec())]);
+        w.finish()
+    }
+
+    /// A catalog keyed like the system apps' symbol images: identifier, deployment target, glyph
+    /// weight and glyph size, as `assetutil --info` lists them (`kCRThemeGlyphWeightName`,
+    /// `kCRThemeGlyphSizeName` after `kCRThemeDeploymentTargetName`).
+    #[test]
+    fn glyph_weight_and_size_attributes_are_named() {
+        use craft_anything_testkit::Buf;
+        let mut w = fx::BomWriter::new();
+        let mut kf = Buf::with_len(28);
+        kf.put(0, b"tmfk");
+        kf.u32(8, 4);
+        for (i, id) in [17u32, 25, 26, 27].into_iter().enumerate() {
+            kf.u32(12 + 4 * i, id);
+        }
+        w.var("KEYFORMAT", kf.into_vec());
+        let mut key = Buf::with_len(8);
+        key.u16(0, 7);
+        key.u16(2, 6);
+        key.u16(4, 4);
+        key.u16(6, 2);
+        w.tree("RENDITIONS", vec![(key.into_vec(), b"symbol".to_vec())]);
+        let c = parse(&w.finish()).unwrap();
+        assert_eq!(c.key_format, vec!["identifier", "deployment-target", "glyph-weight", "glyph-size"]);
+        assert_eq!(c.renditions[0].key.get("glyph-weight"), Some(&4));
+        assert_eq!(c.renditions[0].key.get("glyph-size"), Some(&2));
+        assert_eq!(attribute_name(28), "attribute-28");
+    }
+
+    #[test]
+    fn key_format_workaround_names_the_real_attribute() {
+        let c = parse(&catalog_with_key_workaround(12)).unwrap();
+        assert_eq!(c.key_format, vec!["scale", "identifier", "display-gamut"]);
+        let p3 = &c.renditions[1];
+        assert_eq!(p3.key.get("display-gamut"), Some(&1));
+        assert!(!p3.key.contains_key("placeholder"), "{:?}", p3.key);
+        assert_eq!(p3.facet.as_deref(), Some("Logo"));
+        // Zero slots keep their attribute, and slots past the end of the block are not replaced.
+        let cut = parse(&catalog_with_key_workaround(8)).unwrap();
+        assert_eq!(cut.key_format, vec!["scale", "identifier", "placeholder"]);
+    }
+
     #[test]
     fn hostile_inputs() {
-        let s = fx::assets_car();
-        for m in craft_anything_testkit::mutations(&s) {
-            let _ = parse(&m);
-        }
-        for i in (0..s.len()).step_by(7) {
-            let _ = parse(&s[..i]);
+        for s in [fx::assets_car(), catalog_with_key_workaround(12)] {
+            for m in craft_anything_testkit::mutations(&s) {
+                let _ = parse(&m);
+            }
+            for i in (0..s.len()).step_by(7) {
+                let _ = parse(&s[..i]);
+            }
         }
         for seed in 0..100 {
             let mut n = b"BOMStore".to_vec();

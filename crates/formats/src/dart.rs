@@ -258,6 +258,7 @@ impl<'a> Elf<'a> {
         self.r.cstr(o, max)
     }
 
+    /// Find a GNU build ID inside the note region, including the padded owner name in its bounds.
     fn notes(&self, off: u64, size: u64, out: &mut Option<String>) {
         let mut pos = 0u64;
         let r = self.r;
@@ -268,6 +269,9 @@ impl<'a> Elf<'a> {
             let desc_pad = (u64::from(descsz) + 3) & !3;
             let name = r.slice(o.saturating_add(12), namesz as usize);
             let desc_off = 12u64.saturating_add(name_pad);
+            if desc_off.saturating_add(u64::from(descsz)) > size - pos {
+                return;
+            }
             if ty == 3
                 && name == Some(b"GNU\0")
                 && (1..=64).contains(&descsz)
@@ -618,6 +622,21 @@ pub fn abi_rank(abi: &str) -> usize {
 mod tests {
     use super::*;
     use craft_anything_testkit::flutter as fx;
+
+    /// Keep the backing bytes intact while varying only the note's declared extent.
+    #[test]
+    fn a_build_id_cannot_borrow_bytes_from_the_next_region() {
+        let note = b"\x04\0\0\0\x04\0\0\0\x03\0\0\0GNU\0\x12\x34\x56\x78";
+        let elf = Elf { r: Reader::new(note), is64: true, phdrs: vec![], shdrs: vec![] };
+        for size in [12, 16, 19] {
+            let mut id = None;
+            elf.notes(0, size, &mut id);
+            assert_eq!(id, None);
+        }
+        let mut id = None;
+        elf.notes(0, 20, &mut id);
+        assert_eq!(id.as_deref(), Some("12345678"));
+    }
 
     #[test]
     fn reads_section_headers_and_snapshots() {
