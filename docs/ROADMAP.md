@@ -757,7 +757,7 @@ Owner: open · Status: in progress
       and npm give the 1.x line, whose `run` has no `--standalone`, so the check before a build
       can't confirm it. Say where 2.x comes from and how to point the backend at it, and record
       the Linux live runs in STATUS.md
-      — claimed: youkaicountry, branch docs/r2.2-opencode-live-findings
+      — claimed: youkaicountry, branch docs/r2.2-opencode-live-findings — PR #1241
 - [ ] OpenCode's shared service, started while a `--standalone` run is going (opening the desktop
       app does), takes over that run's session: both servers ran its commands, and the turn ended
       with an error that had no details (seen live on Linux, a 2.2.6 service beside a 2.2.5 run).
