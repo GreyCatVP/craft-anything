@@ -994,6 +994,12 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     let (p2, tx2, tx_err, lost2, failure2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone(), failure.clone());
     let failed_tools = Arc::new(AtomicBool::new(false));
     let (failed_tools2, failed_tools3) = (failed_tools.clone(), failed_tools.clone());
+    // A question it asks in its terminal (`[Y/n]`, a sign-in it waits on in a browser) gets no
+    // answer here, so the run stops at once instead of waiting out the idle limit (#1345).
+    let asked: Arc<Mutex<Option<String>>> = Arc::default();
+    let (asked2, asked3, asked4) = (asked.clone(), asked.clone(), asked.clone());
+    // Its own words on stdout are only told apart from the model's when the model's come as JSON.
+    let plain_stdout_is_its_own = adapter.streams_json();
     let stop2 = stop.clone();
     let mut proc = (if remote.is_none() { adapter.process(&prog) } else { Process::new(&prog) })
         .args(&argv)
@@ -1004,9 +1010,15 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     }
     let mut proc = proc
         .stdout_cap(4 * 1024 * 1024)
-        .cancel_when(move || stop2.is_stopped() || failed_tools2.load(Ordering::SeqCst))
+        .cancel_when(move || {
+            stop2.is_stopped() || failed_tools2.load(Ordering::SeqCst) || asked2.lock().unwrap_or_else(PoisonError::into_inner).is_some()
+        })
         .on_stdout_line(move |l| {
             if failed_tools3.load(Ordering::SeqCst) {
+                return;
+            }
+            if plain_stdout_is_its_own && let Some(question) = terminal_question(l) {
+                asked3.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert(question);
                 return;
             }
             let mut p = p2.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1032,6 +1044,9 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
             }
         })
         .on_stderr_line(move |l| {
+            if let Some(question) = terminal_question(l) {
+                asked4.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert(question);
+            }
             if !l.trim().is_empty() {
                 let _ = tx_err.send(AgentEvent::Output { text: l.to_string() });
             }
@@ -1063,7 +1078,14 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         Ok(out) => !out.success,
         Err(_) => true,
     };
+    let question = asked.lock().unwrap_or_else(PoisonError::into_inner).take();
     match result {
+        // It stopped to ask something nobody here can answer; say what, and how to get past it.
+        result if question.is_some() => {
+            *failure.lock().unwrap_or_else(PoisonError::into_inner) = Some(TurnFailure::new(FailureKind::Configuration));
+            let question = question.as_deref().unwrap_or_default();
+            let _ = tx.send(shown.asked_event(&agent, result.as_ref().ok(), question, adapter.sign_in_fix()));
+        }
         // The protocol already named the required tool server. Stop the owned process without
         // replacing that useful error with the cancellation used to stop it.
         result if failed_tools.load(Ordering::SeqCst) => {
@@ -1236,6 +1258,33 @@ impl FailureContext {
         };
         AgentEvent::Error { message: e.message, remediation, log }
     }
+
+    /// The run was stopped because the agent asked `question` in its terminal (#1345).
+    fn asked_event(&self, agent: &str, out: Option<&craft_anything_platform::Output>, question: &str, sign_in_fix: Option<String>) -> AgentEvent {
+        let name = display_for(agent);
+        let message = format!("{name} stopped to ask a question in its terminal, which can't be answered from here: \"{question}\"");
+        let (log, unsaved) = self.save_with(agent, out, Some(&message), None);
+        let mut remediation = sign_in_fix.unwrap_or_else(|| {
+            format!("Run {} once in a terminal and answer it there (if it asks you to sign in, finish signing in), then send your message again.", self.program)
+        });
+        if let Some(u) = unsaved {
+            remediation.push_str(&format!("\n\n{u}"));
+        }
+        AgentEvent::Error { message, remediation: Some(remediation), log }
+    }
+}
+
+/// A line where an agent asks for an answer in its terminal, which a run here never gives: a
+/// `[Y/n]`-style question, or a sign-in it waits on in the browser (Gemini CLI, #1345). Lines of
+/// JSON are the agent's stream, not its own words.
+fn terminal_question(line: &str) -> Option<String> {
+    let text = line.trim();
+    if text.is_empty() || text.starts_with('{') {
+        return None;
+    }
+    let lower = text.to_ascii_lowercase();
+    let asks = ["[y/n]", "(y/n)", "[yes/no]", "(yes/no)"].iter().any(|choice| lower.contains(choice)) || lower.contains("waiting for authentication");
+    asks.then(|| text.chars().take(200).collect())
 }
 
 impl Conversation for CliConversation {
@@ -2582,6 +2631,68 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
             }
             assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error { .. })), "round {round}: {events:?}");
         }
+    }
+
+    /// #1345: a question an agent asks in its terminal is noticed, and its own stream isn't.
+    #[test]
+    fn questions_an_agent_asks_in_its_terminal_are_told_apart() {
+        for line in [
+            "Do you want to continue? [Y/n]: ",
+            "Open the browser to sign in (y/n)?",
+            "[Y/n]",
+            "Waiting for authentication...",
+            "  Overwrite settings? [yes/no] ",
+        ] {
+            assert!(terminal_question(line).is_some(), "{line:?}");
+        }
+        for line in [
+            "",
+            r#"{"type":"text","text":"Reply [Y/n] to confirm"}"#,
+            "Loaded cached credentials.",
+            "Building the first version...",
+        ] {
+            assert!(terminal_question(line).is_none(), "{line:?}");
+        }
+        let long = format!("Continue? [Y/n] {}", "x".repeat(500));
+        assert_eq!(terminal_question(&long).map(|q| q.chars().count()), Some(200), "the quoted line is kept short");
+    }
+
+    /// #1345: an agent that stops at a `[Y/n]` question nobody can answer ends the turn at once
+    /// with an error saying so, instead of waiting out the idle limit (hours for a build).
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_waiting_on_a_terminal_question_ends_the_turn() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("claude");
+        let script = "#!/bin/sh\ncase \"$1\" in --help|--version) echo '--print --output-format stream-json'; exit 0;; esac\n\
+                      cat >/dev/null\necho 'Do you want to continue? [Y/n]: '\nexec sleep 60\n";
+        std::fs::write(&program, script).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config =
+            BackendConfig { name: "Claude".into(), kind: BackendKind::AgentCli, model: "claude-code".into(), base_url: None, ssh_host: None, enabled: true };
+        let options = BackendOptions { command: Some(program.display().to_string()), ..Default::default() };
+        let mut c = CliConversation::new(CliSpec::new(config, options, false, None));
+        let began = std::time::Instant::now();
+        c.send("go");
+        let mut events = Vec::new();
+        loop {
+            let got = c.poll();
+            let done = got.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. }));
+            events.extend(got);
+            if done {
+                break;
+            }
+            assert!(began.elapsed() < Duration::from_secs(30), "the turn waited on the question: {events:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let error = events.iter().find_map(|e| match e {
+            AgentEvent::Error { message, remediation, .. } => Some((message.clone(), remediation.clone().unwrap_or_default())),
+            _ => None,
+        });
+        let (message, remediation) = error.unwrap_or_else(|| panic!("no error: {events:?}"));
+        assert!(message.contains("[Y/n]") && message.contains("terminal"), "{message}");
+        assert!(remediation.contains("terminal") || remediation.contains("sign"), "{remediation}");
     }
 
     /// #91: a Mac app with no CLI beside it reached Claude Code, which stopped with a stack trace.

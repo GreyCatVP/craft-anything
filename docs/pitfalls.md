@@ -451,6 +451,12 @@ that checks the PID), and test by killing the owner, not by dropping the guard.
 **Stopping a long run leaves children behind** unless every program goes through
 `craft_anything_platform::process`. After stopping one, check that its child processes are gone.
 
+**A closed stdin doesn't stop a program waiting on the person.** Gemini CLI asked `[Y/n]` about
+signing in through the browser and kept waiting, with no one able to answer, and a build sat at
+"Building the first version" with nothing to end it before the 8-hour idle limit (#1345). When a
+program says it's waiting on a terminal answer or a sign-in, stop the run at once and say what it
+asked and how to answer it outside.
+
 **Separate target folders fill the disk.** Agents given their own `CARGO_TARGET_DIR` under
 `target/` (to avoid locking a running exe) left them behind; one reached 79 GB and the disk filled
 mid-build ("not enough space", os error 112). Delete an agent's target folder when its work is
