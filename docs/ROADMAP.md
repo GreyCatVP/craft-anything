@@ -929,6 +929,9 @@ Owner: open · Status: in progress
       line break ("batch file arguments are invalid"), expands `%` and caps the line at 8191
       characters; that `.exe` is now started directly, as an npm shim's is (#1237)
       — claimed: jgt87, branch bugfix/r2.2-cmd-wrapper-exe — PR #1238
+- [x] Codex's and Grok Build's `config.toml` keep their Windows line endings when setup adds or
+      removes our entry.
+      — claimed: Plastic-time, branch bugfix/r2.2-toml-config-crlf
 
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
