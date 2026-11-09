@@ -60,7 +60,8 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
     let overflow = context_overflow(full.as_deref().unwrap_or(body));
     // Ollama fits a long prompt to its context by dropping the oldest messages; once the person's
     // request is among them, a Qwen 3.8 model refuses what's left with this, and no retry fits (#1245).
-    let dropped_request = overflow.is_none() && full.as_deref().unwrap_or(body).to_ascii_lowercase().contains("no user query found in messages");
+    let lower = full.as_deref().unwrap_or(body).to_ascii_lowercase();
+    let dropped_request = overflow.is_none() && lower.contains("no user query found in messages");
     let detail: String = full.unwrap_or_else(|| body.chars().take(300).collect()).chars().take(1000).collect();
     let (code, remediation) = match status {
         _ if dropped_request => (ErrorCode::BadSettings, ""),
@@ -90,7 +91,15 @@ pub fn status_error(what: &str, status: u16, body: &str) -> ToolError {
         "context_window": overflow.map(|o| o.0),
         "prompt_tokens": overflow.and_then(|o| o.1),
         "context_overflow": overflow.is_some() || dropped_request,
+        "affordable_tokens": if status == 402 { affordable_tokens(&lower) } else { None },
     }))
+}
+
+/// The answer length OpenRouter says a key can still pay for: "You requested up to 131072 tokens,
+/// but can only afford 35063" (#1213).
+fn affordable_tokens(lower: &str) -> Option<u64> {
+    let (_, rest) = lower.split_once("can only afford ")?;
+    rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()
 }
 
 /// The context window a server says a request didn't fit in, and the request's size when it says

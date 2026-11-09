@@ -1368,3 +1368,46 @@ fn openrouter_with_no_provider_for_tools_falls_back_to_the_text_protocol() {
     assert!(seen[0].body.get("tools").is_some());
     assert!(seen[1].body.get("provider").is_none() && seen[1].body.get("tools").is_none(), "the second asks in text: {}", seen[1].body);
 }
+
+/// #1213: with no max_tokens, OpenRouter holds the model's whole output limit against the key's
+/// credit and answers 402 with what it can afford; the request is sent once more capped at that.
+#[test]
+fn openrouter_asks_again_for_an_answer_the_key_can_afford() {
+    use crate::model::{Effort, Msg, Stop, TurnRequest};
+    let messages = [Msg::user_text("hi")];
+    let request = TurnRequest { system: "S", messages: &messages, tools: &[], effort: Effort::Low, max_tokens: 100 };
+    let refusal = |n: u64| {
+        let message = format!(
+            "This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford {n}. To increase, visit https://openrouter.ai/settings/credits and add more credits"
+        );
+        (402, "application/json", json!({"error": {"code": 402, "message": message}}).to_string())
+    };
+    let reply = || (200, "text/event-stream", chat_sse(&[json!({"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]})]));
+    let (url, seen) = mock(vec![refusal(35063), reply(), reply()]);
+    let mut model = openai::OpenAi::openrouter(Some(&url), "k".into(), "moonshotai/kimi-k3.1-pro");
+    assert_eq!(model.turn(&request, &mut |_| {}, &Stop::default()).unwrap().message.text(), "hello");
+    assert_eq!(model.turn(&request, &mut |_| {}, &Stop::default()).unwrap().message.text(), "hello");
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3, "one retry, then the cap is kept");
+        assert!(seen[0].body.get("max_tokens").is_none());
+        assert_eq!(seen[1].body["max_tokens"], 35063);
+        assert_eq!(seen[2].body["max_tokens"], 35063, "the next turn doesn't ask for more again");
+    }
+
+    // Too little left to write a file, or the same refusal under the cap: it stays a billing error.
+    for (cap, n) in [(None, 1000), (Some(35063), 35063)] {
+        let (url, seen) = mock(vec![refusal(n), reply()]);
+        let mut model = openai::OpenAi::openrouter(Some(&url), "k".into(), "moonshotai/kimi-k3.1-pro");
+        model.answer_cap = cap;
+        let e = model.turn(&request, &mut |_| {}, &Stop::default()).unwrap_err();
+        assert!(e.message.contains("402"), "{}", e.message);
+        assert!(!crate::TurnFailure::from_api(&e).retryable());
+        assert_eq!(seen.lock().unwrap().len(), 1, "not asked again");
+    }
+    // Only OpenRouter is asked again.
+    let (url, seen) = mock(vec![refusal(35063), reply()]);
+    let mut other = openai::OpenAi::compatible("Other", &url, Some("k".into()), "m");
+    assert!(other.turn(&request, &mut |_| {}, &Stop::default()).is_err());
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}
