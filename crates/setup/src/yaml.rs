@@ -126,6 +126,16 @@ struct Block {
     end: usize,
 }
 
+/// A value after `table:` that holds nothing: `{}`, or a null as the parser reads one (`null` or
+/// `~`), with an optional comment after it.
+fn empty_inline(rest: &str) -> bool {
+    let t = rest.trim();
+    if let Some(after) = t.strip_prefix("{}") {
+        return only_comment(after);
+    }
+    ["null", "~"].iter().any(|null| t.strip_prefix(null).is_some_and(|after| after.is_empty() || (after.starts_with([' ', '\t']) && only_comment(after))))
+}
+
 fn find_table(lines: &[&str], table: &str) -> Result<Option<Block>, String> {
     for (i, l) in lines.iter().enumerate() {
         if indent_of(l) != 0 || is_blank_or_comment(l) {
@@ -133,7 +143,9 @@ fn find_table(lines: &[&str], table: &str) -> Result<Option<Block>, String> {
         }
         if let Some(rest) = key_line(l, table) {
             if !only_comment(rest) {
-                if rest.trim() == "{}" || rest.trim().starts_with("{}") && only_comment(rest.trim().get(2..).unwrap_or_default()) {
+                // A value that carries on onto indented lines isn't empty: `null` then `  more` is text.
+                let continued = lines.iter().skip(i + 1).find(|l2| !is_blank_or_comment(l2)).is_some_and(|l2| indent_of(l2) > 0);
+                if empty_inline(rest) && !continued {
                     return Ok(Some(Block { header: i, end: i + 1 }));
                 }
                 return Err(format!("`{table}` uses inline (flow) style; edit it by hand or convert it to a block mapping"));
@@ -243,9 +255,11 @@ pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String,
             let child = find_child(&lines, &block, name);
             if block.end == block.header + 1
                 && let Some(h) = out.get_mut(block.header)
-                && key_line(&h.0, table).is_some_and(|r| r.trim().starts_with("{}"))
+                && let Some(rest) = key_line(&h.0, table).filter(|r| empty_inline(r))
             {
-                h.0 = format!("{table}:");
+                // Keep a comment that followed the empty value.
+                let comment = rest.find('#').and_then(|p| rest.get(p..)).map(|c| format!(" {c}")).unwrap_or_default();
+                h.0 = format!("{table}:{comment}");
             }
             match child {
                 Some((s, e)) => {
