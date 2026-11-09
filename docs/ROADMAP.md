@@ -1217,6 +1217,12 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
+- [x] Simple and Advanced use one text size and spacing: switching modes changes what is shown, not
+      how big everything is (Simple set 16 pt text and roomier controls, Advanced 13 pt, so the
+      whole window seemed to zoom). Zoom (Cmd/Ctrl + / −) stays the way to make everything bigger.
+      A maintainer's call, made by merging: Simple's larger text was there for people who find
+      small text hard to read, and this leaves that to zoom
+      — claimed: jgt87, branch feature/r2.9-one-size-both-modes — PR #1236
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
