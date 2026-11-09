@@ -311,9 +311,11 @@ pub(super) fn run_with(cx: &CheckCx, option: &str, file: &Path) -> Result<OwnRun
     let mut with = args.clone();
     with.extend(option_args(godot.is_some() && app.join("project.godot").is_file(), option, file));
     // A round with a time limit (the builder's own checks) cuts this run at the limit, instead of
-    // waiting out its own 90 s. A pause stops it now.
+    // waiting out its own 90 s. A pause stops it now, and neither a pause nor a passed limit ever
+    // starts the program.
     let stop = cx.stop();
     let timeout = stop.time_left().map_or(RUN_LIMIT, |left| RUN_LIMIT.min(left));
+    stop.check()?;
     let out = Process::new(&program).args(&with).cwd(&app).timeout(timeout).stdout_cap(256 * 1024).cancel_when(move || stop.paused()).run();
     let Ok(bytes) = std::fs::read(file) else {
         let why = match &out {

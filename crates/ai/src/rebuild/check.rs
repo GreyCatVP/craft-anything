@@ -10,6 +10,9 @@ fn run_in(app: &Path, prog: &Path, args: &[String], minutes: u64, stop: &CheckSt
     // instead of waiting out the step's own, much longer, deadline.
     let limit = Duration::from_secs(minutes * 60);
     let timeout = stop.time_left().map_or(limit, |left| limit.min(left));
+    // Nothing starts once it's time to stop: a step starting past the limit could exit before its
+    // zero deadline is seen and count as passed.
+    stop.check().map_err(|e| e.message)?;
     let s = stop.clone();
     craft_anything_platform::Process::new(prog)
         .args(args)
@@ -369,6 +372,25 @@ mod tests {
         paused.cancel();
         let stop = CheckStop::from(&paused);
         assert!(stop.cancelled() && stop.time_left().is_none(), "a pause alone cancels, a missing limit isn't one");
+    }
+
+    /// A step that would start after the round's limit, or while the build is paused, is refused
+    /// before it starts: a zero deadline alone could let a quick exit count as a pass.
+    #[cfg(unix)]
+    #[test]
+    fn a_step_is_refused_before_it_starts_past_the_limit_or_paused() {
+        let d = tempfile::tempdir().unwrap();
+        let marker = d.path().join("started");
+        let args = ["-c", "touch started"].map(String::from).to_vec();
+        let started = |stop: &CheckStop| run_in(d.path(), Path::new("sh"), &args, 60, stop);
+        let e = started(&CheckStop::limited(Instant::now())).unwrap_err();
+        assert!(e.contains("time limit"), "{e}");
+        assert!(!marker.exists(), "the step ran after the round's limit");
+        let paused = CancelToken::default();
+        paused.cancel();
+        let e = started(&CheckStop::from(&paused)).unwrap_err();
+        assert!(e.contains("cancelled"), "{e}");
+        assert!(!marker.exists(), "the step ran while paused");
     }
 
     #[test]

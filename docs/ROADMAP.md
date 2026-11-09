@@ -574,6 +574,9 @@ yet, and the quick start is how every new person begins.
       within 90 s while the same check passed in the builder's turn and on a re-run; not
       reproduced. The app waited on animation frames, which a window behind others may not get;
       the Electron steps now say to capture after loading instead
+- [ ] A live Windows build whose check stalls (Codex, a Godot project, as in the reports): the
+      feed names the check it is in, the builder's own checks stop at their 30-minute limit,
+      Pause acts between checks and stops a running build step, and a caught bug leaves "Needs you"
 - [ ] A live chat run with a big comparison result, to see Claude Code page it with
       `core_evidence_browse` (and whether 80 KB is the right size)
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't
