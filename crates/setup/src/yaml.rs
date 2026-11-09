@@ -136,6 +136,8 @@ fn empty_inline(rest: &str) -> bool {
     ["null", "~"].iter().any(|null| t.strip_prefix(null).is_some_and(|after| after.is_empty() || (after.starts_with([' ', '\t']) && only_comment(after))))
 }
 
+/// The top-level `table:` block, if the file has one. An inline value is refused unless it holds
+/// nothing (see [`empty_inline`]).
 fn find_table(lines: &[&str], table: &str) -> Result<Option<Block>, String> {
     for (i, l) in lines.iter().enumerate() {
         if indent_of(l) != 0 || is_blank_or_comment(l) {
