@@ -13,11 +13,12 @@ content, kept private), so the remote run gets the same tools. The host needs
 next to it). If the check fails, the turn stops before any work with the fix.
 
 **Which OpenCode.** Runs need OpenCode 2.x, whose `run` has `--standalone`. OpenCode's install
-script and npm still give the 1.x line (1.19.5 on 2026-11-08), which doesn't have it. 2.x comes
+script and npm's `opencode-ai` package still give the 1.x line (1.19.5 on 2026-11-08), which
+doesn't have it. 2.x comes from npm's `@opencode/cli` package (`npm install -g @opencode/cli`),
 with the OpenCode desktop app, whose CLI is `opencode-cli` in the app's resources folder
 (`/opt/OpenCode/resources/opencode-cli` from the Linux package), and from OpenCode's GitHub
-releases. When the `opencode` on your PATH is 1.x, point the backend at the 2.x CLI: step 2
-below, or `craft-anything-cli ai program OpenCode <path>`.
+releases. When the `opencode` on your PATH is 1.x, install `@opencode/cli`, or point the backend
+at a 2.x CLI: step 2 below, or `craft-anything-cli ai program OpenCode <path>`.
 
 **Don't start OpenCode during a build.** OpenCode's shared service resumes every session it finds
 running, including the one a build's private server is driving: started mid-build (opening the

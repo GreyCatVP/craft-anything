@@ -754,7 +754,8 @@ Owner: open · Status: in progress
       project. Discover with a private server unless the person chose `--server`
       — claimed: youkaicountry, branch bugfix/r2.2-opencode-discovery-standalone
 - [x] `docs/opencode.md` says "OpenCode V2" but not where to get it: OpenCode's install script
-      and npm give the 1.x line, whose `run` has no `--standalone`, so the check before a build
+      and npm's `opencode-ai` give the 1.x line, whose `run` has no `--standalone` (npm's
+      `@opencode/cli` is 2.x), so the check before a build
       can't confirm it. Say where 2.x comes from and how to point the backend at it, and record
       the Linux live runs in STATUS.md
       — claimed: youkaicountry, branch docs/r2.2-opencode-live-findings — PR #1241
