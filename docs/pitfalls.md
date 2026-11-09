@@ -475,6 +475,17 @@ edit, right before committing.
 
 ## Design
 
+**A round of checks that nothing could stop.** The builder's own checks ran one after another on
+the build's thread with no time limit, Pause was looked at only between tool calls, and the feed
+said only "checking its work against the original" for the whole round, so a check that stalled
+named no check and could hold the build for hours. Give a builder's checks a round time limit,
+look at Pause before each check, and say each check as its own step. The limit must reach the
+checks' own program runs too: a build step (a game engine's import, a cold compile) makes no tool
+call, so a limit that only applies "at the next tool call" leaves exactly the step that hangs.
+A check that's cut off is a failed check with its reason, never a silent wait. And every way a
+run can end — including a caught bug — records the project's status: leaving the last status on
+disk ("Checking" while nothing runs) reads as a stuck build that can't be retried.
+
 **An early error without a terminal event.** Model validation returned after reporting an error,
 but headless chat waits for `TurnDone`, not just an idle worker. Preflight failures and cancellation
 must finish the event sequence too; regression tests check both the error/status and the terminal event.
@@ -618,6 +629,9 @@ test a tool through `Engine::call` with a time limit on a thread.
 **A forked session's cost is the session's.** Claude Code's `total_cost_usd` for a
 `--fork-session` run is the whole session's running total ($22.67 for a question that cost cents).
 Don't show a cost you can't attribute to the thing it's shown beside.
+The same holds for `--resume`: a build turn's total is the session's running total, so summing
+each turn's total counted the session again every turn (#1187). Keep each session's last total and
+add only the increase; a per-turn `usage` block is per turn, the cost fields are not.
 
 **An option that offered nothing new.** Asked for "a shallow live copy", the pin dialog got a
 Live choice that copied nothing and opened the project's app, which is exactly Play, under a
@@ -786,6 +800,12 @@ the install then downloaded the same release again (#740). Install folders are a
 list: scan the folders people keep such things in (`KnownRoot`, by folder name, a set number of
 levels down), and make an install use a copy already found outside our store. Test each layout
 (unzipped, cask, capitalised name) with temp folders, not the machine the test runs on.
+
+**A per-run id that a provider expects to be stable.** OpenCode Go refuses a request without
+`x-opencode-session` (#1225). The header was sent, but only for backends saved with an id, so
+backends from older versions or found from a key got a new id on every run. A fallback id for one
+run is a workaround, not a fix: give each saved provider backend its id once, at startup, before
+any session lock is held (`AiHub::ensure_session_id`), and test a restart keeps the same id.
 
 ## Agent tooling
 
