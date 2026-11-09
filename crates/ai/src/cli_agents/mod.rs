@@ -53,6 +53,7 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("maki", "maki", "Maki"),
     ("aider", "aider", "Aider"),
     ("dsh", "dsh", "DeepSeek Harness"),
+    ("devin", "devin", "Devin"),
 ];
 
 pub fn program_for(agent: &str) -> String {
@@ -566,6 +567,9 @@ pub struct CliSpec {
     pub question: bool,
     /// Where a failed run writes what's known about it ([`crate::failure_log`]). None writes no log.
     pub logs: Option<PathBuf>,
+    /// The backend's stored API key, for an ACP agent that asks the host to authenticate before a
+    /// session opens (Devin). None for agents that sign in some other way.
+    pub key: Option<String>,
 }
 
 /// What a building run needs besides the working folder.
@@ -613,6 +617,7 @@ impl CliSpec {
             logs: None,
             adapters: AgentAdapters::built_in(),
             question: false,
+            key: None,
         }
     }
 }
@@ -667,6 +672,7 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     args.extend(adapter.acp_trailing().iter().map(|word| (*word).to_string()));
     let preamble = spec.preamble.clone().unwrap_or_else(|| crate::prompt::cli_preamble(spec.beginner));
     let session_config = adapter.acp_session_config(&spec.options);
+    let auth = acp::key_auth_method(&agent).map(str::to_string).zip(spec.key.clone());
     Some(
         AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, if spec.question { None } else { spec.resume.clone() })
             .with_validation(adapter.validate_options(&spec.options))
@@ -675,7 +681,8 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
             .with_question(spec.question)
             .with_session_config(session_config)
             .with_preamble(preamble)
-            .with_logs(spec.logs.clone()),
+            .with_logs(spec.logs.clone())
+            .with_auth(auth),
     )
 }
 
@@ -2702,7 +2709,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         reg.register(Arc::new(EchoAgent));
         assert_eq!(
             format!("{reg:?}"),
-            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "copilot", "grok", "dsh", "echo-agent"]"#
+            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "copilot", "grok", "dsh", "devin", "echo-agent"]"#
         );
     }
 

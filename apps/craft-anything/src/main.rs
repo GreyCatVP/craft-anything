@@ -54,6 +54,12 @@ fn main() -> eframe::Result {
     layer_tools.extend(craft_anything_setup::tools::specs());
     let engine = Engine::shared_with(session, layer_tools, plugins);
     let hub = Arc::new(AiHub::new(engine.clone()));
+    // Before the window opens, while no session lock is held (#1225).
+    match hub.ensure_session_id() {
+        Ok(true) => log::info!("made this installation's OpenCode Go session id"),
+        Ok(false) => {}
+        Err(e) => log::warn!("couldn't save the OpenCode Go session id: {e}"),
+    }
     log::info!("engine and AI ready; opening the window");
 
     let viewport = eframe::egui::ViewportBuilder::default()
