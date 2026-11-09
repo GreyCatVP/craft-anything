@@ -753,11 +753,19 @@ Owner: open · Status: in progress
       build's model check woke it, and a session left from days before went on editing another
       project. Discover with a private server unless the person chose `--server`
       — claimed: youkaicountry, branch bugfix/r2.2-opencode-discovery-standalone
-- [ ] `docs/opencode.md` says "OpenCode V2" but not where to get it: OpenCode's install script
+- [x] `docs/opencode.md` says "OpenCode V2" but not where to get it: OpenCode's install script
       and npm give the 1.x line, whose `run` has no `--standalone`, so the check before a build
       can't confirm it. Say where 2.x comes from and how to point the backend at it, and record
       the Linux live runs in STATUS.md
       — claimed: youkaicountry, branch docs/r2.2-opencode-live-findings
+- [ ] OpenCode's shared service, started while a `--standalone` run is going (opening the desktop
+      app does), takes over that run's session: both servers ran its commands, and the turn ended
+      with an error that had no details (seen live on Linux, a 2.2.6 service beside a 2.2.5 run).
+      Keep a run's session out of the service's reach, if OpenCode allows it; until then
+      `docs/opencode.md` says not to open OpenCode during a build
+- [ ] OpenCode logs "Received a progress notification for an unknown token" for our tool server
+      after calls through 2.x's `execute` (seen live on Linux, 2.2.5): check that our MCP server
+      sends progress only for a request that carried a `progressToken`, and only before its result
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
