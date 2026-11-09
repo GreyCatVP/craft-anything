@@ -1255,6 +1255,13 @@ Gaps found while using the app for real projects.
       no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
       the reported running total was $0.00350053. Earlier builds' totals stay as they were.
       — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
+- [x] The app's version can be seen inside it on every system: only macOS's menu bar had an About,
+      and the About dialog in `home.rs` was never opened (#1300)
+      — claimed: jgt87, branch feature/r2.9-show-version — PR #1301
+- [ ] Settings fits a small window at high zoom: it's 680 points wide with a page up to 560 tall,
+      so at 2× zoom in the smallest window (760×520, 380×260 points) its tab list starts off the
+      left edge and the dialog runs off the bottom. Fit the dialog to the window, with the tab
+      list scrolling when it must (found in #1301's review)
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
