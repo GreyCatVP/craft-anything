@@ -992,7 +992,7 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
             continue;
         }
         let (name, rest) = take_identifier(seg);
-        if name.is_empty() {
+        if name.is_empty() && !seg.starts_with(['"', '`', '\'', '[']) {
             continue;
         }
         let type_name = extract_type(rest.trim());
@@ -1229,7 +1229,7 @@ fn take_identifier(seg: &str) -> (String, &str) {
                 } else if chars.next_if(|&(_, next)| next == q).is_some() {
                     name.push(q);
                 } else {
-                    return (name, seg.get(i + 1..).unwrap_or(""));
+                    return (name, seg.get(i.saturating_add(1)..).unwrap_or(""));
                 }
             }
             (name, "")
