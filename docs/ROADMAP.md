@@ -1255,6 +1255,10 @@ Gaps found while using the app for real projects.
       no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
       the reported running total was $0.00350053. Earlier builds' totals stay as they were.
       — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
+- [x] Two-way switches (Mode, Theme and the others) slide their selection to the new choice instead
+      of jumping, and Theme gets a System choice, the new default, that follows the system's light
+      or dark appearance and changes with it
+      — claimed: jgt87, branch feature/r2.9-sliding-switch-system-theme — PR #1234
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
