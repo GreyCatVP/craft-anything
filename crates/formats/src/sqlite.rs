@@ -1214,20 +1214,25 @@ fn split_top_level(s: &str) -> Vec<&str> {
     out
 }
 
-/// Take the leading column identifier (handling "quoted", `back-ticked`, [bracketed] names).
+/// Take the leading column identifier (handling "quoted", `back-ticked`, 'single-quoted' and
+/// [bracketed] names).
 fn take_identifier(seg: &str) -> (String, &str) {
     let seg = seg.trim_start();
-    let mut chars = seg.char_indices();
+    let mut chars = seg.char_indices().peekable();
     match chars.next() {
-        Some((_, q @ ('"' | '`'))) => {
-            // Quoted: read to the closing quote (doubled quote = literal, kept simple).
-            for (i, c) in chars {
-                if c == q {
-                    let name = seg.get(1..i).unwrap_or("").replace(&format!("{q}{q}"), &q.to_string());
+        Some((_, q @ ('"' | '`' | '\''))) => {
+            // Quoted: read to the closing quote. A doubled quote stands for one quote.
+            let mut name = String::new();
+            while let Some((i, c)) = chars.next() {
+                if c != q {
+                    name.push(c);
+                } else if chars.next_if(|&(_, next)| next == q).is_some() {
+                    name.push(q);
+                } else {
                     return (name, seg.get(i + 1..).unwrap_or(""));
                 }
             }
-            (seg.get(1..).unwrap_or("").to_string(), "")
+            (name, "")
         }
         Some((_, '[')) => {
             if let Some(close) = seg.find(']') {
