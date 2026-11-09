@@ -959,6 +959,8 @@ pub fn parse_create_columns(sql: &str) -> Vec<Column> {
     column_definitions(sql).into_iter().map(|(column, _)| column).collect()
 }
 
+/// Each column of a CREATE TABLE, with the text that follows its name (type, constraints,
+/// default).
 fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
     let mut cols = Vec::new();
     // Take the text inside the outermost parentheses.
