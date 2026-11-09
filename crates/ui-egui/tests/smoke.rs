@@ -3255,3 +3255,66 @@ fn a_very_long_app_file_name_keeps_start_inside_the_window() {
     let start = h.get_by_label("Start").rect();
     assert!(start.left() >= 0.0 && start.right() <= content.right(), "Start ({start:?}) stays inside the window ({content:?})");
 }
+
+/// Choosing who extracts right before Start (#1290's review): quick choices are saved in the order
+/// they were made, and the build waits until they're saved, so it uses the latest.
+#[test]
+fn a_start_waits_for_the_ai_choices_being_saved() {
+    use craft_anything_ai::rebuild::StandIns;
+    use craft_anything_ai::{BackendConfig, BackendKind, Role};
+    let d = tempfile::tempdir().unwrap();
+    let runs = StandIns::new();
+    let (dir, r) = (d.path().to_path_buf(), runs.clone());
+    let mut h = harness(move || {
+        let a = stand_in_app(dir, &r);
+        for name in ["Local one", "Local two"] {
+            let local = BackendConfig {
+                name: name.into(),
+                kind: BackendKind::OpenaiCompatible,
+                model: "qwen".into(),
+                base_url: Some("http://localhost:11434/v1".into()),
+                ssh_host: None,
+                enabled: true,
+            };
+            a.hub.add_backend(local, None).unwrap();
+        }
+        a
+    });
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Local two")));
+    {
+        let a = h.state_mut();
+        a.set_role(Role::Extractor, Some("Local one".into()));
+        a.set_role(Role::Extractor, Some("Local two".into()));
+        a.state.make.request = "A notes app".into();
+        a.start_make();
+        assert!(a.roles_saving(), "the choices are still being saved");
+        assert!(a.creating.is_none(), "Start waits for them");
+    }
+    assert!(wait(&mut h, |a| !a.roles_saving()), "saved");
+    assert_eq!(h.state().hub.chosen(Role::Extractor).as_deref(), Some("Local two"), "the latest choice wins");
+    assert_eq!(h.state().extractor.as_deref(), Some("Local two"));
+    assert!(wait(&mut h, |_| !runs.started().is_empty()), "the waiting Start built once they were saved");
+}
+
+/// A choice that can't be saved keeps a waiting Start from building with the old one.
+#[test]
+fn a_start_waiting_for_an_ai_choice_that_fails_to_save_does_not_build() {
+    use craft_anything_ai::Role;
+    use craft_anything_ai::rebuild::StandIns;
+    let d = tempfile::tempdir().unwrap();
+    let runs = StandIns::new();
+    let (dir, r) = (d.path().to_path_buf(), runs.clone());
+    let mut h = harness(move || stand_in_app(dir, &r));
+    h.run_steps(2);
+    {
+        let a = h.state_mut();
+        a.set_role(Role::Extractor, Some("No such AI".into()));
+        a.state.make.request = "A notes app".into();
+        a.start_make();
+    }
+    assert!(wait(&mut h, |a| !a.roles_saving()), "the save ended");
+    h.run_steps(5);
+    assert!(h.state().creating.is_none() && runs.started().is_empty(), "no build after a failed save");
+    assert!(h.state().state.toasts.iter().any(|(_, error)| *error), "the failure is shown");
+}

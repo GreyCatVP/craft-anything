@@ -531,6 +531,13 @@ pub struct CraftApp {
     saving: Option<u64>,
     /// A new project being made (Start waits for it).
     pub creating: Option<u64>,
+    /// Role choices (who builds, who extracts) not saved yet, the latest per role. They're saved
+    /// one job at a time, in order, so a quick second choice can't be overtaken by the first.
+    roles_wanted: Vec<(craft_anything_ai::Role, Option<String>)>,
+    /// The job saving role choices, while one runs.
+    roles_job: Option<u64>,
+    /// A Start that waits for role choices to be saved, so the build uses them.
+    start_after_roles: Option<state::MakeDraft>,
     /// Tools the UI started that wait for the person's consent, by the id on their card.
     pending_consent: std::collections::HashMap<u64, (String, Value, Route)>,
     next_consent: u64,
@@ -579,6 +586,9 @@ impl CraftApp {
             folder_inputs: Default::default(),
             builder: None,
             extractor: None,
+            roles_wanted: Vec::new(),
+            roles_job: None,
+            start_after_roles: None,
             missing_key: Default::default(),
             detected: None,
             detect_hints: Vec::new(),
@@ -1204,13 +1214,34 @@ impl CraftApp {
         self.jobs.spawn("Read AI settings", false, move |_| Ok(backends(&hub)));
     }
 
-    /// Choose the backend that builds or extracts (`None`: its default).
+    /// Choose the backend that builds or extracts (`None`: its default). Choices are saved one
+    /// job at a time and the latest wins, whatever order threads would have run in.
     pub fn set_role(&mut self, role: craft_anything_ai::Role, name: Option<String>) {
-        let hub = self.hub.clone();
-        self.jobs.spawn(tr("Choose an AI's job"), true, move |_| {
-            hub.set_role(role, name.as_deref()).map_err(|e| e.message)?;
+        match self.roles_wanted.iter_mut().find(|(r, _)| *r == role) {
+            Some(wanted) => wanted.1 = name,
+            None => self.roles_wanted.push((role, name)),
+        }
+        self.save_roles();
+    }
+
+    /// Save the role choices made since the last save, unless a save is already running (its
+    /// end starts the next).
+    fn save_roles(&mut self) {
+        if self.roles_job.is_some() || self.roles_wanted.is_empty() {
+            return;
+        }
+        let (hub, wanted) = (self.hub.clone(), std::mem::take(&mut self.roles_wanted));
+        self.roles_job = Some(self.jobs.spawn(tr("Choose an AI's job"), true, move |_| {
+            for (role, name) in &wanted {
+                hub.set_role(*role, name.as_deref()).map_err(|e| e.message)?;
+            }
             Ok(backends(&hub))
-        });
+        }));
+    }
+
+    /// Role choices are still being saved: a build started now waits for them.
+    pub fn roles_saving(&self) -> bool {
+        self.roles_job.is_some() || !self.roles_wanted.is_empty()
     }
 
     pub fn detect_backends(&mut self) {
@@ -1408,10 +1439,20 @@ impl CraftApp {
         if self.creating == Some(job) {
             self.creating = None;
         }
+        let roles_saved = self.roles_job == Some(job);
+        if roles_saved {
+            self.roles_job = None;
+        }
         self.chat_jobs.retain(|id| *id != job);
         let done = match done.result {
             Ok(d) => d,
             Err(e) => {
+                // A role choice that couldn't be saved keeps a waiting Start from building
+                // with the old one; choices made since are still saved.
+                if roles_saved {
+                    self.start_after_roles = None;
+                    self.save_roles();
+                }
                 self.detecting = false;
                 self.facts_read(job, None);
                 // A failed or cancelled engine download frees the button to try again.
@@ -1491,14 +1532,27 @@ impl CraftApp {
                     self.state.backend = None;
                 }
                 self.backends = b;
-                self.builder = builder;
-                self.extractor = extractor;
+                // While role choices are being saved, another job's read of them may predate the
+                // save: keep what's shown until the save's own result arrives.
+                if roles_saved || !self.roles_saving() {
+                    self.builder = builder;
+                    self.extractor = extractor;
+                }
                 self.missing_key = missing_key;
                 self.backend_options = options;
                 self.model_tuning.retain(|name, state| {
                     self.backends.iter().any(|backend| backend.name == *name && craft_anything_ai::model_options::supported(backend))
                         && self.backend_options.get(name).and_then(|options| options.cli_model.as_ref()) == state.cli_model.as_ref()
                 });
+                // Saved: the next choices go out, and a Start that waited for them builds now.
+                if roles_saved {
+                    self.save_roles();
+                    if !self.roles_saving()
+                        && let Some(draft) = self.start_after_roles.take()
+                    {
+                        self.start_draft(draft);
+                    }
+                }
             }
             Done::ModelChoices { name, result } => match result {
                 // Kept only while the picker is still open for that AI.
