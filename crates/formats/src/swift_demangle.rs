@@ -185,6 +185,10 @@ impl<'a> D<'a> {
         Ok(())
     }
 
+    /// Records a node that later `A…` substitutions can refer to by position. The mangler numbers
+    /// identifiers, nominal types, bound generic types (an `Sg` optional too) and associated types
+    /// (`Qz`, `Qy`) in the order they appear, but not extensions, so every index after a missed or
+    /// extra entry would pick the wrong node.
     fn add_sub(&mut self, n: &N) -> R<()> {
         if self.subs.len() >= MAX_SUBST {
             return Err("too many substitutions".into());
@@ -347,7 +351,10 @@ impl<'a> D<'a> {
         let (kind, name) = match c {
             b'g' => {
                 let t = self.pop_type()?;
-                return self.push(N::Bound { base: Box::new(Self::swift_enum("Optional")), args: vec![t] });
+                // `Sg` spells `Optional<T>`; like any other bound generic type it takes a slot.
+                let n = N::Bound { base: Box::new(Self::swift_enum("Optional")), args: vec![t] };
+                self.add_sub(&n)?;
+                return self.push(n);
             }
             b'o' => return self.push(N::Module("__C".into())),
             b'C' => return self.push(N::Module("__C_Synthesized".into())),
@@ -630,9 +637,8 @@ impl<'a> D<'a> {
                 let _sig = self.pop_if(|n| matches!(n, N::Sig { .. }));
                 let module = self.pop_context()?;
                 let ty = self.pop_type()?;
-                let n = N::Extension { module: Box::new(module), ty: Box::new(ty) };
-                self.add_sub(&n)?;
-                self.push(n)
+                // Extensions take no substitution slot.
+                self.push(N::Extension { module: Box::new(module), ty: Box::new(ty) })
             }
             b'F' => {
                 let ty = self.pop_entity_type(true)?;
@@ -707,13 +713,17 @@ impl<'a> D<'a> {
                 b'z' => {
                     let name = self.pop_name()?;
                     self.note_param(0);
-                    self.push(N::Member { base: Box::new(N::Param(0, 0)), name })
+                    let n = N::Member { base: Box::new(N::Param(0, 0)), name };
+                    self.add_sub(&n)?;
+                    self.push(n)
                 }
                 b'y' => {
                     let i = self.index()?;
                     let name = self.pop_name()?;
                     self.note_param(i);
-                    self.push(N::Member { base: Box::new(N::Param(0, i)), name })
+                    let n = N::Member { base: Box::new(N::Param(0, i)), name };
+                    self.add_sub(&n)?;
+                    self.push(n)
                 }
                 _ => Err("unsupported associated type".into()),
             },
@@ -1306,6 +1316,39 @@ mod tests {
         assert_eq!(dm("$s4main3fooyyypF"), "main.foo(Any) -> ()");
         assert_eq!(dm("$s4main3fooyyAA8DelegateP_pF"), "main.foo(main.Delegate) -> ()");
         assert_eq!(dm("$s4main6WidgetCSgMa"), "type metadata accessor for main.Widget?");
+    }
+
+    /// Symbols from macOS system binaries. `Sg` optionals and `Qz`/`Qy` associated types take a
+    /// substitution slot and extensions do not, so a later `A…` reference names the right node.
+    #[test]
+    fn substitutions_count_optionals_and_associated_types_but_not_extensions() {
+        // `Sg`: `A2L` is `String?` twice, not the dictionary before it.
+        assert_eq!(
+            dm("_$s6NDOAPI22RequestPayloadProviderP07amsBodyC012serialNumber05extraC06ulCode0J6Params10Foundation4DataVSSSg_SDyS2SGA2LtKFTj"),
+            "dispatch thunk of NDOAPI.RequestPayloadProvider.amsBodyPayload(serialNumber: Swift.String?, extraPayload: [Swift.String : Swift.String], ulCode: Swift.String?, ulParams: Swift.String?) throws -> Foundation.Data"
+        );
+        assert_eq!(dm("_$sxSg8ShelfKit13ObserverValueABMc"), "protocol conformance descriptor for A? : ShelfKit.ObserverValue in ShelfKit");
+        // `Qz`: `AI` is `A.Subscriber`, not the bound generic after it.
+        assert_eq!(
+            dm("_$s8SPShared12SubscribableP9subscribe10subscriberAA12SubscriptionVy10SubscriberQzGAI_tFTq"),
+            "method descriptor for SPShared.Subscribable.subscribe(subscriber: A.Subscriber) -> SPShared.Subscription<A.Subscriber>"
+        );
+        assert_eq!(dm("_$sSl5index5after5IndexQzAD_tFTj"), "dispatch thunk of Swift.Collection.index(after: A.Index) -> A.Index");
+        assert_eq!(dm("_$ss10SetAlgebraP6removey7ElementQzSgAEFTq"), "method descriptor for Swift.SetAlgebra.remove(A.Element) -> A.Element?");
+        // Extensions: `AH` is `Range<String.Index>`, `AE` is `UIButton.Configuration`.
+        assert_eq!(
+            dm("_$sSo11NLTokenizerC15NaturalLanguageE6tokens3forSaySnySS5IndexVGGAH_tF"),
+            "__C.NLTokenizer.tokens(for: Swift.Range<Swift.String.Index>) -> [Swift.Range<Swift.String.Index>]"
+        );
+        assert_eq!(
+            dm("_$sSo8UIButtonC5UIKitE13ConfigurationV13macIdiomStyleAE03MaceF0Ovs"),
+            "__C.UIButton.Configuration.macIdiomStyle.setter : __C.UIButton.Configuration.MacIdiomStyle"
+        );
+        // An extension and an `Sg` before `AN`: right only when both are counted the mangler's way.
+        assert_eq!(
+            dm("_$sSo8NLTaggerC15NaturalLanguageE4tags2in4unit6scheme7optionsSaySo5NLTagaSg_SnySS5IndexVGtGAN_So11NLTokenUnitVSo0I6SchemeaSo0A7OptionsVtF"),
+            "__C.NLTagger.tags(in: Swift.Range<Swift.String.Index>, unit: __C.NLTokenUnit, scheme: __C.NLTagScheme, options: __C.NLTaggerOptions) -> [(__C.NLTag?, Swift.Range<Swift.String.Index>)]"
+        );
     }
 
     #[test]
