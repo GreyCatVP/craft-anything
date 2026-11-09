@@ -505,6 +505,10 @@ Owner: open · Status: todo
       "400: Provider returned error" (#369): a request with tools now sets
       `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
       text protocol like any server that rejects tools
+- [ ] OpenRouter reserves a model's whole output limit against the key's credit when no `max_tokens`
+      is sent, so a key with $35 left of a daily limit got 402 "You requested up to 131072 tokens, but
+      can only afford 35063" (#1213): ask again once with the answer capped at what it can afford
+      — claimed: justinjohn0306, branch bugfix/r5.5-openrouter-afford-tokens
 - [x] A saved fal.ai key reaches an API-key build's asset tools; every call said "No fal.ai key"
       (#923). Outside a project the tools now say that instead. Not checked with a real fal.ai key
       or API build
