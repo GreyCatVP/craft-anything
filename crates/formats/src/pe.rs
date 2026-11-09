@@ -36,6 +36,7 @@ pub struct PeHeaders {
     pub pe32_plus: bool,
     pub image_base: u64,
     pub entry_rva: u32,
+    pub size_of_headers: u32,
     pub subsystem: u16,
     pub dll_characteristics: u16,
     pub linker: (u8, u8),
@@ -56,8 +57,7 @@ impl PeHeaders {
                 return usize::try_from(s.raw_offset.checked_add(delta)?).ok();
             }
         }
-        let first = self.sections.iter().map(|s| s.raw_offset).filter(|o| *o > 0).min().unwrap_or(u32::MAX);
-        if rva < first { usize::try_from(rva).ok() } else { None }
+        if rva < self.size_of_headers { usize::try_from(rva).ok() } else { None }
     }
 
     pub fn dir(&self, i: usize) -> Option<(u32, u32)> {
@@ -126,6 +126,7 @@ pub fn headers(data: &[u8]) -> Result<PeHeaders, FormatError> {
         pe32_plus,
         image_base,
         entry_rva: optional.u32_le(16).unwrap_or(0),
+        size_of_headers: optional.u32_le(60).unwrap_or(0),
         subsystem: optional.u16_le(68).unwrap_or(0),
         dll_characteristics: optional.u16_le(70).unwrap_or(0),
         linker: (optional.u8(2).unwrap_or(0), optional.u8(3).unwrap_or(0)),
@@ -746,10 +747,7 @@ pub fn parse_resources(data: &[u8], max_entries: usize) -> Result<Resources, For
     };
     let mapped_len = match h.sections.iter().enumerate().find(|(_, s)| rva.checked_sub(s.rva).is_some_and(|delta| delta < s.virtual_size.max(s.raw_size))) {
         Some((index, s)) => rva.checked_sub(s.rva).and_then(|delta| s.raw_size.checked_sub(delta)).map(|len| len.min(next_section_distance(index))),
-        None => {
-            let first = h.sections.iter().map(|s| s.raw_offset).filter(|&o| o > 0).min().unwrap_or(u32::MAX);
-            first.checked_sub(rva).map(|len| len.min(next_section_distance(h.sections.len())))
-        }
+        None => h.size_of_headers.checked_sub(rva).map(|len| len.min(next_section_distance(h.sections.len()))),
     }
     .map(u64::from)
     .and_then(|len| {
@@ -971,6 +969,22 @@ fn walk_version(r: &Reader<'_>, start: usize, end: usize, depth: u8, info: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_rvas_stop_before_file_padding() {
+        let mut pe = craft_anything_testkit::pe64();
+        let first = headers(&pe).unwrap().sections[0].raw_offset;
+        let opt = Reader::new(&pe).u32_le(0x3c).unwrap() as usize + 24;
+        let size_headers = 0x200_u32;
+        pe[opt + 60..opt + 64].copy_from_slice(&size_headers.to_le_bytes());
+        let coff = opt - 20;
+        let section = opt + usize::from(Reader::new(&pe).u16_le(coff + 16).unwrap());
+        pe[section + 20..section + 24].copy_from_slice(&(first + 0x400).to_le_bytes());
+        let h = headers(&pe).unwrap();
+        assert_eq!(h.rva_to_offset(size_headers - 1), Some(0x1ff));
+        assert_eq!(h.rva_to_offset(size_headers), None);
+        assert_eq!(h.rva_to_offset(h.sections[0].rva), Some((first + 0x400) as usize));
+    }
 
     #[test]
     fn imports_carry_iat_slots() {

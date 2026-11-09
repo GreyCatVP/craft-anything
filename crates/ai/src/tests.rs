@@ -30,6 +30,49 @@ fn opencode_go_gets_a_session_header_without_a_saved_id() {
     assert!(client.extra_headers.iter().any(|(name, value)| *name == openai::OPENCODE_GO_SESSION_HEADER && *value == id), "{:?}", client.extra_headers);
 }
 
+/// #1225: a saved OpenCode Go backend with no id (one from an older version, or a copied config)
+/// gets one at startup, once, and keeps it after a restart. A hub with no Go backend makes none.
+#[test]
+fn a_saved_opencode_go_backend_gets_one_stable_session_id_at_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let keys = || KeyStore::file_only(dir.path().join("ai-keys.toml"));
+    // A hub whose session starts from the settings file, as the app and the CLI do.
+    let started = |path: &std::path::Path| {
+        let mut session = craft_anything_engine::testing::session();
+        session.settings = craft_anything_engine::Settings::load_from(path);
+        AiHub::with_stores(Arc::new(Engine::new(session)), path.to_path_buf(), keys())
+    };
+    let saved_id = || AiConfig::from_table(&craft_anything_engine::Settings::load_from(&path).ai).unwrap().install_id;
+
+    // A Go backend saved the way an older version did: no id in the file.
+    let first = started(&path);
+    add(&first, "OpenCode Go (subscription)", BackendKind::OpenaiCompatible, openai::OPENCODE_GO_BASE, Some("sk-test"));
+    let kept = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, kept.lines().filter(|l| !l.trim_start().starts_with("install_id")).collect::<Vec<_>>().join("\n")).unwrap();
+    assert!(saved_id().is_none(), "the test starts without an id");
+
+    let startup = started(&path);
+    assert!(startup.ensure_session_id().unwrap(), "one is made and saved");
+    let id = saved_id().expect("saved to the settings file");
+    assert!(id.starts_with("craft-"), "{id}");
+    assert!(!startup.ensure_session_id().unwrap(), "made once, not again on the next start");
+    assert_eq!(saved_id().as_deref(), Some(id.as_str()));
+    assert_eq!(started(&path).session_id(), id, "the same id after a restart");
+
+    // No Go backend, no id.
+    let other_dir = tempfile::tempdir().unwrap();
+    let other_path = other_dir.path().join("config.toml");
+    let plain = AiHub::with_stores(
+        Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        other_path.clone(),
+        KeyStore::file_only(other_dir.path().join("ai-keys.toml")),
+    );
+    add(&plain, "Claude", BackendKind::Anthropic, "https://api.anthropic.com", Some("sk-test"));
+    assert!(!plain.ensure_session_id().unwrap());
+    assert!(AiConfig::from_table(&craft_anything_engine::Settings::load_from(&other_path).ai).unwrap().install_id.is_none());
+}
+
 /// The model list lives at /v1 on the service root, not under the chat path's /openai/v1.
 #[test]
 fn opencode_go_lists_models_at_the_documented_url() {

@@ -1299,12 +1299,19 @@ fn column_default(rest: &str, affinity: Affinity) -> (CellValue, bool) {
     (CellValue::Null, true)
 }
 
-/// A literal DEFAULT as SQLite reads it into a column of this affinity: `NULL`, booleans, text,
-/// `X'…'`, numbers, hex integers and one parenthesized literal; anything else (an expression, a
-/// keyword) stays unknown. A TEXT column reads a number as text; a NUMERIC or REAL column reads
+/// A literal DEFAULT as SQLite reads it into a column of this affinity: `NULL`, booleans, quoted
+/// or bare words, `X'…'`, numbers (with optional digit separators), hex integers and one
+/// parenthesized literal; anything else (an expression, a keyword) stays unknown. A TEXT column
+/// reads a number as text; a NUMERIC or REAL column reads
 /// text that is a number as that number (a REAL column then turns a whole number into a REAL, as
 /// it does for stored values); a BLOB column, or one with no type, keeps the literal's own type.
 fn literal_default(tokens: &[&str], affinity: Affinity) -> Option<CellValue> {
+    literal_value(tokens, affinity, true)
+}
+
+/// A top-level `DEFAULT` value, or one inside its parentheses. Bare and double-quoted words are
+/// string constants only at the top level: SQLite rejects `(abc)` and `("abc")` as not constant.
+fn literal_value(tokens: &[&str], affinity: Affinity, allow_words: bool) -> Option<CellValue> {
     let token = *tokens.first()?;
     if token == "(" {
         return parenthesized_literal(tokens, affinity);
@@ -1315,43 +1322,54 @@ fn literal_default(tokens: &[&str], affinity: Affinity) -> Option<CellValue> {
     if token.eq_ignore_ascii_case("TRUE") || token.eq_ignore_ascii_case("FALSE") {
         return Some(integer_default(i64::from(token.eq_ignore_ascii_case("TRUE")), affinity));
     }
-    if token.starts_with('\'') && token.ends_with('\'') && token.len() >= 2 {
-        let text = token.get(1..token.len().checked_sub(1)?)?.replace("''", "'");
-        if matches!(affinity, Affinity::Numeric | Affinity::Real)
-            && let Some(number) = numeric_value(&text)
-        {
-            return finite(number);
-        }
-        return Some(text_value(text.as_bytes()));
+    if let Some(text) = single_quoted(token) {
+        return text_default(&text, affinity);
+    }
+    // A bare `x` is a word, but `X'…'` is a blob; a quoted next token decides which.
+    let blob = token.eq_ignore_ascii_case("X") && tokens.get(1).is_some_and(|quoted| quoted.starts_with('\''));
+    if allow_words && !blob && is_bare_word(token) {
+        return text_default(token, affinity);
+    }
+    if allow_words && token.starts_with('"') && token.ends_with('"') && token.len() >= 2 {
+        let text = token.get(1..token.len().checked_sub(1)?)?.replace("\"\"", "\"");
+        return text_default(&text, affinity);
     }
     if token.eq_ignore_ascii_case("X") {
-        let quoted = *tokens.get(1)?;
-        if !quoted.starts_with('\'') || !quoted.ends_with('\'') || quoted.len() < 2 {
-            return None;
+        // `X'…'` is a blob; a bare `x` is just a word, so only a quoted next token starts one.
+        if let Some(quoted) = tokens.get(1).filter(|quoted| quoted.starts_with('\'')) {
+            if !quoted.ends_with('\'') || quoted.len() < 2 {
+                return None;
+            }
+            let hex = quoted.get(1..quoted.len().checked_sub(1)?)?;
+            if !hex.len().is_multiple_of(2) {
+                return None;
+            }
+            let bytes: Option<Vec<u8>> = hex
+                .as_bytes()
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| {
+                    let high = char::from(*pair.first()?).to_digit(16)?;
+                    let low = char::from(*pair.get(1)?).to_digit(16)?;
+                    Some((high * 16 + low) as u8)
+                })
+                .collect();
+            let bytes = bytes?;
+            return Some(blob_value(&bytes, bytes.len()));
         }
-        let hex = quoted.get(1..quoted.len().checked_sub(1)?)?;
-        if !hex.len().is_multiple_of(2) {
-            return None;
-        }
-        let bytes: Option<Vec<u8>> = hex
-            .as_bytes()
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| {
-                let high = char::from(*pair.first()?).to_digit(16)?;
-                let low = char::from(*pair.get(1)?).to_digit(16)?;
-                Some((high * 16 + low) as u8)
-            })
-            .collect();
-        let bytes = bytes?;
-        return Some(blob_value(&bytes, bytes.len()));
     }
     if let Some(n) = hex_integer(token) {
         return Some(integer_default(n, affinity));
     }
     let number = if matches!(token, "+" | "-") {
         let value = *tokens.get(1)?;
+        if let Some(text) = single_quoted(value) {
+            if token == "+" {
+                return text_default(&text, affinity);
+            }
+            return signed_quoted_default(&text, affinity);
+        }
         if let Some(n) = hex_integer(value) {
             return Some(integer_default(if token == "-" { n.checked_neg()? } else { n }, affinity));
         }
@@ -1359,24 +1377,172 @@ fn literal_default(tokens: &[&str], affinity: Affinity) -> Option<CellValue> {
     } else {
         token.to_owned()
     };
-    let integer = number_kind(&number)?;
-    let (minus, unsigned) = match number.strip_prefix('-') {
-        Some(unsigned) => (true, unsigned),
-        None => (false, number.strip_prefix('+').unwrap_or(&number)),
-    };
+    let clean = unseparated_number(&number)?;
+    let integer = number_kind(&clean)?;
     match affinity {
-        // An integer that fits in 64 bits is written plainly (`007` reads '7'); any other number
-        // is written as it is in the schema, keeping a minus sign but not a plus.
-        Affinity::Text => Some(match unsigned.parse::<i64>() {
-            Ok(n) if integer => integer_default(if minus { n.saturating_neg() } else { n }, affinity),
-            _ => text_value(format!("{}{unsigned}", if minus { "-" } else { "" }).as_bytes()),
+        // Reading an old row supplies the DEFAULT expression, not the stored value of a
+        // later insert. SQLite formats a representable integer magnitude, but otherwise
+        // keeps a separated literal's spelling (without underscores or a leading plus).
+        Affinity::Text if clean != number => {
+            let spelling = clean.strip_prefix('+').unwrap_or(&clean);
+            let magnitude = spelling.strip_prefix('-').unwrap_or(spelling);
+            Some(match magnitude.parse::<i64>() {
+                Ok(n) if integer => integer_default(if spelling.starts_with('-') { -n } else { n }, affinity),
+                _ => text_value(spelling.as_bytes()),
+            })
+        }
+        // An integer literal that fits in 64 bits is written plainly (`007` reads '7', and
+        // `-9223372036854775808` keeps its sign); any other number is written in SQLite's REAL
+        // text form, since the schema's text is not the REAL it reads.
+        Affinity::Text => Some(match clean.parse::<i64>() {
+            Ok(n) if integer => integer_default(n, affinity),
+            _ => {
+                let real = clean.parse::<f64>().ok()?;
+                text_value(real_text(real).as_bytes())
+            }
         }),
-        Affinity::Numeric | Affinity::Real => numeric_value(&number).and_then(finite),
-        Affinity::Blob => match number.parse::<i64>() {
+        Affinity::Numeric | Affinity::Real => numeric_value(&clean).and_then(finite),
+        Affinity::Blob => match clean.parse::<i64>() {
             Ok(n) if integer => Some(CellValue::Int(n)),
-            _ => number.parse::<f64>().ok().map(CellValue::Real).and_then(finite),
+            _ => clean.parse::<f64>().ok().map(CellValue::Real).and_then(finite),
         },
     }
+}
+
+/// A quoted SQL string's content, or `None` when the token is not one.
+fn single_quoted(token: &str) -> Option<String> {
+    if token.starts_with('\'') && token.ends_with('\'') && token.len() >= 2 {
+        Some(token.get(1..token.len().checked_sub(1)?)?.replace("''", "'"))
+    } else {
+        None
+    }
+}
+
+/// A word SQLite reads as a string constant in a DEFAULT, but not a dynamic date/time keyword.
+fn is_bare_word(token: &str) -> bool {
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else { return false };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !["CURRENT_TIME", "CURRENT_DATE", "CURRENT_TIMESTAMP"].iter().any(|keyword| token.eq_ignore_ascii_case(keyword))
+}
+
+/// A string default read into a column of this affinity: a number becomes one for NUMERIC and
+/// REAL, and otherwise the text stays text.
+fn text_default(text: &str, affinity: Affinity) -> Option<CellValue> {
+    if matches!(affinity, Affinity::Numeric | Affinity::Real)
+        && let Some(number) = numeric_value(text)
+    {
+        return finite(number);
+    }
+    Some(text_value(text.as_bytes()))
+}
+
+/// A `-'…'` default: SQLite coerces the quoted text to an INTEGER when it is written as one,
+/// otherwise to a REAL, negates it, and reads it with the column's affinity.
+fn signed_quoted_default(text: &str, affinity: Affinity) -> Option<CellValue> {
+    let text = text.trim_matches([' ', '\t', '\n', '\u{b}', '\u{c}', '\r']);
+    // A separator inside quoted text is not the number the separator would join.
+    if text.contains('_') {
+        return None;
+    }
+    if let Ok(n) = text.parse::<i64>()
+        && let Some(neg) = n.checked_neg()
+    {
+        return Some(integer_default(neg, affinity));
+    }
+    let real = text.parse::<f64>().ok().filter(|n| n.is_finite())?;
+    let neg = -real;
+    match affinity {
+        Affinity::Text => Some(text_value(real_text(neg).as_bytes())),
+        Affinity::Numeric | Affinity::Real => {
+            let negated = if let Some(rest) = text.strip_prefix('-') { rest.to_string() } else { format!("-{}", text.strip_prefix('+').unwrap_or(text)) };
+            numeric_value(&negated).and_then(finite)
+        }
+        Affinity::Blob => finite(CellValue::Real(neg)),
+    }
+}
+
+/// A REAL as SQLite writes it into a TEXT column (`%!.15g`): 15 significant digits, a decimal
+/// point always present, scientific notation outside 1e-4..1e15, and `Inf`/`-Inf` for infinity.
+fn real_text(n: f64) -> String {
+    if n.is_infinite() {
+        return if n.is_sign_negative() { "-Inf".to_string() } else { "Inf".to_string() };
+    }
+    let scientific = format!("{n:.14e}");
+    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    // SQLite writes both zeroes as "0.0"; keep the sign only for a non-zero value.
+    let negative = mantissa.starts_with('-') && n != 0.0;
+    let mut mantissa = mantissa.trim_start_matches('-').to_string();
+    if mantissa.contains('.') {
+        while mantissa.ends_with('0') {
+            mantissa.pop();
+        }
+        if mantissa.ends_with('.') {
+            mantissa.pop();
+        }
+    }
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let point = 1i32.saturating_add(exponent);
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    if (-4..15).contains(&exponent) {
+        if point <= 0 {
+            out.push_str("0.");
+            for _ in 0..-point {
+                out.push('0');
+            }
+            out.push_str(&digits);
+        } else if point as usize >= digits.len() {
+            out.push_str(&digits);
+            for _ in 0..(point as usize - digits.len()) {
+                out.push('0');
+            }
+        } else {
+            let (whole, fraction) = digits.split_at(point as usize);
+            out.push_str(whole);
+            out.push('.');
+            out.push_str(fraction);
+        }
+        if !out.contains('.') {
+            out.push_str(".0");
+        }
+    } else {
+        out.push_str(&mantissa);
+        if !mantissa.contains('.') {
+            out.push_str(".0");
+        }
+        out.push('e');
+        out.push(if exponent < 0 { '-' } else { '+' });
+        let abs = exponent.unsigned_abs();
+        if abs < 10 {
+            out.push('0');
+        }
+        out.push_str(&abs.to_string());
+    }
+    out
+}
+
+/// Remove a numeric literal's single `_` separators, rejecting any not between two digits.
+fn unseparated_number(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut clean = String::with_capacity(bytes.len());
+    let mut previous_was_digit = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            if !previous_was_digit || !bytes.get(i.checked_add(1)?)?.is_ascii_digit() {
+                return None;
+            }
+            previous_was_digit = false;
+            continue;
+        }
+        clean.push(b as char);
+        previous_was_digit = b.is_ascii_digit();
+    }
+    Some(clean)
 }
 
 /// An integer literal as a column of this affinity reads it: a TEXT column reads it as text.
@@ -1465,8 +1631,8 @@ fn parenthesized_literal(tokens: &[&str], affinity: Affinity) -> Option<CellValu
     }
     let inside = tokens.get(1..close?)?;
     match inside {
-        [one] => literal_default(&[*one], affinity),
-        [sign, _] if matches!(*sign, "+" | "-") || (*sign).eq_ignore_ascii_case("X") => literal_default(inside, affinity),
+        [one] => literal_value(&[*one], affinity, false),
+        [sign, _] if matches!(*sign, "+" | "-") || (*sign).eq_ignore_ascii_case("X") => literal_value(inside, affinity, false),
         _ => None,
     }
 }
@@ -2234,15 +2400,25 @@ mod tests {
     #[test]
     fn added_column_defaults_take_the_column_affinity() {
         for (declaration, value) in [
-            // TEXT: a number becomes text, an integer written plainly and anything else as written.
+            // TEXT: an integer written plainly, otherwise SQLite's own REAL text.
             ("x TEXT DEFAULT 5", text("5")),
             ("x VARCHAR(10) DEFAULT -5.0", text("-5.0")),
             ("x TEXT DEFAULT 007", text("7")),
             ("x TEXT DEFAULT - 007", text("-7")),
-            ("x CLOB DEFAULT +1e3", text("1e3")),
-            ("x TEXT DEFAULT 5.", text("5.")),
-            ("x TEXT DEFAULT 99999999999999999999", text("99999999999999999999")),
-            ("x TEXT DEFAULT 1e400", text("1e400")),
+            ("x CLOB DEFAULT +1e3", text("1000.0")),
+            ("x TEXT DEFAULT 5.", text("5.0")),
+            ("x TEXT DEFAULT 0.10", text("0.1")),
+            ("x TEXT DEFAULT 1.50", text("1.5")),
+            ("x TEXT DEFAULT 0001.5", text("1.5")),
+            ("x TEXT DEFAULT 1e-7", text("1.0e-07")),
+            ("x TEXT DEFAULT 1e16", text("1.0e+16")),
+            ("x TEXT DEFAULT -0.0", text("0.0")),
+            ("x TEXT DEFAULT 99999999999999999999", text("1.0e+20")),
+            ("x TEXT DEFAULT -9223372036854775808", text("-9223372036854775808")),
+            ("x TEXT DEFAULT 9223372036854775808", text("9.22337203685478e+18")),
+            ("x TEXT DEFAULT -9223372036854775809", text("-9.22337203685478e+18")),
+            ("x TEXT DEFAULT 1e400", text("Inf")),
+            ("x TEXT DEFAULT -1e400", text("-Inf")),
             ("x TEXT DEFAULT TRUE", text("1")),
             // INTEGER and NUMERIC: text that is a number becomes one; a whole REAL an INTEGER.
             ("x INTEGER DEFAULT '7'", CellValue::Int(7)),
@@ -2276,6 +2452,75 @@ mod tests {
         short_record_case("x INTEGER DEFAULT '1e400'", vec![CellValue::Null], true);
     }
 
+    /// Bare and double-quoted words, signed strings and digit separators take the column's
+    /// affinity too (SQLite 3.51 readings).
+    #[test]
+    fn default_words_and_separators_take_the_column_affinity() {
+        for (declaration, value) in [
+            ("x TEXT DEFAULT abc", text("abc")),
+            ("x TEXT DEFAULT \"abc\"", text("abc")),
+            ("x TEXT DEFAULT \"a\"\"b\"", text("a\"b")),
+            ("x TEXT DEFAULT _1", text("_1")),
+            ("x TEXT DEFAULT X", text("X")),
+            ("x INTEGER DEFAULT \"5\"", CellValue::Int(5)),
+            ("x REAL DEFAULT \"5\"", CellValue::Real(5.0)),
+            ("x BLOB DEFAULT \"5\"", text("5")),
+            ("x DEFAULT \"5\"", text("5")),
+            ("x TEXT DEFAULT +'5'", text("5")),
+            ("x INTEGER DEFAULT -'5'", CellValue::Int(-5)),
+            ("x REAL DEFAULT -'5'", CellValue::Real(-5.0)),
+            ("x BLOB DEFAULT -'5'", CellValue::Int(-5)),
+            ("x TEXT DEFAULT -'5'", text("-5")),
+            ("x TEXT DEFAULT -'1e3'", text("-1000.0")),
+            ("x TEXT DEFAULT -'1.50'", text("-1.5")),
+            ("x TEXT DEFAULT -'1.0'", text("-1.0")),
+            ("x TEXT DEFAULT -'1000'", text("-1000")),
+            ("x TEXT DEFAULT -' 1e3 '", text("-1000.0")),
+            ("x TEXT DEFAULT -' -5 '", text("5")),
+            ("x INTEGER DEFAULT -'1e3'", CellValue::Int(-1000)),
+            ("x INTEGER DEFAULT -'1.50'", CellValue::Real(-1.5)),
+            ("x REAL DEFAULT -'1e3'", CellValue::Real(-1000.0)),
+            ("x BLOB DEFAULT -'1e3'", CellValue::Real(-1000.0)),
+            ("x TEXT DEFAULT 1_000", text("1000")),
+            ("x TEXT DEFAULT 1_000.5", text("1000.5")),
+            ("x TEXT DEFAULT 1_000.", text("1000.")),
+            ("x TEXT DEFAULT .1_0", text(".10")),
+            ("x TEXT DEFAULT 1_0e2", text("10e2")),
+            ("x TEXT DEFAULT 1_0e-2", text("10e-2")),
+            ("x TEXT DEFAULT 1_0e-5", text("10e-5")),
+            ("x TEXT DEFAULT -0_0.0", text("-00.0")),
+            ("x TEXT DEFAULT -1_0", text("-10")),
+            ("x TEXT DEFAULT 12_34.5_0", text("1234.50")),
+            ("x TEXT DEFAULT +1_0e+0_2", text("10e+02")),
+            ("x TEXT DEFAULT -0_9223372036854775808", text("-09223372036854775808")),
+            ("x TEXT DEFAULT 0_07", text("7")),
+            ("x NUMERIC DEFAULT 1_0e-0_1", CellValue::Int(1)),
+            ("x NUMERIC DEFAULT '1_000'", text("1_000")),
+            ("x INTEGER DEFAULT 1_000", CellValue::Int(1000)),
+            ("x INTEGER DEFAULT 1_000.5", CellValue::Real(1000.5)),
+            ("x INTEGER DEFAULT .1_0", CellValue::Real(0.1)),
+            ("x INTEGER DEFAULT 1_000.", CellValue::Int(1000)),
+            ("x REAL DEFAULT 1_0e2", CellValue::Real(1000.0)),
+            ("x REAL DEFAULT 1_000", CellValue::Real(1000.0)),
+            ("x BLOB DEFAULT 1_000", CellValue::Int(1000)),
+            ("x DEFAULT 1_000", CellValue::Int(1000)),
+        ] {
+            short_record_case(declaration, vec![value], false);
+        }
+        for declaration in [
+            "x DEFAULT (abc)",
+            "x DEFAULT (\"abc\")",
+            "x DEFAULT (\"5\")",
+            "x INTEGER DEFAULT -'abc'",
+            "x INTEGER DEFAULT -'1_0'",
+            "x DEFAULT 1__000",
+            "x DEFAULT 1_",
+            "x DEFAULT 1e_2",
+        ] {
+            short_record_case(declaration, vec![CellValue::Null], true);
+        }
+    }
+
     /// Hex and parenthesized literals take the column's affinity too (SQLite 3.51 readings).
     #[test]
     fn hex_and_parenthesized_defaults_take_the_column_affinity() {
@@ -2283,6 +2528,9 @@ mod tests {
             ("x TEXT DEFAULT 0x10", text("16")),
             ("x TEXT DEFAULT -0xFFFFFFFFFFFFFFFF", text("1")),
             ("x TEXT DEFAULT (5.0)", text("5.0")),
+            ("x TEXT DEFAULT (1e3)", text("1000.0")),
+            ("x TEXT DEFAULT (5.)", text("5.0")),
+            ("x TEXT DEFAULT (1e400)", text("Inf")),
             ("x TEXT DEFAULT (- 007)", text("-7")),
             ("x TEXT DEFAULT (TRUE)", text("1")),
             ("x INTEGER DEFAULT ('7')", CellValue::Int(7)),

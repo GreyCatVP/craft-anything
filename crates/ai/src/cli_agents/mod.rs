@@ -10,6 +10,7 @@
 
 pub mod acp;
 pub mod adapters;
+pub mod claude_cost;
 pub mod models;
 mod shared;
 pub mod unfinished;
@@ -53,6 +54,7 @@ pub const KNOWN: &[(&str, &str, &str)] = &[
     ("maki", "maki", "Maki"),
     ("aider", "aider", "Aider"),
     ("dsh", "dsh", "DeepSeek Harness"),
+    ("devin", "devin", "Devin"),
 ];
 
 pub fn program_for(agent: &str) -> String {
@@ -566,6 +568,12 @@ pub struct CliSpec {
     pub question: bool,
     /// Where a failed run writes what's known about it ([`crate::failure_log`]). None writes no log.
     pub logs: Option<PathBuf>,
+    /// The backend's stored API key, for an ACP agent that asks the host to authenticate before a
+    /// session opens (Devin). None for agents that sign in some other way.
+    pub key: Option<String>,
+    /// Where Claude Code's session costs are kept, so a resumed turn's cost is what it added
+    /// ([`claude_cost`]). None: a resumed turn has no cost.
+    pub cost_totals: Option<PathBuf>,
 }
 
 /// What a building run needs besides the working folder.
@@ -611,8 +619,10 @@ impl CliSpec {
             deep: false,
             preamble: None,
             logs: None,
+            cost_totals: None,
             adapters: AgentAdapters::built_in(),
             question: false,
+            key: None,
         }
     }
 }
@@ -667,6 +677,7 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
     args.extend(adapter.acp_trailing().iter().map(|word| (*word).to_string()));
     let preamble = spec.preamble.clone().unwrap_or_else(|| crate::prompt::cli_preamble(spec.beginner));
     let session_config = adapter.acp_session_config(&spec.options);
+    let auth = acp::key_auth_method(&agent).map(str::to_string).zip(spec.key.clone());
     Some(
         AcpConversation::new(&spec.config.name, &agent, program, args, cwd, mcp, if spec.question { None } else { spec.resume.clone() })
             .with_validation(adapter.validate_options(&spec.options))
@@ -675,7 +686,8 @@ fn acp_for(spec: &CliSpec) -> Option<AcpConversation> {
             .with_question(spec.question)
             .with_session_config(session_config)
             .with_preamble(preamble)
-            .with_logs(spec.logs.clone()),
+            .with_logs(spec.logs.clone())
+            .with_auth(auth),
     )
 }
 
@@ -1100,7 +1112,14 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     if gone && let Some(h) = held {
         h.done();
     }
-    AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd: p.cost_usd, cost_is_estimate: true }
+    // Claude Code's total is the session's running total (#1187); a question's copy is answered by
+    // question.rs, which keeps no cost for it.
+    let cost_usd = if adapter.ids().contains(&"claude-code") && !spec.question {
+        claude_cost::turn_cost(spec.cost_totals.as_deref(), resume.as_deref(), p.session_id.as_deref(), p.cost_usd)
+    } else {
+        p.cost_usd
+    };
+    AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd, cost_is_estimate: true }
 }
 
 /// What's needed to explain a failed CLI run: the command with the person's message left out, and
@@ -2702,7 +2721,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
         reg.register(Arc::new(EchoAgent));
         assert_eq!(
             format!("{reg:?}"),
-            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "copilot", "grok", "dsh", "echo-agent"]"#
+            r#"["claude-code", "codex", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "aider", "copilot", "grok", "dsh", "devin", "echo-agent"]"#
         );
     }
 

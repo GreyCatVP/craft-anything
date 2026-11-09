@@ -29,7 +29,7 @@ pub enum ZipError {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ZipEntry {
     /// Entry name as stored (forward slashes). Bit 11 selects lossy UTF-8; otherwise
-    /// valid UTF-8 is preserved and remaining names are decoded as CP437.
+    /// a valid Unicode Path extra field takes precedence over the UTF-8/CP437 fallback.
     pub name: String,
     pub method: u16,
     pub flags: u16,
@@ -192,6 +192,8 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         // Each extra field owns its payload: ZIP64 values cannot borrow a following field's bytes.
         let needs_zip64 = usize_ == 0xffff_ffff || csize == 0xffff_ffff || local == 0xffff_ffff || entry_disk == 0xffff;
         let mut found_zip64 = false;
+        let mut unicode_name = None;
+        let mut name_crc = None;
         let mut x = 0usize;
         let er = Reader::new(extra);
         // Trailing bytes too short for a field header are padding, not truncation.
@@ -200,7 +202,7 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
             let len = usize::from(er.u16_le(x + 2).ok_or(ZipError::Truncated("extra field header"))?);
             let body = x + 4;
             let field = er.slice(body, len).ok_or(ZipError::Truncated("extra field payload"))?;
-            if id == 0x0001 {
+            if id == 0x0001 && !found_zip64 {
                 let values = Reader::new(field);
                 let mut f = 0;
                 if usize_ == 0xffff_ffff {
@@ -219,7 +221,11 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
                     entry_disk = values.u32_le(f).ok_or(ZipError::Truncated("zip64 entry disk"))?;
                 }
                 found_zip64 = true;
-                break;
+            } else if id == 0x7075 && flags & (1 << 11) == 0 && unicode_name.is_none() {
+                let field = Reader::new(field);
+                if field.u8(0) == Some(1) && field.u32_le(1) == Some(*name_crc.get_or_insert_with(|| self::crc32(name_bytes))) {
+                    unicode_name = field.data().get(5..).and_then(|bytes| std::str::from_utf8(bytes).ok()).filter(|s| !s.is_empty());
+                }
             }
             x = body + len;
         }
@@ -229,7 +235,7 @@ pub fn parse(data: &[u8], max_entries: usize) -> Result<ZipArchive, ZipError> {
         if entry_disk != 0 {
             return Err(ZipError::Unsupported("multi-volume ZIP archives".into()));
         }
-        let name = decode_name(name_bytes, flags).replace('\\', "/");
+        let name = unicode_name.map(str::to_owned).unwrap_or_else(|| decode_name(name_bytes, flags)).replace('\\', "/");
         entries.push(ZipEntry {
             is_dir: name.ends_with('/') || unix_mode.is_some_and(|m| m & 0o170000 == 0o040000) || (matches!(host, 0 | 10) && attrs & 0x10 != 0),
             name,
@@ -403,6 +409,28 @@ mod tests {
         zip[central + 8..central + 10].copy_from_slice(&flags.to_le_bytes());
         zip[central + 46..central + 46 + name.len()].copy_from_slice(name);
         zip
+    }
+
+    #[test]
+    fn verified_unicode_path_overrides_a_legacy_zip_name() {
+        let raw = b"notes.txt";
+        let unicode = "笔记.txt";
+        for (flags, version, checksum, expected) in
+            [(0, 1, crc32(raw), unicode), (0, 1, crc32(b"old-name"), "notes.txt"), (0, 2, crc32(raw), "notes.txt"), (1 << 11, 1, crc32(raw), "notes.txt")]
+        {
+            let mut zip = build_named_entry(raw, flags);
+            let central = 30 + raw.len();
+            let end = central + 46 + raw.len();
+            let mut extra = 0x7075_u16.to_le_bytes().to_vec();
+            extra.extend_from_slice(&((5 + unicode.len()) as u16).to_le_bytes());
+            extra.push(version);
+            extra.extend_from_slice(&checksum.to_le_bytes());
+            extra.extend_from_slice(unicode.as_bytes());
+            zip[central + 30..central + 32].copy_from_slice(&(extra.len() as u16).to_le_bytes());
+            zip[end + 12..end + 16].copy_from_slice(&((end - central + extra.len()) as u32).to_le_bytes());
+            zip.splice(end..end, extra);
+            assert_eq!(parse(&zip, 1).unwrap().entries[0].name, expected);
+        }
     }
 
     #[test]
