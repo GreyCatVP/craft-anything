@@ -6,6 +6,7 @@ use crate::i18n::tr;
 use crate::state::MakeDraft;
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, Pick, icons, widgets};
+use craft_anything_ai::BackendKind;
 use craft_anything_engine::workspace::{ExistingFiles, Status, TargetRef};
 use egui::{Margin, RichText, Sense, Ui, Vec2};
 
@@ -263,6 +264,46 @@ fn engine_choices(app: &mut CraftApp, ui: &mut Ui) {
         ui.add_space(14.0);
         let on = app.state.make.generate_assets;
         crate::engine_ui::assets_toggle(app, ui, on);
+        extracted_by(app, ui);
+    }
+}
+
+/// "Extracted by": the AI that takes a game's own files out after the study, before the build
+/// (`Role::Extractor`). Shown only where a run uses it: an original game on this computer, in Deep
+/// mode, with an AI that has an API key and is on (coding agents can't take this job). It's the
+/// app's one setting, as "Extract with this" in Settings → AI is, and says so.
+fn extracted_by(app: &mut CraftApp, ui: &mut Ui) {
+    let choices: Vec<String> = app.backends.iter().filter(|b| b.enabled && b.kind != BackendKind::AgentCli).map(|b| b.name.clone()).collect();
+    if !app.settings.deep_mode || !matches!(app.state.make.target, TargetRef::Local { .. }) || choices.is_empty() {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let none = tr("No separate AI");
+    let mut pick = None;
+    ui.add_space(14.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Extracted by")).size(theme::BODY).color(t.text_dim));
+        let shown = app.extractor.clone().unwrap_or_else(|| none.clone());
+        let r = egui::ComboBox::from_id_salt("extracted-by").icon(widgets::combo_icon).selected_text(shown).width(220.0).show_ui(ui, |ui| {
+            if ui.selectable_label(app.extractor.is_none(), &none).on_hover_text(tr("The builder takes what it needs itself.")).clicked() {
+                pick = Some(None);
+            }
+            for name in &choices {
+                if ui.selectable_label(app.extractor.as_ref() == Some(name), name).clicked() {
+                    pick = Some(Some(name.clone()));
+                }
+            }
+        });
+        widgets::named(r.response, "Extracted by");
+    });
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(tr("After the study, this AI takes the game's own files out for the builder. For everything you make, like Extracts in Settings → AI."))
+            .size(theme::SMALL)
+            .color(t.text_faint),
+    );
+    if let Some(p) = pick {
+        app.set_role(craft_anything_ai::Role::Extractor, p);
     }
 }
 

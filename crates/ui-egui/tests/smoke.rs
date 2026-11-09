@@ -114,6 +114,55 @@ fn simple_title_bar_keeps_only_the_essentials() {
     h.get_by_label("Clean room");
 }
 
+/// "Extracted by" on Make: an original game in Deep mode with an AI that has an API key offers the
+/// app's extractor there, and picking one sets the same role as Settings → AI.
+#[test]
+fn make_offers_the_ai_that_takes_a_games_files_out_in_deep_mode() {
+    use craft_anything_ai::{BackendConfig, BackendKind, Role};
+    use craft_anything_engine::workspace::TargetRef;
+    let d = tempfile::tempdir().unwrap();
+    let game = d.path().join("game");
+    std::fs::create_dir_all(&game).unwrap();
+    let app = move |deep: bool| {
+        let game = game.clone();
+        move || {
+            let mut a = demo::app(demo::engine(Mode::Beginner, true));
+            let local = BackendConfig {
+                name: "Local model".into(),
+                kind: BackendKind::OpenaiCompatible,
+                model: "qwen".into(),
+                base_url: Some("http://localhost:11434/v1".into()),
+                ssh_host: None,
+                enabled: true,
+            };
+            a.hub.add_backend(local, None).unwrap();
+            a.settings.deep_mode = deep;
+            a.state.make.target = TargetRef::Local { path: game };
+            a.state.make.game = true;
+            a.state.make.request = "Recreate this game".into();
+            a
+        }
+    };
+    // Clean room never takes anything out of the original: no such choice.
+    let mut h = harness_sized(egui::vec2(1280.0, 1300.0), app(false));
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Local model")));
+    h.run_steps(3);
+    assert!(h.query_by_label("Extracted by").is_none(), "Clean room: nothing is taken out");
+
+    let mut h = harness_sized(egui::vec2(1280.0, 1300.0), app(true));
+    h.state_mut().refresh_backends();
+    assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Local model")));
+    h.run_steps(3);
+    h.get_by_label("After the study, this AI takes the game's own files out for the builder. For everything you make, like Extracts in Settings → AI.");
+    // The label and the drop-down share the name, as "Built by" does: the drop-down is the second.
+    h.get_all_by_label("Extracted by").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("Local model").click();
+    assert!(wait(&mut h, |a| a.extractor.as_deref() == Some("Local model")), "the app's extractor is set");
+    assert_eq!(h.state().hub.chosen(Role::Extractor).as_deref(), Some("Local model"), "the same role as Settings → AI");
+}
+
 #[test]
 fn a_game_is_built_with_its_engine_and_a_missing_engine_is_got_first() {
     use craft_anything_engine::workspace::TargetRef;

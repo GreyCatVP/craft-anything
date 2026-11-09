@@ -1217,11 +1217,11 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
-- [ ] Make offers "Extracted by" beside the game's other choices: in Deep mode an AI with an API key
+- [x] Make offers "Extracted by" beside the game's other choices: in Deep mode an AI with an API key
       can take a game's own files out after the study, but it could only be chosen in Settings → AI,
       so on Make only the builder could be picked. It sets the app's one extractor and says so
       (choosing one per project would need the run to take it from the project; not in this change)
-      — claimed: jgt87, branch feature/r2.9-make-extracted-by
+      — claimed: jgt87, branch feature/r2.9-make-extracted-by — PR #1290
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
