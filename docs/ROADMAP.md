@@ -468,12 +468,12 @@ been run live.
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
       — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
-- [ ] An AI on this computer (Ollama, LM Studio) that can't be reached, or that took a request and
+- [x] An AI on this computer (Ollama, LM Studio) that can't be reached, or that took a request and
       didn't start answering, is told apart: "Couldn't reach Ollama (local)" for a server that was
-      reached and "check your internet connection" for one on this computer mislead, and an answer
-      that never started doesn't say a large model may still be loading or reading a long prompt
+      reached and "check your internet connection" for one on this computer misled, and an answer
+      that never started didn't say a large model may still be loading or reading a long prompt
       (#1239 gave it the `timeout_secs` advice)
-      — claimed: jgt87, branch bugfix/r5.4-local-server-messages
+      — claimed: jgt87, branch bugfix/r5.4-local-server-messages — PR #1242
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
