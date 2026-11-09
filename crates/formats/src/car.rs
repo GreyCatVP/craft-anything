@@ -102,6 +102,8 @@ pub fn attribute_name(id: u32) -> String {
         23 => "graphics-feature-set-class",
         24 => "display-gamut",
         25 => "deployment-target",
+        26 => "glyph-weight",
+        27 => "glyph-size",
         o => return format!("attribute-{o}"),
     }
     .into()
@@ -130,26 +132,37 @@ pub fn parse_bom(data: &[u8]) -> Result<Bom, FormatError> {
     let t = || FormatError::Truncated("BOM header".into());
     let version = r.u32_be(8).ok_or_else(t)?;
     let block_count = r.u32_be(12).ok_or_else(t)?;
-    let index_off = r.u32_be(16).ok_or_else(t)? as usize;
-    let vars_off = r.u32_be(24).ok_or_else(t)? as usize;
-    let n = r.u32_be(index_off).ok_or_else(|| FormatError::Truncated("block index".into()))? as usize;
-    if n > MAX_BLOCKS || n.saturating_mul(8) > data.len() {
-        return Err(FormatError::Malformed(format!("{n} blocks in a {}-byte file", data.len())));
+    let directory = |field, label: &str| {
+        let off = r.u32_be(field).ok_or_else(t)? as usize;
+        let len = r.u32_be(field + 4).ok_or_else(t)? as usize;
+        r.slice(off, len).ok_or_else(|| FormatError::Truncated(label.into()))
+    };
+    let index = Reader::new(directory(16, "block index")?);
+    let vars_table = Reader::new(directory(24, "variables")?);
+    let short_index = || FormatError::Truncated("block index".into());
+    let n = index.u32_be(0).ok_or_else(short_index)? as usize;
+    if n > MAX_BLOCKS {
+        return Err(FormatError::Malformed(format!("{n} blocks exceeds the block limit")));
+    }
+    if n > index.len().saturating_sub(4) / 8 {
+        return Err(short_index());
     }
     let mut blocks = Vec::with_capacity(n);
     for i in 0..n {
-        let a = r.u32_be(index_off + 4 + i * 8).ok_or_else(|| FormatError::Truncated("block index".into()))?;
-        let l = r.u32_be(index_off + 8 + i * 8).ok_or_else(|| FormatError::Truncated("block index".into()))?;
+        let a = index.u32_be(4 + i * 8).ok_or_else(short_index)?;
+        let l = index.u32_be(8 + i * 8).ok_or_else(short_index)?;
         blocks.push((a, l));
     }
-    let nv = r.u32_be(vars_off).ok_or_else(|| FormatError::Truncated("variables".into()))? as usize;
+    let short_vars = || FormatError::Truncated("variables".into());
+    let nv = vars_table.u32_be(0).ok_or_else(short_vars)? as usize;
     let mut vars = Vec::new();
-    let mut p = vars_off + 4;
+    let mut p = 4;
     for _ in 0..nv.min(MAX_VARS) {
-        let (Some(idx), Some(len)) = (r.u32_be(p), r.u8(p + 4)) else { break };
-        let Some(name) = r.slice(p + 5, usize::from(len)) else { break };
+        let idx = vars_table.u32_be(p).ok_or_else(short_vars)?;
+        let len = usize::from(vars_table.u8(p + 4).ok_or_else(short_vars)?);
+        let name = vars_table.slice(p + 5, len).ok_or_else(short_vars)?;
         vars.push((String::from_utf8_lossy(name).into_owned(), idx));
-        p += 5 + usize::from(len);
+        p += 5 + len;
     }
     Ok(Bom { version, block_count, blocks, vars })
 }
@@ -371,6 +384,25 @@ mod tests {
     use craft_anything_testkit::apple as fx;
 
     #[test]
+    fn bom_directories_cannot_read_past_their_declared_sizes() {
+        let mut writer = fx::BomWriter::new();
+        writer.var("first", b"asset".to_vec());
+        writer.var("second", b"rendition".to_vec());
+        let file = writer.finish();
+        let bom = parse_bom(&file).unwrap();
+        assert_eq!(bom.var(&file, "second"), Some(&b"rendition"[..]));
+        for length_field in [20, 28] {
+            let old = u32::from_be_bytes(file[length_field..length_field + 4].try_into().unwrap());
+            let mut shortened = file.clone();
+            shortened[length_field..length_field + 4].copy_from_slice(&(old - 1).to_be_bytes());
+            assert!(parse_bom(&shortened).is_err(), "table length at {length_field}");
+        }
+        let mut beyond = file.clone();
+        beyond[28..32].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(parse_bom(&beyond).is_err());
+    }
+
+    #[test]
     fn reads_a_catalog() {
         let c = parse(&fx::assets_car()).unwrap();
         let h = c.header.as_ref().unwrap();
@@ -421,6 +453,33 @@ mod tests {
         };
         w.tree("RENDITIONS", vec![(key(0), b"sRGB".to_vec()), (key(1), b"P3".to_vec())]);
         w.finish()
+    }
+
+    /// A catalog keyed like the system apps' symbol images: identifier, deployment target, glyph
+    /// weight and glyph size, as `assetutil --info` lists them (`kCRThemeGlyphWeightName`,
+    /// `kCRThemeGlyphSizeName` after `kCRThemeDeploymentTargetName`).
+    #[test]
+    fn glyph_weight_and_size_attributes_are_named() {
+        use craft_anything_testkit::Buf;
+        let mut w = fx::BomWriter::new();
+        let mut kf = Buf::with_len(28);
+        kf.put(0, b"tmfk");
+        kf.u32(8, 4);
+        for (i, id) in [17u32, 25, 26, 27].into_iter().enumerate() {
+            kf.u32(12 + 4 * i, id);
+        }
+        w.var("KEYFORMAT", kf.into_vec());
+        let mut key = Buf::with_len(8);
+        key.u16(0, 7);
+        key.u16(2, 6);
+        key.u16(4, 4);
+        key.u16(6, 2);
+        w.tree("RENDITIONS", vec![(key.into_vec(), b"symbol".to_vec())]);
+        let c = parse(&w.finish()).unwrap();
+        assert_eq!(c.key_format, vec!["identifier", "deployment-target", "glyph-weight", "glyph-size"]);
+        assert_eq!(c.renditions[0].key.get("glyph-weight"), Some(&4));
+        assert_eq!(c.renditions[0].key.get("glyph-size"), Some(&2));
+        assert_eq!(attribute_name(28), "attribute-28");
     }
 
     #[test]

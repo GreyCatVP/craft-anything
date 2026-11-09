@@ -218,9 +218,16 @@ pub fn enrich(data: &[u8], file: &object::File<'_>, b: &mut Binary) {
     }
     let dyns = dynamic_entries(&e, &phdrs);
     let strtab = dyns.iter().find(|(t, _)| *t == 5).and_then(|(_, v)| va_to_off(&phdrs, *v));
+    let strsz = dyns.iter().find(|(t, _)| *t == DT_STRSZ).map(|(_, size)| *size);
     let dstr = |v: u64| -> Option<String> {
         let off = usize::try_from(strtab?.checked_add(v)?).ok()?;
-        e.r.cstr(off, 4096)
+        let Some(size) = strsz else { return e.r.cstr(off, 4096) };
+        let left = usize::try_from(size.checked_sub(v)?).unwrap_or(usize::MAX);
+        let rest = data.get(off..)?;
+        let window = rest.get(..left.min(rest.len()).min(4096))?;
+        // Keep the existing preview cap for long names, but never continue into the next table.
+        let end = window.iter().position(|&b| b == 0).or_else(|| (window.len() == 4096 && left > 4096).then_some(4096))?;
+        Some(String::from_utf8_lossy(window.get(..end)?).into_owned())
     };
     let mut flags = 0u64;
     let mut flags1 = 0u64;
@@ -1027,6 +1034,22 @@ pub fn parse_core(data: &[u8]) -> Result<CoreDump, FormatError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn needed_names_must_fit_the_dynamic_string_table() {
+        let (mut data, _) = craft_anything_testkit::elf64(craft_anything_testkit::ElfArch::X86_64, true);
+        let header = program_headers(&data).unwrap().into_iter().find(|ph| ph.p_type == 2).unwrap();
+        let start = header.offset as usize;
+        let end = start + header.file_size as usize;
+        let size_entry = data[start..end].as_chunks::<16>().0.iter().position(|e| e[..8] == 10u64.to_le_bytes()).unwrap();
+        let size_at = start + size_entry * 16 + 8;
+        assert_eq!(crate::parse_binary(&data).unwrap().libraries, ["libc.so.6"]);
+        // The dependency starts at byte 6, with its NUL at byte 15.
+        for size in [6u64, 15] {
+            data[size_at..size_at + 8].copy_from_slice(&size.to_le_bytes());
+            assert!(crate::parse_binary(&data).unwrap().libraries.is_empty(), "DT_STRSZ={size}");
+        }
+    }
+
     #[test]
     fn a_string_stops_at_its_nul_or_the_cap() {
         assert_eq!(super::str_at(b"ab\0cd\0", 3).as_deref(), Some("cd"));

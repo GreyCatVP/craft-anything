@@ -66,7 +66,7 @@ pub struct Entry {
     pub key: String,
     /// Qualifier string, e.g. `fr`, `es-rMX`, `night-xhdpi`, or `default`.
     pub config: String,
-    /// `language[-rREGION]`, empty for the default locale.
+    /// Android locale qualifier, empty for the default locale.
     pub locale: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
@@ -125,8 +125,26 @@ pub fn config_qualifiers(r: &Reader<'_>, off: usize) -> (String, String) {
     }
     let lang = if size >= 12 { r.slice(off + 8, 2).map(|b| unpack_code(b, b'a')).unwrap_or_default() } else { String::new() };
     let region = if size >= 12 { r.slice(off + 10, 2).map(|b| unpack_code(b, b'0')).unwrap_or_default() } else { String::new() };
-    let mut locale = lang.clone();
-    if !region.is_empty() {
+    // Extended locale fields were appended to ResTable_config. Older
+    // configurations end before one or more of these fields.
+    let subtag = |start: usize, len: usize| {
+        if start + len <= size { r.slice(off + start, len).map(ascii2).unwrap_or_default() } else { String::new() }
+    };
+    let script = if get8(52).unwrap_or(0) == 0 { subtag(36, 4) } else { String::new() };
+    let variant = subtag(40, 8);
+    let numbering = subtag(53, 8);
+    let mut locale = lang;
+    if !locale.is_empty() && (!script.is_empty() || !variant.is_empty() || !numbering.is_empty()) {
+        locale.insert_str(0, "b+");
+        for part in [&script, &region, &variant].into_iter().filter(|p| !p.is_empty()) {
+            locale.push('+');
+            locale.push_str(part);
+        }
+        if !numbering.is_empty() {
+            locale.push_str("+u+nu+");
+            locale.push_str(&numbering);
+        }
+    } else if !locale.is_empty() && !region.is_empty() {
         locale.push_str(&format!("-r{region}"));
     }
     if !locale.is_empty() {
@@ -479,6 +497,25 @@ mod tests {
         assert_eq!(style.parent.as_deref(), Some("@0x01030005"));
         assert_eq!(style.bag[0].value, "#ff336699");
         assert_eq!(style.config, "night-xhdpi-v21");
+    }
+
+    #[test]
+    fn distinct_locale_scripts_and_variants_keep_separate_keys() {
+        let mut cfg = [0u8; 64];
+        cfg[0] = 64;
+        cfg[8..12].copy_from_slice(b"zhTW");
+        cfg[36..40].copy_from_slice(b"Hant");
+        assert_eq!(config_qualifiers(&Reader::new(&cfg), 0).1, "b+zh+Hant+TW");
+        cfg[36..40].copy_from_slice(b"Hans");
+        assert_eq!(config_qualifiers(&Reader::new(&cfg), 0).1, "b+zh+Hans+TW");
+        cfg[52] = 1; // The inferred script is not part of the requested locale.
+        assert_eq!(config_qualifiers(&Reader::new(&cfg), 0).1, "zh-rTW");
+        cfg[40..45].copy_from_slice(b"POSIX");
+        assert_eq!(config_qualifiers(&Reader::new(&cfg), 0).1, "b+zh+TW+POSIX");
+        cfg[53..57].copy_from_slice(b"latn");
+        assert_eq!(config_qualifiers(&Reader::new(&cfg), 0).1, "b+zh+TW+POSIX+u+nu+latn");
+        cfg[0] = 36; // Bytes beyond the declared configuration are unrelated.
+        assert_eq!(config_qualifiers(&Reader::new(&cfg), 0).1, "zh-rTW");
     }
 
     #[test]
