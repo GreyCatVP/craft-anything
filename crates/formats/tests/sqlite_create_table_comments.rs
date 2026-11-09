@@ -28,8 +28,10 @@ fn a_comment_inside_a_definition_keeps_the_rowid_alias() {
         "CREATE TABLE t (id INTEGER -- key\n PRIMARY KEY, v TEXT)",
         "CREATE TABLE t (id INTEGER/* key */PRIMARY KEY, v TEXT)",
         "CREATE TABLE t (id INTEGER--key\n PRIMARY KEY, v TEXT)",
+        "CREATE TABLE t (id/* key */INTEGER PRIMARY KEY, v TEXT)",
+        "CREATE TABLE t (id--key\n INTEGER PRIMARY KEY, v TEXT)",
     ] {
-        assert_eq!(names_and_types(sql).1, ["INTEGER", "TEXT"], "{sql}");
+        assert_eq!(names_and_types(sql), (vec!["id".into(), "v".into()], vec!["INTEGER".into(), "TEXT".into()]), "{sql}");
         let data = table_db(sql, &[(3, vec![Val::Null, Val::Text("x".into())])]);
         let page = SqliteDb::parse(&data).unwrap().read_rows(2, 0, 10);
         assert_eq!(page.rows[0].values, vec![CellValue::Int(3), text("x")], "{sql}");
@@ -52,6 +54,16 @@ fn an_added_column_with_a_comment_takes_its_default() {
 fn comment_markers_inside_quotes_are_not_comments() {
     let (names, _) = names_and_types("CREATE TABLE t (a TEXT DEFAULT '--', \"b/*\" TEXT, c TEXT DEFAULT '*/,', d)");
     assert_eq!(names, ["a", "b/*", "c", "d"]);
+}
+
+/// A table constraint stays a constraint when a comment follows its keyword with no space.
+#[test]
+fn a_constraint_keyword_followed_by_a_comment_is_not_a_column() {
+    let sql = "CREATE TABLE t (k TEXT, v INT, CONSTRAINT--the key\n pk PRIMARY KEY (k)) WITHOUT ROWID";
+    assert_eq!(names_and_types(sql).0, ["k", "v"]);
+    let data = without_rowid_db(sql, &[vec![Val::Text("x".into()), Val::Int(1)]]);
+    let page = SqliteDb::parse(&data).unwrap().read_rows(2, 0, 10);
+    assert_eq!(page.rows[0].values, vec![text("x"), CellValue::Int(1)]);
 }
 
 /// A WITHOUT ROWID table's key is still found past comments, so rows come back in declaration order.

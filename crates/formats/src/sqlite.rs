@@ -986,7 +986,7 @@ fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
         let Some(first) = sql_tokens(seg).into_iter().next() else { continue };
         let seg = seg.get((first.as_ptr() as usize).saturating_sub(seg.as_ptr() as usize)..).unwrap_or("").trim_end();
         // Skip table-level constraints.
-        let first_word = seg.split(|c: char| c.is_whitespace() || c == '(').next().unwrap_or("").to_ascii_uppercase();
+        let first_word = first.to_ascii_uppercase();
         if matches!(first_word.as_str(), "CONSTRAINT" | "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN") {
             continue;
         }
@@ -1246,6 +1246,8 @@ fn take_identifier(seg: &str) -> (String, &str) {
         }
         Some(_) => {
             let endp = seg.find([' ', '\t', '\n', '(', ',']).unwrap_or(seg.len());
+            // A comment may follow the name with no space between: `id/*key*/` or `id--key`.
+            let endp = ["--", "/*"].into_iter().filter_map(|mark| seg.get(..endp)?.find(mark)).fold(endp, usize::min);
             (seg.get(..endp).unwrap_or("").to_string(), seg.get(endp..).unwrap_or(""))
         }
         None => (String::new(), ""),
