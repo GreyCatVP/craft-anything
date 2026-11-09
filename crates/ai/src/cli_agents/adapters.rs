@@ -446,8 +446,8 @@ impl AgentAdapter for ClaudeCode {
         if let Some(r) = cx.resume {
             a.extend(["--resume".into(), r.to_string()]);
         }
-        // Deep builders keep subagents (#1105): a subagent has only these tools and asks the same
-        // approval tool. Clean room leaves them out, since its reads must all reach that tool.
+        // Deep builders keep subagents (#1105): a subagent has only these tools and the session's
+        // permissions. Clean room leaves them out, since its reads must all reach our approval tool.
         let tools = match (cx.builder, cx.reads_checked) {
             (true, false) => "Bash,PowerShell,Read,Write,Edit,MultiEdit,Glob,Grep,TodoWrite,NotebookEdit,Agent",
             (true, true) => "Bash,PowerShell,Read,Write,Edit,MultiEdit,Glob,Grep,TodoWrite,NotebookEdit",
