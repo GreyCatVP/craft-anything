@@ -742,6 +742,10 @@ Owner: open · Status: in progress
       Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [x] Find OpenCode's CLI inside its Windows desktop app (`opencode-cli.exe`), for detection and for runs (#1060)
+- [x] OpenCode Go gets one session id per installation, saved at startup for any saved Go backend, so
+      a restart keeps it (#1225). An OpenCode error without a message shows its name, status and the
+      start of its response body. Not run live; the run-5 cause in #1225 still needs its log.
+      — claimed: fabox-os, branch bugfix/1225-opencode-go-session
 - [ ] Settings → AI can only add an agent it detected: add one by choosing its program, for a CLI
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
