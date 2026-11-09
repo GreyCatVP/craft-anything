@@ -1269,6 +1269,9 @@ Owner: open · Status: in progress
       — tests cover a UTF-8 character, a UTF-16 surrogate pair and a UTF-16 continuation-like
       byte at the cut; invalid bytes keep their lossy prefix. Claimed: AlexJoaquimPereira,
       branch bugfix/r3.12-sqlite-text-cap
+- [x] WITHOUT ROWID rows stored before ALTER TABLE ADD COLUMN show the added columns' defaults,
+      as rowid tables already do, instead of NULL.
+      — claimed: Plastic-time, branch bugfix/r3.12-sqlite-without-rowid-added-columns
 - [x] Require a complete DNS question's type and class fields before retaining it, and keep
       truncated questions out of packet inventories while reporting the incomplete message
       — claimed: Afloat16, branch bugfix/r3.12-dns-question-class-review-20261104

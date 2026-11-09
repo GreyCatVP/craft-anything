@@ -458,12 +458,14 @@ impl<'a> SqliteDb<'a> {
         self.collect_table_rows(&mut w, rootpage, 0);
         if let Some(table) = table {
             if let Some(order) = without_rowid_order(&table) {
+                // A row stored before ALTER TABLE ADD COLUMN ends early. Added columns come last in
+                // both orders, so stop at the first missing field and let the defaults below fill it.
                 for row in &mut w.out {
                     row.values = order
                         .iter()
-                        .map(|slot| match slot {
-                            Some(i) => row.values.get(*i).cloned().unwrap_or(CellValue::Null),
-                            None => CellValue::NotRead,
+                        .map_while(|slot| match slot {
+                            Some(i) => row.values.get(*i).cloned(),
+                            None => Some(CellValue::NotRead),
                         })
                         .collect();
                 }
