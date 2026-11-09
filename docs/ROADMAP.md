@@ -1365,6 +1365,10 @@ Owner: open · Status: in progress
       TCP, pcapng and TLS lengths (#688–#715, by Afloat16)
 - [x] Check ClientHello vector lengths and extension values before reporting the handshake as complete.
       — claimed: Afloat16, branch bugfix/r3.12-tls-client-hello-values
+- [x] SQLite tables whose quoted name holds a parenthesis (`"export (1)"`) keep their columns,
+      rowid alias and WITHOUT ROWID order: the column list opens at the first parenthesis outside
+      quotes.
+      — claimed: Plastic-time, branch bugfix/r3.12-sqlite-parenthesized-table-names
 
 - [x] Address the combined parser review: preserve partial Java reference coverage,
       enforce DEX signed 32-bit LEB128 limits, recover legacy AAPT UTF-8 lengths within
