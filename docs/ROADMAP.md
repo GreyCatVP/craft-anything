@@ -295,8 +295,9 @@ only when it's green and a maintainer has fully reviewed it, code as well as wor
       Code, Websites as targets, Desktop app and CLI; `docs/opencode.md` has a paragraph twice.
       Keep the newest complete copy of each
       — claimed: youkaicountry, branch docs/r5.2-doubled-status-rows — PR #1226
-- [ ] Have `cargo xtask` refuse a STATUS.md table with two rows of the same name, so a merge
+- [x] Have `cargo xtask` refuse a STATUS.md table with two rows of the same name, so a merge
       that keeps both copies of an edited row fails CI instead of reaching `main`
+      — claimed: Afloat16, branch test/r5.2-detect-duplicate-status-rows
 - [x] `docs/opencode.md` still has one passage twice, missed by #1226: in "Configuration and
       execution", the older copy of the standalone-server sentence, cut off after "both"
       — claimed: youkaicountry, branch docs/r5.2-opencode-doubled-passage
@@ -446,9 +447,10 @@ been run live.
       loop) picks the wording: a website's `layouts` and each round's `capture.json`, a program's
       `ui-tree.json` and the check's likeness, and asking the person what their pictures show
       — claimed: youkaicountry, branch bugfix/r5.4-blind-builder-prompts
-- [ ] The carry-on and follow-up prompts (`continue_prompt`, `follow_up`) ask an API-loop builder
+- [x] The carry-on and follow-up prompts (`continue_prompt`, `follow_up`) ask an API-loop builder
       to check its work with rebuild_check, which the loop refuses while it builds; only its first
       message says so. Say "Craft Anything checks it after your turn" there instead
+      — claimed: Afloat16, branch bugfix/r5.4-api-follow-up-check
 - [x] When a server refuses a request for its context window and says the size (Ollama, llama.cpp,
       OpenAI-style), fit the conversation to that window and ask once more, else say how to raise it (#962)
 - [x] Ollama fits a long prompt to its context by dropping the oldest messages, and a Qwen 3.8 model
@@ -858,6 +860,8 @@ Owner: open · Status: in progress
       nothing), in a build, a chat and a question, and have runs act on that, once the decision above
       is made. Today Codex, Gemini CLI, OpenCode, Antigravity, Hermes and Maki are not held to
       Clean room in a chat (their own sandbox, if any, is not established)
+- [x] A Deep build through Claude Code can start subagents again: `--tools` left out `Agent` when
+      #637 trimmed the list (#1105) — claimed: justinjohn0306, branch bugfix/r2.2-builder-subagents
 - [ ] Check live that a Clean room chat with Claude Code can't read a file outside its folder, and
       that an ACP chat in Clean room still reaches our tools (its permission requests for them are
       allowed, only its own read/write/command/fetch are refused)
@@ -975,6 +979,8 @@ Owner: open · Status: in progress
 
 ### R2.7 The request decides how to build
 Owner: open · Status: in progress
+- [x] Recognize Phaser and Bevy requests in the stack catalogue so Make can start those games without a Unity, Unreal or Godot editor.
+      — claimed: Afloat16, branch feature/r2.7-phaser-bevy-game-stacks
 - [ ] Make: a game whose request names a technology the stack table doesn't know (Phaser, Bevy…)
       still needs the default engine installed to start, though the builder is told to use what
       was named; ask the person, or let such a game start without an engine
@@ -1070,9 +1076,18 @@ Gaps found while using the app for real projects.
       builder's own rebuild_check, then the check after its turn). Keep a check whose round all
       worked while the app's files and what it's compared with are unchanged
       — claimed: tanish2k09, branch feature/r2.9-reuse-unchanged-check
-- [ ] A check starts the app in front, with focus, on the main monitor, in the way of whatever the
-      person is doing. Start it behind other windows without taking focus (it's still pictured);
-      Play keeps opening it in front
+- [x] A check starts the app in front, with focus, on the main monitor, in the way of whatever the
+      person is doing. The `--screenshot` contract now asks for the window without focus, and on
+      Windows behind other windows (egui's `with_active(false)` and `AlwaysOnBottom`, which winit
+      shows with `SW_SHOWNOACTIVATE` at `HWND_BOTTOM`; on macOS and X11 a covered window is
+      reported occluded and eframe stops painting it, so it isn't lowered there); it must keep
+      drawing unfocused (Unity's `runInBackground`). Play still opens it in front. It's the builder's
+      to do, so a build made before reads it only in a new brief, and nothing checks it was done.
+      Not run live — claimed: tanish2k09, branch feature/r2.9-check-window-behind
+- [ ] A runtime study's check also starts the build normally (`native_window_capture`) to picture
+      it beside the original, and that start still comes up in front with focus. Starting a program
+      without focus needs `STARTUPINFO`'s show mode, which std has only unstable
+      (`CommandExt::show_window`, rust-lang/rust#127544), or a safe window crate to send it back
 - [x] Keep New project's content column fixed while the vertical scrollbar animates in or out,
       hiding it when there is nothing to scroll, so switching tabs never shifts the page horizontally
       — claimed: Codex, branch bugfix/r2.9-home-scrollbar-gutter
@@ -1275,7 +1290,8 @@ to the project next.
 - [ ] Cap a run's log (`last-run.log`, `play.log`): it grows as long as the program prints
       — in PR #218
 - [ ] Opening a pin that's already running brings its window to the front, instead of a message
-- [ ] How much space pins take in Settings
+- [x] How much space pins take in Settings
+      — claimed: Afloat16, branch feature/r2.10-pinned-copy-storage
 
 ---
 
@@ -1291,8 +1307,9 @@ Owner: open · Status: todo
       follow-up) — a shared `capped_line` helper walks back to a character boundary; regression
       tests cover both parsers and the helper
       — claimed: AlexJoaquimPereira, branch bugfix/r3.3-engine-line-cap
-- [ ] `adb` `parse_ps` reads its header line before the 64 KiB cap, so a hostile header can
+- [x] `adb` `parse_ps` reads its header line before the 64 KiB cap, so a hostile header can
       materialize a full token list; cap it like the body lines
+      — claimed: Afloat16, branch bugfix/r3.3-cap-adb-process-header
 
 ### R3.9 Game assets out
 Owner: open · Status: in progress
@@ -1326,7 +1343,9 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.11-standin-empty-304-20261103
 - [ ] Godot format 4 and IL2CPP metadata 38 and 39 are header-only; read their tables once a real
       file can be checked
-- [ ] Bun: take source maps and bytecode out as files; a standalone `.pyz`
+- [x] Bun: take each module's stored source map and bytecode out as files.
+      — claimed: Afloat16, branch feature/r3.11-bun-module-payloads
+- [ ] A standalone `.pyz`
 - [ ] `native_source_folder_write` uses the built-in decompiler only: use Ghidra in Deep mode when
       it's there
 - [x] Keep stand-in response samples distinct when headers, content types or body-availability metadata differ.
@@ -1349,12 +1368,16 @@ Owner: open · Status: in progress
 
 ### R3.12 Format parser correctness
 Owner: open · Status: in progress
+- [x] Extract legacy PyInstaller PYZ data as raw files and report modern namespace packages without fabricating bytecode.
+      — claimed: Afloat16, branch bugfix/r3.12-pyz-member-kinds
 - [x] Bound rejected ASAR names by the archive listing limit.
       — claimed: Afloat16, branch bugfix/r3.12-asar-limit-bounds-20261107
 - [x] Keep .NET bundle member reads before the manifest.
       — claimed: Afloat16, branch bugfix/r3.12-dotnet-data-bounds-20261107
 - [x] Check the decoded byte count for packed files whose manifest declares their original size.
       — claimed: Afloat16, branch bugfix/r3.12-packed-member-size
+- [x] Decode all frames of concatenated Zstandard members and account for their combined output.
+      — claimed: Afloat16, branch bugfix/r3.12-zstandard-multiple-frames
 - [x] SQLite TEXT values cut at the 4 KiB cap can end in a spurious U+FFFD when the cut lands
       inside a character; cut at a UTF-8/UTF-16 boundary and keep the `truncated` flag
       — tests cover a UTF-8 character, a UTF-16 surrogate pair and a UTF-16 continuation-like
@@ -1377,10 +1400,14 @@ Owner: open · Status: in progress
       `DEFAULT "abc"`), a signed string (`DEFAULT -'5'`) or a number with digit separators
       (`DEFAULT 1_000`); they show NULL with a note today. Bare and double-quoted words are text
       constants; a signed numeric string and single digit separators take the column's affinity,
-      and a separator-bearing REAL uses SQLite's REAL text form.
+      and a separator-bearing REAL fills a missing TEXT field with its unseparated spelling.
       — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-default-literals
-- [ ] Read a TEXT column's REAL default as SQLite does: `DEFAULT 1e3` and `DEFAULT 5.` are
-      '1000.0' and '5.0' in SQLite, while non-separated reals keep the schema's text here.
+- [x] Read a TEXT column's REAL default as SQLite does: `DEFAULT 1e3` and `DEFAULT 5.` are
+      '1000.0' and '5.0' in SQLite. A non-integer REAL default now uses SQLite's REAL text form,
+      including `Inf`/`-Inf`; integer literals keep integer text.
+      — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-real-text
+- [x] Preserve decimal literal spelling when filling a missing TEXT field from a SQLite default with digit separators.
+      — claimed: Afloat16, branch bugfix/r3.12-sqlite-added-default-spellings
 - [x] Read a signed quoted numeric default with SQLite's coercion before the column's affinity:
       `DEFAULT -'1e3'` is '-1000.0' on TEXT and -1000 on INTEGER, and `DEFAULT -'1.50'` is '-1.5';
       integer text keeps integer formatting. The quoted text is coerced to an INTEGER or REAL
@@ -1397,10 +1424,14 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-ipv4-header-lengths-20261105
 - [x] Validate the version in IPv6 frames.
       — claimed: Afloat16, branch bugfix/r3.12-ipv6-version-20261105
+- [x] Decode VLAN-encapsulated network packets in Linux cooked v1 and v2 captures.
+      — claimed: Afloat16, branch bugfix/r3.12-cooked-vlan-packets
 - [x] Reject negative GNU base-256 values in unsigned tar header fields.
       — claimed: Afloat16, branch bugfix/r3.12-tar-octal-fields
 - [x] Recognize ZIP directories from DOS directory attributes and Unix file-type metadata when the entry name has no trailing slash.
       — claimed: Afloat16, branch bugfix/r3.12-zip-directory-attributes
+- [x] Use a verified Info-ZIP Unicode Path extra field when listing a member stored under a legacy filename.
+      — claimed: Afloat16, branch feature/r3.12-zip-unicode-path
 - [x] Stop decoding extension headers inside noninitial IPv6 fragments.
       — claimed: Afloat16, branch bugfix/r3.12-ipv6-fragment-payload-20261105
 - [x] Enforce the expanded DNS name wire-length limit.
@@ -1411,6 +1442,8 @@ Owner: open · Status: in progress
       Preserve empty multicast/unicast DNS-SD TXT records using wire-label service instance names.
 - [x] Validate DER algorithm identifiers, signature and key bit strings, and name fields before using them as certificate verification inputs.
       — claimed: Afloat16, branch bugfix/r3.12-der-verification-fields
+- [x] Distinguish literal punctuation and multi-valued attributes in the displayed X.509 issuer and subject.
+      — claimed: Afloat16, branch bugfix/r3.12-certificate-name-rendering
 - [x] Read HTTP Host fields only from the header section.
       — claimed: Afloat16, branch bugfix/r3.12-http-host-boundary-20261105
 - [x] Keep capture flow timestamps in chronological order.
@@ -1426,8 +1459,12 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-zip-multidisk-20261105
 - [x] Check Unity bundle blocks against their declared output lengths.
       — claimed: Afloat16, branch bugfix/r3.12-unity-bundle-decompressed-length-20261105
+- [x] Expand repeated LZ4 match bytes in blocks when reading Unity bundles.
+      — claimed: Afloat16, branch refactor/r3.12-expand-lz4-matches
 - [x] Require terminated cpio pathnames and a complete, empty trailer before reporting an archive as complete.
       — claimed: Afloat16, branch bugfix/r3.12-cpio-path-and-trailer
+- [x] Identify regular files sharing an inode and device in newc and CRC archives so hard-link aliases are visible in listings.
+      — claimed: Afloat16, branch feature/r3.12-cpio-hard-link-evidence
 - [x] Locate Unity bundle metadata within the declared bundle size.
       — claimed: Afloat16, branch bugfix/r3.12-unity-bundle-declared-size-20261105
 - [x] Check that Unity bundle compressed blocks end before the trailing block table, or the declared
@@ -1443,24 +1480,34 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-unreal-fstring-terminators-20261105
 - [x] Count every compression block spanned by an IoStore chunk.
       — claimed: Afloat16, branch bugfix/r3.12-iostore-unaligned-chunk-blocks-20261105
+- [x] Reject IoStore directory rows that name a missing chunk or name instead of reporting a zero-byte file or fabricated path.
+      — claimed: Afloat16, branch bugfix/r3.12-iostore-directory-references
 - [x] Reject truncated IoStore fixed headers.
       — claimed: Afloat16, branch bugfix/r3.12-iostore-complete-header-20261105
 - [x] Reject CBOR collections that exceed the EVM metadata reader's limits and invalid text strings.
       — claimed: Afloat16, branch bugfix/r3.12-evm-cbor
+- [x] Require evidence of a rejecting payment branch before labelling EVM functions nonpayable; reading CALLVALUE alone accepts payments.
+      — claimed: Afloat16, branch bugfix/r3.12-evm-payment-guards
 - [x] Reject invalid marshal long integer digits.
       — claimed: Afloat16, branch bugfix/r3.12-pyc-long-limb-validation-20261105
 - [x] Check expanded RGBA image sizes and enforce output budgets before allocation.
       — claimed: Afloat16, branch bugfix/r3.12-pixel-rgba-output-overflow-20261105
 - [x] Report malformed safetensors metadata, element widths and payload coverage.
       — claimed: Afloat16, branch bugfix/r3.12-safetensors-layout
+- [x] Read Apple BOM block indices and named variables only within the directory byte ranges declared by the container.
+      — claimed: Afloat16, branch bugfix/r3.12-bom-directory-bounds
 - [x] Count empty tensor shapes consistently across axis orders.
       — claimed: Afloat16, branch bugfix/r3.12-tensor-zero-dimension-product-20261105
 - [x] Find APK signatures through valid ZIP comments and framed central directories.
       — claimed: Afloat16, branch bugfix/r3.12-apk-sign-eocd-comment-boundary-20261105
+- [x] Keep explicit script and variant subtags when grouping Android resource strings by locale.
+      — claimed: Afloat16, branch bugfix/r3.12-android-script-locale
 - [x] Read 16-bit native pointers without consuming adjacent bytes.
       — claimed: Afloat16, branch bugfix/r3.12-binary-pointer
 - [x] Keep Mach-O load-command facts within their command.
       — claimed: Afloat16, branch bugfix/r3.12-macho-load-command-framing-20261105
+- [x] Prevent Mach-O zero-fill sections from exposing unrelated file bytes during section lookup.
+      — claimed: Afloat16, branch bugfix/r3.12-macho-zerofill-section-data
 - [x] Keep native address translations and reads inside both the mapped range and its file-backed bytes.
       — claimed: Afloat16, branch bugfix/r3.12-binary-padding
 - [x] Keep Mach-O function starts within their declared payload.
@@ -1473,15 +1520,32 @@ Owner: open · Status: in progress
 - [x] Name DriverKit and visionOS simulator Mach-O binaries in the binary view: its platform table
       stopped at 9 and 11, so a `.dext` read "unknown" while the dependency view said "driverkit".
       — claimed: Chr0mium24, branch bugfix/r3.12-macho-platform-names
+- [x] Swift symbols with a protocol type decode. In a protocol list (`…_p`) each protocol is a
+      context and a name with no `P` kind letter, but the demangler expected a type there, so an
+      existential of a protocol named this way was reported invalid ("expected a type"):
+      `_$sSS6encode2toys7Encoder_p_tKF` is `Swift.String.encode(to: Swift.Encoder) throws -> ()`.
+      — claimed: Chr0mium24, branch bugfix/r3.12-swift-demangle-existentials
 - [x] Swift symbols name the right type after an optional, an associated type or an extension.
       The demangler's substitution list left out `Sg` optionals and `Qz`/`Qy` associated types
       and added extensions, so a later `A…` reference named the wrong node
       (`[Swift.String : Swift.String]` where the symbol says `Swift.String?`) or fell out of range.
       — claimed: Chr0mium24, branch bugfix/r3.12-swift-demangle-substitutions
+- [x] Swift symbols read `SQ` as `Swift.Equatable`. The demangler's table of standard types mapped
+      it to the enum `Swift.ImplicitlyUnwrappedOptional`, so `_$sSQMp` read "protocol descriptor for
+      Swift.ImplicitlyUnwrappedOptional", a requirement read `A: Swift.ImplicitlyUnwrappedOptional`,
+      and `Equatable` conformance descriptors and witness tables (`…SQAAMc`, `…SQsWP`) were
+      reported invalid ("expected a protocol").
+      — claimed: Chr0mium24, branch bugfix/r3.12-swift-demangle-equatable
+- [x] Require a complete Cargo package version before a registry or vendor path becomes Rust dependency evidence.
+      — claimed: Afloat16, branch bugfix/r3.12-rust-dependency-versions
 - [x] Decode binary plist markers and dictionary keys according to their stored types.
       — claimed: Afloat16, branch bugfix/r3.12-bplist-typed-objects
+- [x] Apply the extracted-string limit in file-offset order across UTF-16LE and narrow strings, so an early wide string is not hidden by later ASCII.
+      — claimed: Afloat16, branch bugfix/r3.12-earliest-extracted-strings
 - [x] Visit XML plist values only inside a complete, correctly encoded document.
       — claimed: Afloat16, branch bugfix/r3.12-xml-plist-document
+- [x] Read and edit JSONC registrations whose line comments end at a bare carriage return.
+      — claimed: Afloat16, branch bugfix/r3.12-jsonc-carriage-return-comments
 - [x] Name code-directory flags with the bits Apple uses: hard 0x100, kill 0x200, expires 0x400,
       restrict 0x800, enforcement 0x1000, library-validation 0x2000. The table used 0x4–0x80 for
       them and named 0x200 and 0x800 as other flags, so a library-validation signature (0x2000)
@@ -1489,10 +1553,14 @@ Owner: open · Status: in progress
       — claimed: Chr0mium24, branch bugfix/r3.12-codesign-flag-names
 - [x] Keep code-signature children and verification reads within their declared superblob.
       — claimed: Afloat16, branch bugfix/r3.12-codesign-superblob-length-boundary-20261105
+- [x] Reject out-of-range or unterminated library names in the ELF dynamic string table.
+      — claimed: Afloat16, branch bugfix/r3.12-elf-dynamic-names
 - [x] Refuse short ELF64 header and section records and handle section-table offsets at the address limit safely.
       — claimed: Afloat16, branch bugfix/r3.12-sbpf-records
 - [x] Keep PE optional-header reads within the declared header.
       — claimed: Afloat16, branch bugfix/r3.12-pe-optional-header-framing-20261105
+- [x] Use the PE image's declared header extent when an RVA is not mapped by a section.
+      — claimed: Afloat16, branch bugfix/r3.12-pe-header-rva-span
 - [x] Keep relocation symbol indices inside a linked symbol table and require a linked string table before reporting a syscall name.
       — claimed: Afloat16, branch bugfix/r3.12-sbpf-symbols
 - [x] Keep PE resource metadata within the resource directory.
@@ -1510,18 +1578,24 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-wasm-debug-names
 - [x] Decode the full signed 32-bit source map VLQ range and refuse mapping fields outside it.
       — claimed: Afloat16, branch bugfix/r3.12-sourcemap-vlq-range
+- [x] Group Go functions by the declaring package when a generic argument names another import path.
+      — claimed: Afloat16, branch bugfix/r3.12-go-generic-owner
 - [x] Keep Go function tables and names within their section.
       — claimed: Afloat16, branch bugfix/r3.12-go-pclntab-section-boundary-20261105
 - [x] Keep the report's function display limit from marking a valid large WebAssembly module as mismatched.
       — claimed: Afloat16, branch bugfix/r3.12-wasm-function-count
 - [x] Preserve complete Unicode characters in shortened .NET strings.
       — claimed: Afloat16, branch bugfix/r3.12-dotnet-user-string-surrogate-limit-20261105
+- [x] Read Dart version hashes and feature strings only from the bytes belonging to that snapshot.
+      — claimed: Afloat16, branch bugfix/r3.12-dart-snapshot-extent
 - [x] Read a Dart ELF build ID only when its name and descriptor fit the declared note.
       — claimed: Afloat16, branch bugfix/r3.12-dart-note
 - [x] Locate ELF core mapping names after the complete declared table.
       — claimed: Afloat16, branch bugfix/r3.12-elf-core-file-name-count-cap-20261105
 - [x] Validate index source map section offsets and stop an unresolved section from borrowing mappings from the preceding section.
       — claimed: Afloat16, branch bugfix/r3.12-index-map-boundaries
+- [x] Preserve the URL delimiter in source-map roots when resolving a relative source file.
+      — claimed: Afloat16, branch bugfix/r3.12-source-map-url-root
 - [x] Keep DOS relocations inside the declared executable header.
       — claimed: Afloat16, branch bugfix/r3.12-dos-relocation-header-boundary-20261105
 - [x] Keep relocation reads within their declared entry stride and never invent an addend for a truncated RELA.
@@ -1563,6 +1637,8 @@ Owner: open · Status: in progress
 
 - [x] Keep Android binary XML events within their document, chunk and attribute bounds.
       — claimed: Afloat16, branch bugfix/r3.12-android-xml-events
+- [x] Find the method parameter terminator outside object type names in JVM descriptors.
+      — claimed: Afloat16, branch bugfix/r3.12-java-descriptor-boundary
 - [x] Address the combined parser review: preserve partial Java reference coverage,
       enforce DEX signed 32-bit LEB128 limits, recover legacy AAPT UTF-8 lengths within
       their pool with a shared recovery probe limit, and distinguish missing ext indirect
@@ -1607,6 +1683,8 @@ Owner: open · Status: in progress
 - [x] Keep the comma inside a SQLite type's parentheses: `DECIMAL(10, 2)` is listed as
       `DECIMAL(10 2)`. The type keeps the comma inside its parentheses, and the schema overview
       shows it unchanged. — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-type-comma
+- [x] Check that IL2CPP method ranges agree with each method's declaring type before reporting names and ownership.
+      — claimed: Afloat16, branch bugfix/r3.12-il2cpp-method-owners
 - [x] Asset catalogs name each rendition key attribute as CoreUI reads it. When the deployment
       target predates an attribute (display gamut before macOS 10.12), actool writes a stand-in
       (the placeholder attribute) in KEYFORMAT and the real one in KEYFORMATWORKAROUND, which
@@ -1617,12 +1695,19 @@ Owner: open · Status: in progress
       moved to 3351. A file with 3350 is reported as a 3.5 pre-release (`is_release: false`), with
       a note that its code layout may differ. Count 3350 and 3351 as releases of 3.5.
       — claimed: Chr0mium24, branch bugfix/r3.12-pyc-3-5-release-magic
+- [x] Swift addressors decode. After `a` (mutable) or `l`, an addressor has a letter for its kind
+      (`u` for unsafe), but the demangler read only the `a` and took the kind letter for another
+      operator, so every addressor was reported invalid: `_$s5Books19PAGETURNLOG_ENABLEDSbvau` is
+      `Books.PAGETURNLOG_ENABLED.unsafeMutableAddressor : Swift.Bool`.
+      — claimed: Chr0mium24, branch bugfix/r3.12-swift-demangle-addressors
 - [x] Name the glyph weight (26) and glyph size (27) key attributes of asset catalogs, which hold
       SF Symbol style images; they're listed as `attribute-26` and `attribute-27` today.
       — claimed: Chr0mium24, branch bugfix/r3.12-car-glyph-attributes
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress
+- [x] Report received HAR response body sizes separately from decoded content sizes and identify entries whose sizes are unknown.
+      — claimed: Afloat16, branch bugfix/r3.13-har-transfer-size
 - [x] Read HAR captures with the permitted UTF-8 byte order mark.
       — claimed: Afloat16, branch bugfix/r3.13-har-bom-bounds-20261107
 - [x] The HTML scanner finds script preloads in `rel` token lists, decodes asset URLs once (numeric

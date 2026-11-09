@@ -228,6 +228,16 @@ impl<'a> D<'a> {
         }
     }
 
+    /// One protocol of a protocol list (`…_p`): a context and a name, with no `P` kind letter and
+    /// no substitution slot of its own, or a type such as a standard protocol (`SH`).
+    fn pop_protocol(&mut self) -> R<N> {
+        if let Some(N::Ident(name)) = self.pop_if(|n| matches!(n, N::Ident(_))) {
+            let ctx = self.pop_context()?;
+            return Ok(N::Nominal { kind: 'P', ctx: Box::new(ctx), name });
+        }
+        self.pop_type()
+    }
+
     fn identifier(&mut self) -> R<N> {
         let mut has_words = false;
         let mut puny = false;
@@ -373,7 +383,7 @@ impl<'a> D<'a> {
             b'O' => ('V', "ObjectIdentifier"),
             b'P' => ('V', "UnsafePointer"),
             b'p' => ('V', "UnsafeMutablePointer"),
-            b'Q' => ('O', "ImplicitlyUnwrappedOptional"),
+            b'Q' => ('P', "Equatable"),
             b'q' => ('O', "Optional"),
             b'R' => ('V', "UnsafeBufferPointer"),
             b'r' => ('V', "UnsafeMutableBufferPointer"),
@@ -547,8 +557,9 @@ impl<'a> D<'a> {
         })
     }
 
-    fn accessor(&mut self) -> Option<&'static str> {
-        let a = match self.peek()? {
+    fn accessor(&mut self) -> R<Option<&'static str>> {
+        let Some(c) = self.peek() else { return Ok(None) };
+        let a = match c {
             b'g' => "getter",
             b's' => "setter",
             b'G' => "global getter",
@@ -557,14 +568,29 @@ impl<'a> D<'a> {
             b'm' => "materializeForSet",
             b'M' => "modify",
             b'r' => "read",
-            b'a' => "unsafeMutableAddressor",
-            b'l' => "unsafeAddressor",
+            b'a' | b'l' => return self.addressor().map(Some),
             b'i' => "init",
             b'p' => "",
-            _ => return None,
+            _ => return Ok(None),
         };
         self.pos += 1;
-        Some(a)
+        Ok(Some(a))
+    }
+
+    /// An addressor: `a` (mutable) or `l`, then a letter for its kind.
+    fn addressor(&mut self) -> R<&'static str> {
+        let mutable = self.next()? == b'a';
+        Ok(match (mutable, self.next()?) {
+            (true, b'u') => "unsafeMutableAddressor",
+            (true, b'O') => "owningMutableAddressor",
+            (true, b'o') => "nativeOwningMutableAddressor",
+            (true, b'P') => "nativePinningMutableAddressor",
+            (false, b'u') => "unsafeAddressor",
+            (false, b'O') => "owningAddressor",
+            (false, b'o') => "nativeOwningAddressor",
+            (false, b'p') => "nativePinningAddressor",
+            _ => return Err("unsupported addressor kind".into()),
+        })
     }
 
     fn conformance(&mut self) -> R<N> {
@@ -886,7 +912,7 @@ impl<'a> D<'a> {
                 let ty = self.pop_entity_type(false)?;
                 let labels = self.pop_labels(Self::param_count(&ty))?;
                 let ctx = self.pop_context()?;
-                let accessor = self.accessor();
+                let accessor = self.accessor()?;
                 self.push(N::Entity { kind: EKind::Subscript, ctx: Box::new(ctx), name: None, labels, ty: Some(Box::new(ty)), accessor, is_static: false })
             }
             b'l' => {
@@ -910,7 +936,7 @@ impl<'a> D<'a> {
                             return Err("too many protocols".into());
                         }
                         let first = self.pop_if(|n| matches!(n, N::FirstMarker)).is_some();
-                        protos.push(self.pop_type()?);
+                        protos.push(self.pop_protocol()?);
                         if first {
                             break;
                         }
@@ -959,7 +985,7 @@ impl<'a> D<'a> {
                 let ty = self.pop_type()?;
                 let name = self.pop_name()?;
                 let ctx = self.pop_context()?;
-                let accessor = self.accessor();
+                let accessor = self.accessor()?;
                 self.push(N::Entity {
                     kind: EKind::Var,
                     ctx: Box::new(ctx),

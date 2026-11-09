@@ -848,9 +848,9 @@ impl Worker {
         let mut prompt = match &opts.message {
             // An agent with a saved session gets the follow-up; one without (an API loop) starts
             // from the brief with the request added.
-            Some(m) if !first && has_history => follow_up(m, kind) + &now(),
+            Some(m) if !first && has_history => follow_up(m, kind, api_loop) + &now(),
             // Carrying on after a stop: the same, told to finish what it was doing.
-            None if carrying_on && !first && has_history => continue_prompt(kind) + &now(),
+            None if carrying_on && !first && has_history => continue_prompt(kind, api_loop) + &now(),
             _ => {
                 let b = brief(kind, &cx, opts.message.as_deref());
                 if api_loop { format!("{API_BUILDER}{}\n\n{b}", if sees_pictures { "" } else { BLIND_BUILDER }) } else { b }

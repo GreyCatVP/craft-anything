@@ -25,7 +25,7 @@ fn refine(k: &str, check: &CheckResult) -> String {
     kind(k).refine(check, true)
 }
 fn follow_up(message: &str, k: &str) -> String {
-    super::follow_up(message, kind(k).as_ref())
+    super::follow_up(message, kind(k).as_ref(), false)
 }
 fn locate(path: &Path, k: &str) -> (PathBuf, Option<PathBuf>) {
     super::locate(path, kind(k).studies_folder())
@@ -3025,8 +3025,17 @@ fn a_resumed_game_builder_hears_the_asset_choice_as_it_is_now() {
 }
 
 #[test]
+fn a_resumed_api_builder_waits_for_the_runs_check() {
+    let app = kind("app");
+    for prompt in [super::follow_up("bigger title", app.as_ref(), true), continue_prompt(app.as_ref(), true)] {
+        assert!(prompt.contains("Craft Anything checks your build after your turn"), "{prompt}");
+        assert!(!prompt.contains("rebuild_check"), "{prompt}");
+    }
+}
+
+#[test]
 fn a_stopped_build_is_told_to_carry_on_not_start_over() {
-    let p = continue_prompt(kind("website").as_ref());
+    let p = continue_prompt(kind("website").as_ref(), false);
     assert!(p.contains("stopped before it finished") && p.contains("Pick up where you left off") && p.contains("app/"));
 }
 
@@ -3234,8 +3243,8 @@ fn every_kind_leads_tests_its_own_build_and_keeps_its_unknowns() {
             assert!(deep.contains("(the rendered HTML).\n\nMatch it exactly"), "one clean paragraph break: {deep}");
         }
     }
-    assert!(follow_up("bigger title", "game").contains("check it with rebuild_check"));
-    assert!(continue_prompt(kind("app").as_ref()).contains("check it with rebuild_check"));
+    assert!(follow_up("bigger title", "game").contains("Check it with rebuild_check"));
+    assert!(continue_prompt(kind("app").as_ref(), false).contains("Check it with rebuild_check"));
 }
 
 #[test]

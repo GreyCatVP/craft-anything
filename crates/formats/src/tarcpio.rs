@@ -311,6 +311,7 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
         _ => return None,
     };
     let odc = format == "cpio-odc";
+    let mut hard_links = std::collections::HashMap::<(u64, u64, u64), Vec<usize>>::new();
     let mut out = Listing { format, ..Listing::default() };
     let mut pos = 0usize;
     let align = |v: usize| if odc { Some(v) } else { v.checked_add(3).map(|x| x & !3) };
@@ -401,6 +402,16 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
                 None => out.warnings.push(format!("{name}: unreadable data checksum")),
             }
         }
+        // newc stores hard-linked files by device and inode. GNU cpio may put the
+        // payload on the last name, so identify aliases after scanning the group.
+        if !odc
+            && kind == MemberKind::File
+            && h.get(38..46).and_then(hex_field).is_some_and(|n| n > 1)
+            && let (Some(ino), Some(major), Some(minor)) =
+                (h.get(6..14).and_then(hex_field), h.get(62..70).and_then(hex_field), h.get(70..78).and_then(hex_field))
+        {
+            hard_links.entry((major, minor, ino)).or_default().push(out.members.len());
+        }
         out.members.push(Member { name, kind, size: filesize, data_offset: data_off as u64, link_target, mode });
         if next > data.len() {
             out.warnings.push("archive ends early (no trailer)".into());
@@ -408,6 +419,20 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
             break;
         }
         pos = next;
+    }
+    for group in hard_links.values().filter(|group| group.len() > 1) {
+        let source = group.iter().rev().copied().find(|&i| out.members.get(i).is_some_and(|m| m.size > 0)).or_else(|| group.first().copied());
+        let Some(source) = source else { continue };
+        let Some(name) = out.members.get(source).map(|m| m.name.clone()) else { continue };
+        for &index in group {
+            if index != source
+                && let Some(alias) = out.members.get_mut(index)
+                && alias.size == 0
+            {
+                alias.kind = MemberKind::Hardlink;
+                alias.link_target = Some(name.clone());
+            }
+        }
     }
     Some(out)
 }
@@ -456,6 +481,36 @@ mod tests {
         with_payload[trailer + 61] = b'1';
         assert!(!cpio(&with_payload, 10).unwrap().complete);
         assert!(!cpio(&bytes[..bytes.len() - 1], 10).unwrap().complete);
+    }
+
+    #[test]
+    fn cpio_hard_link_aliases_do_not_appear_as_empty_files() {
+        for content_first in [true, false] {
+            let data = if content_first { [b"abc".as_slice(), b""] } else { [b"".as_slice(), b"abc"] };
+            let mut archive = fx::cpio_newc(&[("one", data[0], 0o100644), ("two", data[1], 0o100644), ("separate", b"", 0o100644)]);
+            let starts: Vec<_> = archive.windows(6).enumerate().filter(|(_, bytes)| *bytes == b"070701").map(|(i, _)| i).collect();
+            for &start in &starts[..3] {
+                archive[start + 6..start + 14].copy_from_slice(b"00000015");
+                archive[start + 38..start + 46].copy_from_slice(b"00000002");
+            }
+            archive[starts[2] + 70..starts[2] + 78].copy_from_slice(b"00000001");
+            let (file, alias) = if content_first { (0, 1) } else { (1, 0) };
+            for crc in [false, true] {
+                if crc {
+                    for &start in &starts {
+                        archive[start..start + 6].copy_from_slice(b"070702");
+                    }
+                    archive[starts[file] + 102..starts[file] + 110].copy_from_slice(b"00000126");
+                }
+                let listing = cpio(&archive, 10).unwrap();
+                assert_eq!(listing.members[file].kind, MemberKind::File);
+                assert_eq!(member_data(&archive, &listing.members[file]), Some(b"abc".as_slice()));
+                assert_eq!(listing.members[alias].kind, MemberKind::Hardlink);
+                assert_eq!(listing.members[alias].link_target.as_deref(), Some(listing.members[file].name.as_str()));
+                assert_eq!(listing.members[2].kind, MemberKind::File);
+                assert!(listing.warnings.is_empty());
+            }
+        }
     }
 
     #[test]
