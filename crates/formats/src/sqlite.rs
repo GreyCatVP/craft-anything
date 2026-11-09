@@ -969,8 +969,7 @@ fn column_list_open(sql: &str) -> Option<usize> {
 fn column_definitions(sql: &str) -> Vec<(Column, &str)> {
     let mut cols = Vec::new();
     // Take the text inside the outermost parentheses.
-    let Some(open) = column_list_open(sql) else { return cols };
-    let inner = &sql[open + 1..];
+    let Some(inner) = column_list_open(sql).and_then(|open| sql.get(open.checked_add(1)?..)) else { return cols };
     let mut depth = 1usize;
     let mut end = inner.len();
     for token in sql_tokens(inner) {
