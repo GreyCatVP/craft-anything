@@ -252,6 +252,27 @@ fn deep_mode_without_ghidra_asks_to_get_it_before_using_it() {
     h.get_by_label("Build without it");
 }
 
+/// A game's chosen folder is shown like every chosen folder: cut to fit its row, never widening the
+/// page, with the whole path on hover.
+#[test]
+fn a_long_game_folder_stays_inside_the_window() {
+    let folder = format!("D:/Games/{}/Cave Game", "A folder with a very long name ".repeat(12).trim());
+    let path = std::path::PathBuf::from(&folder);
+    let mut h = harness(move || {
+        let mut a = demo::app(demo::engine(Mode::Beginner, true));
+        demo::deep(&mut a);
+        a.state.screen = Screen::GameFiles;
+        a.state.game.folder = Some(path);
+        a
+    });
+    h.run_steps(4);
+    let width = h.ctx.content_rect().width();
+    let shown = craft_anything_ui_egui::short_path(std::path::Path::new(&folder));
+    let r = h.get_by_label(&shown).rect();
+    assert!(r.right() <= width, "the folder ({r:?}) stays inside the {width}px window");
+    assert!(r.height() < 30.0, "it's cut to one line, not wrapped ({r:?})");
+}
+
 #[test]
 fn a_long_prompt_wraps_inside_the_window_in_the_project_and_the_chat() {
     use craft_anything_ui_egui::state::{ChatItem, FeedItem, UserItem};

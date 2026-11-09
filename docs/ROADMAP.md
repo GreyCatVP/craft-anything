@@ -474,6 +474,12 @@ been run live.
       answer stream ended early." and no next step (seen once live, 27B model); say the server may
       still be loading it and to try again in a minute
       — claimed: yashpatadiya1724-cmyk, branch bugfix/r5.4-stream-loading-remediation
+- [x] An AI on this computer (Ollama, LM Studio) that can't be reached, or that took a request and
+      didn't start answering, is told apart: "Couldn't reach Ollama (local)" for a server that was
+      reached and "check your internet connection" for one on this computer misled, and an answer
+      that never started didn't say a large model may still be loading or reading a long prompt
+      (#1239 gave it the `timeout_secs` advice)
+      — claimed: jgt87, branch bugfix/r5.4-local-server-messages — PR #1242
 
 ### R5.5 API-key builds fail in words people can use
 Owner: open · Status: todo
@@ -505,6 +511,10 @@ Owner: open · Status: todo
       "400: Provider returned error" (#369): a request with tools now sets
       `provider.require_parameters`, and a 404 "no provider for these parameters" falls back to the
       text protocol like any server that rejects tools
+- [x] OpenRouter reserves a model's whole output limit against the key's credit when no `max_tokens`
+      is sent, so a key with $35 left of a daily limit got 402 "You requested up to 131072 tokens, but
+      can only afford 35063" (#1213): ask again once with the answer capped at what it can afford
+      — claimed: justinjohn0306, branch bugfix/r5.5-openrouter-afford-tokens
 - [x] A saved fal.ai key reaches an API-key build's asset tools; every call said "No fal.ai key"
       (#923). Outside a project the tools now say that instead. Not checked with a real fal.ai key
       or API build
@@ -1198,12 +1208,15 @@ Gaps found while using the app for real projects.
 - [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
       button; the line didn't wrap and ran on under the button
       — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
-- [ ] **decision** Simple and Advanced use one text size and spacing: switching modes changes what
-      is shown, not how big everything is (today Simple sets 16 pt text and roomier controls,
-      Advanced 13 pt, so the whole window seems to zoom). Zoom (Cmd/Ctrl + / −) stays the way to
-      make everything bigger. To decide: Simple's larger text is there for people who find small
-      text hard to read; this would leave that to zoom
-      — claimed: jgt87, branch feature/r2.9-one-size-both-modes
+- [x] The same action reads the same everywhere: a pin's menu said "Show folder" for what the project
+      page calls "Open folder" (both `project_open_folder`), and a game's chosen folder was shown as a
+      full path in its row, where other chosen folders are shortened, cut to fit and whole on hover
+      — claimed: jgt87, branch bugfix/r2.9-same-words-open-folder — PR #1243
+- [x] Colours, corners and text sizes off the theme in the chat, evidence, prompt box, sidebar,
+      palette and Just ask: the Send button's own white and black, two hand-set corner radii,
+      code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
+      the mode's default size where other card titles are 15 semibold
+      — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -1399,10 +1412,20 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-binary-padding
 - [x] Keep Mach-O function starts within their declared payload.
       — claimed: Afloat16, branch bugfix/r3.12-macho-function-starts-payload-boundary-20261105
+- [x] A Mach-O executable's entry point comes from the segment whose file bytes hold its
+      `LC_MAIN` offset. A segment with no file bytes, such as a `__DATA` that holds only
+      zero-fill sections, records file offset 0 like `__TEXT`, and the entry was placed in that
+      segment instead of in `__TEXT` (`/bin/cat` reads 0x100008588 for 0x100000588).
+      — claimed: Chr0mium24, branch bugfix/r3.12-macho-entry-zero-fill
 - [x] Decode binary plist markers and dictionary keys according to their stored types.
       — claimed: Afloat16, branch bugfix/r3.12-bplist-typed-objects
 - [x] Visit XML plist values only inside a complete, correctly encoded document.
       — claimed: Afloat16, branch bugfix/r3.12-xml-plist-document
+- [x] Name code-directory flags with the bits Apple uses: hard 0x100, kill 0x200, expires 0x400,
+      restrict 0x800, enforcement 0x1000, library-validation 0x2000. The table used 0x4–0x80 for
+      them and named 0x200 and 0x800 as other flags, so a library-validation signature (0x2000)
+      showed no flag names and 0x12200 read "allowed-entitlements,runtime".
+      — claimed: Chr0mium24, branch bugfix/r3.12-codesign-flag-names
 - [x] Keep code-signature children and verification reads within their declared superblob.
       — claimed: Afloat16, branch bugfix/r3.12-codesign-superblob-length-boundary-20261105
 - [x] Refuse short ELF64 header and section records and handle section-table offsets at the address limit safely.
@@ -1473,8 +1496,9 @@ Owner: open · Status: in progress
       rowid alias and WITHOUT ROWID order: the column list opens at the first parenthesis outside
       quotes.
       — claimed: Plastic-time, branch bugfix/r3.12-sqlite-parenthesized-table-names
-- [ ] A comment after a SQLite column list that holds `)` (`... WITHOUT ROWID /* ) */`) still hides
+- [x] A comment after a SQLite column list that holds `)` (`... WITHOUT ROWID /* ) */`) still hides
       the WITHOUT ROWID marker: find the list's closing parenthesis by tokens, not `rfind(')')`.
+      — claimed: Chr0mium24, branch bugfix/r3.12-sqlite-options-after-comment
 
 - [x] Keep Android binary XML events within their document, chunk and attribute bounds.
       — claimed: Afloat16, branch bugfix/r3.12-android-xml-events
@@ -1518,6 +1542,12 @@ Owner: open · Status: in progress
 - [x] Keep the comma inside a SQLite type's parentheses: `DECIMAL(10, 2)` is listed as
       `DECIMAL(10 2)`. The type keeps the comma inside its parentheses, and the schema overview
       shows it unchanged. — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-type-comma
+- [x] Asset catalogs name each rendition key attribute as CoreUI reads it. When the deployment
+      target predates an attribute (display gamut before macOS 10.12), actool writes a stand-in
+      (the placeholder attribute) in KEYFORMAT and the real one in KEYFORMATWORKAROUND, which
+      isn't read: the key format lists `placeholder` and a Display P3 variant's key shows
+      `placeholder: 1` instead of `display-gamut: 1`.
+      — claimed: Chr0mium24, branch bugfix/r3.12-car-key-format-workaround
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress
