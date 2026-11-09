@@ -902,6 +902,9 @@ Owner: open · Status: in progress
 - [x] Windows: look in `%LOCALAPPDATA%\agy\bin` too (#62) — claimed: Afloat16, branch bugfix/r2.2-antigravity-search-20261103
 - [x] Windows: `usual_windows_dirs_come_after_path` counts Antigravity's second folder (#748
       added it; the test runs only on Windows, which CI doesn't)
+- [x] Windows: setup and doctor take the user profile (USERPROFILE) for home, as the apps do,
+      not HOME, which MSYS2 and Cygwin shells point at their own folder.
+      — claimed: Plastic-time, branch bugfix/r2.2-windows-home-is-the-user-profile
 - [ ] CI runs the tests on Ubuntu only, so `cfg(windows)` tests (search paths, consoles, Job
       Objects) are checked only on contributors' machines: run them on a Windows runner too
 - [ ] "Claude Code on <ssh host>" is offered for any SSH host, whether or not it has Claude Code
