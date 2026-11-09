@@ -269,12 +269,19 @@ fn engine_choices(app: &mut CraftApp, ui: &mut Ui) {
 
 /// "Extracted by": the AI that takes a game's own files out after the study, before the build
 /// (`Role::Extractor`). Shown only where a run uses it: an original game on this computer, in Deep
-/// mode, with an AI that has an API key and is on (coding agents can't take this job). It's the
-/// app's one setting, as "Extract with this" in Settings → AI is, and says so.
+/// mode. The choices are the AIs reached over their API that are on and can start: a hosted one
+/// needs its key (`missing_key`, read with the backends off the UI thread), a local server needs
+/// none, and coding agents can't take this job. While one is chosen the row stays, so it can be
+/// cleared even when nothing else qualifies. It's the app's one setting, as "Extract with this" in
+/// Settings → AI is, and says so.
 fn extracted_by(app: &mut CraftApp, ui: &mut Ui) {
-    let choices: Vec<String> =
-        app.backends.iter().filter(|b| b.enabled && b.kind != craft_anything_ai::BackendKind::AgentCli).map(|b| b.name.clone()).collect();
-    if !app.settings.deep_mode || !matches!(app.state.make.target, TargetRef::Local { .. }) || choices.is_empty() {
+    let choices: Vec<String> = app
+        .backends
+        .iter()
+        .filter(|b| b.enabled && b.kind != craft_anything_ai::BackendKind::AgentCli && !app.missing_key.contains(&b.name))
+        .map(|b| b.name.clone())
+        .collect();
+    if !app.settings.deep_mode || !matches!(app.state.make.target, TargetRef::Local { .. }) || (choices.is_empty() && app.extractor.is_none()) {
         return;
     }
     let t = Tokens::get(ui.ctx());

@@ -114,8 +114,9 @@ fn simple_title_bar_keeps_only_the_essentials() {
     h.get_by_label("Clean room");
 }
 
-/// "Extracted by" on Make: an original game in Deep mode with an AI that has an API key offers the
-/// app's extractor there, and picking one sets the same role as Settings → AI.
+/// "Extracted by" on Make: an original game in Deep mode offers the app's extractor there, among
+/// the AIs reached over their API that can start (a local server needs no key; a hosted AI without
+/// its key isn't offered), and picking one sets the same role as Settings → AI.
 #[test]
 fn make_offers_the_ai_that_takes_a_games_files_out_in_deep_mode() {
     use craft_anything_ai::{BackendConfig, BackendKind, Role};
@@ -136,6 +137,16 @@ fn make_offers_the_ai_that_takes_a_games_files_out_in_deep_mode() {
                 enabled: true,
             };
             a.hub.add_backend(local, None).unwrap();
+            // A hosted AI added without a key (it may still find one in the environment).
+            let hosted = BackendConfig {
+                name: "Hosted".into(),
+                kind: BackendKind::Anthropic,
+                model: "claude-opus-5-5".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            };
+            a.hub.add_backend(hosted, None).unwrap();
             a.settings.deep_mode = deep;
             a.state.make.target = TargetRef::Local { path: game };
             a.state.make.game = true;
@@ -153,11 +164,17 @@ fn make_offers_the_ai_that_takes_a_games_files_out_in_deep_mode() {
     let mut h = harness_sized(egui::vec2(1280.0, 1300.0), app(true));
     h.state_mut().refresh_backends();
     assert!(wait(&mut h, |a| a.backends.iter().any(|b| b.name == "Local model")));
+    // Which AIs lack a key is read with the backends, the same way `has_key` decides it.
+    let missing = !h.state().hub.has_key("Hosted");
+    assert_eq!(h.state().missing_key.contains("Hosted"), missing, "read with the backends");
+    // Whatever this machine's environment holds: an AI without its key isn't offered.
+    h.state_mut().missing_key.insert("Hosted".into());
     h.run_steps(3);
     h.get_by_label("After the study, this AI takes the game's own files out for the builder. For everything you make, like Extracts in Settings → AI.");
     // The label and the drop-down share the name, as "Built by" does: the drop-down is the second.
     h.get_all_by_label("Extracted by").last().unwrap().click();
     h.run_steps(2);
+    assert!(h.query_by_label("Hosted").is_none(), "a hosted AI without its key can't start the extraction");
     h.get_by_label("Local model").click();
     assert!(wait(&mut h, |a| a.extractor.as_deref() == Some("Local model")), "the app's extractor is set");
     assert_eq!(h.state().hub.chosen(Role::Extractor).as_deref(), Some("Local model"), "the same role as Settings → AI");

@@ -157,9 +157,15 @@ pub enum Done {
     },
     /// What a scan found, and why an expected coding agent may be missing.
     Detected(Vec<Detected>, Vec<craft_anything_ai::detect::DetectHint>),
-    /// The configured backends, the ones chosen to build with and to extract with, and each one's
-    /// options.
-    Backends(Vec<BackendConfig>, Option<String>, Option<String>, std::collections::BTreeMap<String, craft_anything_ai::BackendOptions>),
+    /// The configured backends, the ones chosen to build with and to extract with, each one's
+    /// options, and the ones that need a key and have none.
+    Backends(
+        Vec<BackendConfig>,
+        Option<String>,
+        Option<String>,
+        std::collections::BTreeMap<String, craft_anything_ai::BackendOptions>,
+        std::collections::BTreeSet<String>,
+    ),
     /// The models an AI can be set to (Settings → AI's model picker).
     ModelChoices {
         name: String,
@@ -449,6 +455,9 @@ pub struct CraftApp {
     pub builder: Option<String>,
     /// The backend chosen to take a game's files out in Deep mode, if any.
     pub extractor: Option<String>,
+    /// Backends that need an API key and have none stored or in the environment (read with the
+    /// backends, off the UI thread).
+    pub missing_key: std::collections::BTreeSet<String>,
     pub detected: Option<Vec<Detected>>,
     /// Why an expected coding agent may be missing, from the last scan.
     pub detect_hints: Vec<craft_anything_ai::detect::DetectHint>,
@@ -569,6 +578,7 @@ impl CraftApp {
             folder_inputs: Default::default(),
             builder: None,
             extractor: None,
+            missing_key: Default::default(),
             detected: None,
             detect_hints: Vec::new(),
             detecting: false,
@@ -1474,13 +1484,14 @@ impl CraftApp {
                 self.log(false, format!("Found {} AI option(s) on this computer", d.len()));
                 self.detected = Some(d);
             }
-            Done::Backends(b, builder, extractor, options) => {
+            Done::Backends(b, builder, extractor, options, missing_key) => {
                 if self.state.backend.as_ref().is_some_and(|n| !b.iter().any(|c| &c.name == n)) {
                     self.state.backend = None;
                 }
                 self.backends = b;
                 self.builder = builder;
                 self.extractor = extractor;
+                self.missing_key = missing_key;
                 self.backend_options = options;
                 self.model_tuning.retain(|name, state| {
                     self.backends.iter().any(|backend| backend.name == *name && craft_anything_ai::model_options::supported(backend))
@@ -1946,9 +1957,12 @@ pub fn app_icon(size: f32) -> egui::Image<'static> {
 }
 
 /// Run an action; a panic is logged and swallowed so one bad action never takes the app down.
-/// The configured backends and the ones chosen to build and to extract (read off the UI thread).
+/// The configured backends, the ones chosen to build and to extract, and which lack a key they
+/// need (read off the UI thread: keys live in the system keychain).
 pub(crate) fn backends(hub: &AiHub) -> Done {
-    Done::Backends(hub.backends(), hub.chosen(craft_anything_ai::Role::Builder), hub.chosen(craft_anything_ai::Role::Extractor), hub.options())
+    let list = hub.backends();
+    let missing_key = list.iter().filter(|b| !hub.has_key(&b.name)).map(|b| b.name.clone()).collect();
+    Done::Backends(list, hub.chosen(craft_anything_ai::Role::Builder), hub.chosen(craft_anything_ai::Role::Extractor), hub.options(), missing_key)
 }
 
 impl CraftApp {
