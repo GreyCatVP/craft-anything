@@ -1374,7 +1374,7 @@ Owner: open · Status: in progress
       constants; a signed numeric string and single digit separators take the column's affinity,
       and a separator-bearing REAL uses SQLite's REAL text form.
       — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-default-literals
-- [ ] Read a TEXT column's REAL default as SQLite does: `DEFAULT 1e3` and `DEFAULT 5.` are
+- [x] Read a TEXT column's REAL default as SQLite does: `DEFAULT 1e3` and `DEFAULT 5.` are
       '1000.0' and '5.0' in SQLite, while non-separated reals keep the schema's text here.
       — claimed: alksv1, branch bugfix/r3.12-sqlite-text-real-default
 - [x] Whole numbers in SQLite REAL columns read as REAL: SQLite stores a REAL with no fractional

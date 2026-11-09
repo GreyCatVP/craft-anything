@@ -1383,7 +1383,6 @@ fn literal_value(tokens: &[&str], affinity: Affinity, allow_words: bool) -> Opti
     } else {
         (token.to_owned(), false)
     };
-    let separated = !quoted && number.contains('_');
     let clean = if quoted { number } else { unseparated_number(&number)? };
     let integer = number_kind(&clean)?;
     let (minus, unsigned) = match clean.strip_prefix('-') {
@@ -1392,15 +1391,13 @@ fn literal_value(tokens: &[&str], affinity: Affinity, allow_words: bool) -> Opti
     };
     match affinity {
         // An integer that fits in 64 bits is written plainly (`007` reads '7'); any other number
-        // keeps the schema's text, with a minus sign but not a plus. A separator-bearing real is
-        // written in SQLite's REAL text form; the schema's text is not the REAL it reads.
+        // (a real, or an integer too large for 64 bits) is written in SQLite's REAL text form.
         Affinity::Text => Some(match unsigned.parse::<i64>() {
             Ok(n) if integer => integer_default(if minus { n.saturating_neg() } else { n }, affinity),
-            _ if separated => {
+            _ => {
                 let real = clean.parse::<f64>().ok().filter(|n| n.is_finite())?;
                 text_value(real_text(real).as_bytes())
             }
-            _ => text_value(format!("{}{unsigned}", if minus { "-" } else { "" }).as_bytes()),
         }),
         Affinity::Numeric | Affinity::Real => numeric_value(&clean).and_then(finite),
         Affinity::Blob => match clean.parse::<i64>() {
@@ -2373,15 +2370,14 @@ mod tests {
     #[test]
     fn added_column_defaults_take_the_column_affinity() {
         for (declaration, value) in [
-            // TEXT: a number becomes text, an integer written plainly and anything else as written.
+            // TEXT: a number becomes text, an integer written plainly and a real in SQLite's REAL text form.
             ("x TEXT DEFAULT 5", text("5")),
             ("x VARCHAR(10) DEFAULT -5.0", text("-5.0")),
             ("x TEXT DEFAULT 007", text("7")),
             ("x TEXT DEFAULT - 007", text("-7")),
-            ("x CLOB DEFAULT +1e3", text("1e3")),
-            ("x TEXT DEFAULT 5.", text("5.")),
-            ("x TEXT DEFAULT 99999999999999999999", text("99999999999999999999")),
-            ("x TEXT DEFAULT 1e400", text("1e400")),
+            ("x CLOB DEFAULT +1e3", text("1000.0")),
+            ("x TEXT DEFAULT 5.", text("5.0")),
+            ("x TEXT DEFAULT 99999999999999999999", text("1.0e+20")),
             ("x TEXT DEFAULT TRUE", text("1")),
             // INTEGER and NUMERIC: text that is a number becomes one; a whole REAL an INTEGER.
             ("x INTEGER DEFAULT '7'", CellValue::Int(7)),
@@ -2413,6 +2409,7 @@ mod tests {
         }
         // SQLite reads a number too large for a REAL as infinity; that stays unsupported.
         short_record_case("x INTEGER DEFAULT '1e400'", vec![CellValue::Null], true);
+        short_record_case("x TEXT DEFAULT 1e400", vec![CellValue::Null], true);
     }
 
     /// Bare and double-quoted words, signed strings and digit separators take the column's
@@ -2475,6 +2472,8 @@ mod tests {
             ("x TEXT DEFAULT 0x10", text("16")),
             ("x TEXT DEFAULT -0xFFFFFFFFFFFFFFFF", text("1")),
             ("x TEXT DEFAULT (5.0)", text("5.0")),
+            ("x TEXT DEFAULT (1e3)", text("1000.0")),
+            ("x TEXT DEFAULT (5.)", text("5.0")),
             ("x TEXT DEFAULT (- 007)", text("-7")),
             ("x TEXT DEFAULT (TRUE)", text("1")),
             ("x INTEGER DEFAULT ('7')", CellValue::Int(7)),
