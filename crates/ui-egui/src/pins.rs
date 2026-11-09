@@ -206,8 +206,9 @@ fn menu(app: &mut CraftApp, ui: &mut Ui, row: &PinRow) {
         app.open_pin(row, false);
         ui.close();
     }
-    if ui.button(tr("Show folder")).clicked() {
-        app.act("project_open_folder", json!({"project": row.project, "pin": row.pin.id}), tr("Show the folder"));
+    // The project page's words for the same action.
+    if ui.button(tr("Open folder")).clicked() {
+        app.act("project_open_folder", json!({"project": row.project, "pin": row.pin.id}), tr("Open the folder"));
         ui.close();
     }
     if ui.button(tr("Go to the project")).clicked() {

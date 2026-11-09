@@ -203,6 +203,13 @@ fn same_question(a: &AskedQuestion, b: &AskedQuestion) -> bool {
     a.at_ms == b.at_ms && a.question == b.question
 }
 
+/// Whether a run without a new request is carrying on work already under way in this mode. For an
+/// API loop, `api_resumed` says its kept transcript matched the run's mode: a transcript from the
+/// other mode isn't carried on, so the run still studies as a fresh one.
+fn is_carrying_on(opts: &RunOptions, ws: &Workspace, api_resumed: bool) -> bool {
+    (opts.continuing || (opts.message.is_none() && ws.builder_started())) && api_resumed
+}
+
 /// A running (or finished) rebuild.
 pub struct RebuildRun {
     rx: Receiver<RunEvent>,
@@ -240,7 +247,11 @@ impl RebuildRun {
         let api = match entry.config.kind {
             BackendKind::AgentCli => None,
             _ => {
-                if opts.message.is_none() || !ws.capture_dir().exists() {
+                // A run carrying on keeps its transcript, so `ApiConversation::resumed` can tell
+                // the run which conversation it continues. Only a genuinely fresh build (no
+                // continuation and no completed Study) starts a new one.
+                let continuing = opts.continuing || (opts.message.is_none() && ws.builder_started());
+                if !continuing && !ws.capture_dir().exists() {
                     let _ = std::fs::remove_file(ws.transcript_path());
                 }
                 Some(hub.start_builder(&entry, opts.beginner, Some(ws.transcript_path()), !clean_room)?)
@@ -250,7 +261,7 @@ impl RebuildRun {
         // study; the run only uses it in Deep mode on a game (see Worker::extract).
         let fresh = opts.message.is_none() || !ws.capture_dir().exists();
         let extractor = match hub.chosen(Role::Extractor).and_then(|n| hub.config().get(&n).cloned()) {
-            Some(e) if fresh && e.config.kind != BackendKind::AgentCli => {
+            Some(e) if fresh && e.config.kind != BackendKind::AgentCli && !clean_room => {
                 let _ = std::fs::remove_file(ws.root.join(EXTRACT_TRANSCRIPT));
                 Some((e.config.name.clone(), hub.start_extractor(&e, opts.beginner, Some(ws.root.join(EXTRACT_TRANSCRIPT)))?))
             }
@@ -784,7 +795,8 @@ impl Worker {
         self.self_check = Some((kind.clone(), opts.good_enough));
         let kind = kind.as_ref();
         self.editor = self.find_editor(&ws.manifest.stack)?;
-        let carrying_on = opts.continuing || (opts.message.is_none() && ws.builder_started());
+        let api_resumed = api.as_ref().is_none_or(crate::agent::ApiConversation::resumed);
+        let carrying_on = is_carrying_on(opts, ws, api_resumed);
         let first = (opts.message.is_none() && !carrying_on) || !ws.capture_dir().exists();
         if first {
             self.study(ws, kind)?;

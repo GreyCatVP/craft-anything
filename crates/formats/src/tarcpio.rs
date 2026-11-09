@@ -64,24 +64,25 @@ fn octal(f: &[u8]) -> Option<u64> {
     if let Some((&first, rest)) = f.split_first()
         && first & 0x80 != 0
     {
+        if first & 0x40 != 0 {
+            return None; // This field holds an unsigned value.
+        }
         let mut v = u64::from(first & 0x7f);
         for &b in rest {
             v = v.checked_mul(256)?.checked_add(u64::from(b))?;
         }
         return Some(v);
     }
-    let s: Vec<u8> = f.iter().copied().filter(|&b| b != 0 && b != b' ').collect();
-    if s.is_empty() {
-        return Some(0);
-    }
+    let padding = |&b: &u8| b == 0 || b == b' ';
+    let mut digits = f.iter().copied().skip_while(padding).peekable();
     let mut v = 0u64;
-    for b in s {
+    while let Some(b) = digits.next_if(|b| !padding(b)) {
         if !(b'0'..=b'7').contains(&b) {
             return None;
         }
         v = v.checked_mul(8)?.checked_add(u64::from(b - b'0'))?;
     }
-    Some(v)
+    digits.all(|b| padding(&b)).then_some(v)
 }
 
 /// True when a 512-byte block is a tar header with a correct checksum.
@@ -118,7 +119,7 @@ pub fn tar(data: &[u8], max_members: usize) -> Option<Listing> {
     let mut pax_link: Option<String> = None;
     let mut pax_size: Option<u64> = None;
     // Every iteration advances by at least one block, so the walk is bounded by the input size.
-    loop {
+    'headers: loop {
         let Some(h) = r.slice(pos, BLOCK) else {
             out.warnings.push(format!("archive ends inside a header at {pos:#x}"));
             out.length = data.len() as u64;
@@ -164,14 +165,35 @@ pub fn tar(data: &[u8], max_members: usize) -> Option<Listing> {
                 }
             }
             b'x' => {
-                if let Some(b) = body {
-                    for (k, v) in pax_records(b) {
-                        match k.as_str() {
-                            "path" => pax_path = Some(v),
-                            "linkpath" => pax_link = Some(v),
-                            "size" => pax_size = v.parse().ok(),
+                if let Some(mut remaining) = body {
+                    for _ in 0..256 {
+                        if remaining.is_empty() {
+                            break;
+                        }
+                        let Some((key, value, rest)) = pax_record(remaining) else {
+                            out.warnings.push(format!("invalid pax record at {pos:#x}"));
+                            out.length = pos as u64;
+                            break 'headers;
+                        };
+                        match key {
+                            b"path" | b"linkpath" => {
+                                if value.len() > MAX_NAME {
+                                    out.warnings.push(format!("pax name exceeds {MAX_NAME} bytes at {pos:#x}"));
+                                    out.length = pos as u64;
+                                    break 'headers;
+                                }
+                                let slot = if key == b"path" { &mut pax_path } else { &mut pax_link };
+                                *slot = Some(String::from_utf8_lossy(value).into_owned());
+                            }
+                            b"size" => pax_size = std::str::from_utf8(value).ok().and_then(|s| s.parse().ok()),
                             _ => {}
                         }
+                        remaining = rest;
+                    }
+                    if !remaining.is_empty() {
+                        out.warnings.push(format!("pax record limit reached at {pos:#x}"));
+                        out.length = pos as u64;
+                        break 'headers;
                     }
                 }
             }
@@ -228,27 +250,20 @@ pub fn tar(data: &[u8], max_members: usize) -> Option<Listing> {
     Some(out)
 }
 
-/// Parse pax extended header records (`<len> <key>=<value>\n`).
-fn pax_records(b: &[u8]) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    while i < b.len() && out.len() < 256 {
-        let rest = b.get(i..).unwrap_or(&[]);
-        let Some(sp) = rest.iter().position(|&c| c == b' ') else { break };
-        let Some(len) = std::str::from_utf8(rest.get(..sp).unwrap_or(&[])).ok().and_then(|s| s.parse::<usize>().ok()) else { break };
-        if len <= sp + 1 {
-            break;
-        }
-        let Some(rec) = rest.get(sp + 1..len) else { break };
-        let rec = rec.strip_suffix(b"\n").unwrap_or(rec);
-        if let Some(eq) = rec.iter().position(|&c| c == b'=') {
-            let k = String::from_utf8_lossy(rec.get(..eq).unwrap_or(&[])).into_owned();
-            let v = String::from_utf8_lossy(rec.get(eq + 1..).unwrap_or(&[])).into_owned();
-            out.push((k, v));
-        }
-        i += len;
+/// Read one length-prefixed pax record, borrowing even unknown keys and values from the header.
+fn pax_record(data: &[u8]) -> Option<(&[u8], &[u8], &[u8])> {
+    let sp = data.iter().position(|&byte| byte == b' ')?;
+    let digits = data.get(..sp)?;
+    if !digits.iter().all(u8::is_ascii_digit) {
+        return None;
     }
-    out
+    let len: usize = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    let field = data.get(sp + 1..len)?.strip_suffix(b"\n")?;
+    let eq = field.iter().position(|&byte| byte == b'=')?;
+    if eq == 0 {
+        return None;
+    }
+    Some((field.get(..eq)?, field.get(eq + 1..)?, data.get(len..)?))
 }
 
 fn hex_field(f: &[u8]) -> Option<u64> {
@@ -332,6 +347,17 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
             out.length = data.len() as u64;
             break;
         };
+        // newc permits extra trailing NULs in namesize for alignment.
+        let Some(end) = name_bytes.iter().position(|&b| b == 0) else {
+            out.warnings.push(format!("unterminated member name at {pos:#x}"));
+            out.length = pos as u64;
+            break;
+        };
+        if end == 0 || name_bytes.get(end..).is_some_and(|pad| pad.iter().any(|&b| b != 0)) {
+            out.warnings.push(format!("invalid member name at {pos:#x}"));
+            out.length = pos as u64;
+            break;
+        }
         let name = text(name_bytes);
         let Some(data_off) = (pos + hdr_len).checked_add(namesize).and_then(align) else { break };
         let size = usize::try_from(filesize).unwrap_or(usize::MAX);
@@ -342,7 +368,11 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
         };
         if name == "TRAILER!!!" {
             out.length = next.min(data.len()) as u64;
-            out.complete = true;
+            if size == 0 && next <= data.len() {
+                out.complete = true;
+            } else {
+                out.warnings.push(format!("invalid or truncated trailer at {pos:#x}"));
+            }
             break;
         }
         let mode = u32::try_from(mode).unwrap_or(0);
@@ -409,6 +439,26 @@ mod tests {
     }
 
     #[test]
+    fn cpio_names_and_trailers_must_be_complete() {
+        let bytes = fx::cpio_newc(&[("abc", b"x", 0o100644)]);
+        let trailer = bytes.windows(6).rposition(|b| b == b"070701").unwrap();
+        for (offset, byte) in [(113, b'x'), (111, 0)] {
+            let mut damaged = bytes.clone();
+            damaged[offset] = byte;
+            let listed = cpio(&damaged, 10).unwrap();
+            assert!(!listed.complete);
+            assert!(listed.members.is_empty());
+        }
+        let mut padded_name = bytes.clone();
+        padded_name[112] = 0;
+        assert_eq!(cpio(&padded_name, 10).unwrap().members[0].name, "ab");
+        let mut with_payload = bytes.clone();
+        with_payload[trailer + 61] = b'1';
+        assert!(!cpio(&with_payload, 10).unwrap().complete);
+        assert!(!cpio(&bytes[..bytes.len() - 1], 10).unwrap().complete);
+    }
+
+    #[test]
     fn walks_cpio() {
         let c = fx::cpio_newc(&[("init", b"#!/bin/sh\n", 0o100755), ("dev", b"", 0o040755), ("sh", b"busybox", 0o120777)]);
         let l = cpio(&c, 100).unwrap();
@@ -426,6 +476,7 @@ mod tests {
         assert_eq!(octal(b"  \0"), Some(0));
         assert_eq!(octal(b"9"), None);
         assert_eq!(octal(&[0x80, 0, 0, 1, 0]), Some(256));
+        assert_eq!(octal(&[0xff; 8]), None);
         assert_eq!(octal(&[0xff; 12]), None);
     }
 
@@ -448,7 +499,7 @@ mod tests {
             let _ = tar(&n, 10);
             let _ = cpio(&n, 10);
         }
-        assert!(pax_records(b"12 path=abc\n").len() == 1);
-        assert!(pax_records(b"9999999999999999999999 x").is_empty());
+        assert!(pax_record(b"12 path=abc\n").is_some());
+        assert!(pax_record(b"9999999999999999999999 x").is_none());
     }
 }

@@ -133,10 +133,11 @@ fn go_env_key(base: &str) -> Option<String> {
     ["OPENCODEGO_API_KEY", "OPENCODE_GO_API_KEY"].iter().filter_map(|v| std::env::var(v).ok()).find(|k| !k.trim().is_empty())
 }
 
-/// How long an API backend's streamed answer may take: its `timeout_secs`, else one hour. A slow
-/// local model can need hours for a long answer (#1096); 0 is not a limit anyone means.
-fn stream_limit(options: &BackendOptions) -> std::time::Duration {
-    options.timeout_secs.filter(|s| *s > 0).map_or(http::STREAM_BODY, std::time::Duration::from_secs)
+/// An API backend's own limit on a streamed answer, its `timeout_secs`; none uses the defaults
+/// ([`http::stream_agent`]). A slow local model can need hours for a long answer (#1096); 0 is not a
+/// limit anyone means.
+fn stream_limit(options: &BackendOptions) -> Option<std::time::Duration> {
+    options.timeout_secs.filter(|s| *s > 0).map(std::time::Duration::from_secs)
 }
 
 /// An OpenAI-compatible client, carrying OpenCode Go's session header when the base is its own.
@@ -889,25 +890,28 @@ impl AiHub {
     /// A builder conversation on an API backend: our agent loop with the Build toolset (files and
     /// commands in the project) enabled from the start, and room for a long build. In Deep mode
     /// every toolset is enabled, so it can look inside the original with all of them.
-    /// `transcript`: where the conversation is kept, and resumed from when it's there. `deep` is
-    /// the run's mode, given by the caller: a tool that starts a build holds the session (#1102).
+    /// `transcript`: where the conversation is kept, and resumed from when it's there in this
+    /// mode. `deep` is the run's mode, given by the caller: a tool that starts a build holds the
+    /// session (#1102).
     pub fn start_builder(&self, entry: &BackendEntry, beginner: bool, transcript: Option<PathBuf>, deep: bool) -> Result<ApiConversation, ToolError> {
         use craft_anything_engine::Toolset;
         let toolsets = if deep { self.engine.registry().toolsets() } else { vec![Toolset::Core, Toolset::Build] };
-        self.start_loop(entry, beginner, transcript, &toolsets, true)
+        self.start_loop(entry, beginner, transcript, deep, &toolsets, true)
     }
 
     /// Start the asset extractor: our agent loop with the Build tools and the game archive tools.
     pub fn start_extractor(&self, entry: &BackendEntry, beginner: bool, transcript: Option<PathBuf>) -> Result<ApiConversation, ToolError> {
         use craft_anything_engine::Toolset;
-        self.start_loop(entry, beginner, transcript, &[Toolset::Core, Toolset::Build, Toolset::Formats], false)
+        self.start_loop(entry, beginner, transcript, true, &[Toolset::Core, Toolset::Build, Toolset::Formats], false)
     }
 
+    /// Start one loop with these toolsets, keeping its transcript and resuming it only in `deep`.
     fn start_loop(
         &self,
         entry: &BackendEntry,
         beginner: bool,
         transcript: Option<PathBuf>,
+        deep: bool,
         toolsets: &[craft_anything_engine::Toolset],
         lean_for_local: bool,
     ) -> Result<ApiConversation, ToolError> {
@@ -917,7 +921,7 @@ impl AiHub {
         ApiConversation::start_with(
             host,
             vec![slot],
-            LoopConfig { beginner, prices: self.config().prices.clone(), transcript, lean_for_local, ..LoopConfig::default() },
+            LoopConfig { beginner, prices: self.config().prices.clone(), transcript, deep, lean_for_local, ..LoopConfig::default() },
             toolsets.iter().copied().collect(),
         )
     }

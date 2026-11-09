@@ -57,7 +57,9 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
                     }
                     if let Some(folder) = &app.state.game.folder {
                         ui.add_space(8.0);
-                        crate::bidi::text(ui, RichText::new(folder.display().to_string()).color(t.text_faint).size(theme::CAPTION));
+                        // Like every chosen folder: short, cut to fit the row, whole on hover.
+                        let full = folder.display().to_string();
+                        crate::bidi::truncated(ui, RichText::new(crate::short_path(folder)).color(t.text_faint).size(theme::CAPTION)).on_hover_text(full);
                     }
                 });
                 ui.add_space(18.0);

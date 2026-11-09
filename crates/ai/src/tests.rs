@@ -7,13 +7,14 @@ use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 
-/// #1096: an AI's timeout_secs sets how long its streamed answer may take; unset or 0 is an hour.
+/// #1096, #1239: an AI's timeout_secs is its own limit on a streamed answer, starting included;
+/// unset or 0 leaves the defaults.
 #[test]
 fn an_ais_own_timeout_bounds_its_streamed_answer() {
     let with = |timeout_secs| BackendOptions { timeout_secs, ..Default::default() };
-    assert_eq!(stream_limit(&with(None)), http::STREAM_BODY);
-    assert_eq!(stream_limit(&with(Some(0))), http::STREAM_BODY);
-    assert_eq!(stream_limit(&with(Some(4 * 3600))), std::time::Duration::from_secs(4 * 3600));
+    assert_eq!(stream_limit(&with(None)), None);
+    assert_eq!(stream_limit(&with(Some(0))), None);
+    assert_eq!(stream_limit(&with(Some(2700))), Some(std::time::Duration::from_secs(2700)));
 }
 
 /// #1225: with no session id saved (a backend added before there was one, or found from an
@@ -209,6 +210,32 @@ fn disabled_backends_are_refused_when_chat_starts() {
         assert!(error.message.contains("Off") && error.message.contains("turned off"), "{error:?}");
         assert!(error.remediation.as_deref().is_some_and(|s| s.contains("Settings → AI")), "{error:?}");
     }
+}
+
+/// R2.9: an API backend's kept transcript is resumed only in the mode that saved it.
+#[test]
+fn an_api_transcript_is_resumed_only_in_its_mode() {
+    let (h, dir) = hub();
+    h.add_backend(
+        BackendConfig {
+            name: "Local".into(),
+            kind: BackendKind::OpenaiCompatible,
+            model: "test-model".into(),
+            base_url: Some("http://127.0.0.1:0/v1".into()),
+            ssh_host: None,
+            enabled: true,
+        },
+        None,
+    )
+    .unwrap();
+    let entry = h.entry("Local").unwrap();
+    let path = dir.path().join("transcript.json");
+    let history = vec![crate::model::Msg::user_text("a Deep conversation")];
+    crate::context::save(&path, &history, true).unwrap();
+    assert!(h.start_builder(&entry, false, Some(path.clone()), true).unwrap().resumed(), "Deep continues a Deep transcript");
+    assert!(!h.start_builder(&entry, false, Some(path.clone()), false).unwrap().resumed(), "Clean room starts fresh");
+    crate::context::save(&path, &history, false).unwrap();
+    assert!(!h.start_builder(&entry, false, Some(path), true).unwrap().resumed(), "Deep doesn't continue a Clean room transcript");
 }
 
 /// Compare checks either position; enabled named and automatic chat choices still work.
@@ -1340,4 +1367,47 @@ fn openrouter_with_no_provider_for_tools_falls_back_to_the_text_protocol() {
     assert_eq!(seen[0].body["provider"], json!({"require_parameters": true}));
     assert!(seen[0].body.get("tools").is_some());
     assert!(seen[1].body.get("provider").is_none() && seen[1].body.get("tools").is_none(), "the second asks in text: {}", seen[1].body);
+}
+
+/// #1213: with no max_tokens, OpenRouter holds the model's whole output limit against the key's
+/// credit and answers 402 with what it can afford; the request is sent once more capped at that.
+#[test]
+fn openrouter_asks_again_for_an_answer_the_key_can_afford() {
+    use crate::model::{Effort, Msg, Stop, TurnRequest};
+    let messages = [Msg::user_text("hi")];
+    let request = TurnRequest { system: "S", messages: &messages, tools: &[], effort: Effort::Low, max_tokens: 100 };
+    let refusal = |n: u64| {
+        let message = format!(
+            "This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford {n}. To increase, visit https://openrouter.ai/settings/credits and add more credits"
+        );
+        (402, "application/json", json!({"error": {"code": 402, "message": message}}).to_string())
+    };
+    let reply = || (200, "text/event-stream", chat_sse(&[json!({"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]})]));
+    let (url, seen) = mock(vec![refusal(35063), reply(), reply()]);
+    let mut model = openai::OpenAi::openrouter(Some(&url), "k".into(), "moonshotai/kimi-k3.1-pro");
+    assert_eq!(model.turn(&request, &mut |_| {}, &Stop::default()).unwrap().message.text(), "hello");
+    assert_eq!(model.turn(&request, &mut |_| {}, &Stop::default()).unwrap().message.text(), "hello");
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3, "one retry, then the cap is kept");
+        assert!(seen[0].body.get("max_tokens").is_none());
+        assert_eq!(seen[1].body["max_tokens"], 35063);
+        assert_eq!(seen[2].body["max_tokens"], 35063, "the next turn doesn't ask for more again");
+    }
+
+    // Too little left to write a file, or the same refusal under the cap: it stays a billing error.
+    for (cap, n) in [(None, 1000), (Some(35063), 35063)] {
+        let (url, seen) = mock(vec![refusal(n), reply()]);
+        let mut model = openai::OpenAi::openrouter(Some(&url), "k".into(), "moonshotai/kimi-k3.1-pro");
+        model.answer_cap = cap;
+        let e = model.turn(&request, &mut |_| {}, &Stop::default()).unwrap_err();
+        assert!(e.message.contains("402"), "{}", e.message);
+        assert!(!crate::TurnFailure::from_api(&e).retryable());
+        assert_eq!(seen.lock().unwrap().len(), 1, "not asked again");
+    }
+    // Only OpenRouter is asked again.
+    let (url, seen) = mock(vec![refusal(35063), reply()]);
+    let mut other = openai::OpenAi::compatible("Other", &url, Some("k".into()), "m");
+    assert!(other.turn(&request, &mut |_| {}, &Stop::default()).is_err());
+    assert_eq!(seen.lock().unwrap().len(), 1);
 }

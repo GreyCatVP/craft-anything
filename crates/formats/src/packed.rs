@@ -110,7 +110,7 @@ pub fn read_stored(data: &[u8], entry: &PackedEntry, max_bytes: u64) -> Result<V
             _ => FormatError::Malformed(format!("the compressed data of {} is damaged", entry.path)),
         })
     };
-    match entry.compression {
+    let decoded = match entry.compression {
         Compression::None if raw.len() as u64 > max_bytes => Err(too_large()),
         Compression::None => Ok(raw.to_vec()),
         Compression::Deflate => inflate(miniz_oxide::inflate::decompress_to_vec_with_limit(raw, cap)),
@@ -121,7 +121,11 @@ pub fn read_stored(data: &[u8], entry: &PackedEntry, max_bytes: u64) -> Result<V
         }
         Compression::Zstd => decompress::zstd(raw, max_bytes).map_err(|e| FormatError::Malformed(format!("{}: {e}", entry.path))),
         Compression::Unreadable => Err(FormatError::Unsupported(format!("{} is stored in a way we can't read back", entry.path))),
+    }?;
+    if entry.size.is_some_and(|size| size != decoded.len() as u64) {
+        return Err(FormatError::Malformed(format!("the unpacked size of {} differs from its manifest", entry.path)));
     }
+    Ok(decoded)
 }
 
 /// The deflate stream after a gzip header.
@@ -152,6 +156,22 @@ mod tests {
 
     fn entry(offset: u64, stored_size: u64, compression: Compression) -> PackedEntry {
         PackedEntry { path: "a".into(), offset, stored_size, size: None, compression, kind: None }
+    }
+
+    #[test]
+    fn member_sizes_must_match_the_manifest() {
+        let raw = b"hello";
+        let zlib = miniz_oxide::deflate::compress_to_vec_zlib(raw, 6);
+        let deflate = miniz_oxide::deflate::compress_to_vec(raw, 6);
+        for (bytes, kind) in [(raw.as_slice(), Compression::None), (&zlib, Compression::Zlib), (&deflate, Compression::Deflate)] {
+            let mut member = entry(0, bytes.len() as u64, kind);
+            for declared in [4, 6] {
+                member.size = Some(declared);
+                assert!(matches!(read_stored(bytes, &member, 100), Err(FormatError::Malformed(_))));
+            }
+            member.size = Some(5);
+            assert_eq!(read_stored(bytes, &member, 100).unwrap(), raw);
+        }
     }
 
     #[test]

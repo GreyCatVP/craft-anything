@@ -72,9 +72,15 @@ pub struct OpenAi {
     pub auto_react: bool,
     /// Talking to OpenRouter, which routes each request to one of several upstream providers.
     pub openrouter: bool,
-    /// How long one streamed answer may take (a slow local model can need hours).
-    pub stream_limit: std::time::Duration,
+    /// The AI's own limit on one streamed answer (a slow local model can need hours); none uses
+    /// the defaults.
+    pub stream_limit: Option<std::time::Duration>,
+    /// The longest answer to ask for, once OpenRouter has said the key can't afford more (#1213).
+    pub answer_cap: Option<u64>,
 }
+
+/// An answer cap smaller than this would cut a builder's file writes short: such a refusal stays one.
+const MIN_AFFORDABLE_ANSWER: u64 = 4096;
 
 impl OpenAi {
     pub fn official(base: Option<&str>, key: String, model: &str) -> Self {
@@ -103,7 +109,8 @@ impl OpenAi {
             react: false,
             auto_react: true,
             openrouter: false,
-            stream_limit: http::STREAM_BODY,
+            stream_limit: None,
+            answer_cap: None,
         }
     }
 
@@ -157,6 +164,9 @@ impl OpenAi {
             "stream_options": {"include_usage": true},
             "messages": messages,
         });
+        if let (Some(cap), Some(o)) = (self.answer_cap, body.as_object_mut()) {
+            o.insert("max_tokens".into(), json!(cap));
+        }
         if !self.react
             && !req.tools.is_empty()
             && let Some(o) = body.as_object_mut()
@@ -217,6 +227,11 @@ impl OpenAi {
     }
 }
 
+/// The answer length a 402 says the key can still pay for.
+fn affordable(e: &ToolError) -> Option<u64> {
+    e.details.as_ref().and_then(|d| d.get("affordable_tokens")).and_then(Value::as_u64)
+}
+
 fn rejects_tools(e: &ToolError) -> bool {
     let m = e.message.to_ascii_lowercase();
     let status = e.details.as_ref().and_then(|d| d.get("status")).and_then(Value::as_u64).unwrap_or(0);
@@ -229,6 +244,13 @@ impl ChatModel for OpenAi {
             Err(e) if !self.react && self.auto_react && !req.tools.is_empty() && (rejects_tools(&e) || self.no_provider_for_tools(&e)) => {
                 log::info!("{} rejected tool calling; switching to the text protocol", self.label);
                 self.react = true;
+                self.stream_once(req, on_delta, stop)
+            }
+            // With no max_tokens, OpenRouter holds the model's whole output limit against the key's
+            // credit; it says what it can afford, so ask once more for an answer that long (#1213).
+            Err(e) if self.openrouter && affordable(&e).is_some_and(|n| n >= MIN_AFFORDABLE_ANSWER && self.answer_cap.is_none_or(|c| n < c)) => {
+                self.answer_cap = affordable(&e);
+                log::info!("{} can afford an answer of {:?} tokens; asking for that", self.label, self.answer_cap);
                 self.stream_once(req, on_delta, stop)
             }
             other => other,

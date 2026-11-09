@@ -2354,6 +2354,68 @@ mod picking_up_a_build {
         assert!(deep.agent_spec(&ws, &entry, &RunOptions::default()).is_ok(), "a Deep run may resume its session");
     }
 
+    /// Add the local API backend the transcript tests start.
+    fn local_api(b: &Bench) {
+        b.hub
+            .add_backend(
+                crate::BackendConfig {
+                    name: "Local".into(),
+                    kind: BackendKind::OpenaiCompatible,
+                    model: "test-model".into(),
+                    base_url: Some("http://127.0.0.1:0/v1".into()),
+                    ssh_host: None,
+                    enabled: true,
+                },
+                None,
+            )
+            .unwrap();
+    }
+
+    /// R2.9: a continuation keeps its API transcript, so the run can recognize completed Study
+    /// work; a genuinely fresh build still starts a new conversation.
+    #[test]
+    fn an_api_continuation_keeps_its_transcript_and_a_fresh_build_drops_it() {
+        let b = bench();
+        local_api(&b);
+        let ws = worked_on(&b);
+        std::fs::write(ws.transcript_path(), b"{}").unwrap();
+        let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), RunOptions { backend: Some("Local".into()), ..RunOptions::default() }).unwrap();
+        assert!(ws.transcript_path().is_file(), "a continuation keeps the conversation");
+        drop(run);
+
+        let b = bench();
+        local_api(&b);
+        let fresh = Workspace::create(&b.projects, "fresh", "Build a notes app", TargetRef::None).unwrap();
+        std::fs::write(fresh.transcript_path(), b"{}").unwrap();
+        let run = RebuildRun::start(
+            &b.hub,
+            Workspace::open(&fresh.root).unwrap(),
+            RunOptions { backend: Some("Local".into()), message: Some("Build a notes app".into()), ..RunOptions::default() },
+        )
+        .unwrap();
+        assert!(!fresh.transcript_path().exists(), "a fresh build starts a new conversation");
+        drop(run);
+    }
+
+    /// R2.9: an API transcript from the other mode isn't "carrying on", so a no-message run still
+    /// studies as a fresh one instead of skipping the Deep study.
+    #[test]
+    fn an_api_transcript_from_the_other_mode_is_not_carried_on() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(d.path(), "x", "A thing", TargetRef::None).unwrap();
+        let mut opts = RunOptions::default();
+        assert!(!super::super::is_carrying_on(&opts, &ws, true), "nothing is under way yet");
+        std::fs::write(ws.transcript_path(), b"{}").unwrap();
+        assert!(super::super::is_carrying_on(&opts, &ws, true), "a transcript in this mode is carried on");
+        assert!(!super::super::is_carrying_on(&opts, &ws, false), "another mode's transcript is not");
+        opts.message = Some("change it".into());
+        assert!(!super::super::is_carrying_on(&opts, &ws, true), "a new request isn't carrying on");
+        opts.message = None;
+        opts.continuing = true;
+        assert!(super::super::is_carrying_on(&opts, &ws, true), "an explicit resume in this mode is");
+        assert!(!super::super::is_carrying_on(&opts, &ws, false), "one in another mode is not");
+    }
+
     /// A saved session records the mode it ran in, and a lost one clears both.
     #[test]
     fn a_session_is_kept_with_the_mode_it_ran_in() {

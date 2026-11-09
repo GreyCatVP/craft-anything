@@ -91,6 +91,7 @@ struct MSegment {
     name: String,
     vmaddr: u64,
     fileoff: u64,
+    filesize: u64,
 }
 
 pub fn load_command_name(cmd: u32) -> String {
@@ -235,7 +236,8 @@ pub fn enrich(data: &[u8], b: &mut Binary) {
                 let name = r.cstr(pos + name_o, 16).unwrap_or_default();
                 let vmaddr = if cmd == 0x19 { r.u64_le(pos + vm) } else { r.u32_le(pos + vm).map(u64::from) }.unwrap_or(0);
                 let fileoff = if cmd == 0x19 { r.u64_le(pos + fo) } else { r.u32_le(pos + fo).map(u64::from) }.unwrap_or(0);
-                segments.push(MSegment { name, vmaddr, fileoff });
+                let filesize = if cmd == 0x19 { r.u64_le(pos + fo + 8) } else { r.u32_le(pos + fo + 4).map(u64::from) }.unwrap_or(0);
+                segments.push(MSegment { name, vmaddr, fileoff, filesize });
                 let nsects = r.u32_le(pos + ns).unwrap_or(0) as usize;
                 let complete = (size - sh) / shsize;
                 if nsects > complete {
@@ -330,10 +332,11 @@ pub fn enrich(data: &[u8], b: &mut Binary) {
     b.mitigations.pie = Some(header_flags & 0x0020_0000 != 0);
     b.mitigations.nx = Some(header_flags & 0x0002_0000 == 0);
     let text = segments.iter().find(|s| s.name == "__TEXT").cloned();
-    // Entry point.
+    // Entry point. LC_MAIN gives a file offset: map it through the segment whose file bytes hold
+    // it. Segments with no file bytes (__PAGEZERO, a __DATA of only zero-fill sections) usually
+    // record file offset 0, like __TEXT, and must not claim it.
     if let Some(off) = entryoff {
-        let seg = segments.iter().filter(|s| s.fileoff <= off && s.name != "__PAGEZERO").max_by_key(|s| s.fileoff);
-        b.entry = seg.map(|s| s.vmaddr.wrapping_add(off - s.fileoff));
+        b.entry = segments.iter().find_map(|s| off.checked_sub(s.fileoff).filter(|&d| d < s.filesize).map(|d| s.vmaddr.wrapping_add(d)));
     } else if let Some(pc) = thread_pc {
         b.entry = Some(pc);
     } else {
@@ -705,6 +708,37 @@ mod tests {
         assert_eq!(slot.addr, tk::MACHO_BASE + 0x1000);
         assert_eq!(slot.library.as_deref(), Some("/usr/lib/libSystem.B.dylib"));
         assert_eq!(b.mitigations.pie, Some(true));
+    }
+
+    /// An executable laid out like `/bin/cat` on arm64e: `__TEXT` maps the first 16 KiB of the
+    /// file, and `__DATA` holds only zero-fill sections, so it has no file bytes and its file
+    /// offset is 0, the same as `__TEXT`'s.
+    fn executable_with_zero_fill_data(entryoff: u64) -> Vec<u8> {
+        let mut data = vec![0u8; 72];
+        data[0..4].copy_from_slice(&0x19u32.to_le_bytes());
+        data[4..8].copy_from_slice(&72u32.to_le_bytes());
+        data[8..14].copy_from_slice(b"__DATA");
+        data[24..32].copy_from_slice(&(tk::MACHO_BASE + 0x4000).to_le_bytes());
+        data[32..40].copy_from_slice(&0x4000u64.to_le_bytes());
+        data[56..60].copy_from_slice(&3u32.to_le_bytes());
+        data[60..64].copy_from_slice(&3u32.to_le_bytes());
+        let mut main = vec![0u8; 24];
+        main[0..4].copy_from_slice(&0x8000_0028u32.to_le_bytes());
+        main[4..8].copy_from_slice(&24u32.to_le_bytes());
+        main[8..16].copy_from_slice(&entryoff.to_le_bytes());
+        let mut m = tk::apple::macho_min(tk::apple::CPU_ARM64, 2, &[data, main], &[("__text", &[0; 4])]);
+        m.resize(0x4000, 0);
+        m
+    }
+
+    #[test]
+    fn the_entry_point_is_in_the_segment_that_holds_its_file_bytes() {
+        let b = crate::parse_binary(&executable_with_zero_fill_data(0x588)).unwrap();
+        let layout: Vec<_> = b.segments.iter().map(|s| (s.name.as_str(), s.file_offset, s.file_size)).collect();
+        assert_eq!(layout, [("__TEXT", 0, 0x4000), ("__DATA", 0, 0)]);
+        assert_eq!(b.entry, Some(tk::MACHO_BASE + 0x588));
+        // An offset past every segment's file bytes names no code.
+        assert_eq!(crate::parse_binary(&executable_with_zero_fill_data(0x5000)).unwrap().entry, None);
     }
 
     #[test]

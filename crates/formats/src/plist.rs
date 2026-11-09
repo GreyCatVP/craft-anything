@@ -164,7 +164,7 @@ pub fn apple_date_iso(secs: f64) -> String {
 
 /// True when the bytes look like a property list of either kind.
 pub fn looks_like_plist(data: &[u8]) -> bool {
-    data.starts_with(b"bplist00") || data.iter().take(1024).copied().collect::<Vec<u8>>().windows(6).any(|w| w == b"<plist")
+    (data.len() >= 8 && data.starts_with(b"bplist0")) || data.iter().take(1024).copied().collect::<Vec<u8>>().windows(6).any(|w| w == b"<plist")
 }
 
 /// Parse a binary or XML property list.
@@ -193,6 +193,9 @@ pub fn parse_binary(data: &[u8]) -> Result<Value, FormatError> {
 fn parse_binary_within(data: &[u8], byte_budget: usize) -> Result<Value, FormatError> {
     if !data.starts_with(b"bplist") {
         return Err(FormatError::Malformed("not a binary plist".into()));
+    }
+    if !data.starts_with(b"bplist0") {
+        return Err(FormatError::Unsupported("unknown binary plist version".into()));
     }
     let len = data.len();
     if len < 8 + 32 {
@@ -313,7 +316,7 @@ impl Bin<'_> {
                 0x0 => Value::Null,
                 0x8 => Value::Bool(false),
                 0x9 => Value::Bool(true),
-                _ => Value::Null,
+                _ => return Err(FormatError::Malformed(format!("unknown simple plist object {m:#04x}"))),
             },
             0x1 => {
                 if lo > 4 {
@@ -336,7 +339,7 @@ impl Bin<'_> {
                 };
                 Value::Real(v.ok_or_else(|| FormatError::Truncated("real".into()))?)
             }
-            0x3 => Value::Date(DateValue::Seconds(self.r.u64_be(at + 1).map(f64::from_bits).ok_or_else(|| FormatError::Truncated("date".into()))?)),
+            0x3 if lo == 3 => Value::Date(DateValue::Seconds(self.r.u64_be(at + 1).map(f64::from_bits).ok_or_else(|| FormatError::Truncated("date".into()))?)),
             0x4 => {
                 let (n, s) = self.count(at, lo)?;
                 let bytes = self.r.slice(s, n).ok_or_else(|| FormatError::Truncated("data".into()))?;
@@ -397,7 +400,7 @@ impl Bin<'_> {
                     let v = self.reference(s, i + n)?;
                     let key = match self.object(k, stack)? {
                         Value::String(s) => s,
-                        other => format!("{:?}", other.to_json()),
+                        _ => return Err(FormatError::Unsupported("non-string dictionary keys cannot be represented in this plist view".into())),
                     };
                     out.push((key, self.object(v, stack)?));
                 }
@@ -467,6 +470,35 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
+/// Skip a declaration without interpreting or fetching any entity. A DOCTYPE's
+/// internal subset can itself contain declarations, quoted delimiters, comments and PIs.
+fn after_declaration(mut rest: &str) -> Result<&str, FormatError> {
+    let mut quote = None;
+    let mut brackets = 0usize;
+    while let Some(ch) = rest.chars().next() {
+        if quote.is_none() {
+            if let Some(comment) = rest.strip_prefix("<!--") {
+                rest = comment.split_once("-->").ok_or_else(|| FormatError::Truncated("comment in declaration".into()))?.1;
+                continue;
+            }
+            if let Some(pi) = rest.strip_prefix("<?") {
+                rest = pi.split_once("?>").ok_or_else(|| FormatError::Truncated("processing instruction in declaration".into()))?.1;
+                continue;
+            }
+        }
+        rest = rest.get(ch.len_utf8()..).unwrap_or("");
+        match (quote, ch) {
+            (Some(q), c) if q == c => quote = None,
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, '[') => brackets += 1,
+            (None, ']') => brackets = brackets.saturating_sub(1),
+            (None, '>') if brackets == 0 => return Ok(rest),
+            _ => {}
+        }
+    }
+    Err(FormatError::Truncated("declaration".into()))
+}
+
 fn tokenize(text: &str) -> Result<Vec<Tok>, FormatError> {
     let mut toks = Vec::new();
     let mut rest = text;
@@ -476,7 +508,7 @@ fn tokenize(text: &str) -> Result<Vec<Tok>, FormatError> {
         }
         match rest.find('<') {
             None => {
-                if !rest.trim().is_empty() {
+                if !rest.is_empty() {
                     toks.push(Tok::Text(decode_entities(rest)));
                 }
                 break;
@@ -500,9 +532,13 @@ fn tokenize(text: &str) -> Result<Vec<Tok>, FormatError> {
             rest = r.get(e + 3..).unwrap_or("");
             continue;
         }
-        if rest.starts_with("<?") || rest.starts_with("<!") {
-            let e = rest.find('>').ok_or_else(|| FormatError::Truncated("declaration".into()))?;
-            rest = rest.get(e + 1..).unwrap_or("");
+        if let Some(r) = rest.strip_prefix("<?") {
+            let end = r.find("?>").ok_or_else(|| FormatError::Truncated("processing instruction".into()))?;
+            rest = r.get(end + 2..).unwrap_or("");
+            continue;
+        }
+        if let Some(declaration) = rest.strip_prefix("<!") {
+            rest = after_declaration(declaration)?;
             continue;
         }
         let e = rest.find('>').ok_or_else(|| FormatError::Truncated("tag".into()))?;
@@ -549,8 +585,8 @@ impl Xml {
         }
     }
 
-    fn skip_text(&mut self) {
-        while matches!(self.peek(), Some(Tok::Text(_))) {
+    fn skip_space(&mut self) {
+        while matches!(self.peek(), Some(Tok::Text(t)) if t.bytes().all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))) {
             self.pos += 1;
         }
     }
@@ -560,14 +596,14 @@ impl Xml {
         if depth > MAX_DEPTH || self.nodes > MAX_NODES {
             return Err(FormatError::TooLarge("plist nesting or size limit".into()));
         }
-        self.skip_text();
+        self.skip_space();
         match self.next() {
             Some(Tok::Empty(n)) => Ok(match n.as_str() {
                 "true" => Value::Bool(true),
                 "false" => Value::Bool(false),
                 "dict" => Value::Dict(Vec::new()),
                 "array" => Value::Array(Vec::new()),
-                "string" | "key" => Value::String(String::new()),
+                "string" => Value::String(String::new()),
                 "data" => Value::Data(Vec::new()),
                 other => return Err(FormatError::Malformed(format!("unexpected <{other}/>"))),
             }),
@@ -592,18 +628,16 @@ impl Xml {
                     let t = self.text_until("data")?;
                     base64_decode(&t).map(Value::Data).ok_or_else(|| FormatError::Malformed("bad base64 in <data>".into()))
                 }
-                "true" => {
-                    self.text_until("true")?;
-                    Ok(Value::Bool(true))
-                }
-                "false" => {
-                    self.text_until("false")?;
-                    Ok(Value::Bool(false))
+                "true" | "false" => {
+                    if !self.text_until(&n)?.is_empty() {
+                        return Err(FormatError::Malformed(format!("<{n}> must be empty")));
+                    }
+                    Ok(Value::Bool(n == "true"))
                 }
                 "array" => {
                     let mut out = Vec::new();
                     loop {
-                        self.skip_text();
+                        self.skip_space();
                         if matches!(self.peek(), Some(Tok::Close(c)) if c == "array") {
                             self.pos += 1;
                             return Ok(Value::Array(out));
@@ -617,7 +651,7 @@ impl Xml {
                 "dict" => {
                     let mut out = Vec::new();
                     loop {
-                        self.skip_text();
+                        self.skip_space();
                         match self.next() {
                             Some(Tok::Close(c)) if c == "dict" => return Ok(Value::Dict(out)),
                             Some(Tok::Open(k)) if k == "key" => {
@@ -647,6 +681,9 @@ impl Xml {
 /// than turning into replacement characters that tokenize into garbage element
 /// names.
 fn decode_utf16_xml(data: &[u8], big_endian: bool) -> Result<String, FormatError> {
+    if !data.len().is_multiple_of(2) {
+        return Err(FormatError::Truncated("UTF-16 code unit".into()));
+    }
     let r = Reader::new(data);
     let mut units = Vec::with_capacity(data.len() / 2);
     let mut off = 0;
@@ -666,26 +703,78 @@ pub fn parse_xml(data: &[u8]) -> Result<Value, FormatError> {
     let text = match data {
         [0xFF, 0xFE, rest @ ..] => decode_utf16_xml(rest, false)?,
         [0xFE, 0xFF, rest @ ..] => decode_utf16_xml(rest, true)?,
-        _ => String::from_utf8_lossy(data).into_owned(),
+        _ => std::str::from_utf8(data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data))
+            .map_err(|_| FormatError::Malformed("invalid UTF-8 in XML plist".into()))?
+            .to_owned(),
     };
     let toks = tokenize(&text)?;
     let mut x = Xml { toks, pos: 0, nodes: 0 };
-    x.skip_text();
-    match x.peek() {
-        Some(Tok::Open(n)) if n == "plist" => {
-            x.pos += 1;
-            let v = x.value(0)?;
-            Ok(v)
-        }
-        Some(Tok::Open(_)) | Some(Tok::Empty(_)) => x.value(0),
-        _ => Err(FormatError::Malformed("no <plist> element".into())),
+    x.skip_space();
+    let wrapped = matches!(x.peek(), Some(Tok::Open(n)) if n == "plist");
+    if wrapped {
+        x.pos += 1;
     }
+    let value = x.value(0)?;
+    x.skip_space();
+    if wrapped {
+        if !matches!(x.next(), Some(Tok::Close(n)) if n == "plist") {
+            return Err(FormatError::Malformed("expected </plist> after its value".into()));
+        }
+        x.skip_space();
+    }
+    if x.peek().is_some() {
+        return Err(FormatError::Malformed("unexpected content after the plist value".into()));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use craft_anything_testkit::apple as fx;
+
+    #[test]
+    fn xml_has_one_complete_root_with_only_markup_space_around_values() {
+        for invalid in [
+            "<plist><true/>",
+            "<plist><true/></dict>",
+            "<plist><true/><false/></plist>",
+            "<plist><true/></plist><dict/>",
+            "<false/>junk",
+            "text<true/>",
+            "<array>junk<true/></array>",
+            "<dict><key>x</key>garbage<true/></dict>",
+            "<true>no</true>",
+            "<false>yes</false>",
+            "<array><key/></array>",
+        ] {
+            assert!(parse_xml(invalid.as_bytes()).is_err(), "{invalid}");
+        }
+        let xml = b"<?example content > <false/> ?>\n<plist><dict><key/><string>  </string></dict></plist><!-- end -->";
+        assert_eq!(parse_xml(xml).unwrap().get("").and_then(Value::as_str), Some("  "));
+        assert_eq!(parse_xml(b" <true></true> ").unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn xml_rejects_partial_code_units_and_preserves_the_utf8_bom() {
+        assert_eq!(parse_xml(b"\xef\xbb\xbf<string>ok</string>").unwrap().as_str(), Some("ok"));
+        assert!(parse_xml(b"<string>\xff</string>").is_err());
+        for be in [false, true] {
+            let mut bytes = if be { vec![0xfe, 0xff] } else { vec![0xff, 0xfe] };
+            for unit in "<true/>".encode_utf16() {
+                bytes.extend(if be { unit.to_be_bytes() } else { unit.to_le_bytes() });
+            }
+            bytes.push(0);
+            assert!(parse_xml(&bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn a_doctype_internal_subset_is_skipped_as_one_declaration() {
+        let doc = br#"<!DOCTYPE plist [<!ELEMENT plist (string)><!ENTITY text "x]>y"><!-- ]> --><?note ]> ?>]><plist><string>ok</string></plist>"#;
+        assert_eq!(parse_xml(doc).unwrap().as_str(), Some("ok"));
+        assert!(parse_xml(b"<!DOCTYPE plist [<!ELEMENT plist ANY><plist><true/></plist>").is_err());
+    }
 
     #[test]
     fn xml_char_refs_require_plain_digits() {
@@ -790,6 +879,24 @@ mod tests {
         b.extend_from_slice(&0u64.to_be_bytes());
         b.extend_from_slice(&(table as u64).to_be_bytes());
         b
+    }
+
+    #[test]
+    fn binary_plist_does_not_invent_types_or_dictionary_keys() {
+        let mut version = small_bplist(&[vec![0x00]]);
+        version[7] = b'1';
+        assert!(looks_like_plist(&version));
+        assert_eq!(parse_binary(&version).unwrap(), Value::Null);
+        version[6] = b'1';
+        assert!(matches!(parse_binary(&version), Err(FormatError::Unsupported(_))));
+        for marker in [0x01, 0x0f, 0x30, 0x32, 0x34] {
+            let mut object = vec![marker];
+            object.extend_from_slice(&0f64.to_be_bytes());
+            assert!(parse_binary(&small_bplist(&[object])).is_err(), "{marker:#x}");
+        }
+        assert_eq!(parse_binary(&small_bplist(&[vec![0x00]])).unwrap(), Value::Null);
+        assert!(parse_binary(&small_bplist(&[vec![0xd1, 1, 2], vec![0x10, 1], vec![0x09]])).is_err());
+        assert_eq!(parse_binary(&small_bplist(&[vec![0xd1, 1, 2], vec![0x51, b'1'], vec![0x09]])).unwrap().get("1"), Some(&Value::Bool(true)));
     }
 
     /// An array (or set) of `n` references to object `child`.
