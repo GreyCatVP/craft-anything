@@ -941,8 +941,24 @@ fn cut_at_max_text(text: &mut String) {
 
 /// The words after a CREATE TABLE's column list, such as `WITHOUT ROWID` and `STRICT`.
 fn table_options(sql: &str) -> Vec<&str> {
-    let Some(close) = sql.rfind(')') else { return Vec::new() };
+    let Some(close) = column_list_close(sql) else { return Vec::new() };
     sql_tokens(close.checked_add(1).and_then(|start| sql.get(start..)).unwrap_or(""))
+}
+
+/// The byte offset of the `)` that closes a CREATE TABLE's column list. It is found by tokens,
+/// so a parenthesis in a comment, string or quoted name after the list (SQLite keeps a trailing
+/// comment in the stored statement) doesn't count.
+fn column_list_close(sql: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for token in sql_tokens(sql) {
+        match token {
+            "(" => depth = depth.saturating_add(1),
+            ")" if depth == 1 => return (token.as_ptr() as usize).checked_sub(sql.as_ptr() as usize),
+            ")" => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn is_without_rowid(sql: &str) -> bool {
@@ -961,7 +977,7 @@ fn without_rowid_order(table: &SchemaObject) -> Option<Vec<Option<usize>>> {
     let generated: Vec<bool> = column_definitions(&table.sql).iter().map(|(_, rest)| is_virtual_column(rest)).collect();
     let is_virtual = |i: usize| generated.get(i).copied().unwrap_or(false);
     let open = column_list_open(&table.sql)?;
-    let close = table.sql.rfind(')')?;
+    let close = column_list_close(&table.sql)?;
     let body = table.sql.get(open.checked_add(1)?..close)?;
     let mut stored = Vec::new();
     for segment in split_top_level(body) {

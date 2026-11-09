@@ -149,7 +149,7 @@ pub fn card(ui: &mut Ui, a: &mut Asked, glossary: bool) {
             toggle |= icons::button(ui, if a.collapsed { "chevron-right" } else { "chevron-down" }, 22.0, false, name).clicked();
             let (icon, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
             icons::paint(ui, icon, "circle-help", 16.0, t.icon);
-            let question = RichText::new(&a.question).strong();
+            let question = RichText::new(&a.question).font(theme::semibold(theme::BODY));
             let line = if crate::bidi::has_rtl(&a.question) {
                 egui::Label::new(crate::bidi::galley(ui, question, a.collapsed))
             } else if a.collapsed {

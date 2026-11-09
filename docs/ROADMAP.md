@@ -1222,6 +1222,11 @@ Gaps found while using the app for real projects.
       page calls "Open folder" (both `project_open_folder`), and a game's chosen folder was shown as a
       full path in its row, where other chosen folders are shortened, cut to fit and whole on hover
       — claimed: jgt87, branch bugfix/r2.9-same-words-open-folder — PR #1243
+- [x] Colours, corners and text sizes off the theme in the chat, evidence, prompt box, sidebar,
+      palette and Just ask: the Send button's own white and black, two hand-set corner radii,
+      code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
+      the mode's default size where other card titles are 15 semibold
+      — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
@@ -1426,6 +1431,11 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-bplist-typed-objects
 - [x] Visit XML plist values only inside a complete, correctly encoded document.
       — claimed: Afloat16, branch bugfix/r3.12-xml-plist-document
+- [x] Name code-directory flags with the bits Apple uses: hard 0x100, kill 0x200, expires 0x400,
+      restrict 0x800, enforcement 0x1000, library-validation 0x2000. The table used 0x4–0x80 for
+      them and named 0x200 and 0x800 as other flags, so a library-validation signature (0x2000)
+      showed no flag names and 0x12200 read "allowed-entitlements,runtime".
+      — claimed: Chr0mium24, branch bugfix/r3.12-codesign-flag-names
 - [x] Keep code-signature children and verification reads within their declared superblob.
       — claimed: Afloat16, branch bugfix/r3.12-codesign-superblob-length-boundary-20261105
 - [x] Refuse short ELF64 header and section records and handle section-table offsets at the address limit safely.
@@ -1496,8 +1506,9 @@ Owner: open · Status: in progress
       rowid alias and WITHOUT ROWID order: the column list opens at the first parenthesis outside
       quotes.
       — claimed: Plastic-time, branch bugfix/r3.12-sqlite-parenthesized-table-names
-- [ ] A comment after a SQLite column list that holds `)` (`... WITHOUT ROWID /* ) */`) still hides
+- [x] A comment after a SQLite column list that holds `)` (`... WITHOUT ROWID /* ) */`) still hides
       the WITHOUT ROWID marker: find the list's closing parenthesis by tokens, not `rfind(')')`.
+      — claimed: Chr0mium24, branch bugfix/r3.12-sqlite-options-after-comment
 
 - [x] Keep Android binary XML events within their document, chunk and attribute bounds.
       — claimed: Afloat16, branch bugfix/r3.12-android-xml-events
@@ -1541,6 +1552,12 @@ Owner: open · Status: in progress
 - [x] Keep the comma inside a SQLite type's parentheses: `DECIMAL(10, 2)` is listed as
       `DECIMAL(10 2)`. The type keeps the comma inside its parentheses, and the schema overview
       shows it unchanged. — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-type-comma
+- [x] Asset catalogs name each rendition key attribute as CoreUI reads it. When the deployment
+      target predates an attribute (display gamut before macOS 10.12), actool writes a stand-in
+      (the placeholder attribute) in KEYFORMAT and the real one in KEYFORMATWORKAROUND, which
+      isn't read: the key format lists `placeholder` and a Display P3 variant's key shows
+      `placeholder: 1` instead of `display-gamut: 1`.
+      — claimed: Chr0mium24, branch bugfix/r3.12-car-key-format-workaround
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress
