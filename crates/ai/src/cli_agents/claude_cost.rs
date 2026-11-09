@@ -26,14 +26,25 @@ pub fn path_in(config_dir: &Path) -> PathBuf {
     config_dir.join(FILE)
 }
 
-/// The kept totals; a missing or unreadable file keeps nothing, so a resumed turn has no cost
-/// rather than an inflated one.
-fn load(path: &Path) -> Kept {
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Kept>(&bytes).ok())
-        .filter(|kept| kept.version == VERSION)
-        .unwrap_or(Kept { version: VERSION, totals: BTreeMap::new() })
+/// What the file holds. A missing or malformed file keeps nothing and is written again, so a
+/// resumed turn has no cost rather than an inflated one. A file we can't read, or one written by
+/// a newer version, is left alone: writing over it would erase other sessions' totals.
+enum Stored {
+    Kept(Kept),
+    Empty,
+    Unwritable,
+}
+
+fn load(path: &Path) -> Stored {
+    match std::fs::read(path) {
+        Ok(bytes) => match serde_json::from_slice::<Kept>(&bytes) {
+            Ok(kept) if kept.version == VERSION => Stored::Kept(kept),
+            Ok(_) => Stored::Unwritable,
+            Err(_) => Stored::Empty,
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Stored::Empty,
+        Err(_) => Stored::Unwritable,
+    }
 }
 
 /// The cost of a turn that ran in `session`, which resumed `resumed` (None: a new session), given
@@ -47,11 +58,19 @@ pub fn turn_cost(path: Option<&Path>, resumed: Option<&str>, session: Option<&st
     let Some(path) = path else {
         return resumed.is_none().then_some(total);
     };
-    let mut kept = load(path);
+    let (mut kept, writable) = match load(path) {
+        Stored::Kept(kept) => (kept, true),
+        Stored::Empty => (Kept { version: VERSION, totals: BTreeMap::new() }, true),
+        Stored::Unwritable => (Kept { version: VERSION, totals: BTreeMap::new() }, false),
+    };
     let cost = match resumed {
         None => Some(total),
         Some(_) => kept.totals.get(session).map(|before| (total - before).max(0.0)),
     };
+    if !writable {
+        log::warn!("not keeping Claude Code's session cost: {} can't be read or was written by a newer version", path.display());
+        return cost;
+    }
     kept.totals.insert(session.to_string(), total);
     match serde_json::to_vec_pretty(&kept) {
         Ok(bytes) => {
@@ -69,7 +88,10 @@ mod tests {
     use super::*;
 
     fn kept_total(path: &Path, session: &str) -> Option<f64> {
-        load(path).totals.get(session).copied()
+        match load(path) {
+            Stored::Kept(kept) => kept.totals.get(session).copied(),
+            Stored::Empty | Stored::Unwritable => None,
+        }
     }
 
     /// The live check (2026-11-09, Claude Haiku 5.5): turn 1 reported $0.00203302; turn 2 reported
@@ -147,6 +169,19 @@ mod tests {
         std::fs::write(&path, b"{ not json").unwrap();
         assert_eq!(turn_cost(Some(&path), Some("s"), Some("s"), Some(2.0)), None, "nothing kept, so no cost");
         assert_eq!(kept_total(&path, "s"), Some(2.0), "the file is rewritten");
+    }
+
+    /// A file written by a newer version is left exactly as it is: writing over it would erase
+    /// the totals another build kept. The turn still has the cost it can tell from its own total.
+    #[test]
+    fn a_file_from_a_newer_version_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = path_in(dir.path());
+        let newer = br#"{"version": 2, "totals": {"s": 1.0}}"#;
+        std::fs::write(&path, newer).unwrap();
+        assert_eq!(turn_cost(Some(&path), Some("s"), Some("s"), Some(2.0)), None, "nothing readable kept");
+        assert_eq!(turn_cost(Some(&path), None, Some("new"), Some(0.5)), Some(0.5), "a new session keeps its cost");
+        assert_eq!(std::fs::read(&path).unwrap(), newer, "the newer file is untouched");
     }
 
     /// Without a folder to keep totals in, a new session still has its cost and a resumed one none.
