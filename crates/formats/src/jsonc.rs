@@ -366,6 +366,7 @@ impl Doc {
         if self.text.contains("\r\n") { "\r\n" } else { "\n" }
     }
 
+    /// Add `key: value` as the last member of `obj`, indented like the members already there.
     fn insert_member(&self, obj: &Node, key: &str, value: &Value) -> Result<String, String> {
         let NodeKind::Object { members, trailing_comma } = &obj.kind else { return Err("not an object".into()) };
         let close = obj.end.saturating_sub(1);
