@@ -178,6 +178,18 @@ fn make_offers_the_ai_that_takes_a_games_files_out_in_deep_mode() {
     h.get_by_label("Local model").click();
     assert!(wait(&mut h, |a| a.extractor.as_deref() == Some("Local model")), "the app's extractor is set");
     assert_eq!(h.state().hub.chosen(Role::Extractor).as_deref(), Some("Local model"), "the same role as Settings → AI");
+
+    // Nothing qualifies any more (the chosen one now lacks a key too): the row stays while one is
+    // chosen, so it can still be cleared from here. (An AI turned off is no longer chosen at all:
+    // `chosen` skips it, so there's nothing to clear.)
+    h.state_mut().missing_key.insert("Local model".into());
+    h.run_steps(3);
+    h.get_all_by_label("Extracted by").last().unwrap().click();
+    h.run_steps(2);
+    assert!(h.query_all_by_label("Local model").count() <= 1, "not offered again, only shown as the current choice");
+    h.get_by_label("No separate AI").click();
+    assert!(wait(&mut h, |a| a.extractor.is_none()), "cleared");
+    assert_eq!(h.state().hub.chosen(Role::Extractor), None, "the role is cleared too");
 }
 
 #[test]
