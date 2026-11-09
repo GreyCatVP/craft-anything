@@ -7,9 +7,21 @@
 use serde_json::{Map, Value};
 use yaml_rust2::{Yaml, YamlLoader};
 
+/// A byte-order mark some Windows editors put in front of the file. YAML allows one there; it isn't
+/// part of the first key.
+const BOM: &str = "\u{feff}";
+
+/// The file's byte-order mark, if it has one, and the text after it.
+fn split_bom(text: &str) -> (&'static str, &str) {
+    match text.strip_prefix(BOM) {
+        Some(rest) => (BOM, rest),
+        None => ("", text),
+    }
+}
+
 /// Parse to JSON-like data (first document; an empty file is an empty mapping).
 pub fn parse(text: &str) -> Result<Value, String> {
-    let docs = YamlLoader::load_from_str(text).map_err(|e| e.to_string())?;
+    let docs = YamlLoader::load_from_str(split_bom(text).1).map_err(|e| e.to_string())?;
     match docs.into_iter().next() {
         None | Some(Yaml::Null) => Ok(Value::Object(Map::new())),
         Some(y @ Yaml::Hash(_)) => Ok(to_json(&y, 0)),
@@ -228,6 +240,8 @@ fn join(lines: &[Line]) -> String {
 /// Set `table.name` to `value` (a mapping). Returns the new text.
 pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String, String> {
     parse(text)?;
+    // Lines are edited after the byte-order mark, which goes back in front as it was.
+    let (bom, text) = split_bom(text);
     let (mut out, eol) = split(text);
     let lines: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
     let new_lines = |rendered: String| -> Vec<Line> { rendered.lines().map(|l| (l.to_string(), eol)).collect() };
@@ -258,19 +272,20 @@ pub fn set(text: &str, table: &str, name: &str, value: &Value) -> Result<String,
             }
         }
     }
-    let new = join(&out);
+    let new = format!("{bom}{}", join(&out));
     parse(&new).map_err(|e| format!("the edited file would not parse: {e}"))?;
     Ok(new)
 }
 
 /// Remove `table.name`. Returns `None` when it was not there.
 pub fn remove(text: &str, table: &str, name: &str) -> Option<String> {
+    let (bom, text) = split_bom(text);
     let (mut out, _) = split(text);
     let lines: Vec<&str> = out.iter().map(|(t, _)| t.as_str()).collect();
     let block = find_table(&lines, table).ok()??;
     let (s, e) = find_child(&lines, &block, name)?;
     out.drain(s..e);
-    let new = join(&out);
+    let new = format!("{bom}{}", join(&out));
     parse(&new).ok()?;
     Some(new)
 }
