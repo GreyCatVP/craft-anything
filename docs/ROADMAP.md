@@ -1270,6 +1270,11 @@ Gaps found while using the app for real projects.
       no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
       the reported running total was $0.00350053. Earlier builds' totals stay as they were.
       — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
+- [x] Make offers "Extracted by" beside the game's other choices: in Deep mode an AI with an API key
+      can take a game's own files out after the study, but it could only be chosen in Settings → AI,
+      so on Make only the builder could be picked. It sets the app's one extractor and says so
+      (choosing one per project would need the run to take it from the project; not in this change)
+      — claimed: jgt87, branch feature/r2.9-make-extracted-by — PR #1290
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
