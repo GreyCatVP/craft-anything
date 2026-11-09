@@ -841,6 +841,7 @@ Pick the app, game or file to rebuild	选择要重建的应用、游戏或文件
 Pick the folder for this project	选择此项目的文件夹
 Pick the game's folder	选择游戏文件夹
 Picture a program's window	截取程序窗口图片
+Play a short script in a program	在程序中播放一段简短脚本
 Picture model	图片模型
 Pictures	图片
 Pictures can't be saved from IoStore containers yet; you can see what's inside.	暂不支持从 IoStore 容器保存图片，但可以查看其中的内容。

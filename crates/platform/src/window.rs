@@ -60,11 +60,29 @@ fn is_named(owner: &str, want: &str) -> bool {
     })
 }
 
-/// Picture the largest visible window that belongs to `pid`, or (when none does, as with a
-/// launcher that starts the real program) to a process whose name matches `app_name`.
+/// Where a program's window is on the screen and whether it has the keyboard, read just now.
+/// `x`/`y`/`width`/`height` are the system's screen coordinates for the window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowPlace {
+    pub pid: u32,
+    pub title: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    /// The window is the one in front, that keyboard and mouse input goes to.
+    pub focused: bool,
+}
+
 #[cfg(any(windows, target_os = "macos"))]
-pub fn capture_window(pid: u32, app_name: Option<&str>) -> Result<WindowShot, ToolError> {
-    let windows = xcap::Window::all().map_err(|e| ToolError::new(ErrorCode::FeatureMissing, format!("Can't list windows on this computer: {e}")))?;
+fn all_windows() -> Result<Vec<xcap::Window>, ToolError> {
+    xcap::Window::all().map_err(|e| ToolError::new(ErrorCode::FeatureMissing, format!("Can't list windows on this computer: {e}")))
+}
+
+/// The largest visible window that belongs to `pid`, or (when none does, as with a launcher that
+/// starts the real program) to a process whose name matches `app_name`.
+#[cfg(any(windows, target_os = "macos"))]
+fn choose<'a>(windows: &'a [xcap::Window], pid: u32, app_name: Option<&str>) -> Result<&'a xcap::Window, ToolError> {
     let usable = |w: &xcap::Window| !w.is_minimized().unwrap_or(true) && w.width().unwrap_or(0) > 32 && w.height().unwrap_or(0) > 32;
     let area = |w: &xcap::Window| u64::from(w.width().unwrap_or(0)) * u64::from(w.height().unwrap_or(0));
     let by_pid = windows.iter().filter(|w| usable(w) && w.pid().ok() == Some(pid)).max_by_key(|w| area(w));
@@ -72,10 +90,43 @@ pub fn capture_window(pid: u32, app_name: Option<&str>) -> Result<WindowShot, To
         let want = app_name?.to_ascii_lowercase();
         windows.iter().filter(|w| usable(w) && w.app_name().is_ok_and(|n| is_named(&n, &want))).max_by_key(|w| area(w))
     });
-    let Some(w) = chosen else {
-        return Err(ToolError::new(ErrorCode::NotFound, "The program didn't show a window to picture.")
-            .with_remediation("Give it longer to start (wait_secs), or check that it opens a window."));
-    };
+    chosen.ok_or_else(|| {
+        ToolError::new(ErrorCode::NotFound, "The program didn't show a window to picture.")
+            .with_remediation("Give it longer to start (wait_secs), or check that it opens a window.")
+    })
+}
+
+/// Where `pid`'s largest visible window is and whether it's in front (no name fallback: input is
+/// only ever aimed at a window the program itself owns).
+#[cfg(any(windows, target_os = "macos"))]
+pub fn window_place(pid: u32) -> Result<WindowPlace, ToolError> {
+    let windows = all_windows()?;
+    let w = choose(&windows, pid, None)?;
+    let unreadable = |what: &str, e: xcap::XCapError| ToolError::new(ErrorCode::ProgramFailed, format!("Couldn't read the window's {what}: {e}"));
+    Ok(WindowPlace {
+        pid,
+        title: w.title().unwrap_or_default(),
+        x: w.x().map_err(|e| unreadable("position", e))?,
+        y: w.y().map_err(|e| unreadable("position", e))?,
+        width: w.width().map_err(|e| unreadable("size", e))?,
+        height: w.height().map_err(|e| unreadable("size", e))?,
+        // Unknown counts as not in front: input then isn't sent.
+        focused: w.is_focused().unwrap_or(false),
+    })
+}
+
+/// Linux and the BSDs: not built in yet (ROADMAP R2.4).
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn window_place(_pid: u32) -> Result<WindowPlace, ToolError> {
+    Err(unsupported())
+}
+
+/// Picture the largest visible window that belongs to `pid`, or (when none does, as with a
+/// launcher that starts the real program) to a process whose name matches `app_name`.
+#[cfg(any(windows, target_os = "macos"))]
+pub fn capture_window(pid: u32, app_name: Option<&str>) -> Result<WindowShot, ToolError> {
+    let windows = all_windows()?;
+    let w = choose(&windows, pid, app_name)?;
     let img = w.capture_image().map_err(|e| ToolError::new(ErrorCode::ProgramFailed, format!("Couldn't picture the window: {e}")))?;
     Ok(WindowShot {
         title: w.title().unwrap_or_default(),

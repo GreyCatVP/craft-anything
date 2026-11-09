@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+mod input_session;
 mod process_tree;
 
 /// Largest picture kept inline in the evidence (bigger ones are only written to `output`).
@@ -25,17 +26,20 @@ const LOOK_AGAIN: Duration = Duration::from_millis(250);
 const UI_TREE_NODES: usize = 1000;
 
 pub fn specs() -> Vec<ToolSpec> {
-    vec![ToolSpec {
-        id: "native_window_capture",
-        title: "Picture a program's window",
-        summary: "Start a program (an app or a game), wait for its window, take a picture of it and close the program (Windows and macOS). Optionally save the PNG to `output`, and the UI tree of its windows (as runtime_ui_read reads it; Windows and macOS) to `ui_tree` as JSON. It runs the program, so it needs consent.",
-        beginner: "Opens a program for a few seconds and takes a picture of its window.",
-        toolset: Toolset::Runtime,
-        effects: Effects::LAUNCHES_PROCESS.union(Effects::EXECUTES_FOREIGN_CODE).union(Effects::WRITES_FILESYSTEM).union(Effects::MUTATES_SESSION),
-        requires: Requires::Nothing,
-        input_schema: schema_of::<CaptureParams>,
-        run: native_window_capture,
-    }]
+    vec![
+        ToolSpec {
+            id: "native_window_capture",
+            title: "Picture a program's window",
+            summary: "Start a program (an app or a game), wait for its window, take a picture of it and close the program (Windows and macOS). Optionally save the PNG to `output`, and the UI tree of its windows (as runtime_ui_read reads it; Windows and macOS) to `ui_tree` as JSON. It runs the program, so it needs consent.",
+            beginner: "Opens a program for a few seconds and takes a picture of its window.",
+            toolset: Toolset::Runtime,
+            effects: Effects::LAUNCHES_PROCESS.union(Effects::EXECUTES_FOREIGN_CODE).union(Effects::WRITES_FILESYSTEM).union(Effects::MUTATES_SESSION),
+            requires: Requires::Nothing,
+            input_schema: schema_of::<CaptureParams>,
+            run: native_window_capture,
+        },
+        input_session::spec(),
+    ]
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -73,9 +77,7 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     if p.ui_tree.as_ref().is_some_and(|t| !t.is_absolute()) {
         return Err(ToolError::invalid("ui_tree must be an absolute path"));
     }
-    if p.working_directory.as_ref().is_some_and(|d| !d.is_absolute() || !d.is_dir()) {
-        return Err(ToolError::invalid("working_directory must be an existing absolute directory"));
-    }
+    check_paths(&p.program, p.working_directory.as_deref())?;
     // Refused before the program starts where no picture can be taken.
     if !craft_anything_platform::window::SUPPORTED {
         return Err(craft_anything_platform::window::unsupported());
@@ -83,27 +85,7 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     craft_anything_platform::window::check_can_see_windows()?;
     let wait = Duration::from_secs(p.wait_secs.unwrap_or(8).clamp(1, 120));
     let dir = p.working_directory.unwrap_or_else(|| p.program.parent().map(PathBuf::from).unwrap_or_default());
-    let cancel = ctx.cancel.clone();
-    ctx.report(None, format!("Starting {} for {} s…", p.program.display(), wait.as_secs()));
-    let mut running = Process::new(&p.program)
-        .args(&p.args)
-        .cwd(&dir)
-        .timeout(wait + Duration::from_secs(60))
-        .stdout_cap(64 * 1024)
-        .cancel_when(move || cancel.is_cancelled())
-        .label("the program")
-        .spawn()?;
-    let started = Instant::now();
-    while started.elapsed() < wait {
-        if ctx.cancel.is_cancelled() {
-            running.kill_and_wait(Duration::from_secs(10));
-            return Err(ToolError::cancelled());
-        }
-        if running.is_finished() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    let (mut running, started) = start_and_wait(ctx, &p.program, &p.args, &dir, wait, wait + Duration::from_secs(60), false)?;
     let name = p.program.file_stem().map(|s| s.to_string_lossy().into_owned());
     let pid = running.pid();
     let late_until = Instant::now() + LATE_WINDOW;
@@ -176,6 +158,52 @@ fn native_window_capture(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput,
     }
     let ev = b.build().map_err(|e| ToolError::new(ErrorCode::Internal, e.message))?;
     Ok(ToolOutput::evidence(ev))
+}
+
+/// Start `program` in `dir` and give it `wait` to start and draw (less if it ends first). The run
+/// as a whole is limited to `limit`; a cancel stops the program and returns cancelled. With
+/// `hands_off`, a program that exits cleanly after starting another (a launcher) doesn't end the
+/// run: what it started lives on until the caller stops it, cancels or the limit is reached.
+fn start_and_wait(
+    ctx: &mut Ctx<'_>,
+    program: &std::path::Path,
+    args: &[String],
+    dir: &std::path::Path,
+    wait: Duration,
+    limit: Duration,
+    hands_off: bool,
+) -> Result<(craft_anything_platform::process::RunningProcess, Instant), ToolError> {
+    let cancel = ctx.cancel.clone();
+    ctx.report(None, format!("Starting {} for {} s…", program.display(), wait.as_secs()));
+    let mut process = Process::new(program);
+    if hands_off {
+        process = process.hands_off();
+    }
+    let mut running =
+        process.args(args).cwd(dir).timeout(limit).stdout_cap(64 * 1024).cancel_when(move || cancel.is_cancelled()).label("the program").spawn()?;
+    let started = Instant::now();
+    while started.elapsed() < wait {
+        if ctx.cancel.is_cancelled() {
+            running.kill_and_wait(Duration::from_secs(10));
+            return Err(ToolError::cancelled());
+        }
+        if running.is_finished() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Ok((running, started))
+}
+
+/// Check the paths a run is given before anything starts.
+fn check_paths(program: &std::path::Path, working_directory: Option<&std::path::Path>) -> Result<(), ToolError> {
+    if !program.is_absolute() || !program.is_file() {
+        return Err(ToolError::invalid(format!("{} isn't a program file.", program.display())).with_remediation("Pass the full path of the program to start."));
+    }
+    if working_directory.is_some_and(|d| !d.is_absolute() || !d.is_dir()) {
+        return Err(ToolError::invalid("working_directory must be an existing absolute directory"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

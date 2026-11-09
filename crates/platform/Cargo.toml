@@ -25,6 +25,8 @@ vt100 = "0.16"
 # needs PipeWire, Wayland/GBM, XCB and clang to build (ROADMAP R2.4).
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 xcap = "0.9"
+# Keys and clicks for short scripted sessions with a program (safe API; ROADMAP R2.4).
+enigo = { version = "0.6", default-features = false }
 
 # Whether Screen Recording is allowed (a safe call; xcap uses the same crate).
 [target.'cfg(target_os = "macos")'.dependencies]

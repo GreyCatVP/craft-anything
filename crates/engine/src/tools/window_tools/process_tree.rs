@@ -35,8 +35,9 @@ pub(super) fn snapshot(cancel: &crate::tool::CancelToken) -> Result<String, Tool
     Ok(out.stdout_text())
 }
 
-/// Breadth-first descendants, regardless of snapshot order. Bound malformed/cyclic input too.
-fn descendants(root: u32, text: &str) -> Vec<u32> {
+/// Breadth-first descendants of `roots` (not the roots), regardless of snapshot order. Bound
+/// malformed/cyclic input too.
+fn descendants(roots: &[u32], text: &str) -> Vec<u32> {
     let mut children = BTreeMap::<u32, Vec<u32>>::new();
     for line in text.lines().take(MAX_PROCESSES) {
         let mut words = line.split_whitespace();
@@ -47,8 +48,8 @@ fn descendants(root: u32, text: &str) -> Vec<u32> {
             children.entry(parent).or_default().push(pid);
         }
     }
-    let mut seen = BTreeSet::from([root]);
-    let mut pending = VecDeque::from([root]);
+    let mut seen: BTreeSet<u32> = roots.iter().copied().collect();
+    let mut pending: VecDeque<u32> = roots.iter().copied().collect();
     let mut result = Vec::new();
     while let Some(parent) = pending.pop_front() {
         for pid in children.remove(&parent).unwrap_or_default() {
@@ -61,29 +62,64 @@ fn descendants(root: u32, text: &str) -> Vec<u32> {
     result
 }
 
+/// Most processes a run may have started before its window can't be told apart safely.
+const MAX_FAMILY: usize = 64;
+
 /// Return the window owner's PID alongside its picture so accessibility uses that same process.
 pub(super) fn capture<T>(
     root: u32,
     snapshot: impl FnOnce() -> Result<String, ToolError>,
-    mut picture: impl FnMut(u32) -> Result<T, ToolError>,
+    picture: impl FnMut(u32) -> Result<T, ToolError>,
 ) -> Result<(u32, T), ToolError> {
-    let missing = match picture(root) {
-        Ok(shot) => return Ok((root, shot)),
-        Err(e) if e.code == ErrorCode::NotFound => e,
-        Err(e) => return Err(e),
-    };
-    let candidates = descendants(root, &snapshot()?);
-    if candidates.len() > 64 {
-        return Err(ToolError::new(ErrorCode::ProgramFailed, "The program started too many processes to identify its window safely."));
+    Family::new(root).capture(snapshot, picture)
+}
+
+/// A started program and every process seen below it so far. A launcher that starts the real
+/// program and exits orphans it: macOS and Linux give the child a new parent, so a later process
+/// list no longer leads from the program to it. Looking again from everything seen before keeps
+/// that child (and what it starts) part of the run.
+pub(super) struct Family {
+    root: u32,
+    known: Vec<u32>,
+}
+
+impl Family {
+    pub(super) fn new(root: u32) -> Self {
+        Family { root, known: Vec::new() }
     }
-    for pid in candidates {
-        match picture(pid) {
-            Ok(shot) => return Ok((pid, shot)),
-            Err(e) if e.code == ErrorCode::NotFound => {}
+
+    /// The first of the family (the program first, then the processes seen earliest) whose
+    /// picture can be taken, with its PID.
+    pub(super) fn capture<T>(
+        &mut self,
+        snapshot: impl FnOnce() -> Result<String, ToolError>,
+        mut picture: impl FnMut(u32) -> Result<T, ToolError>,
+    ) -> Result<(u32, T), ToolError> {
+        let missing = match picture(self.root) {
+            Ok(shot) => return Ok((self.root, shot)),
+            Err(e) if e.code == ErrorCode::NotFound => e,
             Err(e) => return Err(e),
+        };
+        let mut roots = Vec::with_capacity(self.known.len() + 1);
+        roots.push(self.root);
+        roots.extend_from_slice(&self.known);
+        for pid in descendants(&roots, &snapshot()?) {
+            if pid != self.root && !self.known.contains(&pid) {
+                self.known.push(pid);
+            }
+            if self.known.len() > MAX_FAMILY {
+                return Err(ToolError::new(ErrorCode::ProgramFailed, "The program started too many processes to identify its window safely."));
+            }
         }
+        for &pid in &self.known {
+            match picture(pid) {
+                Ok(shot) => return Ok((pid, shot)),
+                Err(e) if e.code == ErrorCode::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(missing)
     }
-    Err(missing)
 }
 
 /// Look until something other than "no window yet" comes back, or `can_wait` says to stop.
@@ -170,10 +206,34 @@ mod tests {
     }
 
     #[test]
+    fn a_child_stays_the_program_after_its_launcher_exits() {
+        // Look 1: the launcher (10) has started the game (20), which has no window yet.
+        // Look 2: the launcher has exited and the game was given a new parent (1, as macOS and
+        // Linux do); the game now has a window, and so does an unrelated program (99).
+        let mut family = Family::new(10);
+        let first = family.capture::<&str>(|| Ok("20 10\n99 1\n".into()), |_| Err(missing()));
+        assert_eq!(first.unwrap_err().code, ErrorCode::NotFound);
+        let mut looked_up = Vec::new();
+        let (pid, shot) = family
+            .capture(
+                || Ok("20 1\n99 1\n30 20\n".into()),
+                |pid| {
+                    looked_up.push(pid);
+                    if pid == 20 || pid == 99 { Ok("game") } else { Err(missing()) }
+                },
+            )
+            .unwrap();
+        assert_eq!((pid, shot), (20, "game"), "the orphaned child is still the program");
+        assert_eq!(looked_up, [10, 20], "only the program's own processes are looked at");
+        // Without that memory the orphan isn't found, and the unrelated window never is.
+        assert!(capture::<()>(10, || Ok("20 1\n99 1\n".into()), |_| Err(missing())).is_err());
+    }
+
+    #[test]
     fn process_relationships_are_bounded_and_cycle_safe() {
-        assert_eq!(descendants(10, "20 10\n30 20\n10 30\n20 10\n0 10\nbad\n40 10 extra\n"), [20, 30]);
+        assert_eq!(descendants(&[10], "20 10\n30 20\n10 30\n20 10\n0 10\nbad\n40 10 extra\n"), [20, 30]);
         let text = format!("{}20 10\n", "bad\n".repeat(MAX_PROCESSES));
-        assert!(descendants(10, &text).is_empty());
+        assert!(descendants(&[10], &text).is_empty());
         let text = (20..85).map(|pid| format!("{pid} 10\n")).collect::<String>();
         let mut attempts = 0;
         let error = capture::<()>(
@@ -194,7 +254,7 @@ mod tests {
     #[test]
     fn snapshot_finds_an_owned_child_on_this_host() {
         let mut child = Process::new("/bin/sleep").arg("20").timeout(Duration::from_secs(30)).spawn().unwrap();
-        let family = snapshot(&crate::CancelToken::default()).map(|text| descendants(std::process::id(), &text));
+        let family = snapshot(&crate::CancelToken::default()).map(|text| descendants(&[std::process::id()], &text));
         assert!(child.kill_and_wait(Duration::from_secs(5)));
         assert!(family.unwrap().contains(&child.pid()));
     }

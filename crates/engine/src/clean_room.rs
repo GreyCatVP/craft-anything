@@ -112,8 +112,10 @@ pub const TOOLS: &[&str] = &[
     "web_site_close",
     // Checks a script's form; it touches no target and starts no browser.
     "web_walkthrough_check",
-    // A program watched from outside: its window, the controls on its screen, a recorded run.
+    // A program watched from outside: its window, the controls on its screen, a recorded run,
+    // keys and clicks sent to its window as a person at the keyboard would.
     "native_window_capture",
+    "native_input_record",
     "runtime_ui_read",
     "runtime_ui_walkthrough_record",
     "runtime_walkthrough_record",
