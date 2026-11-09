@@ -1166,10 +1166,10 @@ Gaps found while using the app for real projects.
 - [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
       button; the line didn't wrap and ran on under the button
       — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
-- [ ] Two-way switches (Mode, Theme and the others) slide their selection to the new choice instead
+- [x] Two-way switches (Mode, Theme and the others) slide their selection to the new choice instead
       of jumping, and Theme gets a System choice, the new default, that follows the system's light
       or dark appearance and changes with it
-      — claimed: jgt87, branch feature/r2.9-sliding-switch-system-theme
+      — claimed: jgt87, branch feature/r2.9-sliding-switch-system-theme — PR #1234
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
