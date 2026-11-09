@@ -787,6 +787,13 @@ list: scan the folders people keep such things in (`KnownRoot`, by folder name, 
 levels down), and make an install use a copy already found outside our store. Test each layout
 (unzipped, cask, capitalised name) with temp folders, not the machine the test runs on.
 
+**A model list that outran the request body.** Older Claude models were added to the dropdown
+(#1289), but every request still built one body for all models: adaptive thinking, an effort level
+and the fallback field. Haiku 4.5 takes only a manual thinking budget and no effort parameter, so
+each request to it was a 400, and Haiku 5.5 has no server-side fallback. Each model's accepted
+fields live in one table (`anthropic::PROFILES`, checked against the model reference), and a test
+builds the body for every listed model. Adding a model means adding its profile first.
+
 ## Agent tooling
 
 **Shared CLI efforts reached Claude unchanged.** Keep CLI-only levels available for agents, but
