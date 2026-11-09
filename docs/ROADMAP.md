@@ -1171,10 +1171,10 @@ Gaps found while using the app for real projects.
 - [x] Settings → AI: a card for an AI found on this computer wraps its description beside its Add
       button; the line didn't wrap and ran on under the button
       — claimed: jgt87, branch bugfix/r2.9-detected-cards-wrap — PR #1235
-- [ ] The same action reads the same everywhere: a pin's menu says "Show folder" for what the project
-      page calls "Open folder" (both `project_open_folder`), and a game's chosen folder is shown as a
+- [x] The same action reads the same everywhere: a pin's menu said "Show folder" for what the project
+      page calls "Open folder" (both `project_open_folder`), and a game's chosen folder was shown as a
       full path in its row, where other chosen folders are shortened, cut to fit and whole on hover
-      — claimed: jgt87, branch bugfix/r2.9-same-words-open-folder
+      — claimed: jgt87, branch bugfix/r2.9-same-words-open-folder — PR #1243
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
