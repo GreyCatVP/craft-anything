@@ -885,6 +885,8 @@ fn align4(x: usize) -> usize {
     x.saturating_add(3) & !3
 }
 
+/// Read the version nodes between `start` and `end` into `info`: the fixed file and product
+/// versions, then each string. `depth` counts levels below VS_VERSION_INFO, so strings are at 3.
 fn walk_version(r: &Reader<'_>, start: usize, end: usize, depth: u8, info: &mut VersionInfo) {
     if depth > 6 {
         return;
