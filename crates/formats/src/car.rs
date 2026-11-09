@@ -102,6 +102,8 @@ pub fn attribute_name(id: u32) -> String {
         23 => "graphics-feature-set-class",
         24 => "display-gamut",
         25 => "deployment-target",
+        26 => "glyph-weight",
+        27 => "glyph-size",
         o => return format!("attribute-{o}"),
     }
     .into()
@@ -421,6 +423,33 @@ mod tests {
         };
         w.tree("RENDITIONS", vec![(key(0), b"sRGB".to_vec()), (key(1), b"P3".to_vec())]);
         w.finish()
+    }
+
+    /// A catalog keyed like the system apps' symbol images: identifier, deployment target, glyph
+    /// weight and glyph size, as `assetutil --info` lists them (`kCRThemeGlyphWeightName`,
+    /// `kCRThemeGlyphSizeName` after `kCRThemeDeploymentTargetName`).
+    #[test]
+    fn glyph_weight_and_size_attributes_are_named() {
+        use craft_anything_testkit::Buf;
+        let mut w = fx::BomWriter::new();
+        let mut kf = Buf::with_len(28);
+        kf.put(0, b"tmfk");
+        kf.u32(8, 4);
+        for (i, id) in [17u32, 25, 26, 27].into_iter().enumerate() {
+            kf.u32(12 + 4 * i, id);
+        }
+        w.var("KEYFORMAT", kf.into_vec());
+        let mut key = Buf::with_len(8);
+        key.u16(0, 7);
+        key.u16(2, 6);
+        key.u16(4, 4);
+        key.u16(6, 2);
+        w.tree("RENDITIONS", vec![(key.into_vec(), b"symbol".to_vec())]);
+        let c = parse(&w.finish()).unwrap();
+        assert_eq!(c.key_format, vec!["identifier", "deployment-target", "glyph-weight", "glyph-size"]);
+        assert_eq!(c.renditions[0].key.get("glyph-weight"), Some(&4));
+        assert_eq!(c.renditions[0].key.get("glyph-size"), Some(&2));
+        assert_eq!(attribute_name(28), "attribute-28");
     }
 
     #[test]

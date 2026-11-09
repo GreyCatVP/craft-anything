@@ -187,7 +187,7 @@ fn consumed_note_resets_survive_failed_and_cancelled_turns() {
 
     for cancelled in [false, true] {
         for text in ["Keep the header blue", "   "] {
-            for record in ["", "{ broken progress", r#"{"version":2,"fingerprint":null,"unchanged_turns":1}"#] {
+            for record in ["", "{ broken progress", r#"{"version":3,"fingerprint":null,"unchanged_turns":1}"#] {
                 let dir = tempfile::tempdir().unwrap();
                 let mut ws = Workspace::create(dir.path(), "Interrupted note", "Build an app", TargetRef::None).unwrap();
                 std::fs::create_dir_all(ws.capture_dir()).unwrap();

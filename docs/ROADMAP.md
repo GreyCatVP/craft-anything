@@ -574,6 +574,9 @@ yet, and the quick start is how every new person begins.
       within 90 s while the same check passed in the builder's turn and on a re-run; not
       reproduced. The app waited on animation frames, which a window behind others may not get;
       the Electron steps now say to capture after loading instead
+- [ ] A live Windows build whose check stalls (Codex, a Godot project, as in the reports): the
+      feed names the check it is in, the builder's own checks stop at their 30-minute limit,
+      Pause acts between checks and stops a running build step, and a caught bug leaves "Needs you"
 - [ ] A live chat run with a big comparison result, to see Claude Code page it with
       `core_evidence_browse` (and whether 80 KB is the right size)
 - [ ] Live check on Windows: rebuild a project while its frozen pin runs, and the build isn't
@@ -664,6 +667,9 @@ Owner: open · Status: in progress
       have no file there)
 - [x] `ai test` names the program it ran and the saved one it replaced, and `doctor` says a saved
       path has no program there instead of blaming PATH (#721)
+- [x] `doctor` looks a registration's bare command (`craft-anything-cli`, as a hand-made entry
+      names it) up on PATH, as the app starting it does, instead of calling it missing.
+      — claimed: Plastic-time, branch bugfix/r2.2-doctor-cli-on-path
 - [ ] Settings says when a saved agent program is gone and which one runs in its place; today a
       build moves to the newest build folder or the usual program without saying so, and the
       setting keeps the old path (read on a worker, not while drawing) (#721)
@@ -742,6 +748,10 @@ Owner: open · Status: in progress
       Reproduced the old failure on macOS; the AI suite now passes (446 passed, 2 ignored). PR #1018
       — claimed: Codex, branch test/r2.2-posix-remote-helper
 - [x] Find OpenCode's CLI inside its Windows desktop app (`opencode-cli.exe`), for detection and for runs (#1060)
+- [x] OpenCode Go gets one session id per installation, saved at startup for any saved Go backend, so
+      a restart keeps it (#1225). An OpenCode error without a message shows its name, status and the
+      start of its response body. Not run live; the run-5 cause in #1225 still needs its log.
+      — claimed: fabox-os, branch bugfix/1225-opencode-go-session
 - [ ] Settings → AI can only add an agent it detected: add one by choosing its program, for a CLI
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
@@ -824,8 +834,14 @@ Owner: open · Status: in progress
 - [ ] Session copies for other agents that keep sessions (ACP agents' `session/load`) (#451)
 - [x] Hermes Agent's native Windows install (`%LOCALAPPDATA%\hermes\bin`) is searched, so an app
       started before the install, or by a launcher, finds it (#116)
+- [x] `mcp_servers: null` (or `~`) in a Hermes `config.yaml` takes our entry like an empty table,
+      instead of being refused as flow style.
+      — claimed: Plastic-time, branch bugfix/r2.2-yaml-null-table
 - [ ] Live-check #116 on Windows: install Hermes natively, start the app from a launcher, and see
       Settings → AI offer it; #116's "error after every message" has no text yet (asked)
+- [x] A Hermes `config.yaml` that starts with a byte-order mark gets our entry in its own
+      `mcp_servers` table, not in a second one that hides the person's servers from Hermes.
+      — claimed: Plastic-time, branch bugfix/r2.2-yaml-config-bom
 - [ ] See whether Hermes still fails on 0.3.0 (#460: the fix its `fixed` label names was already in
       0.3.0 when it was filed, and it gives no version)
 
@@ -866,6 +882,9 @@ Owner: open · Status: in progress
 - [ ] Over ACP, turns report 0 tokens: the protocol sends only `usage_update` (context used and
       size). Read real counts where an agent keeps them (Maki: `token_usage` in its session file
       under `~/.local/state/maki/sessions/`) or say the count is unknown instead of 0
+- [ ] Devin over ACP: `devin acp` asks the host to `authenticate` (`meta.api_key`) before
+      `session/new`, so the backend's stored key is sent — claimed: NibrasAz7, branch
+      feature/r2.2-devin-agent
 
 **Finding them:**
 - [ ] #105, #135, #259, #385 and #423 predate 0.3.0, which looks in more places, and came through
@@ -892,6 +911,9 @@ Owner: open · Status: in progress
 - [x] Windows: look in `%LOCALAPPDATA%\agy\bin` too (#62) — claimed: Afloat16, branch bugfix/r2.2-antigravity-search-20261103
 - [x] Windows: `usual_windows_dirs_come_after_path` counts Antigravity's second folder (#748
       added it; the test runs only on Windows, which CI doesn't)
+- [x] Windows: setup and doctor take the user profile (USERPROFILE) for home, as the apps do,
+      not HOME, which MSYS2 and Cygwin shells point at their own folder.
+      — claimed: Plastic-time, branch bugfix/r2.2-windows-home-is-the-user-profile
 - [ ] CI runs the tests on Ubuntu only, so `cfg(windows)` tests (search paths, consoles, Job
       Objects) are checked only on contributors' machines: run them on a Windows runner too
 - [ ] "Claude Code on <ssh host>" is offered for any SSH host, whether or not it has Claude Code
@@ -919,6 +941,9 @@ Owner: open · Status: in progress
       line break ("batch file arguments are invalid"), expands `%` and caps the line at 8191
       characters; that `.exe` is now started directly, as an npm shim's is (#1237)
       — claimed: jgt87, branch bugfix/r2.2-cmd-wrapper-exe — PR #1238
+- [x] Codex's and Grok Build's `config.toml` keep their Windows line endings when setup adds or
+      removes our entry.
+      — claimed: Plastic-time, branch bugfix/r2.2-toml-config-crlf
 
 ### R2.4 Runtime study for apps and games (with consent)
 Owner: maintainers · Status: in progress
@@ -1041,6 +1066,13 @@ Gaps found while using the app for real projects.
       — claimed: tanish2k09, branch feature/r2.9-approvals-ui
 - [ ] The new approvals strings in every catalog were written with an AI; not reviewed by native
       speakers yet — pt-BR claimed: marlonferreira1800-hue, branch docs/r2.9-approvals-pt-br-review
+- [x] A prompt that changes nothing in app/ still builds and starts the app again, often twice (the
+      builder's own rebuild_check, then the check after its turn). Keep a check whose round all
+      worked while the app's files and what it's compared with are unchanged
+      — claimed: tanish2k09, branch feature/r2.9-reuse-unchanged-check
+- [ ] A check starts the app in front, with focus, on the main monitor, in the way of whatever the
+      person is doing. Start it behind other windows without taking focus (it's still pictured);
+      Play keeps opening it in front
 - [x] Keep New project's content column fixed while the vertical scrollbar animates in or out,
       hiding it when there is nothing to scroll, so switching tabs never shifts the page horizontally
       — claimed: Codex, branch bugfix/r2.9-home-scrollbar-gutter
@@ -1217,6 +1249,12 @@ Gaps found while using the app for real projects.
       code at 12.5 pt where the rest is 12, an evidence summary at 13/15, and a question drawn in
       the mode's default size where other card titles are 15 semibold
       — claimed: jgt87, branch bugfix/r2.9-theme-tokens-type-scale — PR #1279
+- [x] A build's AI cost estimate counts each Claude Code turn's own cost: a resumed session reports
+      its running total, so the build summed the whole session at every turn (#1187). A turn's cost
+      is now its total less the total kept for its session; a resumed session with nothing kept has
+      no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
+      the reported running total was $0.00350053. Earlier builds' totals stay as they were.
+      — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
 - [x] Make offers "Extracted by" beside the game's other choices: in Deep mode an AI with an API key
       can take a game's own files out after the study, but it could only be chosen in Settings → AI,
       so on Make only the builder could be picked. It sets the app's one extractor and says so
@@ -1335,9 +1373,19 @@ Owner: open · Status: in progress
       `DEFAULT '7'` as 7 and `DEFAULT 5.0` as 5; a REAL column reads `DEFAULT '1.5'` as 1.5; a BLOB
       or untyped column, and an ANY column in a STRICT table, keep the literal as written.
       — claimed: Chr0mium24, branch bugfix/r3.12-sqlite-default-affinity
-- [ ] Fill added SQLite columns whose DEFAULT is a bare or double-quoted word (`DEFAULT abc`,
+- [x] Fill added SQLite columns whose DEFAULT is a bare or double-quoted word (`DEFAULT abc`,
       `DEFAULT "abc"`), a signed string (`DEFAULT -'5'`) or a number with digit separators
-      (`DEFAULT 1_000`); they show NULL with a note today.
+      (`DEFAULT 1_000`); they show NULL with a note today. Bare and double-quoted words are text
+      constants; a signed numeric string and single digit separators take the column's affinity,
+      and a separator-bearing REAL uses SQLite's REAL text form.
+      — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-default-literals
+- [ ] Read a TEXT column's REAL default as SQLite does: `DEFAULT 1e3` and `DEFAULT 5.` are
+      '1000.0' and '5.0' in SQLite, while non-separated reals keep the schema's text here.
+- [x] Read a signed quoted numeric default with SQLite's coercion before the column's affinity:
+      `DEFAULT -'1e3'` is '-1000.0' on TEXT and -1000 on INTEGER, and `DEFAULT -'1.50'` is '-1.5';
+      integer text keeps integer formatting. The quoted text is coerced to an INTEGER or REAL
+      before affinity, and TEXT's REAL value uses SQLite's REAL text form.
+      — claimed: AlexJoaquimPereira, branch bugfix/r3.12-sqlite-signed-quoted
 - [x] Whole numbers in SQLite REAL columns read as REAL: SQLite stores a REAL with no fractional
       part as an integer and turns it back into a REAL when it reads the column, so a REAL, FLOAT
       or DOUBLE column holding 1.0 shows 1.0 instead of 1.
@@ -1422,6 +1470,14 @@ Owner: open · Status: in progress
       zero-fill sections, records file offset 0 like `__TEXT`, and the entry was placed in that
       segment instead of in `__TEXT` (`/bin/cat` reads 0x100008588 for 0x100000588).
       — claimed: Chr0mium24, branch bugfix/r3.12-macho-entry-zero-fill
+- [x] Name DriverKit and visionOS simulator Mach-O binaries in the binary view: its platform table
+      stopped at 9 and 11, so a `.dext` read "unknown" while the dependency view said "driverkit".
+      — claimed: Chr0mium24, branch bugfix/r3.12-macho-platform-names
+- [x] Swift symbols name the right type after an optional, an associated type or an extension.
+      The demangler's substitution list left out `Sg` optionals and `Qz`/`Qy` associated types
+      and added extensions, so a later `A…` reference named the wrong node
+      (`[Swift.String : Swift.String]` where the symbol says `Swift.String?`) or fell out of range.
+      — claimed: Chr0mium24, branch bugfix/r3.12-swift-demangle-substitutions
 - [x] Decode binary plist markers and dictionary keys according to their stored types.
       — claimed: Afloat16, branch bugfix/r3.12-bplist-typed-objects
 - [x] Visit XML plist values only inside a complete, correctly encoded document.
@@ -1530,6 +1586,10 @@ Owner: open · Status: in progress
       and single-quoted names (which SQLite accepts) lose their quotes. Keys that name such columns
       find them, so rowid aliases and WITHOUT ROWID order hold.
       — claimed: Plastic-time, branch bugfix/r3.12-sqlite-quoted-column-names
+- [x] Removing the last member of a JSONC object takes the comma before it too, so a config that
+      is plain JSON (Claude Code's, Claude Desktop's) stays plain JSON after an uninstall; an
+      object written with trailing commas keeps them, new members included.
+      — claimed: Plastic-time, branch bugfix/r3.12-jsonc-no-new-trailing-comma
 - [x] SQLite rows keep each value on its own column when a table has VIRTUAL generated columns:
       SQLite computes those when a row is read and stores no field for them, so they show as not
       read (with a note) instead of shifting later values onto the wrong columns, in rowid and
@@ -1553,6 +1613,13 @@ Owner: open · Status: in progress
       isn't read: the key format lists `placeholder` and a Display P3 variant's key shows
       `placeholder: 1` instead of `display-gamut: 1`.
       — claimed: Chr0mium24, branch bugfix/r3.12-car-key-format-workaround
+- [x] Python 3.5.0, 3.5.1 and 3.5.2 wrote magic number 3350 into their `.pyc` files, and 3.5.3
+      moved to 3351. A file with 3350 is reported as a 3.5 pre-release (`is_release: false`), with
+      a note that its code layout may differ. Count 3350 and 3351 as releases of 3.5.
+      — claimed: Chr0mium24, branch bugfix/r3.12-pyc-3-5-release-magic
+- [x] Name the glyph weight (26) and glyph size (27) key attributes of asset catalogs, which hold
+      SF Symbol style images; they're listed as `attribute-26` and `attribute-27` today.
+      — claimed: Chr0mium24, branch bugfix/r3.12-car-glyph-attributes
 
 ### R3.13 Web inspection correctness
 Owner: open · Status: in progress

@@ -129,22 +129,6 @@ pub fn load_command_name(cmd: u32) -> String {
     .into()
 }
 
-fn platform_name(p: u32) -> &'static str {
-    match p {
-        1 => "macos",
-        2 => "ios",
-        3 => "tvos",
-        4 => "watchos",
-        5 => "bridgeos",
-        6 => "mac-catalyst",
-        7 => "ios-simulator",
-        8 => "tvos-simulator",
-        9 => "watchos-simulator",
-        11 => "visionos",
-        _ => "unknown",
-    }
-}
-
 /// Fixed bytes required before decoding a known load command's fields.
 pub(crate) fn load_command_min_size(cmd: u32) -> usize {
     match cmd {
@@ -307,7 +291,8 @@ pub fn enrich(data: &[u8], b: &mut Binary) {
             0x1d => b.mitigations.code_signature = Some(true),
             0x21 | 0x2c => b.mitigations.encrypted = Some(r.u32_le(pos + 16).unwrap_or(0) != 0),
             0x32 => {
-                b.info.insert("platform".into(), platform_name(r.u32_le(pos + 8).unwrap_or(0)).into());
+                // One platform table for the binary and the dependency views.
+                b.info.insert("platform".into(), crate::macho_deps::platform_name(r.u32_le(pos + 8).unwrap_or(0)));
                 b.info.insert("min_os".into(), nibble_version(r.u32_le(pos + 12).unwrap_or(0)));
                 b.info.insert("sdk".into(), nibble_version(r.u32_le(pos + 16).unwrap_or(0)));
             }

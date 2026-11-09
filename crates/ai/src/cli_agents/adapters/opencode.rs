@@ -182,8 +182,7 @@ impl AgentAdapter for OpenCode {
             }
             Some("error") => {
                 let error = v.get("error").unwrap_or(&Value::Null);
-                let data = error.get("data").unwrap_or(&Value::Null);
-                let why = data.get("message").and_then(Value::as_str).unwrap_or("the service returned no error details");
+                let why = error_text(error);
                 p.failure = Some(opencode_failure(error));
                 p.saw_result = true;
                 events.push(AgentEvent::Error { message: format!("OpenCode stopped: {why}"), remediation: None, log: None });
@@ -232,6 +231,42 @@ fn remote_prepare_line(name: &str, content: &str) -> String {
 
 /// OpenCode's JSON error carries the provider status and its own retry decision. In particular,
 /// an unclassified exit or an unsupported CLI flag cannot become retryable from display text.
+/// What an OpenCode error event says went wrong, for the person (#1225): its message; else its
+/// name and HTTP status, with the start of the provider's response body; else its own fields. The
+/// words "no error details" are only for an event with nothing in it.
+fn error_text(error: &Value) -> String {
+    /// A non-blank string value, trimmed.
+    fn text(v: Option<&Value>) -> Option<&str> {
+        v.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+    }
+    let data = error.get("data");
+    if let Some(message) = text(data.and_then(|d| d.get("message"))) {
+        return message.to_string();
+    }
+    let name = text(error.get("name"));
+    let status = data.and_then(|d| d.get("statusCode")).and_then(Value::as_u64);
+    match (name, status) {
+        (Some(name), status) => {
+            let head = status.map_or_else(|| name.to_string(), |s| format!("{name} (HTTP {s})"));
+            match text(data.and_then(|d| d.get("responseBody"))) {
+                Some(body) => format!("{head}: {}", shorten(body)),
+                None => head,
+            }
+        }
+        (None, _) if error.is_null() || error.as_object().is_some_and(serde_json::Map::is_empty) => "the service returned no error details".into(),
+        (None, _) => shorten(&error.to_string()),
+    }
+}
+
+/// The first 300 characters of `text`, with an ellipsis when cut.
+fn shorten(text: &str) -> String {
+    let mut out: String = text.chars().take(300).collect();
+    if text.chars().count() > 300 {
+        out.push('…');
+    }
+    out
+}
+
 fn opencode_failure(error: &Value) -> TurnFailure {
     let data = error.get("data").unwrap_or(&Value::Null);
     match error.get("name").and_then(Value::as_str) {
@@ -324,6 +359,26 @@ mod tests {
         let events = p.line(&json!({"type":"error","error":{"name":"APIError","data":{"message":"暂时失败","statusCode":429,"isRetryable":true}}}).to_string());
         assert!(matches!(events.as_slice(), [AgentEvent::Error { .. }]), "run_cli alone owns TurnDone");
         assert_eq!(p.failure.unwrap().kind, FailureKind::RateLimited);
+    }
+
+    /// #1225: an error event without a message says what it does have, and "no error details" only
+    /// when it has nothing.
+    #[test]
+    fn an_error_event_without_a_message_says_what_it_has() {
+        assert_eq!(
+            error_text(&json!({"name":"APIError","data":{"statusCode":400,"responseBody":"Request is missing x-opencode-session"}})),
+            "APIError (HTTP 400): Request is missing x-opencode-session"
+        );
+        assert_eq!(error_text(&json!({"name":"UnknownError"})), "UnknownError");
+        assert_eq!(error_text(&json!({"name":"APIError","data":{"responseBody":"  "}})), "APIError");
+        assert_eq!(error_text(&json!({"data":{"message":"  the model failed  "}})), "the model failed");
+        assert_eq!(error_text(&Value::Null), "the service returned no error details");
+        assert_eq!(error_text(&json!({})), "the service returned no error details");
+        assert_eq!(error_text(&json!("plain")), "\"plain\"", "a plain error is shown, not hidden");
+        let long = "x".repeat(400);
+        let cut = error_text(&json!({"name":"APIError","data":{"responseBody":long}}));
+        assert!(cut.starts_with("APIError: ") && cut.ends_with('…'));
+        assert_eq!(cut.chars().count(), "APIError: ".len() + 300 + 1);
     }
 
     #[test]
