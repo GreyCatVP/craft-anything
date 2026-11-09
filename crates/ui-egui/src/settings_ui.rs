@@ -195,6 +195,33 @@ fn general(app: &mut CraftApp, ui: &mut Ui) {
             app.settings_changed();
         }
     });
+    missing_fonts(ui);
+}
+
+/// A build without the script fallbacks shows boxes wherever a language needs one. Say so, rather
+/// than leaving the person to guess what a box means.
+///
+/// The text is English on purpose: this is the one place a translation would be unreadable, since
+/// a build without the fallbacks cannot draw the very scripts a translation needs. Latin text is
+/// always available (DM Sans), so this line reads in every build.
+fn missing_fonts(ui: &mut Ui) {
+    if theme::has_script_fallbacks() {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(220.0);
+            ui.label(RichText::new("Missing fonts").font(theme::medium(theme::SMALL)));
+        });
+        ui.label(
+            RichText::new("This build has no fonts for some languages, so it shows boxes instead of Chinese, Japanese, Korean, Thai, Arabic, Hebrew, Devanagari or symbols.")
+                .color(t.text_faint)
+                .size(theme::CAPTION)
+                .line_height(Some(16.0)),
+        );
+    });
+    ui.add_space(10.0);
 }
 
 fn language(app: &mut CraftApp, ui: &mut Ui) {
@@ -1318,5 +1345,51 @@ mod model_options_tests {
         assert!(text.contains("new-model") && text.contains("Context window") && text.contains("Thinking depth"), "{text}");
         assert_eq!(app.model_tuning["Copilot test"].cli_model.as_deref(), Some("new-model"));
         assert_eq!(app.model_tuning["Copilot test"].error, None);
+    }
+}
+
+#[cfg(test)]
+mod missing_fonts_tests {
+    use super::*;
+
+    /// The text a person reads when the interface shows boxes instead of their language.
+    const NOTICE: &str = "This build has no fonts for some languages";
+
+    /// Draw the notice on its own and return the text it painted.
+    fn draw_notice() -> String {
+        let context = egui::Context::default();
+        crate::theme::install_fonts(&context);
+        let mut output = context.run_ui(egui::RawInput::default(), missing_fonts);
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some(text.galley.text().to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The notice appears exactly when the build has no fallback faces: a build with them shows
+    /// no boxes, so telling the person about missing fonts would be noise.
+    #[test]
+    fn the_notice_appears_only_without_the_fallbacks() {
+        let text = draw_notice();
+        assert_eq!(text.contains(NOTICE), !theme::has_script_fallbacks(), "the notice and the fallbacks must agree: {text}");
+    }
+
+    /// The notice names the scripts that would show as boxes, so the person knows what is missing
+    /// without reading the build log.
+    #[test]
+    fn the_notice_names_the_scripts_that_would_be_boxes() {
+        if theme::has_script_fallbacks() {
+            return; // This build has the fallbacks, so it shows no notice at all.
+        }
+        let text = draw_notice();
+        for script in ["Chinese", "Japanese", "Korean", "Arabic", "Hebrew", "Devanagari"] {
+            assert!(text.contains(script), "the notice does not mention {script}: {text}");
+        }
     }
 }

@@ -8,6 +8,8 @@ corpus/
 /dist/
 .DS_Store
 .claude/worktrees/
+# This agent's own plans and handoffs: they name this machine's folders, so they stay local.
+.claude/artifacts/
 # Secrets and local settings (`cargo xtask secrets` refuses them too)
 .env
 .env.*

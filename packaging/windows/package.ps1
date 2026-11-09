@@ -96,7 +96,10 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 $Exes = $Bins | ForEach-Object { "$_.exe" }
 foreach ($exe in $Exes) { Copy-Item (Join-Path $Bin $exe) $Stage }
 
-& (Join-Path $PSScriptRoot 'sign.ps1') @($Exes | ForEach-Object { Join-Path $Stage $_ })
+# -Files (named) instead of splatting: Windows PowerShell 5.1 collapses a splatted array into
+# one space-joined string for a ValueFromRemainingArguments parameter, which made sign.ps1 fail
+# to resolve the paths. The named argument binds the array as-is on both 5.1 and pwsh 7.
+& (Join-Path $PSScriptRoot 'sign.ps1') -Files @($Exes | ForEach-Object { Join-Path $Stage $_ })
 
 # ---- MSI ---------------------------------------------------------------------------------------
 # The setup wizard's art, drawn here from the app icon so the MSI shows Craft Anything rather than

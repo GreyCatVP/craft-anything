@@ -459,6 +459,33 @@ systems with `cargo check --target`, with zig as the C compiler for `ring` (a wr
 so #53 merged with a long line rustfmt rewraps. Run `cargo fmt --all --check` last, after every
 edit, right before committing.
 
+**A local build showed boxes instead of Chinese, and nothing said why.** The app embeds only DM
+Sans and JetBrains Mono; the CJK, Arabic, Thai, Hebrew, Devanagari and symbol fallbacks live in
+the sibling craft-fonts repository and are embedded only when `CRAFT_FONTS_DIR` points at it. An
+unset variable built happily and silently, and the boxes only appeared once someone ran the app.
+The build now warns, `cargo xtask fonts` fetches a checkout and prints the variable, and Settings
+says what is missing. **A build that ships the fallbacks must say so at build time**: a problem
+that only shows up at runtime is a problem nobody can act on.
+It happened again on a machine where the fonts were in the build but not in the app the person
+ran: the file on disk was correct and the window still showed boxes, because the shortcut on the
+desktop pointed at an installer cache an upgrade had deleted, so the app that opened was an older
+copy from elsewhere. **Before believing a screenshot, check which file is actually running**: its
+path, its size and whether it holds the fonts. A build that is right and an install that is right
+are still wrong if the program that starts is neither.
+
+**A shortcut that outlived the thing it pointed at.** A desktop shortcut copied from an MSI's
+advertised shortcut points at `C:\Windows\Installer\{product code}\…`, and an upgrade gives the
+product a new code and deletes the old cache. The shortcut then fails with "the parameter is
+incorrect" and never opens the app, so the person keeps launching whatever else they can find —
+often an older copy. A shortcut we leave behind points at the installed executable itself, not at
+an installer cache, and is checked after an upgrade by opening it.
+
+**A splatted array that one shell read as one string.** `& script.ps1 @($paths)` passes the paths
+to a `ValueFromRemainingArguments` parameter; Windows PowerShell 5.1 collapses the splat into a
+single space-joined string, so the script saw one path that didn't exist and the packaging step
+failed on a machine where pwsh 7 worked. Pass the array as a named argument (`-Files @($paths)`),
+which binds the same way on both.
+
 ## Design
 
 **An early error without a terminal event.** Model validation returned after reporting an error,

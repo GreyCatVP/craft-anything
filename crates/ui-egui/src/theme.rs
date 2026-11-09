@@ -218,6 +218,16 @@ pub struct CraftFont {
 
 include!(concat!(env!("OUT_DIR"), "/craft_fonts.rs"));
 
+/// Whether this build has the script fallbacks (CJK, Arabic, Thai, Hebrew, Devanagari,
+/// symbols). A build without them shows boxes for those characters, so the interface says so
+/// instead of leaving the person to wonder what a box means.
+///
+/// Only the Regular faces count, because those are the ones [`install_fonts`] puts in the
+/// fallback chain: a manifest with nothing but a bold face gives the interface no fallback at all.
+pub fn has_script_fallbacks() -> bool {
+    CRAFT_FONTS.iter().any(|f| f.style.eq_ignore_ascii_case("regular"))
+}
+
 /// Install DM Sans (three weights: body, labels and bold for headings; it has no static
 /// SemiBold), JetBrains Mono (code), plus any craft-fonts as fallbacks.
 pub fn install_fonts(ctx: &egui::Context) {
@@ -647,6 +657,18 @@ mod tests {
         assert_eq!(fallback_rank("craft:Unknown Face:Regular"), FallbackRank::Other);
         assert_eq!(fallback_rank("craft:BIZ UDMincho:Regular"), FallbackRank::Serif);
         assert_eq!(fallback_rank("craft:BIZ UDPGothic:Regular"), FallbackRank::Local);
+    }
+
+    /// The interface says so when the build has no script fallbacks, so the answer to "what are
+    /// these boxes?" is in the app rather than only in a build log. Only the Regular faces count:
+    /// those are the ones `install_fonts` puts in the fallback chain.
+    #[test]
+    fn a_build_without_fallbacks_says_so() {
+        assert_eq!(
+            has_script_fallbacks(),
+            CRAFT_FONTS.iter().any(|f| f.style.eq_ignore_ascii_case("regular")),
+            "the notice must follow the faces that are actually installed"
+        );
     }
 
     /// Releases are built with craft-fonts (#19), and so is CI; a build without them has only

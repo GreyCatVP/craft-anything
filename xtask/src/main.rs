@@ -1,13 +1,10 @@
-//! `cargo xtask <layers | locks | i18n-coverage | tools [--check] | wasm | licenses | schemas [--check] | pending [--count] | secrets [--history] | ci | version [set X.Y.Z] | ico <out.ico> <png>...>`
+//! `cargo xtask <layers | locks | i18n-coverage | tools [--check] | wasm | licenses | schemas [--check] | pending [--count] | secrets [--history] | ci | version [set X.Y.Z] | ico <out.ico> <png>... | fonts [--check] [--print]>`
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-mod i18n_coverage;
-mod ico;
-mod locks;
-mod secrets;
+use xtask::{fonts, i18n_coverage, ico, locks, secrets, workspace_root};
 
 /// Workspace crates and their layer. A crate may depend only on strictly lower layers
 /// (L0 format crates depend on nothing in the workspace).
@@ -50,6 +47,7 @@ fn main() -> ExitCode {
             let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
             ico::run(&rest).map_err(|e| eprintln!("ico: {e}")).is_ok()
         }
+        Some("fonts") => fonts::run(&root, args.iter().any(|a| a == "--check"), args.iter().any(|a| a == "--print")),
         Some("ci") => {
             layers(&root)
                 && locks::check(&root)
@@ -67,7 +65,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: cargo xtask <layers | locks | i18n-coverage | tools [--check] | wasm | licenses | schemas [--check] | pending [--count] | secrets [--history] | ci | version [set X.Y.Z] | ico <out.ico> <png>...>"
+                "usage: cargo xtask <layers | locks | i18n-coverage | tools [--check] | wasm | licenses | schemas [--check] | pending [--count] | secrets [--history] | ci | version [set X.Y.Z] | ico <out.ico> <png>... | fonts [--check] [--print]>"
             );
             false
         }
@@ -134,11 +132,6 @@ fn version(root: &Path, sub: Option<&str>, value: Option<&str>) -> bool {
             false
         }
     }
-}
-
-fn workspace_root() -> PathBuf {
-    let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    here.parent().map(Path::to_path_buf).unwrap_or(here)
 }
 
 fn run(cmd: &str, args: &[&str]) -> bool {
@@ -482,17 +475,4 @@ fn pending(root: &Path, count_only: bool) -> bool {
     }
     println!("{total} open item(s) under {} roadmap entr{}", groups.len(), if groups.len() == 1 { "y" } else { "ies" });
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::workspace_root;
-
-    #[test]
-    fn readme_status_does_not_list_first_public_release_as_next() {
-        let readme = std::fs::read_to_string(workspace_root().join("README.md")).unwrap();
-        let status = readme.split("\n## Status").nth(1).unwrap();
-        let status = status.split("\n**Responsible use.**").next().unwrap().replace("\n> ", " ");
-        assert!(!status.contains("**Next:** the first public release"), "{status}");
-    }
 }

@@ -162,6 +162,8 @@ stacked marks (ạ, ả, ấ, ế, ơ, ư, ữ…), so a build without craft-fon
 craft-fonts, Noto Sans CJK SC supplies those letters (a different face from the DM Sans around them);
 the script test in `theme.rs` checks every one of them. Chinese and Korean glyphs use the existing craft-fonts fallback, which release and CI builds
 already include. Local builds must set `CRAFT_FONTS_DIR` to a craft-fonts checkout
-before compiling to get the same glyph coverage. The catalogs add no font assets.
+before compiling to get the same glyph coverage — `cargo xtask fonts` fetches one and prints
+the variable to set. A build without it warns, and Settings → General says which scripts are
+missing. The catalogs add no font assets.
 Check each script, clipping, narrow windows and native file dialogs visually
 on each platform; catalog coverage alone does not verify layout or fonts.
